@@ -137,30 +137,6 @@ function _quarterFromDateStr(dateStr) {
   return `Q${q}`;
 }
 
-function buildFinalTradeRead(payload) {
-  const rg = payload?.regime || {};
-  const gate = rg?.guidance?.tradeGate || "OK";
-  const tradeStatus = gate === "NO_TRADE" ? "No trade" : gate === "CAUTION" ? "Caution" : "Trade allowed";
-  const regimeLabel = rg?.label ? `${rg.label} regime` : "Regime —";
-
-  const asOf = rg?.asOfDate;
-  const qk = _quarterFromDateStr(asOf) || null;
-  const qRecRaw = qk ? payload?.quarters?.[qk]?.recommendation : null;
-  const qRec = (qRecRaw || "Standard").startsWith("Avoid") ? "Avoid" : String(qRecRaw || "Standard");
-  const quarterPhrase = `${qRec} quarter`;
-
-  const tm = (rg.tailMultiplier === null || rg.tailMultiplier === undefined) ? 1.0 : Number(rg.tailMultiplier);
-  const tmTxt = `${tm.toFixed(2)}×`;
-
-  let action = "Standard";
-  if (gate === "NO_TRADE") action = "Stand down (stress regime)";
-  else if (qRec === "Avoid") action = "Avoid (quarter risk)";
-  else if (gate === "CAUTION") action = `Sell IC at ~${tmTxt} base wings or reduce size`;
-  else action = `Sell IC at ~${tmTxt} base wings`;
-
-  return `${tradeStatus} · ${quarterPhrase} · ${regimeLabel} → ${action}`;
-}
-
 function _baseWingFactorFromRec(rec) {
   const r = (String(rec || "Standard").startsWith("Avoid")) ? "Avoid" : String(rec || "Standard");
   if (r === "Tight") return 0.5;
@@ -169,56 +145,41 @@ function _baseWingFactorFromRec(rec) {
   return null;
 }
 
-function buildStrikeBufferGuidance(payload) {
+function buildBufferTarget(payload) {
   const rg = payload?.regime || {};
   const gate = rg?.guidance?.tradeGate || "OK";
   const asOf = rg?.asOfDate;
   const qk = _quarterFromDateStr(asOf) || null;
   const qRecRaw = qk ? payload?.quarters?.[qk]?.recommendation : null;
+  const qRecStr = String(qRecRaw || "");
+  const isAvoid = qRecStr.startsWith("Avoid");
+
+  // Muted / no-trade display rules (UI only).
+  if (gate === "NO_TRADE" || isAvoid) {
+    return { text: "—", subtext: "No trade", muted: true };
+  }
+
   const base = _baseWingFactorFromRec(qRecRaw);
   const tm = (rg.tailMultiplier === null || rg.tailMultiplier === undefined) ? null : Number(rg.tailMultiplier);
-
-  // If we shouldn't be trading, keep it present but muted and explicit.
-  if (gate === "NO_TRADE" || base === null || tm === null) {
-    return {
-      body: "No Trade: buffer guidance not applicable.",
-      rule: "Execution guidance (not part of model). Does not affect breach stats / regime / seasonality.",
-      muted: true,
-    };
+  if (base === null || tm === null || Number.isNaN(tm)) {
+    return { text: "—", subtext: "Execution buffer (UI only)", muted: false };
   }
 
-  const finalWing = base * tm; // UI-only interpretation: base wing factor × tail multiplier
-  const fw = Number(finalWing);
-
-  // Buffer rules (execution guidance only)
-  let rule = "";
-  let suggestion = "";
-
-  if (fw >= 1.7) {
-    const lo = fw * 1.15;
-    const hi = fw * 1.25;
-    suggestion = `Suggested short strike distance: ~${lo.toFixed(2)}× to ${hi.toFixed(2)}× EM`;
-    rule = "Rule: FinalWing ≥ 1.7× → add +15–25% buffer";
-  } else if (fw >= 1.3 && fw <= 1.6) {
-    const x = fw * 1.10;
-    suggestion = `Suggested short strike distance: ~${x.toFixed(2)}× EM`;
-    rule = "Rule: 1.3–1.6× → add +10% buffer";
-  } else if (fw <= 1.25) {
-    const hi = fw * 1.10;
-    suggestion = `Suggested short strike distance: ~${fw.toFixed(2)}× to ${hi.toFixed(2)}× EM`;
-    rule = "Rule: ≤ 1.25× → sell near boundary (0–10% discretionary)";
-  } else {
-    // Edge band between buckets (1.25–1.3 or 1.6–1.7): keep guidance conservative and explicit.
-    const x = fw * 1.10;
-    suggestion = `Suggested short strike distance: ~${x.toFixed(2)}× EM`;
-    rule = "Rule: between bands → use ~+10% buffer (execution guidance)";
+  const finalWing = Number(base) * Number(tm); // UI-only: base wing factor × tail multiplier
+  if (!Number.isFinite(finalWing)) {
+    return { text: "—", subtext: "Execution buffer (UI only)", muted: false };
   }
 
-  const copy = `Final wing is a risk boundary. If you exit for IV-crush at the open, place short strikes beyond the boundary to avoid wing-touch gamma. ${suggestion}.`;
+  let bufferFactor = 1.10;
+  if (finalWing >= 1.7) bufferFactor = 1.20; // midpoint of [1.15, 1.25]
+  else if (finalWing >= 1.3 && finalWing <= 1.6) bufferFactor = 1.10;
+  else if (finalWing <= 1.25) bufferFactor = 1.05;
+
+  const bufferTarget = finalWing * bufferFactor;
   return {
-    body: copy,
-    rule: `Execution guidance (not part of model). ${rule}. Does not affect breach stats / regime / seasonality.`,
-    muted: gate !== "OK",
+    text: `~${bufferTarget.toFixed(2)}× EM`,
+    subtext: "Execution buffer (UI only)",
+    muted: false,
   };
 }
 
@@ -374,17 +335,13 @@ function render(payload) {
   const a = $("actionSummary");
   if (a) a.textContent = buildActionSummary(payload.quarters);
 
-  const ftr = $("finalTradeRead");
-  if (ftr) ftr.textContent = buildFinalTradeRead(payload);
-
-  const sb = buildStrikeBufferGuidance(payload);
-  const sbBody = $("strikeBufferBody");
-  const sbRule = $("strikeBufferRule");
-  if (sbBody) {
-    sbBody.textContent = sb.body;
-    sbBody.style.opacity = sb.muted ? "0.65" : "";
-  }
-  if (sbRule) sbRule.textContent = sb.rule;
+  const bt = buildBufferTarget(payload);
+  const btVal = $("bufferTarget");
+  const btSub = $("bufferTargetSubtext");
+  const btCard = $("bufferTargetCard");
+  if (btVal) btVal.textContent = bt.text;
+  if (btSub) btSub.textContent = bt.subtext;
+  if (btCard) btCard.classList.toggle("isMuted", !!bt.muted);
 
   const skipped = payload.skipped || [];
   $("skippedSummary").textContent =

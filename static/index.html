@@ -87,8 +87,6 @@
           <div id="actionSummary" class="actionSummary muted" aria-live="polite">—</div>
         </section>
 
-        <div id="finalTradeRead" class="tradeReadStrip" aria-live="polite">—</div>
-
         <section class="surface">
           <div class="sectionHeader">
             <h2 class="sectionTitle">
@@ -98,7 +96,7 @@
             <div class="sectionMeta muted" id="regimeAsOf">—</div>
           </div>
 
-          <div class="metricGrid">
+          <div class="metricGrid metricGrid--regime">
             <div class="metricCard">
               <div class="metricLabel">Regime</div>
               <div id="regimeLabel" class="metricValue">—</div>
@@ -122,15 +120,18 @@
               <div id="regimeMessage" class="metricValue">—</div>
               <div class="metricCaption">Based on quarter + regime</div>
             </div>
-          </div>
-
-          <div id="strikeBuffer" class="execNote">
-            <div class="execNoteTitle">
-              Strike Placement Buffer (execution)
-              <span class="info" title="This is an execution buffer to improve open-exit fills and reduce wing-touch risk; it does not modify model math.">ⓘ</span>
+            <div id="bufferTargetCard" class="metricCard">
+              <div class="metricLabel">
+                Buffer Target
+                <span
+                  class="info"
+                  title="Buffer guidance for open-exit / IV-crush execution. Does not affect model stats."
+                  >ⓘ</span
+                >
+              </div>
+              <div id="bufferTarget" class="metricValue mono">—</div>
+              <div id="bufferTargetSubtext" class="metricCaption muted">Execution buffer (UI only)</div>
             </div>
-            <div id="strikeBufferBody" class="execNoteBody muted">—</div>
-            <div id="strikeBufferRule" class="execNoteRule muted">Execution guidance (not part of model). Does not affect breach stats / regime / seasonality.</div>
           </div>
         </section>
 

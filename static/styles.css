@@ -205,6 +205,16 @@ body {
   gap: 12px;
 }
 
+.metricGrid.metricGrid--regime {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@media (max-width: 1200px) {
+  .metricGrid.metricGrid--regime {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 980px) {
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controlBarForm { flex-wrap: wrap; height: auto; padding: 8px 0; }
@@ -216,6 +226,10 @@ body {
   border-radius: var(--radius-card);
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.02);
+}
+
+.metricCard.isMuted {
+  opacity: 0.65;
 }
 
 .metricLabel {
@@ -232,6 +246,16 @@ body {
   font-size: 34px;
   font-weight: 650;
   letter-spacing: 0.2px;
+}
+
+.metricGrid--regime .metricValue {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.15px;
+}
+
+.metricGrid--regime .metricValue .pill {
+  font-weight: 600;
 }
 
 .metricCaption {
