@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from cachetools import TTLCache
 
-from backend.earnings_logic import BreachInputError, compute_breach_stats
+from backend.earnings_logic import BreachInputError, compute_breach_stats, compute_current_snapshot
 from backend.orats_client import OratsClient, OratsError
 
 
@@ -79,18 +79,52 @@ def breach(
     n: int = Query(20, ge=1, le=50),
     years: int = Query(5, ge=1, le=10),
     k: float = Query(1.0, gt=0.0),
+    mode: str | None = Query(None, description="trade builder: auto|equal_delta|equal_premium"),
+    symmetry: str | None = Query(None, description="trade builder: auto|symmetric|manual"),
+    target_delta: float | None = Query(None, gt=0.0, lt=1.0),
+    target_premium: float | None = Query(None, gt=0.0),
+    wing_width: float | None = Query(None, gt=0.0),
+    dte_target: int | None = Query(None, ge=1, le=60),
+    exp: str | None = Query(None, description="trade builder expiration (YYYY-MM-DD)"),
 ):
     try:
+        trade_builder_inputs = {
+            "mode": mode,
+            "symmetry": symmetry,
+            "target_delta": target_delta,
+            "target_premium": target_premium,
+            "wing_width": wing_width,
+            "dte_target": dte_target,
+            "exp": exp,
+        }
+        has_trade_builder = any(v is not None for v in trade_builder_inputs.values())
+
         key = _breach_cache_key(ticker, n, years, k)
-        with _breach_cache_lock:
-            cached = _breach_cache.get(key)
-        if cached is not None:
-            return cached
+        if not has_trade_builder:
+            with _breach_cache_lock:
+                cached = _breach_cache.get(key)
+            if cached is not None:
+                # Refresh "current" snapshot even when the heavy payload is cached.
+                # This prevents stale assumed-price/EM issues in the Trade Builder UI.
+                try:
+                    fresh = dict(cached)
+                    fresh["current"] = compute_current_snapshot(client=_get_client(), ticker=ticker.strip().upper())
+                    return fresh
+                except Exception:
+                    return cached
 
         client = _get_client()
-        payload = compute_breach_stats(client=client, ticker=ticker, n=n, years=years, k=k)
-        with _breach_cache_lock:
-            _breach_cache[key] = payload
+        payload = compute_breach_stats(
+            client=client,
+            ticker=ticker,
+            n=n,
+            years=years,
+            k=k,
+            trade_builder_inputs=(trade_builder_inputs if has_trade_builder else None),
+        )
+        if not has_trade_builder:
+            with _breach_cache_lock:
+                _breach_cache[key] = payload
         return payload
     except BreachInputError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

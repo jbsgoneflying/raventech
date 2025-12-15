@@ -358,6 +358,11 @@ function _bestUnderlyingPrice(payload) {
     const p = Number(tb.underlyingPrice);
     if (Number.isFinite(p) && p > 0) return p;
   }
+  const cur = payload?.current;
+  if (cur && cur.stockPrice !== null && cur.stockPrice !== undefined) {
+    const p = Number(cur.stockPrice);
+    if (Number.isFinite(p) && p > 0) return p;
+  }
   const events = Array.isArray(payload?.events) ? payload.events : [];
   for (const e of events) {
     const px = Number(e?.closePx);
@@ -367,6 +372,11 @@ function _bestUnderlyingPrice(payload) {
 }
 
 function _bestImpliedMovePct(payload) {
+  const cur = payload?.current;
+  if (cur && cur.impliedMovePct !== null && cur.impliedMovePct !== undefined) {
+    const imp = Number(cur.impliedMovePct);
+    if (Number.isFinite(imp) && imp > 0) return imp;
+  }
   const events = Array.isArray(payload?.events) ? payload.events : [];
   for (const e of events) {
     const imp = Number(e?.impliedMovePct);
@@ -384,6 +394,39 @@ function renderTradeBuilder(payload) {
   const putOut = $("tbPutOut");
   const callOut = $("tbCallOut");
   const notes = $("tradeBuilderNotes");
+
+  const tb = payload?.tradeBuilder || null;
+  const hasStrikes = !!(tb?.put?.shortStrike && tb?.call?.shortStrike);
+
+  if (hasStrikes) {
+    const put = tb.put || {};
+    const call = tb.call || {};
+    const price = Number(tb.underlyingPrice);
+    const credit = tb.totalCredit;
+    if (putOut) {
+      putOut.innerHTML = `
+        <div class="k">Short strike</div><div class="v mono">${put.shortStrike ?? "—"}</div>
+        <div class="k">Long strike</div><div class="v mono">${put.longStrike ?? "—"}</div>
+        <div class="k">Short delta</div><div class="v mono">${put.shortDelta !== null && put.shortDelta !== undefined ? Number(put.shortDelta).toFixed(3) : "—"}</div>
+        <div class="k">Short mid</div><div class="v mono">${put.shortMid !== null && put.shortMid !== undefined ? `$${Number(put.shortMid).toFixed(2)}` : "—"}</div>
+        <div class="k">Wing credit</div><div class="v mono">${put.credit !== null && put.credit !== undefined ? `$${Number(put.credit).toFixed(2)}` : "—"}</div>
+      `;
+    }
+    if (callOut) {
+      callOut.innerHTML = `
+        <div class="k">Short strike</div><div class="v mono">${call.shortStrike ?? "—"}</div>
+        <div class="k">Long strike</div><div class="v mono">${call.longStrike ?? "—"}</div>
+        <div class="k">Short delta</div><div class="v mono">${call.shortDelta !== null && call.shortDelta !== undefined ? Number(call.shortDelta).toFixed(3) : "—"}</div>
+        <div class="k">Short mid</div><div class="v mono">${call.shortMid !== null && call.shortMid !== undefined ? `$${Number(call.shortMid).toFixed(2)}` : "—"}</div>
+        <div class="k">Wing credit</div><div class="v mono">${call.credit !== null && call.credit !== undefined ? `$${Number(call.credit).toFixed(2)}` : "—"}</div>
+      `;
+    }
+    const noteLines = Array.isArray(tb.notes) ? tb.notes : [];
+    const head = credit !== null && credit !== undefined ? `Estimated total credit: $${Number(credit).toFixed(2)}.` : "Credit unavailable.";
+    const mid = (Number.isFinite(price) && price > 0) ? `Assumed price $${price.toFixed(2)}.` : "";
+    if (notes) notes.textContent = [head, mid, `Expiration ${tb.expiration || "—"}.`, ...noteLines].filter(Boolean).join(" ");
+    return;
+  }
 
   const price = _bestUnderlyingPrice(payload);
   const impPct = _bestImpliedMovePct(payload);
@@ -449,7 +492,11 @@ function renderTradeBuilder(payload) {
   }
 
   const extra = gate === "NO_TRADE" ? "No Trade (Regime Gate)." : "Chain-based strike selection not enabled; showing distance targets only.";
-  if (notes) notes.textContent = `${extra} Assumed price $${price.toFixed(2)}; implied move ${impPct.toFixed(2)}%.`;
+  const cur = payload?.current || null;
+  const src = cur?.source ? `source=${cur.source}` : "";
+  const asOf = cur?.asOfDate ? `asOf=${cur.asOfDate}` : "";
+  const meta = [src, asOf].filter(Boolean).join(", ");
+  if (notes) notes.textContent = `${extra} Assumed price $${price.toFixed(2)}; implied move ${impPct.toFixed(2)}%.${meta ? ` (${meta})` : ""}`;
 }
 
 function renderEarningsTable(events) {
@@ -566,7 +613,7 @@ function render(payload) {
 
   const rg = payload.regime || {};
   const asOf = $("regimeAsOf");
-  if (asOf) asOf.textContent = rg.asOfDate ? `As of ${rg.asOfDate}` : "—";
+  if (asOf) asOf.textContent = rg.asOfDate ? `Latest ORATS EOD: ${rg.asOfDate}` : "—";
   const rl = $("regimeLabel");
   if (rl) rl.textContent = rg.label || "—";
   const tm = $("tailMultiplier");

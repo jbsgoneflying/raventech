@@ -117,7 +117,7 @@ class OratsClient:
 
                 # For certain hist endpoints, ORATS returns 404 on dates with no data (weekends/holidays).
                 # We treat that as "empty result" so callers can probe for the nearest trading day.
-                if resp.status_code == 404 and path in ("/hist/dailies", "/hist/cores", "/hist/monies/implied"):
+                if resp.status_code == 404 and path in ("/hist/dailies", "/hist/cores", "/hist/monies/implied", "/hist/strikes"):
                     try:
                         data = resp.json()
                     except ValueError:
@@ -181,6 +181,22 @@ class OratsClient:
 
     def hist_dailies(self, ticker: str, trade_date: str, fields: str) -> OratsResponse:
         return self.get("/hist/dailies", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
+
+    def hist_strikes(
+        self,
+        *,
+        ticker: str,
+        trade_date: str,
+        fields: str,
+        dte: str | None = None,
+        delta: str | None = None,
+    ) -> OratsResponse:
+        params: Dict[str, Any] = {"ticker": ticker, "tradeDate": str(trade_date)[:10], "fields": fields}
+        if dte:
+            params["dte"] = dte  # format: "lo,hi"
+        if delta:
+            params["delta"] = delta  # format: "lo,hi"
+        return self.get("/hist/strikes", params)
 
     def hist_monies_implied(
         self,

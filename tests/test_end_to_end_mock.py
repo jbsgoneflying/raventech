@@ -1,3 +1,5 @@
+import datetime as dt
+
 from backend.earnings_logic import compute_breach_stats
 
 
@@ -58,7 +60,8 @@ class FakeOratsClient:
 
 def test_compute_breach_stats_mocked():
     client = FakeOratsClient()
-    out = compute_breach_stats(client=client, ticker="TST", n=20, years=5, k=1.0)
+    # Pin "today" so current-quarter selection is deterministic in tests
+    out = compute_breach_stats(client=client, ticker="TST", n=20, years=5, k=1.0, today=dt.date(2025, 3, 1))
 
     assert out["ticker"] == "TST"
     assert out["params"]["n"] == 20

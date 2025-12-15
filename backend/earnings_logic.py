@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from backend.orats_client import OratsClient, OratsError
 from backend.regime_overlay import compute_regime_backtest_view, compute_regime_overlay
 from backend.skew_overlay import compute_skew_overlay
+from backend.trade_builder import compute_trade_builder
 from backend.wing_recommendation import compute_wing_recommendation
 
 
@@ -156,6 +157,59 @@ def _pct_move(a: float, b: float) -> float:
     return abs(b - a) / a * 100.0
 
 
+def _current_snapshot(client: OratsClient, *, ticker: str, as_of_date: str) -> Dict[str, Any]:
+    """
+    Current-ish snapshot for UI (does not affect model stats).
+    Provides a stable source for "assumed price" and "current earnings implied move"
+    so the UI doesn't fall back to last earnings close when the chain isn't fetched.
+    """
+    # Walk back from as_of_date to find the latest available snapshot. This avoids
+    # accidentally using "last earnings close" in the UI when chain data isn't fetched.
+    out: Dict[str, Any] = {"asOfDate": str(as_of_date)[:10], "stockPrice": None, "impErnMv": None, "impliedMovePct": None, "source": None}
+    try:
+        start = _parse_date(str(as_of_date)[:10])
+    except Exception:
+        start = dt.date.today()
+
+    # Try up to 7 prior calendar days to handle weekends/holidays.
+    for i in range(0, 8):
+        d0 = start - dt.timedelta(days=i)
+        ds = _fmt_date(d0)
+
+        # Cores is best (stockPrice + impErnMv).
+        try:
+            cores = client.hist_cores(ticker=ticker, trade_date=ds, fields="ticker,tradeDate,stockPrice,impErnMv").rows
+            row = _first_row(cores) if cores else None
+            px = _to_float(row.get("stockPrice")) if row else None
+            if row and px is not None:
+                out["asOfDate"] = str(row.get("tradeDate") or ds)[:10]
+                out["source"] = "cores"
+                out["stockPrice"] = _round2(px)
+                out["impErnMv"] = row.get("impErnMv")
+                out["impliedMovePct"] = _round2(_imp_to_pct(row.get("impErnMv")))
+                return out
+        except Exception:
+            pass
+
+        # Fallback: dailies close for price.
+        try:
+            bar = fetch_daily_bar(client, ticker, ds)
+            if bar and bar.clsPx is not None:
+                out["asOfDate"] = str(bar.tradeDate or ds)[:10]
+                out["source"] = "dailies"
+                out["stockPrice"] = _round2(bar.clsPx)
+                return out
+        except Exception:
+            pass
+
+    return out
+
+
+def compute_current_snapshot(client: OratsClient, *, ticker: str) -> Dict[str, Any]:
+    """Public helper: latest-available price/EM snapshot for UI and trade builder."""
+    return _current_snapshot(client, ticker=ticker, as_of_date=_fmt_date(dt.date.today()))
+
+
 def _mean(xs: List[float]) -> Optional[float]:
     if not xs:
         return None
@@ -273,6 +327,8 @@ def compute_breach_stats(
     n: int = 20,
     years: int = 5,
     k: float = 1.0,
+    trade_builder_inputs: Optional[Dict[str, Any]] = None,
+    today: Optional[dt.date] = None,
 ) -> Dict[str, Any]:
     """
     Compute ORATS earnings implied-move breach stats and overlays.
@@ -352,7 +408,9 @@ def compute_breach_stats(
     cutoff = dt.date.today() - dt.timedelta(days=365 * years)
     parsed = [(d, r) for (d, r) in parsed if d >= cutoff]
     parsed = parsed[:n]
-    current_quarter_key = _quarter_key(parsed[0][0]) if parsed else None
+    # IMPORTANT: "current quarter" should be based on *today/latest available pricing date*,
+    # not the most recent earnings event in the lookback.
+    current_quarter_key: Optional[str] = None
 
     # Step 2-5: per-event computations
     out_events: List[Dict[str, Any]] = []
@@ -811,6 +869,16 @@ def compute_breach_stats(
     # V3/V3.1 overlays (do not affect core breach/seasonality calculations)
     _, regime_validation = compute_regime_backtest_view(client, t, events=out_events)
     regime = compute_regime_overlay(client, t, quarters=quarters, n=n, years=years, k=float(k))
+
+    # Current snapshot drives "current quarter" selection (used for wingRecommendation and trade builder)
+    now = today or dt.date.today()
+    current = _current_snapshot(client, ticker=t, as_of_date=_fmt_date(now))
+    try:
+        cq_date = _parse_date(str(current.get("asOfDate") or "")[:10])
+        current_quarter_key = _quarter_key(cq_date)
+    except Exception:
+        current_quarter_key = _quarter_key(now)
+
     wing_rec = compute_wing_recommendation(
         summary=summary,
         quarters=quarters,
@@ -821,16 +889,17 @@ def compute_breach_stats(
     skew_overlay = compute_skew_overlay(
         client,
         ticker=t,
-        current_as_of_date=str(regime.get("asOfDate") or "")[:10],
+        current_as_of_date=str(current.get("asOfDate") or str(regime.get("asOfDate") or ""))[:10],
         events=out_events,
         target_dte=2,
     )
 
-    return {
+    out: Dict[str, Any] = {
         "ticker": t,
         "params": {"n": n, "years": years, "k": float(k)},
         "summary": summary,
         "baseline": baseline,
+        "current": current,
         "regime": regime,
         "regimeValidation": regime_validation,
         "quarters": quarters,
@@ -839,5 +908,31 @@ def compute_breach_stats(
         "wingRecommendation": wing_rec,
         "skewOverlay": skew_overlay,
     }
+
+    # Progressive enhancement: chain-based strike builder
+    if trade_builder_inputs is not None:
+        try:
+            out["tradeBuilderInputs"] = {k: v for k, v in trade_builder_inputs.items() if v is not None}
+            out["tradeBuilder"] = compute_trade_builder(
+                client,
+                ticker=t,
+                as_of_date=str(current.get("asOfDate") or str(regime.get("asOfDate") or ""))[:10],
+                inputs=trade_builder_inputs,
+                wing_recommendation=wing_rec,
+            )
+        except Exception as e:
+            out["tradeBuilderInputs"] = {k: v for k, v in trade_builder_inputs.items() if v is not None}
+            out["tradeBuilder"] = {
+                "underlyingPrice": None,
+                "expiration": None,
+                "modeUsed": str(trade_builder_inputs.get("mode") or "auto"),
+                "symmetryUsed": str(trade_builder_inputs.get("symmetry") or "auto"),
+                "put": {},
+                "call": {},
+                "totalCredit": None,
+                "notes": [f"Trade builder failed: {type(e).__name__}: {e}"],
+            }
+
+    return out
 
 

@@ -1,3 +1,5 @@
+import datetime as dt
+
 from backend.earnings_logic import compute_breach_stats
 
 
@@ -47,7 +49,7 @@ class NoBreachClient:
 
 
 def test_no_breaches_baseline_and_overshoot_null():
-    out = compute_breach_stats(client=NoBreachClient(), ticker="TST", n=20, years=5, k=1.0)
+    out = compute_breach_stats(client=NoBreachClient(), ticker="TST", n=20, years=5, k=1.0, today=dt.date(2025, 3, 1))
     assert out["summary"]["breaches"] == 0
     assert out["baseline"]["avg_above_breach_pct"] is None
 
