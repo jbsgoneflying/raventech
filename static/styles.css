@@ -71,6 +71,18 @@ body {
   min-width: 220px;
 }
 
+.toggleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.toggleText {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .controlLabel {
   font-size: 12px;
   font-weight: 500;

@@ -5,11 +5,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from backend.config import get_flags
 from backend.orats_client import OratsClient, OratsError
 from backend.regime_overlay import compute_regime_backtest_view, compute_regime_overlay
 from backend.skew_overlay import compute_skew_overlay
+from backend.stats_utils import beta_posterior_from_counts
 from backend.trade_builder import compute_trade_builder
 from backend.wing_recommendation import compute_wing_recommendation
+from backend.mc_simulator import bootstrap_tas_stability, optimize_wings_risk_only, run_monte_carlo
 
 
 LOG = logging.getLogger(__name__)
@@ -132,12 +135,65 @@ def find_trading_day(
     return None
 
 
+def find_trading_day_with_shift(
+    get_bar: Callable[[str], Optional[DailyBar]],
+    *,
+    start: dt.date,
+    direction: int,
+    max_steps: int,
+    require: Callable[[DailyBar], bool] | None = None,
+) -> tuple[Optional[DailyBar], Optional[int]]:
+    """
+    Like find_trading_day, but also returns a shift metric:
+    - shiftDays: calendar-day distance between the first probed date and the returned bar date.
+
+    Note: This is telemetry. It intentionally measures probing distance, not “trading day distance”.
+    """
+    cur = start
+    for _ in range(max_steps + 1):
+        bar = get_bar(_fmt_date(cur))
+        if bar and (bar.clsPx is not None or bar.open is not None):
+            if require is None or require(bar):
+                try:
+                    used = _parse_date(bar.tradeDate or _fmt_date(cur))
+                except Exception:
+                    used = cur
+                return bar, abs((used - start).days)
+        cur = cur + dt.timedelta(days=direction)
+    return None, None
+
+
 def get_prior_trading_day(client: OratsClient, ticker: str, date_: dt.date, max_steps: int = 10) -> Optional[DailyBar]:
     return find_trading_day(lambda d: fetch_daily_bar(client, ticker, d), date_ - dt.timedelta(days=1), -1, max_steps)
 
 
 def get_next_trading_day(client: OratsClient, ticker: str, date_: dt.date, max_steps: int = 10) -> Optional[DailyBar]:
     return find_trading_day(lambda d: fetch_daily_bar(client, ticker, d), date_ + dt.timedelta(days=1), +1, max_steps)
+
+
+def _date_shift_days(expected: dt.date, actual_date_str: Optional[str]) -> Optional[int]:
+    if not actual_date_str:
+        return None
+    try:
+        actual = _parse_date(actual_date_str)
+    except Exception:
+        return None
+    return abs((actual - expected).days)
+
+
+def _shift_days(expected: Optional[dt.date], actual_date_str: Optional[str]) -> Optional[int]:
+    """
+    Calendar-day shift between an expected date and the actual bar/core date used.
+    Returns 0 if exact, >0 if substituted, or None if unknown.
+    """
+
+    if expected is None or not actual_date_str:
+        return None
+    try:
+        actual = _parse_date(str(actual_date_str)[:10])
+    except Exception:
+        return None
+    return abs((actual - expected).days)
 
 
 def _imp_to_pct(imp_ern_mv: Any) -> Optional[float]:
@@ -321,6 +377,22 @@ def _recommendation(
     return rec
 
 
+def _confidence_from_beta_ci(*, n: int, lo: float, hi: float) -> str:
+    """
+    Map posterior uncertainty to a coarse confidence label.
+    Why: prevent small-sample estimates from driving asymmetric sizing.
+    """
+
+    if n < 6:
+        return "LOW"
+    width = float(hi) - float(lo)
+    if n >= 20 and width <= 0.20:
+        return "HIGH"
+    if n >= 12 and width <= 0.30:
+        return "MED"
+    return "LOW"
+
+
 def compute_breach_stats(
     client: OratsClient,
     ticker: str,
@@ -329,6 +401,7 @@ def compute_breach_stats(
     k: float = 1.0,
     trade_builder_inputs: Optional[Dict[str, Any]] = None,
     today: Optional[dt.date] = None,
+    flags_override: Any = None,
 ) -> Dict[str, Any]:
     """
     Compute ORATS earnings implied-move breach stats and overlays.
@@ -389,10 +462,15 @@ def compute_breach_stats(
         raise BreachInputError("k must be > 0")
 
     t = ticker.strip().upper()
+    flags = flags_override if flags_override is not None else get_flags()
+    now = today or dt.date.today()
 
     # Step 1: earnings events
     earn_resp = client.hist_earnings(t)
     events_raw = earn_resp.rows
+    # For MC anchoring: track nearest upcoming earnings event (earnDate >= now).
+    next_event_raw: Optional[dict] = None
+    next_event_date: Optional[dt.date] = None
     parsed: List[Tuple[dt.date, dict]] = []
     for r in events_raw:
         ed = r.get("earnDate") or r.get("earn_date") or r.get("date")
@@ -402,10 +480,14 @@ def compute_breach_stats(
             d = _parse_date(str(ed))
         except ValueError:
             continue
+        if d >= now:
+            if next_event_date is None or d < next_event_date:
+                next_event_date = d
+                next_event_raw = r
         parsed.append((d, r))
 
     parsed.sort(key=lambda x: x[0], reverse=True)
-    cutoff = dt.date.today() - dt.timedelta(days=365 * years)
+    cutoff = now - dt.timedelta(days=365 * years)
     parsed = [(d, r) for (d, r) in parsed if d >= cutoff]
     parsed = parsed[:n]
     # IMPORTANT: "current quarter" should be based on *today/latest available pricing date*,
@@ -420,6 +502,7 @@ def compute_breach_stats(
     realized_all: List[float] = []
     breaches: List[bool] = []
     above_breach_all: List[float] = []
+    above_breach_vs_k_all: List[float] = []
     realized_if_breach: List[float] = []
     ratios_all: List[float] = []
     # Phase 1 directional aggregates (baseline)
@@ -508,6 +591,8 @@ def compute_breach_stats(
 
         row_notes: List[str] = []
         pricing_date_used: Optional[str] = None
+        pricing_date_shift_days: Optional[int] = None
+        realized_window_shift_days: Optional[int] = None
         imp_raw: Any = None
         implied_pct: Optional[float] = None
 
@@ -521,15 +606,33 @@ def compute_breach_stats(
 
         breach: Optional[bool] = None
         above_breach_pct: Optional[float] = None
+        above_breach_pct_vs_k: Optional[float] = None
         up_breach: Optional[bool] = None
         down_breach: Optional[bool] = None
         breach_side: Optional[str] = None
         up_overshoot_pct: Optional[float] = None
         down_overshoot_pct: Optional[float] = None
 
-        # Determine pricing date and realized window dates per spec
-        prior_bar = get_prior_trading_day(client, t, earn_date)
-        next_bar = get_next_trading_day(client, t, earn_date)
+        # Determine pricing date and realized window dates per spec.
+        # Strict-mode guardrail: when enabled, probe until we find a bar with the field we need.
+        if flags.STRICT_REALIZED_WINDOW:
+            prior_bar, _ = find_trading_day_with_shift(
+                lambda d: fetch_daily_bar(client, t, d),
+                start=earn_date - dt.timedelta(days=1),
+                direction=-1,
+                max_steps=10,
+                require=lambda b: b.clsPx is not None,
+            )
+            next_bar, _ = find_trading_day_with_shift(
+                lambda d: fetch_daily_bar(client, t, d),
+                start=earn_date + dt.timedelta(days=1),
+                direction=+1,
+                max_steps=10,
+                require=lambda b: b.open is not None,
+            )
+        else:
+            prior_bar = get_prior_trading_day(client, t, earn_date)
+            next_bar = get_next_trading_day(client, t, earn_date)
         earn_bar = fetch_daily_bar(client, t, _fmt_date(earn_date))
 
         if timing == "AMC":
@@ -546,6 +649,8 @@ def compute_breach_stats(
                 open_px = next_bar.open
             else:
                 row_notes.append("missing dailies open on next trading day")
+            # Telemetry: expected realized window open is earnDate+1 (calendar). If markets are closed, this can shift.
+            realized_window_shift_days = _shift_days(earn_date + dt.timedelta(days=1), open_date_used)
 
         elif timing == "BMO":
             if prior_bar:
@@ -564,6 +669,8 @@ def compute_breach_stats(
                 open_px = earn_bar.open
             else:
                 row_notes.append("missing dailies open on earnDate")
+            # Telemetry: expected close date is earnDate-1 (calendar). Prior trading day can be shifted by weekends/holidays.
+            realized_window_shift_days = _shift_days(earn_date - dt.timedelta(days=1), close_date_used)
 
         else:
             # Spec: either fallback close(prior)->open(next) OR mark unknown timing and skip breach calc.
@@ -574,10 +681,12 @@ def compute_breach_stats(
             if next_bar and next_bar.open is not None:
                 open_date_used = next_bar.tradeDate
                 open_px = next_bar.open
+            realized_window_shift_days = None
 
         # Step 3: implied move from cores using pricing_date_used
         if timing in ("AMC", "BMO") and pricing_date_used:
             # if cores missing for date, retry with nearest prior trading day (max 5)
+            expected_pricing_date = _parse_date(str(pricing_date_used)[:10])
             cores_used_date = pricing_date_used
             cores_row: Optional[dict] = None
             cores_date = _parse_date(cores_used_date)
@@ -601,6 +710,10 @@ def compute_breach_stats(
                 cores_date = cores_date - dt.timedelta(days=1)
             if found:
                 pricing_date_used = cores_used_date
+                pricing_date_shift_days = _shift_days(expected_pricing_date, cores_used_date)
+            else:
+                # If we never found impErnMv, preserve None shift (unknown actual).
+                pricing_date_shift_days = None
 
             if not cores_row or cores_row.get("impErnMv") is None:
                 row_notes.append("missing cores impErnMv for pricing date after retries")
@@ -616,11 +729,23 @@ def compute_breach_stats(
 
         # Step 5: breach + above breach (only for valid events with implied+realized and known timing)
         valid_for_stats = timing in ("AMC", "BMO") and (implied_pct is not None) and (realized_pct is not None)
+        strict_reject_reason: Optional[str] = None
+        if flags.STRICT_REALIZED_WINDOW and timing in ("AMC", "BMO"):
+            # Strict realized-window guardrail:
+            # reject events where the realized window had to be shifted away from the spec anchor dates
+            # (earnDate±1 calendar probing start). This is intentionally conservative and is OFF by default.
+            if realized_window_shift_days is not None and realized_window_shift_days > 0:
+                valid_for_stats = False
+                strict_reject_reason = f"shifted {timing} realized window (strict)"
         if valid_for_stats:
             implied_k = float(implied_pct) * float(k)
             breach = realized_pct > implied_k
             if breach and implied_pct and implied_pct > 0:
                 above_breach_pct = (realized_pct - implied_pct) / implied_pct * 100.0
+            # Optional additive: overshoot defined vs the actual threshold (k-consistent).
+            # Overshoot vs threshold = (absMove - k*implied) / (k*implied)
+            if flags.ADD_K_CONSISTENT_OVERSHOOT and breach and implied_k and implied_k > 0:
+                above_breach_pct_vs_k = (realized_pct - implied_k) / implied_k * 100.0
 
             # Directional breach / overshoot (Phase 1)
             if signed_move_pct is not None and implied_k > 0:
@@ -643,6 +768,8 @@ def compute_breach_stats(
                 realized_if_breach.append(realized_pct)
                 if above_breach_pct is not None:
                     above_breach_all.append(above_breach_pct)
+                if above_breach_pct_vs_k is not None:
+                    above_breach_vs_k_all.append(above_breach_pct_vs_k)
 
             # Quarter seasonality accumulators
             q = quarter_acc[qk]
@@ -687,7 +814,12 @@ def compute_breach_stats(
                     q["down_overshoot"].append(float(down_overshoot_pct))
         else:
             # record skip reason
-            reason = "unknown timing" if timing == "UNK" else "missing implied/realized data"
+            if timing == "UNK":
+                reason = "unknown timing"
+            elif strict_reject_reason:
+                reason = strict_reject_reason
+            else:
+                reason = "missing implied/realized data"
             skipped.append({"earnDate": _fmt_date(earn_date), "reason": reason})
 
         out_events.append(
@@ -696,6 +828,9 @@ def compute_breach_stats(
                 "anncTod": None if annc_tod is None else str(annc_tod),
                 "timing": timing,
                 "pricingDateUsed": pricing_date_used,
+                # Data quality telemetry (additive): quantify when results rely on substituted dates.
+                "pricingDateShiftDays": pricing_date_shift_days if (flags.ADD_EVENT_SHIFT_TELEMETRY) else None,
+                "realizedWindowShiftDays": realized_window_shift_days if (flags.ADD_EVENT_SHIFT_TELEMETRY) else None,
                 "impErnMv": imp_raw,
                 "impliedMovePct": _round2(implied_pct),
                 "closeDateUsed": close_date_used,
@@ -712,6 +847,7 @@ def compute_breach_stats(
                 "downOvershootPct": _round2(down_overshoot_pct),
                 "breach": breach,
                 "aboveBreachPct": _round2(above_breach_pct),
+                "aboveBreachPctVsK": _round2(above_breach_pct_vs_k) if flags.ADD_K_CONSISTENT_OVERSHOOT else None,
                 "notes": row_notes,
             }
         )
@@ -743,7 +879,11 @@ def compute_breach_stats(
         "events_used": events_used,
         "breaches": breaches_count,
         "breach_rate_pct": _round2(breach_rate_pct),
+        # Additive display fields: keep raw rates explicit when decisioning uses shrinkage.
+        "breachRatePct_raw": _round2(breach_rate_pct),
         "avg_above_breach_pct": _round2(_mean(above_breach_all)),
+        # Optional additive k-consistent overshoot summary (vs threshold k*implied, not vs implied).
+        "avg_above_breach_pct_vs_k": _round2(_mean(above_breach_vs_k_all)) if flags.ADD_K_CONSISTENT_OVERSHOOT else None,
         "avg_realized_if_breach_pct": _round2(_mean(realized_if_breach)),
         "avg_realized_all_pct": _round2(_mean(realized_all)),
         "avg_implied_all_pct": _round2(_mean(implied_all)),
@@ -756,6 +896,32 @@ def compute_breach_stats(
         "downBreaches": int(down_breaches_all),
         "tailBias": tail_bias,
     }
+
+    summary_decision: Optional[Dict[str, Any]] = None
+    if flags.USE_BETA_POSTERIOR_FOR_DECISIONING and events_used >= 0:
+        post = beta_posterior_from_counts(
+            successes=int(breaches_count),
+            trials=int(events_used),
+            alpha0=float(flags.BETA_PRIOR_ALPHA),
+            beta0=float(flags.BETA_PRIOR_BETA),
+        )
+        if post is not None:
+            lo, hi = post.ci(level=0.90)
+            summary_decision = {
+                "breachProb_mean_beta": round(float(post.mean), 6),
+                "breachProb_ci90": {"lo": round(float(lo), 6), "hi": round(float(hi), 6)},
+                "n": int(events_used),
+                "prior": {"alpha": float(flags.BETA_PRIOR_ALPHA), "beta": float(flags.BETA_PRIOR_BETA)},
+            }
+
+    # Additive telemetry rollups (safe default; does not change existing semantics)
+    if flags.ADD_EVENT_SHIFT_TELEMETRY:
+        pr_shifts = [e.get("pricingDateShiftDays") for e in out_events if isinstance(e.get("pricingDateShiftDays"), int)]
+        rw_shifts = [e.get("realizedWindowShiftDays") for e in out_events if isinstance(e.get("realizedWindowShiftDays"), int)]
+        summary["eventsWithPricingDateShift"] = int(sum(1 for v in pr_shifts if v and v > 0))
+        summary["eventsWithRealizedWindowShift"] = int(sum(1 for v in rw_shifts if v and v > 0))
+        summary["pricingDateShiftDaysMax"] = int(max(pr_shifts)) if pr_shifts else 0
+        summary["realizedWindowShiftDaysMax"] = int(max(rw_shifts)) if rw_shifts else 0
 
     baseline = {
         "events_used": events_used,
@@ -868,7 +1034,7 @@ def compute_breach_stats(
 
     # V3/V3.1 overlays (do not affect core breach/seasonality calculations)
     _, regime_validation = compute_regime_backtest_view(client, t, events=out_events)
-    regime = compute_regime_overlay(client, t, quarters=quarters, n=n, years=years, k=float(k))
+    regime = compute_regime_overlay(client, t, quarters=quarters, n=n, years=years, k=float(k), today=(today or dt.date.today()))
 
     # Current snapshot drives "current quarter" selection (used for wingRecommendation and trade builder)
     now = today or dt.date.today()
@@ -886,6 +1052,15 @@ def compute_breach_stats(
         current_quarter_key=current_quarter_key,
         skew_component=None,
     )
+    # Optional: uncertainty-aware confidence mapping (flagged).
+    if flags.USE_BETA_CI_FOR_CONFIDENCE and summary_decision is not None:
+        try:
+            ci = summary_decision.get("breachProb_ci90") or {}
+            lo = float(ci.get("lo"))
+            hi = float(ci.get("hi"))
+            wing_rec["confidence"] = _confidence_from_beta_ci(n=int(events_used), lo=lo, hi=hi)
+        except Exception:
+            pass
     skew_overlay = compute_skew_overlay(
         client,
         ticker=t,
@@ -898,6 +1073,7 @@ def compute_breach_stats(
         "ticker": t,
         "params": {"n": n, "years": years, "k": float(k)},
         "summary": summary,
+        "summaryDecision": summary_decision,
         "baseline": baseline,
         "current": current,
         "regime": regime,
@@ -932,6 +1108,122 @@ def compute_breach_stats(
                 "totalCredit": None,
                 "notes": [f"Trade builder failed: {type(e).__name__}: {e}"],
             }
+
+    # --- Monte Carlo (additive, default OFF) ---
+    if flags.ENABLE_MONTE_CARLO_EARNINGS:
+        next_event: Dict[str, Any] = {
+            "earnDateNext": None,
+            "timingPlanned": None,
+            "pricingDatePlanned": None,
+            "impliedMovePctPlanned": None,
+            "impliedMoveSource": None,
+            "notes": [],
+        }
+        try:
+            if next_event_date is not None and next_event_raw is not None:
+                annc_tod = next_event_raw.get("anncTod") or next_event_raw.get("annc_tod") or next_event_raw.get("anncTOD")
+                timing_planned = classify_timing(annc_tod)
+                next_event["earnDateNext"] = _fmt_date(next_event_date)
+                next_event["timingPlanned"] = timing_planned
+
+                pricing_planned: Optional[str] = None
+                if timing_planned == "AMC":
+                    pricing_planned = _fmt_date(next_event_date)
+                elif timing_planned == "BMO":
+                    prior = get_prior_trading_day(client, t, next_event_date)
+                    if prior and prior.tradeDate:
+                        pricing_planned = str(prior.tradeDate)[:10]
+                    else:
+                        next_event["notes"].append("Unable to determine prior trading day for BMO pricing date; falling back to current as-of.")
+                else:
+                    next_event["notes"].append("Unknown upcoming earnings timing; pricing date unclear.")
+
+                if pricing_planned is None:
+                    pricing_planned = str(current.get("asOfDate") or "")[:10] or None
+                next_event["pricingDatePlanned"] = pricing_planned
+
+                implied_pct_planned: Optional[float] = None
+                implied_source: Optional[str] = None
+                if pricing_planned and timing_planned in ("AMC", "BMO"):
+                    cores_date = _parse_date(pricing_planned)
+                    used_date: Optional[str] = None
+                    for _ in range(0, 5):
+                        try:
+                            cores_resp = client.hist_cores(ticker=t, trade_date=_fmt_date(cores_date), fields="ticker,tradeDate,stockPrice,impErnMv")
+                            row = _first_row(cores_resp.rows)
+                        except Exception:
+                            row = None
+                        if row and row.get("impErnMv") is not None:
+                            used_date = str(row.get("tradeDate") or _fmt_date(cores_date))[:10]
+                            implied_pct_planned = _imp_to_pct(row.get("impErnMv"))
+                            break
+                        cores_date = cores_date - dt.timedelta(days=1)
+                    if implied_pct_planned is not None:
+                        if used_date and used_date == pricing_planned:
+                            implied_source = "cores_on_pricingDate"
+                        else:
+                            implied_source = "cores_fallback_prior"
+                            if used_date:
+                                next_event["notes"].append(f"Cores implied move used fallback date {used_date} (planned {pricing_planned}).")
+                    else:
+                        implied_source = "missing"
+                        next_event["notes"].append("Missing cores impErnMv for planned pricing date (after retries).")
+                else:
+                    implied_source = "missing"
+
+                # If the event pricing date is in the future (common pre-earnings), cores may not exist yet.
+                # Fall back to the current snapshot implied move for a usable, explainable MC anchor.
+                if implied_pct_planned is None:
+                    fallback_imp = _to_float(current.get("impliedMovePct"))
+                    if fallback_imp is not None:
+                        implied_pct_planned = float(fallback_imp)
+                        implied_source = "current_snapshot_fallback"
+                        next_event["notes"].append("Using current snapshot implied move as fallback (pricing-date cores unavailable).")
+                next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
+                next_event["impliedMoveSource"] = implied_source
+            else:
+                next_event["notes"].append("No upcoming earnings event found in hist/earnings.")
+        except Exception as e:
+            next_event["notes"].append(f"nextEvent calculation failed: {type(e).__name__}: {e}")
+
+        out["nextEvent"] = next_event
+
+        try:
+            out["monteCarlo"] = run_monte_carlo(
+                ticker=t,
+                params=out.get("params") or {"n": n, "years": years, "k": float(k)},
+                flags=flags,
+                current=current,
+                next_event=next_event,
+                regime=regime,
+                wing_recommendation=wing_rec,
+                events=out_events,
+                trade_builder=(out.get("tradeBuilder") if isinstance(out.get("tradeBuilder"), dict) else None),
+            )
+        except Exception as e:
+            out["monteCarlo"] = {"nSims": 0, "notes": [f"MC failed: {type(e).__name__}: {e}"]}
+
+        if flags.MC_ENABLE_TAS_STABILITY:
+            try:
+                out["stability"] = bootstrap_tas_stability(flags=flags, summary=summary, regime=regime, events=out_events, n_boot=int(flags.MC_BOOTSTRAP_N))
+            except Exception as e:
+                out["stability"] = {"notes": [f"stability failed: {type(e).__name__}: {e}"]}
+
+        if flags.MC_ENABLE_WING_OPTIMIZATION:
+            try:
+                out["monteCarloOptimization"] = optimize_wings_risk_only(
+                    ticker=t,
+                    params=out.get("params") or {"n": n, "years": years, "k": float(k)},
+                    flags=flags,
+                    current=current,
+                    next_event=next_event,
+                    regime=regime,
+                    wing_recommendation=wing_rec,
+                    events=out_events,
+                    stability=(out.get("stability") if isinstance(out.get("stability"), dict) else None),
+                )
+            except Exception as e:
+                out["monteCarloOptimization"] = {"mode": "RISK_ONLY", "notes": [f"Optimization failed: {type(e).__name__}: {e}"]}
 
     return out
 

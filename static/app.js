@@ -18,6 +18,15 @@ function fmtNum(v) {
   return Number.isFinite(n) ? n.toFixed(2) : "—";
 }
 
+function fmtMoney(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  const sign = n > 0 ? "-" : ""; // losses are positive; display as -$ for trader intuition
+  const abs = Math.abs(n);
+  return `${sign}$${abs.toFixed(2)}`;
+}
+
 function fmtSignedPct(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   const n = Number(v);
@@ -46,6 +55,7 @@ let earningsExpanded = false;
 let bufferModePref = null; // "symmetric" | "asymmetric" | null (auto)
 let showAdvancedCols = false;
 let tradeBuilderExpanded = false;
+let mcEnabledPref = false;
 
 const tradeBuilderState = {
   mode: "auto", // auto | equal_delta | equal_premium
@@ -350,6 +360,85 @@ function renderSkewWings(payload) {
   // Hide entire section if nothing to show (graceful degradation).
   const showSection = hasDirectional || hasWing || hasSkew;
   sec.classList.toggle("hidden", !showSection);
+}
+
+function renderMonteCarlo(payload) {
+  const sec = $("mcSection");
+  if (!sec) return;
+  const mc = payload?.monteCarlo || null;
+  const ne = payload?.nextEvent || null;
+  const opt = payload?.monteCarloOptimization || null;
+
+  const hasAnyMc = !!mc;
+  const hasMc = !!(mc && mc.nSims && Number(mc.nSims) > 0);
+  const show = mcEnabledPref || hasAnyMc;
+  sec.classList.toggle("hidden", !show);
+  if (!show) return;
+
+  const meta = $("mcMeta");
+  const note = $("mcNote");
+  const bEither = $("mcBreachEither");
+  const bBreak = $("mcBreachBreakout");
+  const expLoss = $("mcExpLoss");
+  const cvar = $("mcCvar");
+  const wingOpt = $("mcWingOpt");
+  const wingOptNote = $("mcWingOptNote");
+
+  const nSims = hasAnyMc ? Number(mc.nSims || 0) : 0;
+  const cond = hasAnyMc ? (mc?.pool?.conditioningUsed || "—") : "—";
+  const poolN = hasAnyMc ? (mc?.pool?.sizeUsed ?? "—") : "—";
+
+  const anchorDate = ne?.pricingDatePlanned || "—";
+  const anchorImp = ne?.impliedMovePctPlanned;
+  const anchorTxt = (anchorImp !== null && anchorImp !== undefined) ? `${Number(anchorImp).toFixed(2)}%` : "—";
+
+  if (meta) meta.textContent = hasAnyMc ? `n=${nSims} · conditioning=${cond} · pool=${poolN} · anchor=${anchorDate} (${anchorTxt})` : "MC requested (waiting for data)…";
+
+  const notes = [];
+  if (hasAnyMc && Array.isArray(mc.notes)) notes.push(...mc.notes);
+  if (ne && Array.isArray(ne.notes) && ne.notes.length) notes.push(...ne.notes.map(s => `Next event: ${s}`));
+  if (!hasAnyMc) notes.push("MC unavailable: server did not return monteCarlo output. Ensure MC toggle is on and backend supports mc=1.");
+  if (note) note.textContent = notes.length ? notes.join(" ") : "Simulates close→open earnings gap only (no intraday path).";
+
+  if (!hasMc) {
+    if (bEither) bEither.textContent = "—";
+    if (bBreak) bBreak.textContent = "Put — · Call —";
+    if (expLoss) expLoss.textContent = "—";
+    if (cvar) cvar.textContent = "—";
+    if (wingOpt) wingOpt.textContent = "—";
+    if (wingOptNote) wingOptNote.textContent = "MC enabled, but no simulation results available.";
+    return;
+  }
+
+  const bp = mc?.breachProb || {};
+  const either = Number(bp.either);
+  const put = Number(bp.put);
+  const call = Number(bp.call);
+  if (bEither) bEither.textContent = Number.isFinite(either) ? `${(either * 100).toFixed(1)}%` : "—";
+  if (bBreak) bBreak.textContent = `Put ${Number.isFinite(put) ? (put * 100).toFixed(1) + "%" : "—"} · Call ${Number.isFinite(call) ? (call * 100).toFixed(1) + "%" : "—"}`;
+
+  const el = mc?.expectedLoss || {};
+  if (expLoss) expLoss.textContent = fmtMoney(el.total);
+
+  const cv = mc?.cvar95 || {};
+  if (cvar) cvar.textContent = fmtMoney(cv.total);
+
+  if (!opt) {
+    if (wingOpt) wingOpt.textContent = "—";
+    if (wingOptNote) wingOptNote.textContent = "Optimization not enabled.";
+    return;
+  }
+
+  const mode = String(opt.mode || "");
+  const pm = opt.optimalPutMultiple;
+  const cm = opt.optimalCallMultiple;
+  if (pm !== null && pm !== undefined && cm !== null && cm !== undefined) {
+    if (wingOpt) wingOpt.textContent = `Put ${Number(pm).toFixed(2)}× · Call ${Number(cm).toFixed(2)}×`;
+  } else {
+    if (wingOpt) wingOpt.textContent = "—";
+  }
+  const optNotes = Array.isArray(opt.notes) ? opt.notes.join(" ") : "";
+  if (wingOptNote) wingOptNote.textContent = mode ? `${mode}. ${optNotes}` : (optNotes || "—");
 }
 
 function _bestUnderlyingPrice(payload) {
@@ -658,6 +747,7 @@ function render(payload) {
 
   renderBufferTarget(payload);
   renderSkewWings(payload);
+  renderMonteCarlo(payload);
   renderTradeBuilder(payload);
 
   const skipped = payload.skipped || [];
@@ -713,6 +803,10 @@ document.addEventListener("DOMContentLoaded", () => {
           if (vv === null || vv === undefined) continue;
           url += `&${encodeURIComponent(kk)}=${encodeURIComponent(String(vv))}`;
         }
+      }
+      if (mcEnabledPref) {
+        // Default-on conditioning for trader relevance; backend will still fail-safe if pools are too small.
+        url += `&mc=1&mc_cond_regime=1&mc_cond_quarter=1`;
       }
       const payload = await fetchJson(url);
       render(payload);
@@ -898,6 +992,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   syncTradeBuilderControls();
+
+  const mcToggle = $("mcToggle");
+  if (mcToggle) {
+    mcToggle.addEventListener("change", async () => {
+      mcEnabledPref = !!mcToggle.checked;
+      if (!lastPayload) return;
+      if (isBusy) return;
+      await runCalculation();
+    });
+  }
 });
 
 

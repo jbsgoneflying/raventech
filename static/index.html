@@ -36,6 +36,17 @@
 
           <div class="controlSpacer"></div>
 
+          <div class="controlGroup">
+            <label class="controlLabel" for="mcToggle">
+              Simulated Risk (MC)
+              <span class="info" title="Empirical Monte Carlo earnings gap simulation (close→open only).">ⓘ</span>
+            </label>
+            <label class="toggleRow">
+              <input id="mcToggle" type="checkbox" />
+              <span class="toggleText">Enable</span>
+            </label>
+          </div>
+
           <button id="submit" type="submit" class="primaryButton">
             <span class="btnSpinner" aria-hidden="true"></span>
             <span class="btnLabel">Calculate</span>
@@ -242,6 +253,44 @@
 
                 <div id="tradeBuilderNotes" class="metricCaption muted">—</div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface hidden" id="mcSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Simulated Earnings Risk (MC)
+              <span class="info" title="Monte Carlo uses empirical earnings shocks from historical events and simulates the close→open earnings gap only (no intraday path).">ⓘ</span>
+            </h2>
+            <div class="sectionMeta muted" id="mcMeta">—</div>
+          </div>
+
+          <div id="mcNote" class="finePrint muted">Simulates close→open earnings gap only (no intraday path).</div>
+
+          <div class="metricGrid">
+            <div class="metricCard">
+              <div class="metricLabel">Chance of breach</div>
+              <div id="mcBreachEither" class="metricValue">—</div>
+              <div id="mcBreachBreakout" class="metricCaption">Put — · Call —</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">Expected loss at open</div>
+              <div id="mcExpLoss" class="metricValue mono">—</div>
+              <div class="metricCaption">Intrinsic (gap-at-open)</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">Expected worst-case loss (95%)</div>
+              <div id="mcCvar" class="metricValue mono">—</div>
+              <div class="metricCaption">CVaR95 (gap risk)</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">Wing optimization</div>
+              <div id="mcWingOpt" class="metricValue mono">—</div>
+              <div id="mcWingOptNote" class="metricCaption muted">—</div>
             </div>
           </div>
         </section>

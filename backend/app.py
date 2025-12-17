@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 import threading
+from dataclasses import replace
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -12,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from cachetools import TTLCache
 
 from backend.earnings_logic import BreachInputError, compute_breach_stats, compute_current_snapshot
+from backend.config import get_flags
 from backend.orats_client import OratsClient, OratsError
 
 
@@ -49,9 +51,10 @@ def _get_client() -> OratsClient:
     return _client
 
 
-def _breach_cache_key(ticker: str, n: int, years: int, k: float) -> tuple:
-    # token is never part of key
-    return (ticker.strip().upper(), int(n), int(years), float(k))
+def _breach_cache_key(ticker: str, n: int, years: int, k: float, flags_fp: tuple | None = None) -> tuple:
+    # token is never part of key; include feature flags to prevent mixing methodologies
+    fp = flags_fp if flags_fp is not None else get_flags().cache_fingerprint()
+    return (ticker.strip().upper(), int(n), int(years), float(k), fp)
 
 
 # Static frontend
@@ -86,6 +89,11 @@ def breach(
     wing_width: float | None = Query(None, gt=0.0),
     dte_target: int | None = Query(None, ge=1, le=60),
     exp: str | None = Query(None, description="trade builder expiration (YYYY-MM-DD)"),
+    mc: bool | None = Query(None, description="enable Monte Carlo earnings gap risk outputs (additive)"),
+    mc_opt: bool | None = Query(None, description="enable Monte Carlo wing optimization (risk-only)"),
+    mc_stability: bool | None = Query(None, description="enable bootstrap stability + asymmetry caps (additive)"),
+    mc_cond_quarter: bool | None = Query(None, description="MC conditioning: quarter"),
+    mc_cond_regime: bool | None = Query(None, description="MC conditioning: regime"),
 ):
     try:
         trade_builder_inputs = {
@@ -99,7 +107,28 @@ def breach(
         }
         has_trade_builder = any(v is not None for v in trade_builder_inputs.values())
 
-        key = _breach_cache_key(ticker, n, years, k)
+        # Per-request feature overrides (additive). Defaults remain env-driven unless query params are passed.
+        base_flags = get_flags()
+        overrides = {}
+        if mc is not None:
+            overrides["ENABLE_MONTE_CARLO_EARNINGS"] = bool(mc)
+        if mc_opt is not None:
+            overrides["MC_ENABLE_WING_OPTIMIZATION"] = bool(mc_opt)
+        if mc_stability is not None:
+            overrides["MC_ENABLE_TAS_STABILITY"] = bool(mc_stability)
+        if mc_cond_quarter is not None:
+            overrides["MC_ENABLE_CONDITION_ON_QUARTER"] = bool(mc_cond_quarter)
+        if mc_cond_regime is not None:
+            overrides["MC_ENABLE_CONDITION_ON_REGIME"] = bool(mc_cond_regime)
+
+        effective_flags = replace(base_flags, **overrides) if overrides else base_flags
+        enable_mc = bool(effective_flags.ENABLE_MONTE_CARLO_EARNINGS)
+
+        # MC depends on near-term anchoring (nextEvent/current snapshot); avoid mixing stale cached payloads.
+        if enable_mc:
+            has_trade_builder = True
+
+        key = _breach_cache_key(ticker, n, years, k, effective_flags.cache_fingerprint())
         if not has_trade_builder:
             with _breach_cache_lock:
                 cached = _breach_cache.get(key)
@@ -121,6 +150,7 @@ def breach(
             years=years,
             k=k,
             trade_builder_inputs=(trade_builder_inputs if has_trade_builder else None),
+            flags_override=effective_flags,
         )
         if not has_trade_builder:
             with _breach_cache_lock:
