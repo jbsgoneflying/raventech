@@ -410,17 +410,21 @@ def compute_regime_overlay(
     n: int,
     years: int,
     k: float,
+    today: dt.date | None = None,
 ) -> Dict[str, Any]:
-    cache_key = ("regime", ticker.upper(), int(n), int(years), float(k))
+    # Include the evaluation date in the cache key to prevent cross-date mixing.
+    now = today or dt.date.today()
+    # Also include client type to avoid cross-client cache contamination in unit tests.
+    cache_key = ("regime", type(client).__name__, ticker.upper(), _fmt_date(now), int(n), int(years), float(k))
     with _cache_lock:
         cached = _cache.get(cache_key)
     if cached is not None:
         return cached
 
-    # Pull SPY dailies for a large window (calendar buffer), then use trading-day series
-    today = dt.date.today()
-    from_date = _fmt_date(today - dt.timedelta(days=520))  # ~2y calendar to cover 252+20 trading days
-    to_date = _fmt_date(today)
+    # Pull SPY dailies for a large window (calendar buffer), then use trading-day series.
+    # Allow deterministic pinning in tests/fixtures via an injected `today`.
+    from_date = _fmt_date(now - dt.timedelta(days=520))  # ~2y calendar to cover 252+20 trading days
+    to_date = _fmt_date(now)
 
     spy_rows: List[dict] = []
     try:
@@ -429,7 +433,7 @@ def compute_regime_overlay(
         # Fallback to sparse daily probing if range is not supported:
         # query backward calendar days until we collect enough trading days
         spy_rows = []
-        cur = today
+        cur = now
         attempts = 0
         # In production we expect range mode to work; keep fallback bounded.
         # (Also keeps unit tests fast with mocked clients.)
@@ -471,7 +475,7 @@ def compute_regime_overlay(
     spy_trade_dates = [str(r.get("tradeDate"))[:10] for r in spy_rows if r.get("tradeDate")]
     spy_closes_f = [c for c in spy_closes if c is not None]
 
-    as_of_date = spy_trade_dates[-1] if spy_trade_dates else _fmt_date(today)
+    as_of_date = spy_trade_dates[-1] if spy_trade_dates else _fmt_date(now)
 
     # Market stress: RV20 percentile
     spy_logrets = _log_returns(spy_closes_f)

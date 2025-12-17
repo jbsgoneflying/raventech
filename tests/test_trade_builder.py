@@ -43,3 +43,18 @@ def test_trade_builder_equal_delta_selects_strikes_and_width():
     assert out["call"]["shortStrike"] == 110.0
     assert out["call"]["longStrike"] == 115.0
 
+
+def test_trade_builder_enforce_otm_equal_premium_avoids_atm(monkeypatch):
+    # Without OTM enforcement, equal_premium would pick the ~ATM strike in this chain.
+    # With enforcement, shorts should be OTM: put < spot, call > spot.
+    monkeypatch.setenv("TRADEBUILDER_ENFORCE_OTM", "true")
+    client = FakeClient()
+    out = compute_trade_builder(
+        client,
+        ticker="TST",
+        as_of_date="2025-12-12",
+        inputs={"mode": "equal_premium", "symmetry": "auto", "target_premium": 2.0, "wing_width": 5, "dte_target": 2},
+        wing_recommendation={"structureMode": "AUTO_EQUAL_PREMIUM"},
+    )
+    assert out["put"]["shortStrike"] == 90.0
+    assert out["call"]["shortStrike"] == 110.0

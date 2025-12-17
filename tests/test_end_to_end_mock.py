@@ -153,9 +153,18 @@ def test_compute_breach_stats_mocked():
         "downOvershootPct",
         "breach",
         "aboveBreachPct",
+        "aboveBreachPctVsK",
+        "pricingDateShiftDays",
+        "realizedWindowShiftDays",
         "notes",
     ):
         assert k in ev
+
+    # Telemetry sanity: no substitution in this mocked dataset (all dates exist as requested)
+    for e in out["events"]:
+        if e["timing"] in ("AMC", "BMO"):
+            assert e["pricingDateShiftDays"] in (0, None)
+            assert e["realizedWindowShiftDays"] in (0, None)
 
     # Phase 1 per-event directional correctness (AMC + BMO)
     ev_by_date = {e["earnDate"]: e for e in out["events"]}

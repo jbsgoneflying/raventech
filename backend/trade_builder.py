@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.config import get_flags
 from backend.orats_client import OratsClient
 
 
@@ -113,6 +114,7 @@ def compute_trade_builder(
     dte_target = int(inputs.get("dte_target") or 2)
     wing_width = float(inputs.get("wing_width") or 5.0)
     exp_override = inputs.get("exp")
+    flags = get_flags()
 
     # Determine expiration (current week) via monies implied unless overridden
     expir, expir_dte, spot_from_monies, _, _ = _pick_expiration_from_monies(
@@ -212,14 +214,33 @@ def compute_trade_builder(
             return None
         return 0.5 * (b + a)
 
+    notes: List[str] = []
+    # Optional OTM constraint: keep shorts OTM (reduces accidental risk-profile shifts).
+    call_rows = rows
+    put_rows = rows
+    if flags.TRADEBUILDER_ENFORCE_OTM and underlying is not None and underlying > 0:
+        eps = 1e-9
+
+        def _strike(r: dict) -> Optional[float]:
+            return _to_float(r.get("strike"))
+
+        call_rows = [r for r in rows if _strike(r) is not None and _strike(r) > float(underlying) + eps]
+        put_rows = [r for r in rows if _strike(r) is not None and _strike(r) < float(underlying) - eps]
+        if not call_rows:
+            call_rows = rows
+            notes.append("OTM enforcement: no OTM call strikes available; falling back to unconstrained selection.")
+        if not put_rows:
+            put_rows = rows
+            notes.append("OTM enforcement: no OTM put strikes available; falling back to unconstrained selection.")
+
     if mode_used == "equal_premium":
-        short_call = _nearest_by(rows, call_mid, target_premium)
-        short_put = _nearest_by(rows, put_mid, target_premium)
+        short_call = _nearest_by(call_rows, call_mid, target_premium)
+        short_put = _nearest_by(put_rows, put_mid, target_premium)
     else:
         # equal_delta
-        short_call = _nearest_by(rows, call_delta, target_delta)
+        short_call = _nearest_by(call_rows, call_delta, target_delta)
         # putDelta is negative; target magnitude
-        short_put = _nearest_by(rows, lambda r: (abs(put_delta(r)) if put_delta(r) is not None else None), target_delta)
+        short_put = _nearest_by(put_rows, lambda r: (abs(put_delta(r)) if put_delta(r) is not None else None), target_delta)
 
     if not short_call or not short_put:
         return {
@@ -282,6 +303,7 @@ def compute_trade_builder(
         "totalCredit": total_credit,
         "notes": [
             "Chain-based strike selection enabled via ORATS /datav2/hist/strikes.",
+            *notes,
         ],
     }
     return out

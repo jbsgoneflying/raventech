@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class ReplayResp:
+    rows: list[dict]
+    raw: Any
+
+
+def _stable_params(params: Dict[str, Any]) -> List[List[str]]:
+    return [[str(k), str(v)] for (k, v) in sorted((k, str(v)) for k, v in params.items())]
+
+
+class ReplayOratsClient:
+    """
+    Offline ORATS client for deterministic tests.
+
+    Loads a recorded tape from `scripts/generate_golden_payloads.py` and replays responses by
+    exact (path, sorted params) lookup.
+    """
+
+    def __init__(self, tape: dict) -> None:
+        calls = tape.get("calls") or []
+        self._by_key: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], List[dict]] = {}
+        for c in calls:
+            path = str(c.get("path") or "")
+            params = tuple((str(k), str(v)) for k, v in (c.get("params") or []))
+            self._by_key[(path, params)] = c.get("rows") or []
+
+    def get(self, path: str, params: Dict[str, Any]) -> ReplayResp:
+        key = (str(path), tuple((k, v) for k, v in _stable_params(params)))
+        rows = self._by_key.get(key)
+        if rows is None:
+            # Unknown call -> empty (mirrors 404->empty behavior used for probing)
+            rows = []
+        return ReplayResp(rows=rows, raw=rows)
+
+    # Convenience wrappers used by the app
+    def hist_earnings(self, ticker: str) -> ReplayResp:
+        return self.get("/hist/earnings", {"ticker": ticker})
+
+    def hist_cores(self, ticker: str, trade_date: str, fields: str) -> ReplayResp:
+        return self.get("/hist/cores", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
+
+    def hist_dailies(self, ticker: str, trade_date: str, fields: str) -> ReplayResp:
+        return self.get("/hist/dailies", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
+
+    def hist_strikes(self, *, ticker: str, trade_date: str, fields: str, dte: str | None = None, delta: str | None = None) -> ReplayResp:
+        params: Dict[str, Any] = {"ticker": ticker, "tradeDate": str(trade_date)[:10], "fields": fields}
+        if dte:
+            params["dte"] = dte
+        if delta:
+            params["delta"] = delta
+        return self.get("/hist/strikes", params)
+
+    def hist_monies_implied(self, *, ticker: str, trade_date: str, fields: str, dte: str | None = None) -> ReplayResp:
+        params: Dict[str, Any] = {"ticker": ticker, "tradeDate": trade_date, "fields": fields}
+        if dte:
+            params["dte"] = dte
+        return self.get("/hist/monies/implied", params)
+
+    # Skew mapping used by `backend/skew_overlay.py`
+    def get_skew_by_delta(
+        self,
+        *,
+        ticker: str,
+        trade_date: str,
+        dte_target: int,
+        deltas: list[int] | None = None,
+        rights: list[str] | None = None,
+    ) -> dict:
+        use_deltas = deltas or [10, 25]
+        use_rights = rights or ["C", "P"]
+
+        lo = max(1, int(dte_target) - 2)
+        hi = int(dte_target) + 7
+        fields = "ticker,tradeDate,expirDate,dte,stockPrice,vol10,vol25,vol50,vol75,vol90"
+        resp = self.hist_monies_implied(
+            ticker=ticker,
+            trade_date=str(trade_date)[:10],
+            fields=fields,
+            dte=f"{lo},{hi}",
+        )
+        rows = resp.rows or []
+        if not rows:
+            return {}
+
+        def _to_float(v: Any) -> Optional[float]:
+            try:
+                if v is None:
+                    return None
+                f = float(v)
+                if f != f:  # NaN
+                    return None
+                return f
+            except (TypeError, ValueError):
+                return None
+
+        best = None
+        best_dist = None
+        for r in rows:
+            dte_val = _to_float(r.get("dte"))
+            if dte_val is None:
+                continue
+            dist = abs(dte_val - float(dte_target))
+            if best is None or best_dist is None or dist < best_dist:
+                best = r
+                best_dist = dist
+        if best is None:
+            best = rows[0]
+
+        vol10 = _to_float(best.get("vol10"))
+        vol25 = _to_float(best.get("vol25"))
+        vol50 = _to_float(best.get("vol50") or best.get("atmiv"))
+        vol75 = _to_float(best.get("vol75"))
+        vol90 = _to_float(best.get("vol90"))
+
+        out: Dict[Any, Any] = {
+            "asOfDate": str(best.get("tradeDate") or str(trade_date)[:10])[:10],
+            "expirDate": str(best.get("expirDate") or "")[:10] if best.get("expirDate") else None,
+            "dte": _to_float(best.get("dte")),
+            "stockPrice": _to_float(best.get("stockPrice") or best.get("spotPrice")),
+            "atm": vol50,
+        }
+
+        def _set(right: str, delta: int, v: Optional[float]) -> None:
+            if v is None:
+                return
+            out[(right, int(delta))] = v
+
+        for d in use_deltas:
+            if int(d) == 25:
+                if "C" in use_rights:
+                    _set("C", 25, vol25)
+                if "P" in use_rights:
+                    _set("P", 25, vol75)
+            if int(d) == 10:
+                if "C" in use_rights:
+                    _set("C", 10, vol10)
+                if "P" in use_rights:
+                    _set("P", 10, vol90)
+
+        return out
+
+
