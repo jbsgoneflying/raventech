@@ -13,8 +13,8 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "golden"
 
 # Fill these after first run (see assertion message if missing).
 EXPECTED = {
-    "MU": {"seed": 2780423902814045974, "breachProbEither": 0.000000, "cvar95Total": 0.0},
-    "NKE": {"seed": 5373924769377447189, "breachProbEither": 0.404000, "cvar95Total": 5.0},
+    "MU": {"seed": 245931981883769468, "breachProbEither": 0.000000, "cvar95Total": 0.0},
+    "NKE": {"seed": 10077185795213068593, "breachProbEither": 0.393000, "cvar95Total": 5.0},
 }
 
 
@@ -40,8 +40,10 @@ def test_mc_smoke_is_deterministic_and_stable(ticker, monkeypatch):
     client = ReplayOratsClient(tape)
     today = dt.date.fromisoformat("2025-03-01")
 
-    out1 = compute_breach_stats(client=client, ticker=ticker, n=20, years=5, k=1.0, today=today)
-    out2 = compute_breach_stats(client=client, ticker=ticker, n=20, years=5, k=1.0, today=today)
+    # Provide a deterministic next-earnings anchor for tapes (delayed plans may not return forward nextErn in /cores).
+    override = {"date": "2025-03-01", "timing": "AMC"}
+    out1 = compute_breach_stats(client=client, ticker=ticker, n=20, years=5, k=1.0, today=today, next_event_override=override)
+    out2 = compute_breach_stats(client=client, ticker=ticker, n=20, years=5, k=1.0, today=today, next_event_override=override)
 
     mc1 = out1.get("monteCarlo") or {}
     mc2 = out2.get("monteCarlo") or {}

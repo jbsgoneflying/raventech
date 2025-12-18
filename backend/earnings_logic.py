@@ -402,6 +402,7 @@ def compute_breach_stats(
     trade_builder_inputs: Optional[Dict[str, Any]] = None,
     today: Optional[dt.date] = None,
     flags_override: Any = None,
+    next_event_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Compute ORATS earnings implied-move breach stats and overlays.
@@ -1115,78 +1116,198 @@ def compute_breach_stats(
             "earnDateNext": None,
             "timingPlanned": None,
             "pricingDatePlanned": None,
+            "pricingDateTarget": None,
+            "pricingDateAsOf": None,
             "impliedMovePctPlanned": None,
             "impliedMoveSource": None,
             "notes": [],
         }
         try:
-            if next_event_date is not None and next_event_raw is not None:
-                annc_tod = next_event_raw.get("anncTod") or next_event_raw.get("annc_tod") or next_event_raw.get("anncTOD")
-                timing_planned = classify_timing(annc_tod)
-                next_event["earnDateNext"] = _fmt_date(next_event_date)
+            # 0) Manual override (explicit, trader-entered). This is the most direct way to unblock MC when
+            # ORATS forward earnings fields are not available on the delayed plan.
+            if next_event_override and next_event_override.get("date"):
+                od = str(next_event_override.get("date") or "")[:10]
+                try:
+                    _ = _parse_date(od)
+                    next_event["earnDateNext"] = od
+                except Exception:
+                    next_event["notes"].append("Invalid manual earnings date override (expected YYYY-MM-DD).")
+                    od = ""
+
+                timing_override = str(next_event_override.get("timing") or "").strip().upper()
+                timing_planned = timing_override if timing_override in ("AMC", "BMO") else "UNK"
                 next_event["timingPlanned"] = timing_planned
 
-                pricing_planned: Optional[str] = None
-                if timing_planned == "AMC":
-                    pricing_planned = _fmt_date(next_event_date)
-                elif timing_planned == "BMO":
-                    prior = get_prior_trading_day(client, t, next_event_date)
-                    if prior and prior.tradeDate:
-                        pricing_planned = str(prior.tradeDate)[:10]
-                    else:
-                        next_event["notes"].append("Unable to determine prior trading day for BMO pricing date; falling back to current as-of.")
+                asof = str(current.get("asOfDate") or "")[:10] or None
+                next_event["pricingDateAsOf"] = asof
+                next_event["pricingDatePlanned"] = asof
+
+                pricing_target = None
+                if od and timing_planned == "AMC":
+                    pricing_target = od
+                elif od and timing_planned == "BMO":
+                    prior = get_prior_trading_day(client, t, _parse_date(od))
+                    pricing_target = str(prior.tradeDate)[:10] if prior and prior.tradeDate else None
+                next_event["pricingDateTarget"] = pricing_target
+                if pricing_target and asof and pricing_target != asof:
+                    next_event["notes"].append(f"Target pricing date={pricing_target}; using latest available ORATS EOD asOf={asof}.")
+
+                # Use the same EOD snapshot implied move currently displayed in the UI.
+                implied = _to_float(current.get("impliedMovePct"))
+                if implied is not None:
+                    next_event["impliedMovePctPlanned"] = _round2(float(implied))
+                    next_event["impliedMoveSource"] = "manual_event+current_snapshot"
+                    next_event["notes"].append("Manual earnings override used; implied move anchored to ORATS EOD snapshot.")
                 else:
-                    next_event["notes"].append("Unknown upcoming earnings timing; pricing date unclear.")
-
-                if pricing_planned is None:
-                    pricing_planned = str(current.get("asOfDate") or "")[:10] or None
-                next_event["pricingDatePlanned"] = pricing_planned
-
-                implied_pct_planned: Optional[float] = None
-                implied_source: Optional[str] = None
-                if pricing_planned and timing_planned in ("AMC", "BMO"):
-                    cores_date = _parse_date(pricing_planned)
+                    # Fallback: compute implied from hist/cores on the as-of date (deterministic EOD anchoring).
+                    implied_pct_planned: Optional[float] = None
                     used_date: Optional[str] = None
-                    for _ in range(0, 5):
+                    if asof:
                         try:
-                            cores_resp = client.hist_cores(ticker=t, trade_date=_fmt_date(cores_date), fields="ticker,tradeDate,stockPrice,impErnMv")
-                            row = _first_row(cores_resp.rows)
+                            cores_date = _parse_date(asof)
                         except Exception:
-                            row = None
-                        if row and row.get("impErnMv") is not None:
-                            used_date = str(row.get("tradeDate") or _fmt_date(cores_date))[:10]
-                            implied_pct_planned = _imp_to_pct(row.get("impErnMv"))
-                            break
-                        cores_date = cores_date - dt.timedelta(days=1)
+                            cores_date = None
+                        if cores_date is not None:
+                            for _ in range(0, 5):
+                                try:
+                                    cores_resp = client.hist_cores(ticker=t, trade_date=_fmt_date(cores_date), fields="ticker,tradeDate,stockPrice,impErnMv")
+                                    row = _first_row(cores_resp.rows)
+                                except Exception:
+                                    row = None
+                                if row and row.get("impErnMv") is not None:
+                                    used_date = str(row.get("tradeDate") or _fmt_date(cores_date))[:10]
+                                    implied_pct_planned = _imp_to_pct(row.get("impErnMv"))
+                                    break
+                                cores_date = cores_date - dt.timedelta(days=1)
                     if implied_pct_planned is not None:
-                        if used_date and used_date == pricing_planned:
-                            implied_source = "cores_on_pricingDate"
+                        next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
+                        next_event["impliedMoveSource"] = "manual_event+hist_cores_asof"
+                        if used_date and asof and used_date != asof:
+                            next_event["notes"].append(f"Manual override implied move used fallback cores date {used_date} (asOf {asof}).")
                         else:
-                            implied_source = "cores_fallback_prior"
-                            if used_date:
-                                next_event["notes"].append(f"Cores implied move used fallback date {used_date} (planned {pricing_planned}).")
+                            next_event["notes"].append("Manual earnings override used; implied move from ORATS hist/cores on as-of date.")
                     else:
-                        implied_source = "missing"
-                        next_event["notes"].append("Missing cores impErnMv for planned pricing date (after retries).")
-                else:
-                    implied_source = "missing"
+                        next_event["impliedMoveSource"] = "manual_event_missing_implied"
+                        next_event["notes"].append("Manual earnings override set, but implied move unavailable from current snapshot and hist/cores.")
 
-                # If the event pricing date is in the future (common pre-earnings), cores may not exist yet.
-                # Fall back to the current snapshot implied move for a usable, explainable MC anchor.
-                if implied_pct_planned is None:
-                    fallback_imp = _to_float(current.get("impliedMovePct"))
-                    if fallback_imp is not None:
-                        implied_pct_planned = float(fallback_imp)
-                        implied_source = "current_snapshot_fallback"
-                        next_event["notes"].append("Using current snapshot implied move as fallback (pricing-date cores unavailable).")
-                next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
-                next_event["impliedMoveSource"] = implied_source
-            else:
-                next_event["notes"].append("No upcoming earnings event found in hist/earnings.")
+            # If manual override provided and valid, skip automatic discovery paths.
+            if not next_event["earnDateNext"]:
+                # Prefer ORATS snapshot /cores for forward-looking earnings metadata (EOD snapshot).
+                snap_fields = "ticker,tradeDate,stockPrice,impErnMv,nextErn,nextErnTod,daysToNextErn,wksNextErn"
+                snap_row: Optional[dict] = None
+                try:
+                    snap = client.cores(ticker=t, fields=snap_fields)
+                    snap_row = _first_row(snap.rows) if snap and getattr(snap, "rows", None) is not None else None
+                except Exception:
+                    snap_row = None
+
+                used_snapshot = False
+                if snap_row:
+                    next_ern = str(snap_row.get("nextErn") or "")[:10]
+                    # ORATS sometimes uses 0000-00-00 when not entitled / not available.
+                    if next_ern and next_ern != "0000-00-00":
+                        try:
+                            nd = _parse_date(next_ern)
+                        except Exception:
+                            nd = None
+                        if nd and nd >= now:
+                            used_snapshot = True
+                            next_event["earnDateNext"] = next_ern
+                            timing_planned = classify_timing(snap_row.get("nextErnTod"))
+                            next_event["timingPlanned"] = timing_planned
+                            asof = str(snap_row.get("tradeDate") or current.get("asOfDate") or "")[:10] or None
+                            next_event["pricingDateAsOf"] = asof
+                            next_event["pricingDatePlanned"] = asof
+                            next_event["impliedMovePctPlanned"] = _round2(_imp_to_pct(snap_row.get("impErnMv")))
+                            next_event["impliedMoveSource"] = "cores_snapshot"
+                            next_event["notes"].append(f"Anchored to ORATS /cores snapshot asOf={asof}.")
+
+                            # Also compute the theoretical pricing-date target for the event (for transparency).
+                            pricing_target: Optional[str] = None
+                            if timing_planned == "AMC":
+                                pricing_target = next_ern
+                            elif timing_planned == "BMO":
+                                prior = get_prior_trading_day(client, t, _parse_date(next_ern))
+                                pricing_target = str(prior.tradeDate)[:10] if prior and prior.tradeDate else None
+                            next_event["pricingDateTarget"] = pricing_target
+                        if pricing_target and asof and pricing_target != asof:
+                            next_event["notes"].append(f"Target pricing date={pricing_target}; using latest available ORATS EOD asOf={asof}.")
+
+                        if next_event["impliedMovePctPlanned"] is None:
+                            next_event["notes"].append("Missing impErnMv in /cores snapshot; will fall back.")
+                    else:
+                        next_event["notes"].append("ORATS /cores snapshot nextErn is missing or not in the future; falling back.")
+                else:
+                    next_event["notes"].append("ORATS /cores snapshot nextErn unavailable (possibly subscription-gated); falling back.")
+
+                if not used_snapshot:
+                    # Fallback path: infer upcoming event from /hist/earnings (may be historical-only on delayed plans).
+                    if next_event_date is not None and next_event_raw is not None:
+                        annc_tod = next_event_raw.get("anncTod") or next_event_raw.get("annc_tod") or next_event_raw.get("anncTOD")
+                        timing_planned = classify_timing(annc_tod)
+                        next_event["earnDateNext"] = _fmt_date(next_event_date)
+                        next_event["timingPlanned"] = timing_planned
+
+                        pricing_planned: Optional[str] = None
+                        if timing_planned == "AMC":
+                            pricing_planned = _fmt_date(next_event_date)
+                        elif timing_planned == "BMO":
+                            prior = get_prior_trading_day(client, t, next_event_date)
+                            if prior and prior.tradeDate:
+                                pricing_planned = str(prior.tradeDate)[:10]
+                            else:
+                                next_event["notes"].append("Unable to determine prior trading day for BMO pricing date; falling back to current as-of.")
+                        else:
+                            next_event["notes"].append("Unknown upcoming earnings timing; pricing date unclear.")
+
+                        if pricing_planned is None:
+                            pricing_planned = str(current.get("asOfDate") or "")[:10] or None
+                        next_event["pricingDatePlanned"] = pricing_planned
+                        next_event["pricingDateAsOf"] = str(current.get("asOfDate") or "")[:10] or None
+                        next_event["pricingDateTarget"] = pricing_planned
+
+                        implied_pct_planned: Optional[float] = None
+                        implied_source: Optional[str] = None
+                        if pricing_planned and timing_planned in ("AMC", "BMO"):
+                            cores_date = _parse_date(pricing_planned)
+                            used_date: Optional[str] = None
+                            for _ in range(0, 5):
+                                try:
+                                    cores_resp = client.hist_cores(ticker=t, trade_date=_fmt_date(cores_date), fields="ticker,tradeDate,stockPrice,impErnMv")
+                                    row = _first_row(cores_resp.rows)
+                                except Exception:
+                                    row = None
+                                if row and row.get("impErnMv") is not None:
+                                    used_date = str(row.get("tradeDate") or _fmt_date(cores_date))[:10]
+                                    implied_pct_planned = _imp_to_pct(row.get("impErnMv"))
+                                    break
+                                cores_date = cores_date - dt.timedelta(days=1)
+                            if implied_pct_planned is not None:
+                                if used_date and used_date == pricing_planned:
+                                    implied_source = "cores_on_pricingDate"
+                                else:
+                                    implied_source = "cores_fallback_prior"
+                                    if used_date:
+                                        next_event["notes"].append(f"Cores implied move used fallback date {used_date} (planned {pricing_planned}).")
+                            else:
+                                implied_source = "missing"
+                                next_event["notes"].append("Missing cores impErnMv for planned pricing date (after retries).")
+                        else:
+                            implied_source = "missing"
+
+                    if implied_pct_planned is None:
+                        fallback_imp = _to_float(current.get("impliedMovePct"))
+                        if fallback_imp is not None:
+                            implied_pct_planned = float(fallback_imp)
+                            implied_source = "current_snapshot_fallback"
+                            next_event["notes"].append("Using current snapshot implied move as fallback (pricing-date cores unavailable).")
+                        next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
+                        next_event["impliedMoveSource"] = implied_source
+                    else:
+                        next_event["notes"].append("No upcoming earnings event found in hist/earnings.")
+            out["nextEvent"] = next_event
         except Exception as e:
             next_event["notes"].append(f"nextEvent calculation failed: {type(e).__name__}: {e}")
-
-        out["nextEvent"] = next_event
 
         try:
             out["monteCarlo"] = run_monte_carlo(

@@ -3,15 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ORATS Earnings Breach Analysis</title>
+    <title>Breach.ai · ORATS Earnings Breach Analysis</title>
+    <link rel="icon" type="image/png" href="/static/Breach-Ai.png" />
+    <link rel="apple-touch-icon" href="/static/Breach-Ai.png" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="container" role="main">
       <header class="appHeader">
-        <div class="appHeaderText">
-          <div class="appTitle">ORATS Earnings Breach Analysis</div>
-          <div class="appSubtitle">Implied vs realized earnings moves · Last 20 events</div>
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/Breach-Ai.png" alt="Breach.ai" />
+          <div class="appHeaderText">
+            <div class="appTitle">ORATS Earnings Breach Analysis</div>
+            <div class="appSubtitle">Implied vs realized earnings moves · Last 20 events</div>
+          </div>
         </div>
       </header>
 
@@ -45,6 +50,21 @@
               <input id="mcToggle" type="checkbox" />
               <span class="toggleText">Enable</span>
             </label>
+          </div>
+
+          <div class="controlGroup hidden" id="mcOverrideGroup">
+            <label class="controlLabel" for="mcEventDate">
+              Next earnings (override)
+              <span class="info" title="If ORATS next earnings is unavailable, provide the earnings date + timing. MC will still be anchored to latest ORATS EOD snapshot (as-of date shown in MC panel).">ⓘ</span>
+            </label>
+            <div class="mcOverrideRow">
+              <input id="mcEventDate" class="controlInput" type="date" />
+              <select id="mcEventTiming" class="controlSelect">
+                <option value="AUTO" selected>Auto</option>
+                <option value="AMC">AMC</option>
+                <option value="BMO">BMO</option>
+              </select>
+            </div>
           </div>
 
           <button id="submit" type="submit" class="primaryButton">
@@ -133,19 +153,19 @@
             </div>
             <div id="bufferTargetCard" class="metricCard">
               <div class="metricLabel">
-                Buffer Target
+                Final EM Multipliers (Strike Targets)
                 <span
                   class="info"
-                  title="Buffer guidance for open-exit / IV-crush execution. Does not affect model stats."
+                  title="Final wing multipliers to use for strike targeting. Multiply each by the event implied move (EM) to get your short-strike distance."
                   >ⓘ</span
                 >
               </div>
               <div class="segmented" role="group" aria-label="Buffer mode">
                 <button id="bufferModeSymmetric" class="segButton" type="button">Symmetric</button>
-                <button id="bufferModeAsymmetric" class="segButton" type="button">Asymmetric (Auto)</button>
+                <button id="bufferModeAsymmetric" class="segButton" type="button">Asymmetric (TAS)</button>
               </div>
               <div id="bufferTargetGrid" class="miniGrid"></div>
-              <div id="bufferTargetSubtext" class="metricCaption muted">Execution buffer (UI only)</div>
+              <div id="bufferTargetSubtext" class="metricCaption muted">Multiply by EM to target short strikes.</div>
             </div>
           </div>
         </section>

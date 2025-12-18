@@ -56,6 +56,7 @@ let bufferModePref = null; // "symmetric" | "asymmetric" | null (auto)
 let showAdvancedCols = false;
 let tradeBuilderExpanded = false;
 let mcEnabledPref = false;
+let mcEventOverride = { date: null, timing: "AUTO" };
 
 const tradeBuilderState = {
   mode: "auto", // auto | equal_delta | equal_premium
@@ -185,32 +186,41 @@ function buildBufferTarget(payload) {
   const qRecStr = String(qRecRaw || "");
   const isAvoid = qRecStr.startsWith("Avoid");
 
-  // Muted / no-trade display rules (UI only).
+  // Muted / no-trade display rules.
   if (gate === "NO_TRADE" || isAvoid) {
     return { primary: "—", secondary: null, subtext: "No trade", muted: true };
   }
 
+  // Canonical "final" multiplier for strike selection is the model's base wing multiple
+  // (quarter seasonality × regime tail multiplier). Asymmetry (put/call) is handled
+  // separately via wingRecommendation.putWingMultiple / callWingMultiple.
+  const wr = payload?.wingRecommendation || null;
+  const baseWing = (wr && wr.baseWingMultiple !== null && wr.baseWingMultiple !== undefined)
+    ? Number(wr.baseWingMultiple)
+    : null;
+  if (baseWing !== null && Number.isFinite(baseWing)) {
+    return {
+      primary: `~${baseWing.toFixed(2)}× EM`,
+      secondary: null,
+      subtext: "Symmetric base wing (quarter × regime).",
+      muted: false,
+    };
+  }
+
+  // Fallback if wingRecommendation is missing/incomplete: compute from quarter+regime inputs.
   const base = _baseWingFactorFromRec(qRecRaw);
   const tm = (rg.tailMultiplier === null || rg.tailMultiplier === undefined) ? null : Number(rg.tailMultiplier);
   if (base === null || tm === null || Number.isNaN(tm)) {
-    return { primary: "—", secondary: null, subtext: "Execution buffer (UI only)", muted: false };
+    return { primary: "—", secondary: null, subtext: "Unavailable: missing quarter/regime inputs.", muted: false };
   }
-
-  const finalWing = Number(base) * Number(tm); // UI-only: base wing factor × tail multiplier
+  const finalWing = Number(base) * Number(tm);
   if (!Number.isFinite(finalWing)) {
-    return { primary: "—", secondary: null, subtext: "Execution buffer (UI only)", muted: false };
+    return { primary: "—", secondary: null, subtext: "Unavailable: invalid quarter/regime inputs.", muted: false };
   }
-
-  let bufferFactor = 1.10;
-  if (finalWing >= 1.7) bufferFactor = 1.20; // midpoint of [1.15, 1.25]
-  else if (finalWing >= 1.3 && finalWing <= 1.6) bufferFactor = 1.10;
-  else if (finalWing <= 1.25) bufferFactor = 1.05;
-
-  const bufferTarget = finalWing * bufferFactor;
   return {
-    primary: `~${bufferTarget.toFixed(2)}× EM`,
+    primary: `~${finalWing.toFixed(2)}× EM`,
     secondary: null,
-    subtext: "Execution buffer (UI only)",
+    subtext: "Symmetric base wing (quarter × regime).",
     muted: false,
   };
 }
@@ -254,12 +264,13 @@ function renderBufferTarget(payload) {
         <div class="k">Put</div><div class="v mono">~${Number(wing.putWingMultiple).toFixed(2)}× EM</div>
         <div class="k">Call</div><div class="v mono">~${Number(wing.callWingMultiple).toFixed(2)}× EM</div>
       `;
+      if (btSub) btSub.textContent = "Final wing multipliers (includes TAS asymmetry). Multiply by EM to target short strikes.";
     } else {
       btGrid.innerHTML = `<div class="k">Target</div><div class="v mono">${escapeHtml(bt.primary)}</div>`;
+      if (btSub) btSub.textContent = "Final symmetric wing multiplier. Multiply by EM to target short strikes.";
     }
   }
-
-  if (btSub) btSub.textContent = bt.subtext;
+  if (btSub && !btSub.textContent) btSub.textContent = bt.subtext;
   if (btCard) btCard.classList.toggle("isMuted", !!bt.muted);
 }
 
@@ -414,8 +425,20 @@ function renderMonteCarlo(payload) {
   const either = Number(bp.either);
   const put = Number(bp.put);
   const call = Number(bp.call);
-  if (bEither) bEither.textContent = Number.isFinite(either) ? `${(either * 100).toFixed(1)}%` : "—";
-  if (bBreak) bBreak.textContent = `Put ${Number.isFinite(put) ? (put * 100).toFixed(1) + "%" : "—"} · Call ${Number.isFinite(call) ? (call * 100).toFixed(1) + "%" : "—"}`;
+  function fmtProbPct(p) {
+    if (!Number.isFinite(p)) return "—";
+    const pct = p * 100;
+    // If we observed zero breaches, show an empirical upper bound if available.
+    if (pct === 0) {
+      const ub = mc?.diagnostics?.breachProbUpperBoundPct;
+      const ubn = Number(ub);
+      if (Number.isFinite(ubn) && ubn > 0) return `<${ubn.toFixed(2)}%`;
+    }
+    if (pct > 0 && pct < 0.1) return "<0.1%";
+    return `${pct.toFixed(1)}%`;
+  }
+  if (bEither) bEither.textContent = fmtProbPct(either);
+  if (bBreak) bBreak.textContent = `Put ${fmtProbPct(put)} · Call ${fmtProbPct(call)}`;
 
   const el = mc?.expectedLoss || {};
   if (expLoss) expLoss.textContent = fmtMoney(el.total);
@@ -807,6 +830,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (mcEnabledPref) {
         // Default-on conditioning for trader relevance; backend will still fail-safe if pools are too small.
         url += `&mc=1&mc_cond_regime=1&mc_cond_quarter=1`;
+        if (mcEventOverride?.date) url += `&mc_event_date=${encodeURIComponent(String(mcEventOverride.date))}`;
+        if (mcEventOverride?.timing && String(mcEventOverride.timing).toUpperCase() !== "AUTO") {
+          url += `&mc_event_timing=${encodeURIComponent(String(mcEventOverride.timing).toUpperCase())}`;
+        }
       }
       const payload = await fetchJson(url);
       render(payload);
@@ -994,11 +1021,32 @@ document.addEventListener("DOMContentLoaded", () => {
   syncTradeBuilderControls();
 
   const mcToggle = $("mcToggle");
+  const mcGroup = $("mcOverrideGroup");
+  const mcDate = $("mcEventDate");
+  const mcTiming = $("mcEventTiming");
   if (mcToggle) {
     mcToggle.addEventListener("change", async () => {
       mcEnabledPref = !!mcToggle.checked;
+      if (mcGroup) mcGroup.classList.toggle("hidden", !mcEnabledPref);
       if (!lastPayload) return;
       if (isBusy) return;
+      await runCalculation();
+    });
+  }
+
+  if (mcDate) {
+    mcDate.addEventListener("change", async () => {
+      mcEventOverride.date = mcDate.value || null;
+      if (!mcEnabledPref) return;
+      if (!lastPayload || isBusy) return;
+      await runCalculation();
+    });
+  }
+  if (mcTiming) {
+    mcTiming.addEventListener("change", async () => {
+      mcEventOverride.timing = mcTiming.value || "AUTO";
+      if (!mcEnabledPref) return;
+      if (!lastPayload || isBusy) return;
       await runCalculation();
     });
   }

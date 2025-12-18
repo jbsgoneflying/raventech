@@ -42,6 +42,9 @@ class ReplayOratsClient:
     def hist_earnings(self, ticker: str) -> ReplayResp:
         return self.get("/hist/earnings", {"ticker": ticker})
 
+    def cores(self, *, ticker: str, fields: str) -> ReplayResp:
+        return self.get("/cores", {"ticker": ticker, "fields": fields})
+
     def hist_cores(self, ticker: str, trade_date: str, fields: str) -> ReplayResp:
         return self.get("/hist/cores", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
 

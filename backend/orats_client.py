@@ -176,6 +176,10 @@ class OratsClient:
     def hist_earnings(self, ticker: str) -> OratsResponse:
         return self.get("/hist/earnings", {"ticker": ticker})
 
+    # Snapshot cores endpoint (no tradeDate). Used for forward-looking earnings calendar fields like nextErn/nextErnTod.
+    def cores(self, *, ticker: str, fields: str) -> OratsResponse:
+        return self.get("/cores", {"ticker": ticker, "fields": fields})
+
     def hist_cores(self, ticker: str, trade_date: str, fields: str) -> OratsResponse:
         return self.get("/hist/cores", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
 

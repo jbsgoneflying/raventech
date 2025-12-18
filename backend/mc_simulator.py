@@ -253,6 +253,32 @@ def _cvar95(losses: List[float]) -> Optional[float]:
     return float(sum(tail) / len(tail))
 
 
+def _pctiles(xs: List[float], ps: List[float]) -> Dict[str, float]:
+    if not xs:
+        return {}
+    ys = sorted(float(x) for x in xs)
+    n = len(ys)
+    out: Dict[str, float] = {}
+    for p in ps:
+        pp = float(p)
+        if pp <= 0:
+            v = ys[0]
+        elif pp >= 100:
+            v = ys[-1]
+        else:
+            # linear interpolation
+            pos = (pp / 100.0) * (n - 1)
+            lo = int(math.floor(pos))
+            hi = int(math.ceil(pos))
+            if lo == hi:
+                v = ys[lo]
+            else:
+                w = pos - lo
+                v = (1.0 - w) * ys[lo] + w * ys[hi]
+        out[str(int(pp))] = float(v)
+    return out
+
+
 def _structure_from_trade_builder(tb: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     try:
         put = tb.get("put") if isinstance(tb.get("put"), dict) else {}
@@ -447,9 +473,22 @@ def run_monte_carlo(
     loss_put: List[float] = []
     loss_call: List[float] = []
     loss_total: List[float] = []
+    p_open_sims: List[float] = []
 
     # Pre-extract S to reduce attribute access overhead.
     s_vals = [r.s_signed for r in used_pool]
+    s_min = min(s_vals) if s_vals else None
+    s_max = max(s_vals) if s_vals else None
+
+    # Required standardized shock (S) to breach each side at open:
+    # P_open = spot * (1 + (S * imp_planned)/100) => S_req = ((K/spot - 1) * 100) / imp_planned
+    def _s_req(k_level: float) -> Optional[float]:
+        if spot is None or spot <= 0 or imp_planned is None or imp_planned <= 0:
+            return None
+        return ((float(k_level) / float(spot) - 1.0) * 100.0) / float(imp_planned)
+
+    s_req_put = _s_req(put_short)
+    s_req_call = _s_req(call_short)
     for _ in range(n_sims):
         if weights is None:
             idx = rng.randrange(len(s_vals))
@@ -458,6 +497,7 @@ def run_monte_carlo(
         s_signed = float(s_vals[idx])
         move_sim_pct = s_signed * float(imp_planned)
         p_open = float(spot) * (1.0 + move_sim_pct / 100.0)
+        p_open_sims.append(p_open)
 
         b_put = p_open <= put_short
         b_call = p_open >= call_short
@@ -477,6 +517,17 @@ def run_monte_carlo(
 
     def _prob(x: int) -> float:
         return float(x) / float(n_sims) if n_sims > 0 else 0.0
+
+    breach_prob_upper_bound_pct: Optional[float] = None
+    # Explainable notes when simulated breach count is zero.
+    if breaches_either == 0 and s_min is not None and s_max is not None and s_req_put is not None and s_req_call is not None:
+        notes.append(
+            "No simulated breaches observed. "
+            f"Historical S range [{s_min:.2f}, {s_max:.2f}] vs required S<= {s_req_put:.2f} (put) or S>= {s_req_call:.2f} (call)."
+        )
+        # Simple empirical upper bound: if 0 breaches in N sims, p < ~3/N (rule-of-three) at ~95% confidence.
+        breach_prob_upper_bound_pct = (3.0 / float(n_sims)) * 100.0
+        notes.append(f"Empirical breach probability is very small (0/{n_sims}); upper bound ~{breach_prob_upper_bound_pct:.2f}%.")
 
     out = {
         "nSims": int(n_sims),
@@ -516,6 +567,15 @@ def run_monte_carlo(
             "putLong": round(put_long, 4),
             "callShort": round(call_short, 4),
             "callLong": round(call_long, 4),
+        },
+        "diagnostics": {
+            "sRange": None if (s_min is None or s_max is None) else {"min": round(float(s_min), 4), "max": round(float(s_max), 4)},
+            "sRequiredForBreach": {
+                "put": None if s_req_put is None else round(float(s_req_put), 4),
+                "call": None if s_req_call is None else round(float(s_req_call), 4),
+            },
+            "openPricePctiles": _pctiles(p_open_sims, [1, 5, 50, 95, 99]) if p_open_sims else None,
+            "breachProbUpperBoundPct": None if breach_prob_upper_bound_pct is None else round(float(breach_prob_upper_bound_pct), 4),
         },
     }
 

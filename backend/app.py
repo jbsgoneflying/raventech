@@ -94,6 +94,8 @@ def breach(
     mc_stability: bool | None = Query(None, description="enable bootstrap stability + asymmetry caps (additive)"),
     mc_cond_quarter: bool | None = Query(None, description="MC conditioning: quarter"),
     mc_cond_regime: bool | None = Query(None, description="MC conditioning: regime"),
+    mc_event_date: str | None = Query(None, description="manual next earnings date override (YYYY-MM-DD)"),
+    mc_event_timing: str | None = Query(None, description="manual next earnings timing override (AMC|BMO)"),
 ):
     try:
         trade_builder_inputs = {
@@ -151,6 +153,7 @@ def breach(
             k=k,
             trade_builder_inputs=(trade_builder_inputs if has_trade_builder else None),
             flags_override=effective_flags,
+            next_event_override={"date": mc_event_date, "timing": mc_event_timing},
         )
         if not has_trade_builder:
             with _breach_cache_lock:
