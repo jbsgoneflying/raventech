@@ -10,6 +10,13 @@ from tests.replay_orats_client import ReplayOratsClient
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "golden"
 
+_ADDITIVE_KEYS = {
+    # Live, informational-only overlays added after golden fixtures were generated.
+    # These should not break deterministic golden comparisons for core Engine 1 payloads.
+    "marketDealerGamma",
+    "tickerDealerGamma",
+}
+
 
 @pytest.mark.parametrize("ticker", ["MU", "NKE"])
 def test_golden_payload_flags_off_snapshot(ticker, monkeypatch):
@@ -36,6 +43,8 @@ def test_golden_payload_flags_off_snapshot(ticker, monkeypatch):
     today = dt.date.fromisoformat("2025-03-01")
 
     out = compute_breach_stats(client=client, ticker=ticker, n=20, years=5, k=1.0, today=today)
+    for k in list(_ADDITIVE_KEYS):
+        out.pop(k, None)
     assert out == expected
 
 

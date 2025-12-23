@@ -96,6 +96,35 @@ class FeatureFlags:
     MC_MAX_CVAR95_TOTAL: float = 0.0  # 0 => disabled (no hard CVaR budget)
     MC_DEFAULT_WING_WIDTH_DOLLARS: float = 5.0  # used only when strikes are unavailable
 
+    # --- Engine 2: SPX weekly IC (default OFF; separate page/endpoint) ---
+    ENABLE_ENGINE2_SPX_IC: bool = False
+
+    # Engine 2 policy knobs (risk-only; env-driven; safe defaults)
+    ENGINE2_ENTRY_DAYS: str = "mon,tue,wed"
+    ENGINE2_EM_MULTS: str = "0.7,0.8,0.9,1.0,1.1,1.2"
+    ENGINE2_WING_WIDTH_PTS: str = "5,10,15,20,25"
+
+    ENGINE2_MAX_WEEKS_RETURN: int = 120  # payload cap for recent weeks drilldown
+    ENGINE2_LOOKBACK_YEARS_DEFAULT: int = 3
+
+    ENGINE2_POLICY_MAX_BREACH_PCT: float = 25.0
+    ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT: float = 10.0
+    ENGINE2_POLICY_MAX_MAE95_X_WING: float = 1.0
+
+    # Regime thresholds (score is 0..100)
+    ENGINE2_REGIME_LOW_MAX: float = 25.0
+    ENGINE2_REGIME_MODERATE_MAX: float = 45.0
+    ENGINE2_REGIME_ELEVATED_MAX: float = 65.0
+
+    # Macro proximity model
+    ENGINE2_MACRO_LAMBDA: float = 0.35  # exp(-lambda * days_to_event)
+    ENGINE2_MACRO_MULTIPLIER_CAP: float = 2.5
+    ENGINE2_MACRO_BASE_CPI: float = 1.0
+    ENGINE2_MACRO_BASE_FOMC: float = 1.2
+    ENGINE2_MACRO_BASE_NFP: float = 0.7
+    ENGINE2_MACRO_BASE_OPEX: float = 0.4
+    ENGINE2_MACRO_BASE_REFUNDING: float = 0.5
+
     @classmethod
     def from_env(cls) -> "FeatureFlags":
         return cls(
@@ -137,10 +166,36 @@ class FeatureFlags:
             MC_MAX_BREACH_EITHER_PCT=_get_float("MC_MAX_BREACH_EITHER_PCT", 25.0),
             MC_MAX_CVAR95_TOTAL=_get_float("MC_MAX_CVAR95_TOTAL", 0.0),
             MC_DEFAULT_WING_WIDTH_DOLLARS=_get_float("MC_DEFAULT_WING_WIDTH_DOLLARS", 5.0),
+
+            ENABLE_ENGINE2_SPX_IC=_get_bool("ENABLE_ENGINE2_SPX_IC", False),
+
+            ENGINE2_ENTRY_DAYS=os.getenv("ENGINE2_ENTRY_DAYS", "mon,tue,wed"),
+            ENGINE2_EM_MULTS=os.getenv("ENGINE2_EM_MULTS", "0.7,0.8,0.9,1.0,1.1,1.2"),
+            ENGINE2_WING_WIDTH_PTS=os.getenv("ENGINE2_WING_WIDTH_PTS", "5,10,15,20,25"),
+            ENGINE2_MAX_WEEKS_RETURN=_get_int("ENGINE2_MAX_WEEKS_RETURN", 120),
+            ENGINE2_LOOKBACK_YEARS_DEFAULT=_get_int("ENGINE2_LOOKBACK_YEARS_DEFAULT", 3),
+            ENGINE2_POLICY_MAX_BREACH_PCT=_get_float("ENGINE2_POLICY_MAX_BREACH_PCT", 25.0),
+            ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT=_get_float("ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT", 10.0),
+            ENGINE2_POLICY_MAX_MAE95_X_WING=_get_float("ENGINE2_POLICY_MAX_MAE95_X_WING", 1.0),
+            ENGINE2_REGIME_LOW_MAX=_get_float("ENGINE2_REGIME_LOW_MAX", 25.0),
+            ENGINE2_REGIME_MODERATE_MAX=_get_float("ENGINE2_REGIME_MODERATE_MAX", 45.0),
+            ENGINE2_REGIME_ELEVATED_MAX=_get_float("ENGINE2_REGIME_ELEVATED_MAX", 65.0),
+            ENGINE2_MACRO_LAMBDA=_get_float("ENGINE2_MACRO_LAMBDA", 0.35),
+            ENGINE2_MACRO_MULTIPLIER_CAP=_get_float("ENGINE2_MACRO_MULTIPLIER_CAP", 2.5),
+            ENGINE2_MACRO_BASE_CPI=_get_float("ENGINE2_MACRO_BASE_CPI", 1.0),
+            ENGINE2_MACRO_BASE_FOMC=_get_float("ENGINE2_MACRO_BASE_FOMC", 1.2),
+            ENGINE2_MACRO_BASE_NFP=_get_float("ENGINE2_MACRO_BASE_NFP", 0.7),
+            ENGINE2_MACRO_BASE_OPEX=_get_float("ENGINE2_MACRO_BASE_OPEX", 0.4),
+            ENGINE2_MACRO_BASE_REFUNDING=_get_float("ENGINE2_MACRO_BASE_REFUNDING", 0.5),
         )
 
     def cache_key(self) -> tuple:
-        # Keep it stable and JSON-safe (tuples of primitives).
+        """
+        Engine 1 cache fingerprint.
+
+        IMPORTANT: Do NOT include Engine 2 knobs here. They do not affect the earnings-breach model and
+        should not change Engine 1 caching or MC seeds.
+        """
         return (
             ("ADD_EVENT_SHIFT_TELEMETRY", bool(self.ADD_EVENT_SHIFT_TELEMETRY)),
             ("STRICT_REALIZED_WINDOW", bool(self.STRICT_REALIZED_WINDOW)),
@@ -185,6 +240,32 @@ class FeatureFlags:
     # Backwards-compatible alias used by some modules.
     def cache_fingerprint(self) -> tuple:
         return self.cache_key()
+
+    def cache_key_engine2(self) -> tuple:
+        """Engine 2 cache fingerprint (SPX IC engine)."""
+        return (
+            ("ENABLE_BENZINGA", bool(self.ENABLE_BENZINGA)),
+            ("BENZINGA_ENABLE_EVENT_RISK", bool(self.BENZINGA_ENABLE_EVENT_RISK)),
+            ("ENABLE_ENGINE2_SPX_IC", bool(self.ENABLE_ENGINE2_SPX_IC)),
+            ("ENGINE2_ENTRY_DAYS", str(self.ENGINE2_ENTRY_DAYS)),
+            ("ENGINE2_EM_MULTS", str(self.ENGINE2_EM_MULTS)),
+            ("ENGINE2_WING_WIDTH_PTS", str(self.ENGINE2_WING_WIDTH_PTS)),
+            ("ENGINE2_MAX_WEEKS_RETURN", int(self.ENGINE2_MAX_WEEKS_RETURN)),
+            ("ENGINE2_LOOKBACK_YEARS_DEFAULT", int(self.ENGINE2_LOOKBACK_YEARS_DEFAULT)),
+            ("ENGINE2_POLICY_MAX_BREACH_PCT", float(self.ENGINE2_POLICY_MAX_BREACH_PCT)),
+            ("ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT", float(self.ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT)),
+            ("ENGINE2_POLICY_MAX_MAE95_X_WING", float(self.ENGINE2_POLICY_MAX_MAE95_X_WING)),
+            ("ENGINE2_REGIME_LOW_MAX", float(self.ENGINE2_REGIME_LOW_MAX)),
+            ("ENGINE2_REGIME_MODERATE_MAX", float(self.ENGINE2_REGIME_MODERATE_MAX)),
+            ("ENGINE2_REGIME_ELEVATED_MAX", float(self.ENGINE2_REGIME_ELEVATED_MAX)),
+            ("ENGINE2_MACRO_LAMBDA", float(self.ENGINE2_MACRO_LAMBDA)),
+            ("ENGINE2_MACRO_MULTIPLIER_CAP", float(self.ENGINE2_MACRO_MULTIPLIER_CAP)),
+            ("ENGINE2_MACRO_BASE_CPI", float(self.ENGINE2_MACRO_BASE_CPI)),
+            ("ENGINE2_MACRO_BASE_FOMC", float(self.ENGINE2_MACRO_BASE_FOMC)),
+            ("ENGINE2_MACRO_BASE_NFP", float(self.ENGINE2_MACRO_BASE_NFP)),
+            ("ENGINE2_MACRO_BASE_OPEX", float(self.ENGINE2_MACRO_BASE_OPEX)),
+            ("ENGINE2_MACRO_BASE_REFUNDING", float(self.ENGINE2_MACRO_BASE_REFUNDING)),
+        )
 
 
 def get_flags() -> FeatureFlags:

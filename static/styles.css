@@ -1,17 +1,38 @@
 :root {
-  --bg: #0f1115;
-  --surface: #151922;
-  --border: rgba(255, 255, 255, 0.06);
-  --text: #e6e8eb;
-  --muted: rgba(230, 232, 235, 0.65);
+  /* RavenTech.ai — Light (Apple-esque) */
+  --bg: #f5f5f7;
+  --bg2: #ffffff;
 
-  --green: rgba(76, 217, 100, 0.9);
-  --amber: rgba(255, 191, 0, 0.9);
-  --red: rgba(255, 69, 58, 0.9);
+  /* Glass surfaces */
+  --surface: rgba(255, 255, 255, 0.70);
+  --surfaceElev: rgba(255, 255, 255, 0.86);
+  --surfaceSolid: #ffffff;
 
-  --shadow: 0 8px 24px rgba(0,0,0,0.35);
-  --radius-card: 16px;
-  --radius-control: 14px;
+  /* Neutrals */
+  --border: rgba(15, 23, 42, 0.10);
+  --border-strong: rgba(15, 23, 42, 0.14);
+  --line: rgba(15, 23, 42, 0.08);
+  --text: #0b0b0f;
+  --muted: rgba(11, 11, 15, 0.62);
+  --muted2: rgba(11, 11, 15, 0.48);
+
+  /* Accents */
+  --blue: rgba(0, 122, 255, 0.95);
+  --green: rgba(52, 199, 89, 0.95);
+  --amber: rgba(255, 159, 10, 0.95);
+  --red: rgba(255, 59, 48, 0.95);
+
+  /* Elevation */
+  --shadow: 0 10px 30px rgba(15, 20, 30, 0.08);
+  --shadow-glass: 0 1px 0 rgba(255,255,255,0.85) inset, 0 10px 30px rgba(15, 20, 30, 0.08);
+
+  /* Focus + hover */
+  --hover: rgba(2, 6, 23, 0.03);
+  --focus-ring: rgba(0, 122, 255, 0.22);
+
+  /* Radii */
+  --radius-card: 18px;
+  --radius-control: 16px;
 }
 
 * { box-sizing: border-box; }
@@ -19,7 +40,12 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
-  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background:
+    radial-gradient(1000px 700px at 18% -10%, rgba(0, 122, 255, 0.12), transparent 56%),
+    radial-gradient(900px 600px at 85% 10%, rgba(52, 199, 89, 0.08), transparent 58%),
+    var(--bg);
   color: var(--text);
 }
 
@@ -47,10 +73,11 @@ body {
 .brandLogo {
   width: 52px;
   height: 52px;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 26px rgba(15, 20, 30, 0.10);
 }
 
 .appHeaderText {
@@ -61,14 +88,14 @@ body {
 
 .appTitle {
   font-size: 24px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
 }
 
 .appSubtitle {
   margin-top: 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--muted);
 }
 
@@ -78,6 +105,8 @@ body {
   border-radius: var(--radius-control);
   padding: 10px 12px 10px;
   box-shadow: var(--shadow);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
 
 .controlBarForm {
@@ -85,6 +114,33 @@ body {
   gap: 12px;
   align-items: center;
   height: 56px;
+}
+
+/* Engine 2 (SPX) control bar: fit controls without horizontal overflow */
+.controlBarForm.controlBarForm--engine2 {
+  display: grid;
+  /* With desk-locked controls, just auto-fit the remaining fields */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: end;
+  height: auto;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2px 0;
+}
+
+.controlBarForm.controlBarForm--engine2 .controlGroup {
+  min-width: 0; /* override base min-width to prevent overflow */
+}
+
+.controlBarForm.controlBarForm--engine2 .controlSpacer {
+  display: none;
+}
+
+.controlBarForm.controlBarForm--engine2 #runBtn {
+  grid-column: auto;
+  justify-self: end;
+  min-width: 110px;
 }
 
 .controlGroup {
@@ -129,20 +185,22 @@ body {
 
 .controlInput, .controlSelect {
   height: 36px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surfaceElev);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 12px;
   padding: 8px 10px;
   outline: none;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.80) inset;
 }
 
 .controlInput::placeholder {
-  color: rgba(230, 232, 235, 0.35);
+  color: rgba(11, 11, 15, 0.35);
 }
 
 .controlInput:focus, .controlSelect:focus {
-  border-color: rgba(255,255,255,0.14);
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 4px var(--focus-ring), 0 1px 0 rgba(255,255,255,0.85) inset;
 }
 
 .primaryButton {
@@ -153,15 +211,27 @@ body {
   justify-content: center;
   padding: 0 14px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.70));
   color: var(--text);
   font-weight: 600;
   cursor: pointer;
+  box-shadow: var(--shadow-glass);
+  transition: background 140ms ease, border-color 140ms ease, transform 80ms ease, box-shadow 140ms ease;
 }
 
 .primaryButton:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.76));
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+.primaryButton:active {
+  transform: translateY(0.5px);
+}
+
+.primaryButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--focus-ring), var(--shadow-glass);
 }
 
 .primaryButton:disabled {
@@ -173,8 +243,8 @@ body {
   width: 14px;
   height: 14px;
   border-radius: 999px;
-  border: 2px solid rgba(230,232,235,0.28);
-  border-top-color: rgba(230,232,235,0.85);
+  border: 2px solid rgba(11,11,15,0.22);
+  border-top-color: rgba(11,11,15,0.65);
   display: none;
 }
 
@@ -190,6 +260,10 @@ body {
   font-weight: 500;
 }
 
+.status.isError { color: var(--red); }
+.status.isOk { color: rgba(11,11,15,0.70); }
+.status.isRunning { color: rgba(11,11,15,0.62); }
+
 .results.hidden { display: none; }
 .hidden { display: none !important; }
 
@@ -200,6 +274,20 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  /* Tooltips: each surface is a stacking context (due to backdrop-filter). Make it
+     positionable so we can raise the active surface above later siblings. */
+  position: relative;
+  z-index: 0;
+}
+
+/* When a tooltip is open/hovered/focused inside a surface, raise that entire surface
+   above following sections so the tooltip isn't hidden behind the next card/table. */
+.surface:has(.tipWrap.isOpen),
+.surface:has(.tipWrap:hover),
+.surface:has(.tipWrap:focus-within) {
+  z-index: 1000;
 }
 
 .sectionHeader {
@@ -235,8 +323,9 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.10);
-  color: rgba(230,232,235,0.70);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.60);
+  color: var(--muted);
   font-size: 11px;
   line-height: 1;
 }
@@ -260,6 +349,21 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
 }
 
+.metricGrid.metricGrid--snapshot {
+  /* Avoid awkward empty “holes” when we have 5–6 cards */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.metricGrid.metricGrid--snapshot #recCard {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 980px) {
+  .metricGrid.metricGrid--snapshot #recCard {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 1200px) {
   .metricGrid.metricGrid--regime {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -270,10 +374,13 @@ body {
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controlBarForm { flex-wrap: wrap; height: auto; padding: 8px 0; }
   .controlSpacer { display: none; }
+  .controlBarForm.controlBarForm--engine2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .controlBarForm.controlBarForm--engine2 #runBtn { justify-self: stretch; }
 }
 
 @media (max-width: 640px) {
   .metricGrid.metricGrid--skewWingsTop { grid-template-columns: 1fr; }
+  .controlBarForm.controlBarForm--engine2 { grid-template-columns: 1fr; }
 }
 
 .metricGrid.metricGrid--skewWingsBottom {
@@ -284,7 +391,8 @@ body {
   padding: 14px 14px 12px;
   border-radius: var(--radius-card);
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.78);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
 }
 
 .metricCard.isMuted {
@@ -294,7 +402,7 @@ body {
 .metricLabel {
   font-size: 12px;
   font-weight: 500;
-  color: rgba(230, 232, 235, 0.55);
+  color: var(--muted);
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -321,11 +429,114 @@ body {
   font-size: 20px;
   line-height: 1.18;
   letter-spacing: 0.10px;
-  display: -webkit-box;
-  line-clamp: 3;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Snapshot-specific tightening (Engine 2) */
+#recMain {
+  font-size: 20px;
+  line-height: 1.12;
+  letter-spacing: 0.10px;
+}
+
+.snapshotLines {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
+  color: rgba(11,11,15,0.74);
+}
+
+.snapLine {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.snapKey {
+  color: rgba(11,11,15,0.48);
+  font-weight: 650;
+  letter-spacing: 0.08px;
+}
+
+.pillRow {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.pill.pill--mini {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.snapDetails {
+  margin-top: 2px;
+}
+
+.snapDetails summary {
+  list-style: none;
+  cursor: pointer;
+  color: rgba(0, 122, 255, 0.90);
+  font-weight: 650;
+  user-select: none;
+}
+
+.snapDetails summary::-webkit-details-marker { display: none; }
+
+.snapDetails summary:after {
+  content: " ▾";
+  color: rgba(0, 122, 255, 0.70);
+  font-weight: 700;
+}
+
+.snapDetails[open] summary:after { content: " ▴"; }
+
+.snapDetailBody {
+  margin-top: 8px;
+  color: rgba(11,11,15,0.70);
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.chipRow {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.62);
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(11,11,15,0.72);
+}
+
+.chip .k { color: rgba(11,11,15,0.50); font-weight: 700; }
+
+/* Macro week list formatting (Engine 2 Snapshot) */
+.macroEventList {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.macroEventLine {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .metricGrid--regime #bufferTargetCard .segmented {
@@ -354,14 +565,14 @@ body {
   gap: 6px;
   padding: 4px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  background: rgba(2, 6, 23, 0.02);
 }
 
 .segButton {
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(230,232,235,0.70);
+  color: rgba(11,11,15,0.62);
   padding: 6px 10px;
   border-radius: 10px;
   font-size: 12px;
@@ -370,9 +581,9 @@ body {
 }
 
 .segButton.isActive {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.08);
-  color: rgba(230,232,235,0.90);
+  background: rgba(255,255,255,0.80);
+  border-color: var(--border);
+  color: rgba(11,11,15,0.88);
 }
 
 .segButton:disabled {
@@ -400,7 +611,7 @@ body {
 .tradeBuilder {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--line);
 }
 
 .tradeBuilderControls {
@@ -422,7 +633,7 @@ body {
 .tbLabel {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(230,232,235,0.65);
+  color: var(--muted);
 }
 
 .tbInputs {
@@ -447,7 +658,7 @@ body {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.1px;
-  color: rgba(230,232,235,0.70);
+  color: rgba(11,11,15,0.72);
   margin-bottom: 6px;
 }
 
@@ -468,8 +679,8 @@ body {
 
 .metricCard:hover,
 .quarterCard:hover {
-  border-color: rgba(255,255,255,0.10);
-  background: rgba(255,255,255,0.03);
+  border-color: rgba(15, 23, 42, 0.16);
+  background: rgba(255,255,255,0.88);
 }
 
 .actionSummary {
@@ -483,9 +694,9 @@ body {
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.02);
-  color: rgba(230, 232, 235, 0.75);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.70);
+  color: rgba(11, 11, 15, 0.78);
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.1px;
@@ -496,7 +707,7 @@ body {
 
 .sectionDivider {
   height: 1px;
-  background: rgba(255,255,255,0.06);
+  background: var(--line);
   margin: 16px 2px 2px;
   border-radius: 999px;
 }
@@ -516,8 +727,8 @@ body {
   margin-top: 12px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.70);
 }
 
 .execNoteTitle {
@@ -561,7 +772,7 @@ body {
 .quarterCard {
   border-radius: var(--radius-card);
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.78);
   padding: 14px;
 }
 
@@ -606,6 +817,8 @@ body {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 14px;
+  background: rgba(255,255,255,0.78);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
 }
 
 .dataTable {
@@ -616,7 +829,7 @@ body {
 }
 
 th, td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--line);
   padding: 10px 12px;
   vertical-align: top;
   white-space: nowrap;
@@ -625,18 +838,20 @@ th, td {
 thead th {
   position: sticky;
   top: 0;
-  background: rgba(21, 25, 34, 0.98);
+  background: rgba(245, 245, 247, 0.92);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
   z-index: 1;
   text-align: left;
   color: var(--muted);
   font-weight: 600;
-  border-bottom: 1px solid rgba(255,255,255,0.10);
+  border-bottom: 1px solid var(--border);
 }
 
-tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+tbody tr:hover { background: var(--hover); }
 
-tr.row--breach { background: rgba(255, 69, 58, 0.08); }
-tr.row--near { background: rgba(255, 191, 0, 0.06); }
+tr.row--breach { background: rgba(255, 59, 48, 0.08); }
+tr.row--near { background: rgba(255, 159, 10, 0.08); }
 
 .ref {
   opacity: 0.75;
@@ -649,7 +864,7 @@ tr.row--near { background: rgba(255, 191, 0, 0.06); }
 
 .regimeMult {
   margin-left: 8px;
-  color: rgba(230,232,235,0.50);
+  color: var(--muted2);
   font-weight: 600;
   font-size: 12px;
 }
@@ -664,15 +879,15 @@ tr.row--near { background: rgba(255, 191, 0, 0.06); }
   margin: 0;
   border: none;
   background: transparent;
-  color: rgba(230,232,235,0.70);
+  color: var(--blue);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
 }
 
-.linkButton:hover { color: rgba(230,232,235,0.82); }
+.linkButton:hover { filter: brightness(0.95); }
 
-.spacerDot { margin: 0 8px; color: rgba(230,232,235,0.35); }
+.spacerDot { margin: 0 8px; color: rgba(11,11,15,0.30); }
 
 .breachCell {
   display: inline-flex;
@@ -685,45 +900,46 @@ tr.row--near { background: rgba(255, 191, 0, 0.06); }
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--border);
   vertical-align: middle;
 }
 
 .breachDot--bad {
-  background: rgba(255, 69, 58, 0.22);
-  border-color: rgba(255, 69, 58, 0.45);
+  background: rgba(255, 59, 48, 0.18);
+  border-color: rgba(255, 59, 48, 0.35);
 }
 
 .breachDot--good {
-  background: rgba(76, 217, 100, 0.18);
-  border-color: rgba(76, 217, 100, 0.35);
+  background: rgba(52, 199, 89, 0.16);
+  border-color: rgba(52, 199, 89, 0.32);
 }
 
 .breachLabel {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(230,232,235,0.55);
+  color: var(--muted);
 }
 
 .pill {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--border);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.1px;
+  background: rgba(255,255,255,0.55);
 }
 
-.pill.good { color: var(--green); border-color: rgba(76, 217, 100, 0.35); }
-.pill.bad { color: var(--red); border-color: rgba(255, 69, 58, 0.45); }
-.pill.warn { color: var(--amber); border-color: rgba(255, 191, 0, 0.35); }
-.pill.neutral { color: rgba(230,232,235,0.58); border-color: rgba(255,255,255,0.06); }
+.pill.good { color: var(--green); border-color: rgba(52, 199, 89, 0.30); }
+.pill.bad { color: var(--red); border-color: rgba(255, 59, 48, 0.32); }
+.pill.warn { color: var(--amber); border-color: rgba(255, 159, 10, 0.28); }
+.pill.neutral { color: rgba(11,11,15,0.55); border-color: var(--border); }
 
 .eventRiskList {
   margin: 10px 0 0;
   padding-left: 18px;
-  color: rgba(230,232,235,0.72);
+  color: rgba(11,11,15,0.74);
   font-size: 13px;
   font-weight: 550;
 }
@@ -755,7 +971,7 @@ tr.row--near { background: rgba(255, 191, 0, 0.06); }
 }
 
 .eventRiskMuted {
-  color: rgba(230,232,235,0.55);
+  color: rgba(11,11,15,0.55);
   font-weight: 500;
 }
 
@@ -764,11 +980,11 @@ tr.row--near { background: rgba(255, 191, 0, 0.06); }
   margin-top: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.60);
   font-size: 12px;
   font-weight: 650;
-  color: rgba(230,232,235,0.72);
+  color: rgba(11,11,15,0.72);
 }
 
 .delta {
@@ -778,4 +994,104 @@ tr.row--near { background: rgba(255, 191, 0, 0.06); }
 .delta.pos { color: var(--red); }
 .delta.neg { color: var(--green); }
 .delta.zero { color: var(--muted); font-weight: 600; }
+
+/* ---- Tooltips (Engine 2 + general) ---- */
+.tipWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tipBtn {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.60);
+  color: rgba(11,11,15,0.62);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.tipBtn:hover {
+  background: rgba(255,255,255,0.82);
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.tipBtn:active { transform: translateY(0.5px); }
+
+.tipBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--focus-ring), 0 1px 0 rgba(255,255,255,0.85) inset;
+}
+
+.tipPanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 76vw);
+  z-index: 1001;
+  padding: 12px 12px 11px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 40px rgba(15, 20, 30, 0.18);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  color: rgba(11,11,15,0.88);
+  display: none;
+}
+
+.tipWrap.isOpen .tipPanel,
+.tipWrap:hover .tipPanel,
+.tipWrap:focus-within .tipPanel {
+  display: block;
+}
+
+.tipPanel:before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border-left: 1px solid rgba(15, 23, 42, 0.12);
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.tipTitle {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.1px;
+  margin-bottom: 6px;
+}
+
+.tipBody {
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.35;
+  color: rgba(11,11,15,0.78);
+  white-space: normal;
+}
+
+.tipBody p {
+  margin: 8px 0 0;
+}
+
+.tipBody p:first-child { margin-top: 0; }
+
+.tipBody ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.tipBody li { margin: 6px 0; }
 

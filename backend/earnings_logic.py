@@ -9,6 +9,7 @@ from backend.benzinga_client import BenzingaClient
 from backend.config import get_flags
 from backend.earnings_calendar import benzinga_next_earnings
 from backend.event_risk_overlay import compute_event_risk_overlay_optional
+from backend.dealer_gamma_context import compute_dealer_gamma_context
 from backend.orats_client import OratsClient, OratsError
 from backend.regime_overlay import apply_event_risk_adjustment, compute_regime_backtest_view, compute_regime_overlay
 from backend.skew_overlay import compute_skew_overlay
@@ -108,6 +109,217 @@ def _to_float(v: Any) -> Optional[float]:
         return f
     except (TypeError, ValueError):
         return None
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    try:
+        x = float(v)
+    except Exception:
+        return float(lo)
+    return float(lo) if x < float(lo) else float(hi) if x > float(hi) else float(x)
+
+
+def _band_pct_from_em_pct(em_pct: Optional[float]) -> Tuple[float, List[str]]:
+    """
+    Convert an expected-move percent (e.g., 5.0 for 5%) to a band_pct (0.05),
+    and clamp to a safe range to avoid empty chains / overly wide bands.
+    """
+    warnings: List[str] = []
+    band = 0.05
+    if em_pct is not None:
+        try:
+            f = float(em_pct)
+            if f > 0:
+                band = f / 100.0
+        except Exception:
+            pass
+    clamped = _clamp(band, 0.03, 0.12)
+    if abs(clamped - band) > 1e-9:
+        warnings.append(f"Band clamped to ±{int(round(clamped * 100))}% (raw={round(band * 100, 2)}%).")
+    return float(clamped), warnings
+
+
+def _parse_live_expiration_dates(exp_rows: list[dict]) -> list[str]:
+    exp_dates: List[str] = []
+    for r in exp_rows or []:
+        if not isinstance(r, dict):
+            continue
+        d0 = str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or "")[:10]
+        if d0 and len(d0) >= 10:
+            exp_dates.append(d0)
+    # unique, sorted
+    return sorted(list(dict.fromkeys(exp_dates)))
+
+
+def _parse_live_expiration_dates_from_strikes(strike_rows: list[dict]) -> list[str]:
+    exp_dates: List[str] = []
+    for r in strike_rows or []:
+        if not isinstance(r, dict):
+            continue
+        d0 = str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or "")[:10]
+        if d0 and len(d0) >= 10:
+            exp_dates.append(d0)
+    return sorted(list(dict.fromkeys(exp_dates)))
+
+
+def _select_live_expiry(
+    exp_dates: list[str],
+    *,
+    today: dt.date,
+    target_on_or_after: Optional[dt.date] = None,
+) -> Optional[str]:
+    if not exp_dates:
+        return None
+    # Prefer: first expiry on/after target date (e.g., earnings date).
+    if target_on_or_after is not None:
+        for d0 in exp_dates:
+            try:
+                if _parse_date(d0) >= target_on_or_after:
+                    return d0
+            except Exception:
+                continue
+    # Else: 0DTE if listed, else nearest upcoming.
+    td = _fmt_date(today)
+    if td in exp_dates:
+        return td
+    for d0 in exp_dates:
+        try:
+            if _parse_date(d0) > today:
+                return d0
+        except Exception:
+            continue
+    return None
+
+
+def _compute_live_dealer_gamma_payload(
+    client: OratsClient,
+    *,
+    ticker: str,
+    today: dt.date,
+    target_date: Optional[dt.date],
+    band_pct: float,
+    top_n: int = 5,
+) -> Optional[Dict[str, Any]]:
+    """
+    Compute a live dealer-gamma proxy for a given ticker (single-name or index).
+    Current-only, informational. Returns a payload dict or None if unavailable.
+    """
+    if not (callable(getattr(client, "live_expirations", None)) and callable(getattr(client, "live_strikes_by_expiry", None))):
+        return None
+
+    warnings: List[str] = []
+    exp_rows = client.live_expirations(ticker=ticker).rows or []
+    exp_dates = _parse_live_expiration_dates([r for r in exp_rows if isinstance(r, dict)])
+    expiry = _select_live_expiry(exp_dates, today=today, target_on_or_after=target_date)
+    if not expiry:
+        return None
+
+    fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
+    chain = client.live_strikes_by_expiry(ticker=ticker, expiry=str(expiry)[:10], fields=fields).rows or []
+    chain_rows = [r for r in chain if isinstance(r, dict)]
+    if not chain_rows:
+        return None
+
+    dg = compute_dealer_gamma_context(chain_rows, expiry=str(expiry)[:10], contract_multiplier=100, band_pct=float(band_pct), top_n=int(top_n))
+    warnings.extend(dg.get("warnings") if isinstance(dg, dict) else [])
+    return {
+        "enabled": True,
+        "symbolUsed": str(ticker).upper(),
+        "expiry": str(expiry)[:10],
+        "dealerGamma": dg,
+        "warnings": warnings,
+        "notes": [
+            "Live, informational only. Dealer gamma context does not change historical earnings stats or breach probabilities.",
+        ],
+    }
+
+
+def _compute_live_dealer_gamma_payload_diag(
+    client: OratsClient,
+    *,
+    ticker: str,
+    today: dt.date,
+    target_date: Optional[dt.date],
+    band_pct: float,
+    top_n: int = 5,
+) -> Dict[str, Any]:
+    """
+    Diagnostic wrapper that always returns a JSON-safe payload, even when live data is unavailable.
+    This helps the UI explain *why* dealer gamma is missing (entitlement vs empty chain vs selection).
+    """
+    base: Dict[str, Any] = {
+        "enabled": False,
+        "symbolUsed": str(ticker).upper(),
+        "expiry": None,
+        "dealerGamma": None,
+        "warnings": [],
+        "notes": [],
+    }
+    if not (callable(getattr(client, "live_strikes_by_expiry", None)) and callable(getattr(client, "live_strikes", None))):
+        base["notes"] = ["Live ORATS client methods unavailable (live endpoints not configured)."]
+        return base
+
+    exp_dates: list[str] = []
+    try:
+        if callable(getattr(client, "live_expirations", None)):
+            exp_rows = client.live_expirations(ticker=str(ticker).upper()).rows or []
+            exp_dates = _parse_live_expiration_dates([r for r in exp_rows if isinstance(r, dict)])
+    except Exception as e:
+        # Degrade: expirations endpoint may be unavailable on some entitlements; we can infer expiries from strikes.
+        base["warnings"] = [f"Live expirations call failed: {type(e).__name__}: {e}"]
+        exp_dates = []
+
+    if not exp_dates:
+        # Fallback: infer expirations from the (potentially large) strikes payload.
+        try:
+            fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
+            all_rows = client.live_strikes(ticker=str(ticker).upper(), fields=fields).rows or []
+            all_rows = [r for r in all_rows if isinstance(r, dict)]
+            exp_dates = _parse_live_expiration_dates_from_strikes(all_rows)
+            if not exp_dates:
+                base["notes"] = ["No live strikes returned for this ticker (check symbol or ORATS Live entitlement)."]
+                return base
+        except Exception as e:
+            base["notes"] = [f"Live strikes call failed: {type(e).__name__}: {e}"]
+            return base
+
+    expiry = _select_live_expiry(exp_dates, today=today, target_on_or_after=target_date)
+    if not expiry:
+        base["notes"] = ["Could not select a live expiry (no valid upcoming expirations)."]
+        return base
+
+    base["expiry"] = str(expiry)[:10]
+    try:
+        fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
+        chain = client.live_strikes_by_expiry(ticker=str(ticker).upper(), expiry=str(expiry)[:10], fields=fields).rows or []
+    except Exception as e:
+        # Degrade: if strikes-by-expiry is flaky, reuse full strikes payload and filter by expiry.
+        try:
+            all_rows = client.live_strikes(ticker=str(ticker).upper(), fields=fields).rows or []
+            all_rows = [r for r in all_rows if isinstance(r, dict)]
+            chain = [r for r in all_rows if str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or "")[:10] == str(expiry)[:10]]
+            base.setdefault("warnings", [])
+            if isinstance(base["warnings"], list):
+                base["warnings"].append(f"Live strikes-by-expiry failed; fell back to filtering full strikes: {type(e).__name__}: {e}")
+        except Exception as e2:
+            base["notes"] = [f"Live strikes-by-expiry failed and strikes fallback failed: {type(e2).__name__}: {e2}"]
+            return base
+
+    chain_rows = [r for r in chain if isinstance(r, dict)]
+    if not chain_rows:
+        base["notes"] = [
+            f"No live strikes returned for expiry={str(expiry)[:10]}. This can indicate an entitlement gap, a temporarily empty chain, or an expiry-param mismatch.",
+        ]
+        return base
+
+    dg = compute_dealer_gamma_context(chain_rows, expiry=str(expiry)[:10], contract_multiplier=100, band_pct=float(band_pct), top_n=int(top_n))
+    base["enabled"] = True
+    base["dealerGamma"] = dg
+    base["warnings"] = (dg.get("warnings") if isinstance(dg, dict) else []) or []
+    base["notes"] = [
+        "Live, informational only. Dealer gamma context does not change historical earnings stats or breach probabilities.",
+    ]
+    return base
 
 
 def fetch_daily_bar(client: OratsClient, ticker: str, trade_date: str) -> Optional[DailyBar]:
@@ -246,7 +458,7 @@ def _current_snapshot(client: OratsClient, *, ticker: str, as_of_date: str) -> D
                 out["stockPrice"] = _round2(px)
                 out["impErnMv"] = row.get("impErnMv")
                 out["impliedMovePct"] = _round2(_imp_to_pct(row.get("impErnMv")))
-                return out
+                break
         except Exception:
             pass
 
@@ -257,9 +469,24 @@ def _current_snapshot(client: OratsClient, *, ticker: str, as_of_date: str) -> D
                 out["asOfDate"] = str(bar.tradeDate or ds)[:10]
                 out["source"] = "dailies"
                 out["stockPrice"] = _round2(bar.clsPx)
-                return out
+                break
         except Exception:
             pass
+
+    # Live overlay (current-only): if available, prefer live spot/stock price for UI/trade builder.
+    try:
+        if callable(getattr(client, "live_summaries", None)):
+            live = client.live_summaries(ticker=ticker).rows or []
+            row = _first_row(live) if live else None
+            spot = _to_float(row.get("spotPrice")) if row else None
+            px = spot if (spot is not None and spot > 0) else (_to_float(row.get("stockPrice")) if row else None)
+            if px is not None and px > 0:
+                out["stockPrice"] = _round2(px)
+                out["source"] = "live"
+                out["asOfDate"] = str(row.get("tradeDate") or out.get("asOfDate") or ds)[:10]
+                out["liveNote"] = "Live price is current-only and does not affect historical stats."
+    except Exception:
+        pass
 
     return out
 
@@ -1145,6 +1372,112 @@ def compute_breach_stats(
     }
     if event_risk is not None:
         out["eventRisk"] = event_risk
+
+    # --- Market dealer gamma context (live, informational; index-level only) ---
+    # Never affects historical earnings stats, seasonality, or regime training.
+    market_dg: Optional[Dict[str, Any]] = None
+    try:
+        if callable(getattr(client, "live_expirations", None)) and callable(getattr(client, "live_strikes_by_expiry", None)):
+            today0 = today or dt.date.today()
+            used_sym = None
+            attempt_notes: List[str] = []
+            # Try SPX first, then SPXW, then SPY as a proxy.
+            for sym in ("SPX", "SPXW", "SPY"):
+                diag = _compute_live_dealer_gamma_payload_diag(
+                    client,
+                    ticker=sym,
+                    today=today0,
+                    target_date=None,
+                    band_pct=0.05,
+                    top_n=5,
+                )
+                if diag.get("enabled"):
+                    used_sym = sym
+                    market_dg = {
+                        **diag,
+                        "symbolUsed": sym,
+                        "notes": [
+                            "Live, informational only. Index-level dealer gamma context does not change historical earnings stats or breach probabilities.",
+                        ],
+                    }
+                    break
+                # Keep the failure reason for debugging.
+                note = (diag.get("notes") or ["unavailable"])
+                attempt_notes.append(f"{sym}: {note[0] if isinstance(note, list) and note else str(note)}")
+
+            if market_dg is None:
+                market_dg = {
+                    "enabled": False,
+                    "symbolUsed": None,
+                    "expiry": None,
+                    "dealerGamma": None,
+                    "warnings": [],
+                    "notes": ["Market dealer gamma unavailable. Attempts: " + " | ".join(attempt_notes[:3])],
+                }
+    except Exception:
+        market_dg = {
+            "enabled": False,
+            "symbolUsed": None,
+            "expiry": None,
+            "dealerGamma": None,
+            "warnings": [],
+            "notes": ["Market dealer gamma failed (unexpected error)."],
+        }
+
+    # Optional warning only: negative market gamma + elevated event risk.
+    if market_dg and isinstance(market_dg.get("dealerGamma"), dict) and event_risk is not None:
+        try:
+            sign = str(market_dg["dealerGamma"].get("netGammaSign") or "")
+            score01 = event_risk.get("score01")
+            if sign == "negative" and score01 is not None and float(score01) >= float(flags.BENZINGA_EVENT_RISK_CAUTION_THRESHOLD):
+                market_dg["warning"] = "Negative market gamma + elevated macro/news event risk: tail risk may be higher for short-vol earnings structures."
+        except Exception:
+            pass
+
+    # Always return marketDealerGamma for transparency in the UI.
+    out["marketDealerGamma"] = market_dg if market_dg is not None else {"enabled": False, "notes": ["Market dealer gamma unavailable."]}
+
+    # --- Ticker dealer gamma context (live, informational; single-name) ---
+    # Uses the selected ticker's live chain, with expiry targeted to the earnings window when possible.
+    # Never affects historical earnings stats, seasonality, or regime training.
+    ticker_dg: Optional[Dict[str, Any]] = None
+    try:
+        today0 = today or dt.date.today()
+
+        # Target expiry selection to the earnings anchor date (best-effort).
+        earn_target: Optional[dt.date] = None
+        try:
+            if isinstance(event_risk, dict) and event_risk.get("earnDateNext"):
+                earn_target = _parse_date(str(event_risk.get("earnDateNext"))[:10])
+            elif next_event_date is not None:
+                earn_target = next_event_date
+        except Exception:
+            earn_target = None
+
+        # Band = ±(1.0× EM). Anchor EM to the current ORATS EOD implied move percent and clamp safely.
+        em_pct = _to_float(current.get("impliedMovePct"))
+        band_pct, band_warn = _band_pct_from_em_pct(em_pct)
+
+        tick_payload = _compute_live_dealer_gamma_payload_diag(
+            client,
+            ticker=str(t).upper(),
+            today=today0,
+            target_date=earn_target,
+            band_pct=band_pct,
+            top_n=5,
+        )
+        if earn_target is not None:
+            tick_payload["earnDateTarget"] = _fmt_date(earn_target)
+        tick_payload["bandMode"] = "±(1.0× EM) around spot (clamped)"
+        tick_payload.setdefault("warnings", [])
+        if isinstance(tick_payload["warnings"], list):
+            tick_payload["warnings"].extend(band_warn)
+        ticker_dg = tick_payload
+    except Exception:
+        ticker_dg = {"enabled": False, "symbolUsed": str(t).upper(), "notes": ["Ticker dealer gamma failed (unexpected error)."]}
+
+    # Always return tickerDealerGamma for transparency in the UI.
+    out["tickerDealerGamma"] = ticker_dg if ticker_dg is not None else {"enabled": False, "symbolUsed": str(t).upper(), "notes": ["Ticker dealer gamma unavailable."]}
 
     # Progressive enhancement: chain-based strike builder
     if trade_builder_inputs is not None:

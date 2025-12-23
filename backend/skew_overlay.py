@@ -67,6 +67,14 @@ def compute_skew_snapshot(
 
         quality = "OK" if rr25 is not None else ("PARTIAL" if (rr10 is not None or bf25 is not None) else "MISSING")
         notes = ""
+        # Transparency: ORATS EOD can lag intraday; if we had to use a prior tradeDate, say so.
+        try:
+            req = str(as_of_date)[:10]
+            used = str(pts.get("asOfDate") or "")[:10]
+            if used and used != req:
+                notes = f"Used prior ORATS EOD date {used} (requested {req})."
+        except Exception:
+            pass
         if quality != "OK":
             missing = []
             if rr25 is None:
@@ -75,7 +83,8 @@ def compute_skew_snapshot(
                 missing.append("rr10")
             if bf25 is None:
                 missing.append("bf25")
-            notes = f"Skew partial: missing {', '.join(missing)}."
+            tail = f"Skew partial: missing {', '.join(missing)}."
+            notes = f"{notes} {tail}".strip() if notes else tail
 
         out = {
             "asOfDate": str(pts.get("asOfDate") or str(as_of_date)[:10])[:10],

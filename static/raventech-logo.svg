@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" role="img" aria-label="RavenTech.ai">
+  <title>RavenTech.ai</title>
+  <defs>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0b0f" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#0b0b0f" stop-opacity="0.75"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Minimal raven mark (simple, replaceable with your exact brand asset later) -->
+  <g transform="translate(18,18)">
+    <path d="M90 24c20 7 32 23 36 44 3 15-1 32-10 45-11 15-28 23-48 23-22 0-40-9-52-26C5 95 2 79 6 64c6-23 22-38 46-44 9-2 25-1 38 4z"
+          fill="url(#glass)"/>
+    <path d="M36 62c18-10 36-15 56-15 12 0 22 2 30 6-10 3-17 8-23 14-15 16-30 25-46 30-8 2-16 3-26 2 6-5 9-10 9-16 0-10-6-17-0-21z"
+          fill="#ffffff" fill-opacity="0.90"/>
+    <circle cx="76" cy="58" r="7" fill="#0b0b0f" fill-opacity="0.95"/>
+    <circle cx="78.5" cy="56.5" r="2.2" fill="#ffffff" fill-opacity="0.95"/>
+    <path d="M115 62c14 2 23 6 28 12-8 5-18 8-30 10 2-4 3-7 3-11s-1-7-1-11z"
+          fill="#ffffff" fill-opacity="0.86"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(160,98)">
+    <text x="0" y="0"
+          font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif"
+          font-size="54"
+          font-weight="800"
+          letter-spacing="-0.6"
+          fill="#0b0b0f">RAVENTECH</text>
+    <text x="410" y="0"
+          font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif"
+          font-size="54"
+          font-weight="700"
+          letter-spacing="-0.6"
+          fill="#0b0b0f" fill-opacity="0.78">.ai</text>
+  </g>
+</svg>
+

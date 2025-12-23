@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RavenTech.ai · Engine 2 · SPX Weekly Iron Condor</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="RavenTech.ai — Engine 2 SPX weekly iron condor regime ranking and historical odds (ORATS EOD + Benzinga macro overlay)." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="RavenTech.ai" />
+          <div class="appHeaderText">
+            <div class="appTitle">RavenTech.ai</div>
+            <div class="appSubtitle">Engine 2 · SPX weekly iron condor · Regime + historical odds (ORATS EOD) · Macro overlay (Benzinga)</div>
+          </div>
+        </div>
+        <div class="tbInputs">
+          <a class="primaryButton" href="/" style="text-decoration:none;">Back to Engine 1</a>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Engine 2 Controls">
+        <form id="spxForm" class="controlBarForm controlBarForm--engine2">
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Entry day
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Entry day help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Entry day (trade entry timing)</div>
+                  <div class="tipBody">
+                    <p>Which weekday you hypothetically open the short iron condor. We use the SPX close on that day as the entry anchor.</p>
+                    <ul>
+                      <li><b>Desk view</b>: Monday entries often “wear” more macro headline risk; Tue/Wed can reduce event density but may miss early-week premium.</li>
+                      <li><b>How it’s used</b>: it controls which historical weeks are included in the backtest and which “bucket” is used for the recommendation.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <select id="entryDay" class="controlSelect">
+              <option value="mon" selected>Mon</option>
+              <option value="tue">Tue</option>
+              <option value="wed">Wed</option>
+            </select>
+          </div>
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Seasonality
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Seasonality help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Seasonality conditioning</div>
+                  <div class="tipBody">
+                    <p>Optional filter that groups weeks by common “calendar effects” (quarter/month/summer/OpEx week). This changes which historical bucket is used.</p>
+                    <ul>
+                      <li><b>How it’s used</b>: the recommendation searches within the chosen season bucket first, then may fall back if the bucket is sparse.</li>
+                      <li><b>Desk view</b>: OpEx week and summer liquidity can change realized ranges and gamma behavior.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <select id="seasonalityMode" class="controlSelect">
+              <option value="none" selected>None</option>
+              <option value="quarter">Quarter</option>
+              <option value="month">Month</option>
+              <option value="summer">Summer</option>
+              <option value="opex">OpEx week</option>
+            </select>
+          </div>
+          <button id="runBtn" class="primaryButton" type="submit">
+            <span class="btnSpinner" aria-hidden="true"></span>
+            Run
+          </button>
+        </form>
+        <div id="status" class="status">Select parameters, then click Run.</div>
+        <div class="metricCaption muted" style="margin-top:10px; text-align:center;">
+          Locked: lookback <b>2y</b> (~104 weeks) · widths <b>1.0 / 1.5 / 2.0× EM</b> · wings <b>5pt</b>
+        </div>
+      </section>
+
+      <section class="results hidden" id="results">
+        <section class="surface">
+          <div class="sectionHeader">
+              <h2 class="sectionTitle">
+                Snapshot
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="Snapshot help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">Snapshot (what to look at first)</div>
+                    <div class="tipBody">
+                      <p>This section summarizes the <b>current regime</b>, <b>macro overlay</b>, and the engine’s <b>recommended risk geometry</b> for weekly short ICs.</p>
+                      <p>Use it like a “pre-trade checklist”: if regime or macro is elevated, widen geometry or reduce size.</p>
+                    </div>
+                  </div>
+                </span>
+              </h2>
+            <div class="sectionMeta muted" id="snapshotMeta">—</div>
+          </div>
+          <div class="metricGrid metricGrid--snapshot">
+            <div class="metricCard" id="recCard">
+                <div class="metricLabel">
+                  Breach odds (like now)
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Breach odds help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Breach odds (like now)</div>
+                      <div class="tipBody">
+                        <p>For each width (1.0/1.5/2.0× EM), this shows how often the underlying finished outside the short strikes at expiry <b>in weeks that match today’s buckets</b> (regime + macro + seasonality).</p>
+                        <ul>
+                          <li><b>Like now</b>: conditioned on the current regime bucket and macro bucket (and season bucket if enabled).</li>
+                          <li><b>Desk view</b>: this answers “how often do I get run over at expiry at this distance?”</li>
+                        </ul>
+                        <p><b>Compliance note</b>: risk-only. No premium/credit, fees, slippage, or active management modeled.</p>
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              <div id="recMain" class="metricValue">—</div>
+              <div id="recNote" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard" id="regimeCard">
+                <div class="metricLabel">
+                  Regime
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Regime help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Regime score (0–100)</div>
+                      <div class="tipBody">
+                        <p>A composite “risk climate” score built from trend, realized vol, stress proxies, dispersion, and macro overlay.</p>
+                        <ul>
+                          <li><b>How to use</b>: lower scores are generally more favorable for short premium; elevated scores suggest widening or standing down.</li>
+                          <li><b>Components</b>: trend/vol/stress/event/disp each run 0–1 and blend into the 0–100 score.</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              <div id="regimeMain" class="metricValue">—</div>
+              <div id="regimeNote" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard" id="macroCard">
+                <div class="metricLabel">
+                  Macro risk
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Macro risk help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Macro risk multiplier</div>
+                      <div class="tipBody">
+                        <p>A multiplier (≥1.0×) derived from Benzinga’s economics calendar and proximity to high-impact events (CPI/FOMC/NFP, OpEx, etc.).</p>
+                        <p class="mono"><b>Range</b>: 1.00×–<span id="macroCap">—</span>×</p>
+                        <p><b>This run</b>: <span id="macroRel">—</span></p>
+                        <ul>
+                          <li><b>Desk view</b>: higher multiplier = more “headline convexity” risk in the week.</li>
+                          <li><b>How it’s used</b>: influences regime via the event component and drives the MACRO/NORMAL bucket.</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              <div id="macroMult" class="metricValue mono">—</div>
+              <div id="macroFlags" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard" id="underlyingCard">
+                <div class="metricLabel">
+                  Underlying
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Underlying help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Underlying (SPX vs proxy)</div>
+                      <div class="tipBody">
+                        <p>The engine prefers <b>SPX</b> for historical OHLC and IV. If SPX OHLC is unavailable, it falls back to <b>SPY</b> as a proxy.</p>
+                        <p><b>Compliance note</b>: proxy use can change realized ranges and should be disclosed when interpreting results.</p>
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              <div id="underlying" class="metricValue mono">—</div>
+              <div id="underlyingNote" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard" id="macroWeekCard">
+                <div class="metricLabel">
+                  Macro week (Benzinga)
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Macro week help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Macro week events</div>
+                      <div class="tipBody">
+                        <p>High-impact US macro events detected for the entry week (Mon–Fri). These are top drivers for short-vol risk.</p>
+                        <p><b>Desk view</b>: treat “High-impact count” as a schedule risk gauge. If you must trade, widen, reduce size, or avoid holding through releases.</p>
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              <div id="macroMain" class="metricValue metricValue--message">—</div>
+              <div id="macroNote" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard" id="backtestCard">
+                <div class="metricLabel">
+                  Backtest
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Backtest help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Backtest rows used</div>
+                      <div class="tipBody">
+                        <p>How many historical weeks were used after filtering for missing prices/IV.</p>
+                        <ul>
+                          <li><b>Interpretation</b>: low N means higher uncertainty. The grid uses Bayesian smoothing, but sample size still matters.</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              <div id="btMain" class="metricValue mono">—</div>
+              <div id="btNote" class="metricCaption muted">—</div>
+            </div>
+
+            <div class="metricCard" id="dealerGammaCard">
+              <div class="metricLabel">
+                Dealer Gamma (Live)
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="Dealer gamma help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">Dealer Gamma Context (Live, informational)</div>
+                    <div class="tipBody">
+                      <p>Computed from ORATS Live strike-level gamma concentration near spot (±5%). It can change intraday.</p>
+                      <ul>
+                        <li><b>Positive</b>: more pinning/mean reversion tendency.</li>
+                        <li><b>Negative</b>: more acceleration/tail risk tendency.</li>
+                        <li><b>Desk guardrail</b>: POSITIVE → OK to run “standard” wings/size if the setup is clean.</li>
+                        <li><b>Desk guardrail</b>: NEGATIVE → treat as elevated tail overlay → widen wings, cut size, or require better credit / higher EM.</li>
+                      </ul>
+                      <p><b>Important</b>: this does not change breach odds or any historical calculations.</p>
+                    </div>
+                  </div>
+                </span>
+              </div>
+              <div id="dgMain" class="metricValue">—</div>
+              <div id="dgNote" class="metricCaption muted">—</div>
+              <div id="dgTop" class="metricCaption muted">—</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Historical odds (expiry breach)
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Historical odds help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Historical odds table</div>
+                  <div class="tipBody">
+                    <p>Aggregates historical breach frequency by width (× EM), across the full selected lookback (not bucketed here).</p>
+                    <ul>
+                      <li><b>Breach (either)</b>: expiry close outside ±(width × EM).</li>
+                      <li><b>Put/Call breach</b>: direction-specific breaches.</li>
+                      <li><b>Avg |ret|</b>: average absolute underlying return for that width’s sample.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="oddsMeta">—</div>
+          </div>
+          <div class="tableWrap">
+            <table class="dataTable">
+              <thead>
+                <tr>
+                  <th>Width (× EM)</th>
+                  <th class="num">N</th>
+                  <th class="num">Breach (either)</th>
+                  <th class="num">Put breach</th>
+                  <th class="num">Call breach</th>
+                  <th class="num">Avg |ret|</th>
+                </tr>
+              </thead>
+              <tbody id="oddsBody"></tbody>
+            </table>
+          </div>
+          <div class="metricCaption muted" id="oddsFootnote">Breach is defined as expiry close outside the short strikes at distance (width × 1σ expected move). Risk-only (no credit model).</div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/spx.js"></script>
+  </body>
+</html>
+
+

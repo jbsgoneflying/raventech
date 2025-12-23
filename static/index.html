@@ -3,20 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Breach.ai · ORATS Earnings Breach Analysis</title>
-    <link rel="icon" type="image/png" href="/static/Breach-Ai.png" />
-    <link rel="apple-touch-icon" href="/static/Breach-Ai.png" />
+    <title>RavenTech.ai · Engine 1 · Earnings Breach</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="RavenTech.ai — Earnings breach analysis, regime context, and event-risk overlays (ORATS EOD + Benzinga)." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="container" role="main">
       <header class="appHeader">
         <div class="appBrand">
-          <img class="brandLogo" src="/static/Breach-Ai.png" alt="Breach.ai" />
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="RavenTech.ai" />
           <div class="appHeaderText">
-            <div class="appTitle">ORATS Earnings Breach Analysis</div>
-            <div class="appSubtitle">Implied vs realized earnings moves · Last 20 events</div>
+            <div class="appTitle">RavenTech.ai</div>
+            <div class="appSubtitle">Engine 1 · Earnings breach analysis (ORATS EOD) · Event overlay (Benzinga)</div>
           </div>
+        </div>
+        <div class="tbInputs">
+          <a id="engine2Link" class="primaryButton hidden" href="/spx" style="text-decoration:none;">Engine 2 · SPX Weekly IC</a>
         </div>
       </header>
 
@@ -137,6 +142,22 @@
               <div class="metricLabel">Tail Multiplier</div>
               <div id="tailMultiplier" class="metricValue mono">—</div>
               <div class="metricCaption">Scales wing width guidance</div>
+            </div>
+            <div class="metricCard" id="marketGammaCard">
+              <div class="metricLabel">
+                Market Dealer Gamma (SPX/SPY · Live)
+                <span class="info" title="Market backdrop only (NOT the selected ticker). Computed from ORATS Live strike-level gamma near spot on SPX/SPXW/SPY as available. Informational only — does not affect historical breach stats, probabilities, or regime training.&#10;&#10;Desk-style guardrail:&#10;Market gamma POSITIVE: OK to run “standard” wings/size if the single-name setup is clean.&#10;Market gamma NEGATIVE: Treat as elevated tail overlay → widen wings, cut size, or require better credit / higher EM.">ⓘ</span>
+              </div>
+              <div id="marketGammaMain" class="metricValue">—</div>
+              <div id="marketGammaNote" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard" id="tickerGammaCard">
+              <div class="metricLabel">
+                <span id="tickerGammaLabel">Ticker Dealer Gamma (Live)</span>
+                <span class="info" title="Single-name dealer gamma context for the selected ticker (live chain near spot). Expiry is targeted to the earnings window when possible. Band is sized to ±(1.0× EM) around spot (clamped). Informational only — does not affect historical breach stats, probabilities, or regime training.&#10;&#10;Desk-style guardrail:&#10;Market gamma POSITIVE: OK to run “standard” wings/size if the single-name setup is clean.&#10;Market gamma NEGATIVE: Treat as elevated tail overlay → widen wings, cut size, or require better credit / higher EM.">ⓘ</span>
+              </div>
+              <div id="tickerGammaMain" class="metricValue">—</div>
+              <div id="tickerGammaNote" class="metricCaption muted">—</div>
             </div>
             <div class="metricCard">
               <div class="metricLabel">Trade Gate</div>

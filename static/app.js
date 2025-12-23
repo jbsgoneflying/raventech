@@ -838,6 +838,56 @@ function render(payload) {
     else if (gate === "OK") tg.innerHTML = pill("OK", "neutral");
     else tg.textContent = "—";
   }
+  // Market dealer gamma (live, informational only)
+  const mgMain = $("marketGammaMain");
+  const mgNote = $("marketGammaNote");
+  const mg = payload?.marketDealerGamma || null;
+  if (mgMain && mgNote) {
+    const dg = mg?.dealerGamma || null;
+    const enabled = !!(mg && mg.enabled && dg && dg.netGammaSign);
+    if (!enabled) {
+      mgMain.textContent = "—";
+      const notes = Array.isArray(mg?.notes) ? mg.notes.filter(Boolean) : [];
+      const warn = Array.isArray(mg?.warnings) ? mg.warnings.filter(Boolean) : [];
+      mgNote.textContent = (notes[0] || warn[0] || "Live context unavailable (market closed, entitlement gap, or no live chain).");
+    } else {
+      const sign = String(dg.netGammaSign || "—");
+      const bucket = String(dg.magnitudeBucket || "—");
+      const exp = String(mg.expiry || "—");
+      const sym = String(mg.symbolUsed || "SPX");
+      mgMain.textContent = `${sym.toUpperCase()} · ${sign.toUpperCase()} · ${bucket.toUpperCase()}`;
+      const warn = mg.warning ? ` ${String(mg.warning)}` : "";
+      mgNote.textContent = `expiry=${exp} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}% · weighting=${String(dg.weightingMode || "—")}.${warn}`;
+    }
+  }
+
+  // Ticker dealer gamma (live, informational only)
+  const tgCard = $("tickerGammaCard");
+  const tgLabel = $("tickerGammaLabel");
+  const tgMain = $("tickerGammaMain");
+  const tgNote = $("tickerGammaNote");
+  const tgd = payload?.tickerDealerGamma || null;
+  if (tgLabel) tgLabel.textContent = `${String(payload?.ticker || "Ticker").toUpperCase()} Dealer Gamma (Live)`;
+  if (tgCard && tgMain && tgNote) {
+    const dg = tgd?.dealerGamma || null;
+    const enabled = !!(tgd && tgd.enabled && dg && dg.netGammaSign);
+    if (!enabled) {
+      tgMain.textContent = "—";
+      const notes = Array.isArray(tgd?.notes) ? tgd.notes.filter(Boolean) : [];
+      const warn = Array.isArray(tgd?.warnings) ? tgd.warnings.filter(Boolean) : [];
+      tgNote.textContent = (notes[0] || warn[0] || "Live context unavailable (market closed, entitlement gap, or no live chain).");
+    } else {
+      const sign = String(dg.netGammaSign || "—");
+      const bucket = String(dg.magnitudeBucket || "—");
+      const exp = String(tgd.expiry || "—");
+      const sym = String(tgd.symbolUsed || payload?.ticker || "—");
+      const earn = tgd.earnDateTarget ? ` · earn=${String(tgd.earnDateTarget)}` : "";
+      tgMain.textContent = `${sym.toUpperCase()} · ${sign.toUpperCase()} · ${bucket.toUpperCase()}`;
+      const warns = Array.isArray(tgd.warnings) && tgd.warnings.length ? ` · ${tgd.warnings.join(" · ")}` : "";
+      const bandMode = tgd.bandMode ? ` · ${String(tgd.bandMode)}` : "";
+      tgNote.textContent = `expiry=${exp}${earn} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}%${bandMode} · weighting=${String(dg.weightingMode || "—")}${warns}`;
+    }
+  }
   const rm = $("regimeMessage");
   if (rm) rm.textContent = rg?.guidance?.message || "—";
 
@@ -884,7 +934,9 @@ function render(payload) {
 function setStatus(text, isError = false) {
   const el = $("status");
   el.textContent = text || "";
-  el.style.color = isError ? "rgba(255, 69, 58, 0.9)" : "";
+  el.classList.toggle("isError", !!isError);
+  el.classList.toggle("isRunning", !isError && !!text && String(text).includes("…"));
+  el.classList.toggle("isOk", !isError && String(text || "").toUpperCase() === "OK");
 }
 
 function setBusy(busy) {
@@ -900,6 +952,17 @@ function setBusy(busy) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Feature-gated nav links (Engine 2).
+  (async () => {
+    try {
+      const flags = await fetchJson("/api/flags");
+      const link = $("engine2Link");
+      if (link) link.classList.toggle("hidden", !flags?.ENABLE_ENGINE2_SPX_IC);
+    } catch {
+      // If flags endpoint fails, keep the link hidden by default.
+    }
+  })();
+
   const form = $("form");
   const ticker = $("ticker");
   const kSel = $("k");

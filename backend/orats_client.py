@@ -14,6 +14,7 @@ from urllib3.util.retry import Retry
 
 
 ORATS_BASE_URL = "https://api.orats.io/datav2"
+ORATS_LIVE_BASE_URL = "https://api.orats.io/datav2/live"
 
 
 class OratsError(RuntimeError):
@@ -61,6 +62,8 @@ class OratsClient:
         timeout_s: float = 20.0,
         cache_ttl_s: int = 6 * 60 * 60,
         cache_maxsize: int = 10_000,
+        live_cache_ttl_s: int = 10,
+        live_cache_maxsize: int = 2_000,
     ) -> None:
         self._log = logging.getLogger(self.__class__.__name__)
         self._token = token
@@ -69,6 +72,9 @@ class OratsClient:
         self._session = _make_session()
         self._cache = TTLCache(maxsize=cache_maxsize, ttl=cache_ttl_s)
         self._cache_lock = threading.Lock()
+        self._live_base_url = ORATS_LIVE_BASE_URL
+        self._live_cache = TTLCache(maxsize=live_cache_maxsize, ttl=live_cache_ttl_s)
+        self._live_cache_lock = threading.Lock()
 
     @classmethod
     def from_env(cls) -> "OratsClient":
@@ -85,6 +91,14 @@ class OratsClient:
     def _cache_set(self, key: Tuple[Any, ...], value: OratsResponse) -> None:
         with self._cache_lock:
             self._cache[key] = value
+
+    def _live_cache_get(self, key: Tuple[Any, ...]) -> Optional[OratsResponse]:
+        with self._live_cache_lock:
+            return self._live_cache.get(key)
+
+    def _live_cache_set(self, key: Tuple[Any, ...], value: OratsResponse) -> None:
+        with self._live_cache_lock:
+            self._live_cache[key] = value
 
     def get(self, path: str, params: Dict[str, Any]) -> OratsResponse:
         """GET an ORATS v2 endpoint under /datav2.
@@ -153,6 +167,49 @@ class OratsClient:
 
         raise OratsError(f"Failed ORATS request after retries: {path} params={params}") from last_err
 
+    def get_live(self, path: str, params: Dict[str, Any]) -> OratsResponse:
+        """GET an ORATS live endpoint under /datav2/live with short-TTL caching."""
+        key = ("GET_LIVE", path, tuple(sorted((k, str(v)) for k, v in params.items())))
+        cached = self._live_cache_get(key)
+        if cached is not None:
+            return cached
+
+        url = f"{self._live_base_url}/{path.lstrip('/')}"
+        q = dict(params)
+        q["token"] = self._token
+
+        last_err: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                resp = self._session.get(url, params=q, timeout=self._timeout_s)
+                if resp.status_code == 429:
+                    retry_after = resp.headers.get("Retry-After")
+                    sleep_s = float(retry_after) if retry_after else min(2.0 * attempt, 6.0)
+                    self._log.warning("ORATS live 429 rate-limited; sleeping %.1fs (attempt %d/3)", sleep_s, attempt)
+                    time.sleep(sleep_s)
+                    continue
+
+                if resp.status_code in (401, 403):
+                    snippet = resp.text[:500]
+                    raise OratsError(f"ORATS auth/entitlement error {resp.status_code} for LIVE {path}: {snippet}")
+
+                if resp.status_code >= 400:
+                    snippet = resp.text[:500]
+                    raise OratsError(f"ORATS error {resp.status_code} for LIVE {path}: {snippet}")
+
+                data = resp.json()
+                rows = self._normalize_rows(data)
+                out = OratsResponse(rows=rows, raw=data)
+                self._live_cache_set(key, out)
+                return out
+            except (requests.RequestException, ValueError, OratsError) as e:
+                last_err = e
+                if isinstance(e, OratsError) and ("auth/entitlement error 401" in str(e) or "auth/entitlement error 403" in str(e)):
+                    raise
+                time.sleep(min(0.5 * (2**(attempt - 1)), 3.0))
+
+        raise OratsError(f"Failed ORATS LIVE request after retries: {path} params={params}") from last_err
+
     @staticmethod
     def _normalize_rows(data: Any) -> list[dict]:
         # ORATS sometimes returns:
@@ -215,6 +272,47 @@ class OratsClient:
             params["dte"] = dte  # format: "lo,hi"
         return self.get("/hist/monies/implied", params)
 
+    # --- Live Data API wrappers ---
+    def live_expirations(self, *, ticker: str) -> OratsResponse:
+        # Docs: GET /datav2/live/expirations?ticker=...
+        return self.get_live("/expirations", {"ticker": ticker})
+
+    def live_strikes(
+        self,
+        *,
+        ticker: str,
+        fields: str | None = None,
+    ) -> OratsResponse:
+        params: Dict[str, Any] = {"ticker": ticker}
+        if fields:
+            params["fields"] = fields
+        return self.get_live("/strikes", params)
+
+    def live_strikes_by_expiry(
+        self,
+        *,
+        ticker: str,
+        expiry: str,
+        fields: str | None = None,
+    ) -> OratsResponse:
+        # Docs: GET /datav2/live/strikes/monthly?ticker=...&expiry=YYYY-MM-DD,YYYY-MM-DD
+        exp = str(expiry).strip()
+        # ORATS docs sometimes show a comma-separated expiry range. Make this robust by
+        # expanding a single YYYY-MM-DD into "YYYY-MM-DD,YYYY-MM-DD".
+        if exp and ("," not in exp):
+            exp = f"{exp[:10]},{exp[:10]}"
+        params: Dict[str, Any] = {"ticker": ticker, "expiry": exp}
+        if fields:
+            params["fields"] = fields
+        return self.get_live("/strikes/monthly", params)
+
+    def live_summaries(self, *, ticker: str, fields: str | None = None) -> OratsResponse:
+        # Docs list a Live "Summaries" endpoint. We keep fields optional for robustness.
+        params: Dict[str, Any] = {"ticker": ticker}
+        if fields:
+            params["fields"] = fields
+        return self.get_live("/summaries", params)
+
     # --- Skew scaffolding (Phase 4) ---
     def get_skew_by_delta(
         self,
@@ -245,13 +343,30 @@ class OratsClient:
         lo = max(1, int(dte_target) - 2)
         hi = int(dte_target) + 7
         fields = "ticker,tradeDate,expirDate,dte,stockPrice,vol10,vol25,vol50,vol75,vol90"
-        resp = self.hist_monies_implied(
-            ticker=ticker,
-            trade_date=str(trade_date)[:10],
-            fields=fields,
-            dte=f"{lo},{hi}",
-        )
-        rows = resp.rows or []
+        # During market hours ORATS EOD for "today" may be unavailable. Deterministically
+        # step back a few calendar days to find the most recent surface row.
+        rows: list[dict] = []
+        used_trade_date = str(trade_date)[:10]
+        for step in range(0, 7):  # today .. 6 days back
+            td = used_trade_date
+            if step > 0:
+                try:
+                    import datetime as dt
+
+                    base = dt.date.fromisoformat(str(used_trade_date)[:10])
+                    td = (base - dt.timedelta(days=step)).isoformat()
+                except Exception:
+                    td = used_trade_date
+            resp = self.hist_monies_implied(
+                ticker=ticker,
+                trade_date=str(td)[:10],
+                fields=fields,
+                dte=f"{lo},{hi}",
+            )
+            rows = resp.rows or []
+            if rows:
+                used_trade_date = str(td)[:10]
+                break
         if not rows:
             return {}
 
@@ -286,7 +401,7 @@ class OratsClient:
         vol90 = _to_float(best.get("vol90"))
 
         out: Dict[Any, Any] = {
-            "asOfDate": str(best.get("tradeDate") or str(trade_date)[:10])[:10],
+            "asOfDate": str(best.get("tradeDate") or str(used_trade_date)[:10])[:10],
             "expirDate": str(best.get("expirDate") or "")[:10] if best.get("expirDate") else None,
             "dte": _to_float(best.get("dte")),
             "stockPrice": _to_float(best.get("stockPrice") or best.get("spotPrice")),

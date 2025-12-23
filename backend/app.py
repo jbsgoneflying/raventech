@@ -16,6 +16,7 @@ from backend.earnings_logic import BreachInputError, compute_breach_stats, compu
 from backend.config import get_flags
 from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
+from backend.spx_ic_engine import compute_engine2_spx_ic
 
 
 load_dotenv()
@@ -43,6 +44,9 @@ _bz_client: BenzingaClient | None = None
 
 _breach_cache = TTLCache(maxsize=512, ttl=6 * 60 * 60)  # 6 hours
 _breach_cache_lock = threading.Lock()
+
+_spx_ic_cache = TTLCache(maxsize=128, ttl=30 * 60)  # 30 minutes (interactive)
+_spx_ic_cache_lock = threading.Lock()
 
 
 def _get_client() -> OratsClient:
@@ -77,6 +81,11 @@ def _breach_cache_key(ticker: str, n: int, years: int, k: float, flags_fp: tuple
     fp = flags_fp if flags_fp is not None else get_flags().cache_fingerprint()
     return (ticker.strip().upper(), int(n), int(years), float(k), fp)
 
+def _spx_ic_cache_key(params: dict, flags_fp: tuple) -> tuple:
+    # stable primitives only
+    items = tuple(sorted((k, str(v)) for k, v in (params or {}).items()))
+    return ("spx_ic", items, flags_fp)
+
 
 # Static frontend
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -95,6 +104,117 @@ def index():
 @app.get("/api/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/api/flags")
+def flags():
+    f = get_flags()
+    # Keep this intentionally small (frontend feature gating + debugging).
+    return {
+        "ENABLE_BENZINGA": bool(f.ENABLE_BENZINGA),
+        "BENZINGA_ENABLE_EVENT_RISK": bool(f.BENZINGA_ENABLE_EVENT_RISK),
+        "ENABLE_ENGINE2_SPX_IC": bool(f.ENABLE_ENGINE2_SPX_IC),
+        "ENGINE2_DEFAULT_YEARS": int(f.ENGINE2_LOOKBACK_YEARS_DEFAULT),
+        "ENGINE2_DEFAULT_EM_MULTS": str(f.ENGINE2_EM_MULTS),
+        "ENGINE2_DEFAULT_WING_PTS": str(f.ENGINE2_WING_WIDTH_PTS),
+        "ENGINE2_MACRO_MULTIPLIER_CAP": float(f.ENGINE2_MACRO_MULTIPLIER_CAP),
+    }
+
+
+@app.get("/spx")
+def spx_page():
+    spx_path = STATIC_DIR / "spx.html"
+    if not spx_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/spx.html")
+    return FileResponse(str(spx_path))
+
+
+@app.get("/api/spx-ic")
+def spx_ic(
+    entry_day: str = Query("mon", description="Entry day: mon|tue|wed"),
+    years: int = Query(3, ge=1, le=5),
+    widths: str = Query("0.8,1.0,1.2", description="Comma-separated EM width multiples (e.g. 0.8,1.0,1.2)"),
+    risk_target_breach_pct: float = Query(25.0, gt=0.0, le=100.0),
+    seasonality_mode: str = Query("none", description="Seasonality conditioning: none|quarter|month|summer|opex"),
+    weeks_offset: int = Query(0, ge=0, le=5000, description="Pagination: weeks offset"),
+    weeks_limit: int = Query(120, ge=0, le=500, description="Pagination: weeks limit (0 to omit weeks)"),
+    grid_limit: int = Query(0, ge=0, le=50000, description="Optional cap on riskGrid cells (0 = all)"),
+):
+    f = get_flags()
+    if not f.ENABLE_ENGINE2_SPX_IC:
+        raise HTTPException(status_code=404, detail="Engine 2 disabled (ENABLE_ENGINE2_SPX_IC=0).")
+
+    try:
+        params = {
+            "entry_day": entry_day,
+            "years": years,
+            "widths": widths,
+            "risk_target_breach_pct": risk_target_breach_pct,
+            "seasonality_mode": seasonality_mode,
+            "weeks_offset": weeks_offset,
+            "weeks_limit": weeks_limit,
+            "grid_limit": grid_limit,
+        }
+        key = _spx_ic_cache_key(params, f.cache_key_engine2())
+        with _spx_ic_cache_lock:
+            cached = _spx_ic_cache.get(key)
+        if cached is not None:
+            return cached
+
+        ws: List[float] = []
+        for part in str(widths).split(","):
+            p = part.strip()
+            if not p:
+                continue
+            ws.append(float(p))
+        if not ws:
+            ws = [0.8, 1.0, 1.2]
+        ws = [w for w in ws if w > 0]
+        ws = sorted(list(dict.fromkeys(ws)))  # unique, stable order
+
+        payload = compute_engine2_spx_ic(
+            client=_get_client(),
+            benzinga_client=_get_benzinga_client_optional(),
+            flags=f,
+            entry_day=entry_day,
+            years=years,
+            widths=ws,
+            risk_target_breach_pct=risk_target_breach_pct,
+            seasonality_mode=seasonality_mode,
+        )
+
+        # API hardening: apply pagination/caps without changing compute determinism.
+        payload["schemaVersion"] = 2
+
+        weeks_obj = payload.get("weeks") if isinstance(payload.get("weeks"), dict) else None
+        if weeks_obj is not None:
+            all_rows = weeks_obj.get("rows") if isinstance(weeks_obj.get("rows"), list) else []
+            if weeks_limit <= 0:
+                weeks_obj["rows"] = []
+                weeks_obj["page"] = {"offset": int(weeks_offset), "limit": 0, "returned": 0, "total": int(weeks_obj.get("count") or len(all_rows))}
+            else:
+                sl = all_rows[int(weeks_offset) : int(weeks_offset) + int(weeks_limit)]
+                weeks_obj["rows"] = sl
+                weeks_obj["page"] = {"offset": int(weeks_offset), "limit": int(weeks_limit), "returned": len(sl), "total": int(weeks_obj.get("count") or len(all_rows))}
+
+        grid_obj = payload.get("riskGrid") if isinstance(payload.get("riskGrid"), dict) else None
+        if grid_obj is not None:
+            cells = grid_obj.get("cells") if isinstance(grid_obj.get("cells"), list) else []
+            if grid_limit and int(grid_limit) > 0:
+                grid_obj["cells"] = cells[: int(grid_limit)]
+                grid_obj["page"] = {"limit": int(grid_limit), "returned": len(grid_obj["cells"]), "total": len(cells)}
+            else:
+                grid_obj["page"] = {"limit": 0, "returned": len(cells), "total": len(cells)}
+
+        with _spx_ic_cache_lock:
+            _spx_ic_cache[key] = payload
+        return payload
+    except OratsError as e:
+        LOG.exception("ORATS failure (spx-ic)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (spx-ic)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
 
 
 @app.get("/api/breach")

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="RavenTech.ai">
+  <title>RavenTech.ai</title>
+  <rect x="0" y="0" width="128" height="128" rx="26" fill="#ffffff"/>
+  <path d="M72 18c17 6 27 19 30 37 2 13-1 26-8 37-9 12-22 19-39 19-18 0-33-7-42-21C6 79 4 66 7 54c5-19 18-31 37-36 8-2 20-1 28 4z"
+        fill="#0b0b0f"/>
+  <path d="M30 55c15-8 30-12 47-12 10 0 18 2 25 5-8 3-14 7-19 12-12 13-25 21-39 25-7 2-14 2-22 1 5-4 7-8 7-13 0-8-5-14 1-18z"
+        fill="#ffffff" fill-opacity="0.92"/>
+  <circle cx="64" cy="52" r="6" fill="#0b0b0f"/>
+  <circle cx="66" cy="50.5" r="2" fill="#ffffff"/>
+  <path d="M98 55c10 1 17 4 20 8-6 4-13 6-22 8 2-3 2-5 2-8 0-3 0-5 0-8z"
+        fill="#ffffff" fill-opacity="0.86"/>
+</svg>
+

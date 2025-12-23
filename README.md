@@ -12,11 +12,14 @@ Small FastAPI + plain HTML app that:
 ### Architecture
 - **Backend**: FastAPI
   - `GET /api/breach?ticker=XYZ&n=20&years=5&k=1.0`
+  - Engine 2 (SPX weekly IC, separate): `GET /api/spx-ic?...` (feature-flagged)
   - ORATS token is read from **env var `ORATS_TOKEN`** (never sent to the browser)
   - Caching:
     - ORATS raw responses cached in-memory (TTL 6h)
     - `/api/breach` responses cached in-memory (TTL 6h)
+    - `/api/spx-ic` responses cached in-memory (TTL 30m)
 - **Frontend**: `static/index.html` + minimal JS/CSS, served by FastAPI
+  - Engine 2 page: `/spx` (served from `static/spx.html`)
 
 ### Setup
 
@@ -49,12 +52,46 @@ uvicorn backend.app:app --host 0.0.0.0 --port "$PORT" --reload
 Then open:
 - `http://localhost:8000`
 
+### Engine 2: SPX Weekly Iron Condor (risk-only)
+Engine 2 is a separate “risk map” engine for weekly short SPX iron condors.
+
+It does **not** try to predict returns or optimize PnL. It answers:
+- “In this regime/macro/seasonality bucket, what IC geometry is least dangerous?”
+
+Data sources:
+- **ORATS**: EOD + daily OHLC for SPX (or SPY proxy) and sector ETFs
+- **Benzinga**: Economic Calendar proximity and event flags (CPI/FOMC/NFP/OpEx/etc)
+- **ORATS Live (optional, current-only)**: strike-level Greeks + dealer gamma context (informational only; does not change historical odds)
+
+Enable in `.env`:
+- `ENABLE_ENGINE2_SPX_IC=1`
+ 
+Optional (current-only overlays):
+- ORATS Live outputs use a short TTL cache and are **informational only**.
+- Dealer gamma is computed from live strike gamma concentration near spot (±5%), weighted by OI when available.
+
+Open:
+- `http://localhost:8000/spx`
+
+Definitions:
+- **EM (1σ)**: Expected move from ORATS ATM implied vol for the holding horizon.
+- **Breach**: Expiry close outside the short strikes (risk-only).
+- **Outside wings**: Expiry close beyond the long strikes.
+- **MAE (pts)**: Max adverse excursion using daily high/low over the holding window.
+- **Bayesian smoothing**: probabilities use a Beta(1,1) prior for sparse bins.
+
 ### API usage
 
 Example:
 
 ```bash
 curl "http://localhost:8000/api/breach?ticker=AAPL&n=20&years=5&k=1.0"
+```
+
+Engine 2 example:
+
+```bash
+curl "http://localhost:8000/api/spx-ic?entry_day=mon&years=3&seasonality_mode=quarter&risk_target_breach_pct=25&weeks_limit=120"
 ```
 
 The response matches the JSON contract in `ORATS_Earnings_EM_Breach_Spec.txt`.
