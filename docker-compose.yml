@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    env_file:
+      - .env
+    # Bind only to localhost on the droplet. Nginx on the host will proxy to this.
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+

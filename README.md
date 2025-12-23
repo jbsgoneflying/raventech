@@ -52,6 +52,106 @@ uvicorn backend.app:app --host 0.0.0.0 --port "$PORT" --reload
 Then open:
 - `http://localhost:8000`
 
+## Deployment (DigitalOcean Droplet, public URL gated by invite code)
+
+This app serves both the UI pages and the `/api/*` endpoints. For a public URL, you should **gate access** so your ORATS/Benzinga keys are not abused.
+
+### Prereqs
+
+- DigitalOcean Droplet (Ubuntu)
+- Domain DNS A-record: `app.yourdomain.com -> <droplet_ip>`
+- Private GitHub repo access from the droplet (Deploy Key recommended)
+
+### Server environment variables
+
+On the droplet (inside your repo folder), create `.env` (do not commit). Minimum:
+
+- `ORATS_TOKEN=...`
+- `BENZINGA_API_KEY=...`
+- `ENABLE_BENZINGA=1`
+- `BENZINGA_ENABLE_EVENT_RISK=1`
+- `ENABLE_ENGINE2_SPX_IC=1`
+- `INVITE_CODE=RAVEN-BETA-2026` (choose your own)
+- `AUTH_SECRET=<long random string>` (required when INVITE_CODE is set)
+- `COOKIE_SECURE=1`
+
+Generate an `AUTH_SECRET`:
+
+```bash
+python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+```
+
+### Run with Docker (recommended)
+
+Install docker on the droplet, then in the repo directory:
+
+```bash
+docker compose up -d --build
+docker compose logs -f --tail=200
+```
+
+The container binds the app to `127.0.0.1:8000` on the droplet (not public). You’ll expose it via nginx + HTTPS.
+
+### Nginx reverse proxy + HTTPS (Let’s Encrypt)
+
+Install nginx + certbot:
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+```
+
+Rate limit zone (copy template):
+
+```bash
+sudo cp deploy/nginx/rate-limit.conf /etc/nginx/conf.d/rate-limit.conf
+```
+
+Site config:
+
+```bash
+sudo cp deploy/nginx/site-app.yourdomain.com.conf /etc/nginx/sites-available/app.yourdomain.com
+sudo ln -s /etc/nginx/sites-available/app.yourdomain.com /etc/nginx/sites-enabled/app.yourdomain.com
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+IMPORTANT: edit `/etc/nginx/sites-available/app.yourdomain.com` and replace `app.yourdomain.com` with your real domain.
+
+Then obtain TLS cert:
+
+```bash
+sudo certbot --nginx -d app.yourdomain.com
+```
+
+### Firewall
+
+For production, keep only 22/80/443 open:
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80
+sudo ufw allow 443
+sudo ufw delete allow 8000/tcp || true
+sudo ufw enable
+sudo ufw status
+```
+
+### Updates
+
+```bash
+cd /opt/breach-algo
+git pull
+docker compose up -d --build
+docker compose logs -f --tail=200
+```
+
+### Troubleshooting
+
+- **502 from nginx**: check docker logs and confirm `127.0.0.1:8000` is listening.\n+- **Can’t log in**: confirm `INVITE_CODE` and `AUTH_SECRET` are set in `.env`, then restart `docker compose`.\n+- **Rate limiting too aggressive**: adjust `deploy/nginx/rate-limit.conf` and reload nginx.
+
 ### Engine 2: SPX Weekly Iron Condor (risk-only)
 Engine 2 is a separate “risk map” engine for weekly short SPX iron condors.
 

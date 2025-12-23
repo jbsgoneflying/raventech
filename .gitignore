@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtualenvs
+.venv/
+venv/
+ENV/
+
+# Env files / secrets
+.env
+.env.*
+
+# Test/cache artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# OS
+.DS_Store
+
+

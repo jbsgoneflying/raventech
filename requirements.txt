@@ -4,5 +4,7 @@ python-dotenv==1.0.1
 requests==2.32.3
 cachetools==5.5.0
 pydantic==2.10.4
+gunicorn==23.0.0
+python-multipart==0.0.20
 pytest==8.3.4
 

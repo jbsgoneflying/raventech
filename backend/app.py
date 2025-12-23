@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import logging
 import os
+import base64
+import hashlib
+import hmac
+import json
+import time
 from pathlib import Path
 import threading
 from dataclasses import replace
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request, Form
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from cachetools import TTLCache
 
@@ -34,6 +39,180 @@ _configure_logging()
 LOG = logging.getLogger("app")
 
 app = FastAPI(title="ORATS Earnings Implied Move Breach", version="1.0.0")
+
+# ---- Invite-code gate (lightweight) ----
+# Intended for private beta access so we don't expose paid ORATS/Benzinga keys to the public internet.
+AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "raven_session").strip() or "raven_session"
+AUTH_COOKIE_TTL_S = int(float(os.getenv("AUTH_COOKIE_TTL_S") or (7 * 24 * 60 * 60)))  # 7 days
+INVITE_CODE = (os.getenv("INVITE_CODE") or "").strip()
+AUTH_SECRET = (os.getenv("AUTH_SECRET") or "").strip()
+
+
+def _b64url_encode(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * ((4 - (len(s) % 4)) % 4)
+    return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
+
+
+def _sign_token(payload: dict) -> str:
+    """
+    Token format: base64url(json).base64url(hmac_sha256)
+    """
+    if not AUTH_SECRET:
+        # Hard fail in gated mode; in ungated mode we don't mint tokens anyway.
+        raise RuntimeError("Missing AUTH_SECRET (required when INVITE_CODE is set).")
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    body = _b64url_encode(raw)
+    sig = hmac.new(AUTH_SECRET.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+    return f"{body}.{_b64url_encode(sig)}"
+
+
+def _verify_token(token: str) -> bool:
+    try:
+        if not token or "." not in token:
+            return False
+        body, sig = token.split(".", 1)
+        if not AUTH_SECRET:
+            return False
+        expected = hmac.new(AUTH_SECRET.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+        got = _b64url_decode(sig)
+        if not hmac.compare_digest(expected, got):
+            return False
+        payload = json.loads(_b64url_decode(body).decode("utf-8"))
+        exp = float(payload.get("exp") or 0.0)
+        if exp <= time.time():
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _auth_enabled() -> bool:
+    # If no invite code is set, run open (dev-friendly).
+    return bool(INVITE_CODE)
+
+
+def _path_is_public(path: str) -> bool:
+    p = str(path or "")
+    if p.startswith("/static/"):
+        return True
+    if p in ("/api/health",):
+        return True
+    if p.startswith("/login") or p.startswith("/logout"):
+        return True
+    # Let’s Encrypt http-01 (if you choose to serve challenges through the app).
+    if p.startswith("/.well-known/acme-challenge/"):
+        return True
+    return False
+
+
+@app.middleware("http")
+async def invite_gate(request: Request, call_next):
+    if not _auth_enabled():
+        return await call_next(request)
+
+    # If secret is missing, refuse to start in gated mode (prevents insecure deploys).
+    if not AUTH_SECRET:
+        return HTMLResponse(
+            "<h3>Server misconfigured</h3><p>AUTH_SECRET is required when INVITE_CODE is set.</p>",
+            status_code=500,
+        )
+
+    if _path_is_public(request.url.path):
+        return await call_next(request)
+
+    token = request.cookies.get(AUTH_COOKIE_NAME) or ""
+    if _verify_token(token):
+        return await call_next(request)
+
+    # Redirect to login, preserving the original destination.
+    nxt = request.url.path
+    if request.url.query:
+        nxt = f"{nxt}?{request.url.query}"
+    return RedirectResponse(url=f"/login?next={nxt}", status_code=302)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(next: str | None = None):
+    nxt = str(next or "/")
+    # Keep the page self-contained; rely on /static assets for logo/styles.
+    return HTMLResponse(
+        f"""
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RavenTech — Access</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      body {{ display:flex; align-items:center; justify-content:center; min-height:100vh; }}
+      .loginCard {{ width:min(520px, 92vw); padding:18px; border:1px solid var(--border); border-radius:18px; background:var(--surface); box-shadow:var(--shadow); }}
+      .loginTop {{ display:flex; align-items:center; gap:12px; }}
+      .loginTop img {{ width:54px; height:54px; object-fit:contain; }}
+      .loginTitle {{ font-size:18px; font-weight:800; letter-spacing:0.1px; }}
+      .loginSub {{ margin-top:2px; color:var(--muted); font-size:13px; }}
+      .loginForm {{ margin-top:14px; display:grid; gap:10px; }}
+      .loginForm input {{ padding:12px 12px; border-radius:12px; border:1px solid var(--border); font-size:14px; }}
+      .loginForm button {{ justify-self:start; }}
+      .loginFoot {{ margin-top:10px; color:var(--muted); font-size:12px; }}
+    </style>
+  </head>
+  <body>
+    <div class="loginCard">
+      <div class="loginTop">
+        <img src="/static/RavenONLY.png" alt="RavenTech" />
+        <div>
+          <div class="loginTitle">RavenTech — Private Beta</div>
+          <div class="loginSub">Enter your invite code to continue.</div>
+        </div>
+      </div>
+      <form class="loginForm" method="post" action="/login">
+        <input type="hidden" name="next" value="{nxt}" />
+        <input type="password" name="code" placeholder="Invite code" autocomplete="current-password" required />
+        <button class="btn" type="submit">Continue</button>
+      </form>
+      <div class="loginFoot">This app uses paid market-data APIs. Access is limited.</div>
+    </div>
+  </body>
+</html>
+        """.strip(),
+        status_code=200,
+    )
+
+
+@app.post("/login")
+def login_submit(code: str = Form(...), next: str = Form("/")):
+    if not _auth_enabled():
+        return RedirectResponse(url=str(next or "/"), status_code=302)
+    if str(code or "").strip() != INVITE_CODE:
+        return RedirectResponse(url="/login?error=1", status_code=302)
+
+    now = time.time()
+    token = _sign_token({"v": 1, "exp": now + float(AUTH_COOKIE_TTL_S)})
+    resp = RedirectResponse(url=str(next or "/"), status_code=302)
+    # Secure cookie when behind HTTPS; allow local testing if needed.
+    secure = str(os.getenv("COOKIE_SECURE") or "").strip().lower() in ("1", "true", "yes", "y", "on")
+    resp.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        max_age=int(AUTH_COOKIE_TTL_S),
+        httponly=True,
+        secure=bool(secure),
+        samesite="lax",
+        path="/",
+    )
+    return resp
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse(url="/login", status_code=302)
+    resp.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return resp
 
 # Keep a singleton ORATS client + a response cache for /api/breach.
 _client_lock = threading.Lock()
