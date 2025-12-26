@@ -1117,6 +1117,54 @@ def fallback_briefing(*, question: str, context_pack: Dict[str, Any]) -> str:
             lines.append(f"- Gamma peak (top): strike={g0.get('strike')} · gamma={_fmt_num(g0.get('gamma'), 6)}")
         lines.append("")
 
+        # If the user is asking for an iron condor / strike selection, propose a best-effort structure.
+        ql = str(question or "").lower()
+        if ("iron condor" in ql) or ("condor" in ql) or ("sell" in ql and "weekly" in ql):
+            try:
+                spot = _to_float(chain_pf.get("spot")) or _to_float(context_pack.get("tradeBrief", {}).get("spot") if isinstance(context_pack.get("tradeBrief"), dict) else None)
+            except Exception:
+                spot = None
+            try:
+                p_wall = None
+                c_wall = None
+                if isinstance(top.get("putOI"), list) and top.get("putOI"):
+                    p_wall = _to_float(top.get("putOI")[0].get("strike"))
+                if isinstance(top.get("callOI"), list) and top.get("callOI"):
+                    c_wall = _to_float(top.get("callOI")[0].get("strike"))
+            except Exception:
+                p_wall, c_wall = None, None
+
+            wing = 5  # default wing width (points) if user doesn't specify
+            # Heuristic: place short put meaningfully below put wall; place short call meaningfully above call wall.
+            # This is intentionally conservative for holiday tape where upside squeezes can be fast.
+            put_short = (p_wall - 50) if (p_wall is not None) else None
+            call_short = (c_wall + 75) if (c_wall is not None) else None
+            if spot is not None and math.isfinite(float(spot)):
+                # ensure reasonable minimum distances if walls are too close
+                if put_short is None:
+                    put_short = float(spot) * 0.985  # ~-1.5%
+                if call_short is None:
+                    call_short = float(spot) * 1.020  # ~+2.0%
+            # Round to nearest 5 for SPX-ish strikes
+            def _round5(x: Optional[float]) -> Optional[int]:
+                if x is None:
+                    return None
+                return int(round(float(x) / 5.0) * 5)
+            ps = _round5(put_short)
+            cs = _round5(call_short)
+            if ps is not None and cs is not None and ps > 0 and cs > 0:
+                pl = ps - wing
+                cl = cs + wing
+                lines.append("## Proposed iron condor (best-effort, chain-rooted)")
+                lines.append(f"- Expiry: {chain_pf.get('expiry')}")
+                lines.append(f"- Put wing: sell {ps}P / buy {pl}P  (wing={wing} pts)")
+                lines.append(f"- Call wing: sell {cs}C / buy {cl}C (wing={wing} pts)")
+                if spot is not None and math.isfinite(float(spot)) and float(spot) > 0:
+                    lines.append(f"- Distances from spot {float(spot):.2f}: putShort={float(ps)-float(spot):.1f} pts ({(float(ps)/float(spot)-1.0)*100.0:.2f}%), callShort={float(cs)-float(spot):.1f} pts ({(float(cs)/float(spot)-1.0)*100.0:.2f}%)")
+                lines.append("- Rationale: put OI wall provides structural support; call OI wall overhead is a common magnet—holiday/low-liquidity squeezes argue for extra call-side room.")
+                lines.append("- Before entry: confirm Monday AM spot, IV, and whether dealer gamma remains positive/medium; if gamma flips negative, widen both sides.")
+                lines.append("")
+
     lines.append("## What can gap the open (framework)")
     lines.append("- Macro prints (CPI/FOMC/NFP minutes/claims, etc.), surprise policy headlines, geopolitical shocks, and big single-name earnings warnings are the classic gap drivers.")
     lines.append("- In holiday/low-liquidity tape, *smaller* catalysts can move price more than usual; treat gamma + liquidity as multipliers, not predictors.")
