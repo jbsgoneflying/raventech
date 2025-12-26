@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -48,6 +49,148 @@ def _content_to_text(content: Any) -> str:
     if isinstance(t, str):
         return t
     return ""
+
+
+def _fmt_pct(x: Any) -> str:
+    try:
+        if x is None:
+            return "—"
+        v = float(x)
+        if not math.isfinite(v):
+            return "—"
+        return f"{v:.2f}%"
+    except Exception:
+        return "—"
+
+
+def _fmt_num(x: Any, d: int = 2) -> str:
+    try:
+        if x is None:
+            return "—"
+        v = float(x)
+        if not math.isfinite(v):
+            return "—"
+        return f"{v:.{int(d)}f}"
+    except Exception:
+        return "—"
+
+
+def fallback_briefing(*, question: str, context_pack: Dict[str, Any]) -> str:
+    """
+    Deterministic, always-available response when the model returns empty/tool-only output.
+    Uses Engine context + optional Benzinga news snapshot (if present).
+    """
+    eng = str(context_pack.get("engine") or "").strip() or "engine?"
+    q = str(question or "").strip()
+
+    lines: List[str] = []
+    lines.append("Here’s a context-grounded briefing using RavenTech + any attached Benzinga headlines. (No web browsing beyond what’s provided.)")
+    lines.append("")
+
+    # --- Engine 2 (SPX) ---
+    if eng == "engine2":
+        cur = context_pack.get("current") if isinstance(context_pack.get("current"), dict) else {}
+        reg = (cur.get("regime") if isinstance(cur.get("regime"), dict) else {}) if isinstance(cur, dict) else {}
+        macro = (cur.get("macro") if isinstance(cur.get("macro"), dict) else {}) if isinstance(cur, dict) else {}
+        live = context_pack.get("liveContext") if isinstance(context_pack.get("liveContext"), dict) else {}
+        dg = live.get("dealerGamma") if isinstance(live.get("dealerGamma"), dict) else {}
+        like = context_pack.get("oddsLikeNow") if isinstance(context_pack.get("oddsLikeNow"), dict) else {}
+
+        score = reg.get("score100")
+        bucket = reg.get("bucket")
+        macro_mult = macro.get("multiplier")
+        macro_hi = (macro.get("highImpactUS") if isinstance(macro.get("highImpactUS"), dict) else {}) if isinstance(macro, dict) else {}
+        hi_top = macro_hi.get("top") if isinstance(macro_hi.get("top"), list) else []
+
+        net_g = dg.get("netGammaSign")
+        mag = dg.get("magnitudeBucket")
+        spot = dg.get("spot")
+
+        lines.append("## Snapshot")
+        lines.append(f"- Regime: {_fmt_num(score, 1)} / 100 · {bucket or '—'}")
+        lines.append(f"- Macro multiplier: {_fmt_num(macro_mult, 2)}×")
+        if net_g or mag:
+            lines.append(f"- Dealer gamma (live): {(str(net_g).upper() if net_g else '—')} · {(str(mag).upper() if mag else '—')} · spot={_fmt_num(spot, 2)}")
+        lines.append("")
+
+        lines.append("## Odds (like now)")
+        byw = like.get("byWidth") if isinstance(like.get("byWidth"), list) else []
+        if byw:
+            for r in byw[:6]:
+                if not isinstance(r, dict):
+                    continue
+                w = r.get("w")
+                n = r.get("n")
+                be = r.get("breachEitherPct")
+                bp = r.get("breachPutPct")
+                bc = r.get("breachCallPct")
+                lines.append(f"- { _fmt_num(w,2) }× EM: breachEither={_fmt_pct(be)} (put={_fmt_pct(bp)} · call={_fmt_pct(bc)}) · n={n if n is not None else '—'}")
+        else:
+            lines.append("- No oddsLikeNow.byWidth available in context.")
+        lines.append("")
+
+        if hi_top:
+            lines.append("## Scheduled macro that can gap / move the open (from your Benzinga macro calendar)")
+            for x in hi_top[:8]:
+                lines.append(f"- {str(x)}")
+            lines.append("")
+
+        # Strike / spread quick math (best-effort)
+        try:
+            # Prefer spot from dealer gamma, else technicals livePrice.
+            px = None
+            if spot is not None:
+                px = float(spot)
+            tech = context_pack.get("technicals") if isinstance(context_pack.get("technicals"), dict) else {}
+            if px is None and tech and tech.get("livePrice") is not None:
+                px = float(tech.get("livePrice"))
+            if px is not None and math.isfinite(px):
+                # parse strikes from question (very simple heuristic)
+                import re
+
+                nums = [int(n) for n in re.findall(r"\b(\d{4,5})\b", q)]
+                nums = sorted(list(dict.fromkeys(nums)))
+                # If user provided 6950/6955 style, these will show.
+                if nums:
+                    lines.append("## Your strikes (best-effort from your prompt)")
+                    for s in nums[:4]:
+                        diff = float(s) - float(px)
+                        side = "above" if diff > 0 else "below"
+                        lines.append(f"- Strike {s}: {abs(diff):.1f} pts {side} spot ({_fmt_num(px,2)})")
+                    lines.append("")
+        except Exception:
+            pass
+
+    # --- News snapshot if present ---
+    news = context_pack.get("news") if isinstance(context_pack.get("news"), dict) else None
+    if news and news.get("enabled") and isinstance(news.get("items"), list):
+        items = [x for x in (news.get("items") or []) if isinstance(x, dict)]
+        if items:
+            lines.append("## Benzinga headlines snapshot (best-effort)")
+            for it in items[:10]:
+                title = str(it.get("title") or "").strip()
+                if not title:
+                    continue
+                src = str(it.get("source") or "").strip()
+                when = str(it.get("updated") or it.get("created") or "").strip()
+                bit = title
+                if src:
+                    bit += f" ({src})"
+                if when:
+                    bit += f" · {when}"
+                lines.append(f"- {bit}")
+            lines.append("")
+
+    lines.append("## What can gap the open (framework)")
+    lines.append("- Macro prints (CPI/FOMC/NFP minutes/claims, etc.), surprise policy headlines, geopolitical shocks, and big single-name earnings warnings are the classic gap drivers.")
+    lines.append("- In holiday/low-liquidity tape, *smaller* catalysts can move price more than usual; treat gamma + liquidity as multipliers, not predictors.")
+    lines.append("")
+    lines.append("## What would change my view (quick questions)")
+    lines.append("- What’s the **current spot** and your **exact expiration time** (0DTE vs next session)?")
+    lines.append("- What credit did you take for the 6950/6955c spread, and what’s your stop/adjust plan?")
+    lines.append("- Are you holding through any of the listed macro events, or can you flatten before them?")
+
+    return "\n".join(lines).strip()
 
 
 def build_context_pack(*, engine: str, report: Dict[str, Any]) -> Dict[str, Any]:
@@ -259,10 +402,7 @@ def call_openai(
         tool_calls = getattr(msg_obj, "tool_calls", None)
         fn_call = getattr(msg_obj, "function_call", None)
         if tool_calls or fn_call:
-            return (
-                "I didn’t get a text answer back from the model (it attempted a tool/browse-style response). "
-                "This AskRaven instance can use RavenTech context plus any provided Benzinga news snapshot, but it does not have web browsing."
-            )
+            return fallback_briefing(question=question, context_pack=context_pack)
 
         # Retry once with an explicit non-empty response constraint.
         try:
@@ -275,9 +415,7 @@ def call_openai(
             pass
 
         return (
-            "I didn’t receive any text back from the model for that request. "
-            "This can happen when the model responds with structured content but no text, or attempts tool-style outputs. "
-            "Try re-sending; if it persists, we can force a different response format for this model."
+            fallback_briefing(question=question, context_pack=context_pack)
         )
     except Exception:
         try:
