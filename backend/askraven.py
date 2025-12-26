@@ -58,6 +58,78 @@ def _content_to_text(content: Any) -> str:
     return ""
 
 
+def _split_answer_and_memory(text: str) -> tuple[str, str]:
+    """
+    Parse a dual-block response:
+      ANSWER:
+      ...
+
+      MEMORY:
+      ...
+    If missing, return (text, "").
+    """
+    t = str(text or "")
+    if not t.strip():
+        return "", ""
+    up = t.upper()
+    a_idx = up.find("ANSWER:")
+    m_idx = up.find("MEMORY:")
+    if m_idx == -1:
+        if a_idx != -1:
+            return t[a_idx + len("ANSWER:") :].strip(), ""
+        return t.strip(), ""
+    if a_idx == -1 or a_idx > m_idx:
+        ans = t[:m_idx].strip()
+    else:
+        ans = t[a_idx + len("ANSWER:") : m_idx].strip()
+    mem = t[m_idx + len("MEMORY:") :].strip()
+    return ans.strip(), mem.strip()
+
+
+def _fallback_memory_update(*, prior: str, question: str, context_pack: dict) -> str:
+    """
+    Best-effort session summary when the model doesn't provide one.
+    Keep it short (bullet list), session-only.
+    """
+    tb = context_pack.get("tradeBrief") if isinstance(context_pack.get("tradeBrief"), dict) else {}
+    strikes = []
+    try:
+        parsed = tb.get("parsedTrade") if isinstance(tb.get("parsedTrade"), dict) else {}
+        strikes = parsed.get("strikes") if isinstance(parsed.get("strikes"), list) else []
+    except Exception:
+        strikes = []
+    expiry = ""
+    pf = context_pack.get("oratsChainPrefetch") if isinstance(context_pack.get("oratsChainPrefetch"), dict) else {}
+    if pf and pf.get("expiry"):
+        expiry = str(pf.get("expiry"))
+    spot = tb.get("spot") if isinstance(tb, dict) else None
+
+    lines: List[str] = []
+    if str(prior or "").strip():
+        pl = [x.strip() for x in str(prior).splitlines() if x.strip()]
+        lines.extend(pl[:10])
+    lines.append(f"- Latest question: {_truncate(question, 220)}")
+    if expiry:
+        lines.append(f"- Focus expiry: {expiry}")
+    if strikes:
+        ss = ", ".join(str(int(x)) for x in strikes[:6] if x is not None)
+        if ss:
+            lines.append(f"- Mentioned strikes: {ss}")
+    if spot is not None:
+        try:
+            lines.append(f"- Spot (best-effort): {float(spot):.2f}")
+        except Exception:
+            pass
+    out: List[str] = []
+    seen = set()
+    for x in lines:
+        if x in seen:
+            continue
+        seen.add(x)
+        out.append(x)
+    return "\n".join(out[:12]).strip()
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     v = str(os.getenv(name) or "").strip().lower()
     if not v:
@@ -542,7 +614,8 @@ def askraven_agent_chat(
     images: List[UploadedImage],
     orats_client: Optional[OratsClient] = None,
     benzinga_client: Optional[BenzingaClient] = None,
-) -> str:
+    prior_summary: str = "",
+) -> Dict[str, str]:
     """
     ChatGPT-style agent loop: model can request tools (ORATS/Benzinga/Web) as needed,
     and we iterate until we get a final answer or budgets are hit.
@@ -691,7 +764,19 @@ def askraven_agent_chat(
         # built-in tool (executed by OpenAI). Some SDKs use web_search_preview.
         tools.append({"type": "web_search"})
 
-    sys_txt = ASKRAVEN_SYSTEM_PROMPT + "\n\nIMPORTANT: You may use tools if needed. When citing web/news, include URLs. Return a non-empty plain-text answer."
+    sys_txt = (
+        ASKRAVEN_SYSTEM_PROMPT
+        + "\n\nSession memory (session-only; may be empty):\n"
+        + (str(prior_summary or "").strip() or "(none)")
+        + "\n\nOutput format (required):\nANSWER:\n<your answer>\n\nMEMORY:\n- 5–10 bullets capturing the ongoing state (trade focus, expiries, strikes, preferences, rules)."
+        + "\n\nIMPORTANT: You may use tools if needed. When citing web/news, include URLs. Return a non-empty plain-text answer."
+    )
+
+    def _wrap(txt: str) -> Dict[str, str]:
+        a, m = _split_answer_and_memory(str(txt or "").strip())
+        if not m:
+            m = _fallback_memory_update(prior=str(prior_summary or ""), question=question, context_pack=ctx)
+        return {"answer": (a or str(txt or "").strip()), "summary": str(m or "").strip()}
 
     # If this SDK doesn't support Responses API, run a tool-using loop via Chat Completions instead.
     if not hasattr(client, "responses"):
@@ -729,17 +814,17 @@ def askraven_agent_chat(
 
         for step in range(int(budget["max_steps"])):
             if budget_exhausted():
-                return "AskRaven budget exhausted (time/tool limit). Try a narrower question or increase ASK_RAVEN_BUDGET."
+                return _wrap("AskRaven budget exhausted (time/tool limit). Try a narrower question or increase ASK_RAVEN_BUDGET.")
             resp = _chat_create(model=model, messages=messages, tools=chat_tools)
             msg = resp.choices[0].message
             txt = _content_to_text(getattr(msg, "content", None)).strip()
             tool_calls = getattr(msg, "tool_calls", None)
             if txt and not tool_calls:
-                return txt
+                return _wrap(txt)
             if tool_calls:
                 for tc in tool_calls:
                     if budget_exhausted():
-                        return "AskRaven budget exhausted while fetching context. Try narrowing the request."
+                        return _wrap("AskRaven budget exhausted while fetching context. Try narrowing the request.")
                     try:
                         tc_id = str(getattr(tc, "id", "") or "")
                         fn = getattr(tc, "function", None)
@@ -758,16 +843,16 @@ def askraven_agent_chat(
                     messages.append({"role": "tool", "tool_call_id": tc_id or f"tc_{step}_{name}", "content": _json_dumps_safe(result, int(budget["max_bytes_per_tool"]))})
                 continue
             # neither text nor tool calls => safe fallback
-            return call_openai(question=question, context_pack=ctx, images=images)
+            return _wrap(call_openai(question=question, context_pack=ctx, images=images))
 
-        return call_openai(question=question, context_pack=ctx, images=images)
+        return _wrap(call_openai(question=question, context_pack=ctx, images=images))
 
     prev_id = None
     pending_tool_results: List[dict] = []
 
     for step in range(int(budget["max_steps"])):
         if budget_exhausted():
-            return "AskRaven budget exhausted (time/tool limit). Try a narrower question or increase ASK_RAVEN_BUDGET."
+            return _wrap("AskRaven budget exhausted (time/tool limit). Try a narrower question or increase ASK_RAVEN_BUDGET.")
 
         def _responses_create_with_tools(use_tools: List[dict]) -> Any:
             kwargs: Dict[str, Any] = {"model": model, "max_output_tokens": max_out, "tools": use_tools}
@@ -797,27 +882,27 @@ def askraven_agent_chat(
                     resp = _responses_create_with_tools(tools2)
                 except Exception as e2:
                     LOG.warning("AskRaven agent: responses.create failed (tools): %s", e2)
-                    return call_openai(question=question, context_pack=ctx, images=images)
+                    return _wrap(call_openai(question=question, context_pack=ctx, images=images))
             LOG.warning("AskRaven agent: responses.create failed: %s", e)
             # If Responses API is unavailable, fall back to the existing single-shot call.
-            return call_openai(question=question, context_pack=ctx, images=images)
+            return _wrap(call_openai(question=question, context_pack=ctx, images=images))
 
         prev_id = getattr(resp, "id", None) or getattr(resp, "response_id", None)
         out_txt = getattr(resp, "output_text", None)
         if isinstance(out_txt, str) and out_txt.strip():
-            return out_txt.strip()
+            return _wrap(out_txt.strip())
 
         # Execute function tools requested by the model (web_search runs inside OpenAI).
         tool_calls = _extract_tool_calls_from_response(resp)
         func_calls = [c for c in tool_calls if isinstance(c, dict) and str(c.get("name") or "").strip()]
         if not func_calls:
             # If no tool calls and no output text, degrade safely.
-            return call_openai(question=question, context_pack=ctx, images=images)
+            return _wrap(call_openai(question=question, context_pack=ctx, images=images))
 
         pending_tool_results = []
         for c in func_calls:
             if budget_exhausted():
-                return "AskRaven budget exhausted while fetching context. Try narrowing the request."
+                return _wrap("AskRaven budget exhausted while fetching context. Try narrowing the request.")
             name = str(c.get("name") or "")
             args = c.get("arguments") if isinstance(c.get("arguments"), dict) else {}
             call_id = str(c.get("id") or "") or f"call_{step}_{name}"
@@ -830,7 +915,7 @@ def askraven_agent_chat(
                 }
             )
 
-    return call_openai(question=question, context_pack=ctx, images=images)
+    return _wrap(call_openai(question=question, context_pack=ctx, images=images))
 
 def _parse_trade_from_prompt(question: str) -> Dict[str, Any]:
     """

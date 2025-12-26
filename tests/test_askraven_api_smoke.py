@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
 
 import backend.app as app_mod
+import hashlib
+
+
 class FakeStore:
     def __init__(self):
         self._m = {}
@@ -37,6 +40,48 @@ def test_chat_message_uses_latest_report_and_mocked_llm(monkeypatch):
     body = r.json()
     assert body["ok"] is True
     assert body["reply"] == "mocked reply"
+
+
+def test_chat_message_persists_and_reuses_session_summary(monkeypatch):
+    store = FakeStore()
+    store.set_json(
+        "latest_report:engine2",
+        {
+            "asOfDate": "2025-12-26",
+            "params": {"entryDay": "mon"},
+            "underlying": {"symbol": "SPX", "isProxy": False},
+            "oddsLikeNow": {"regimeBucket": "MODERATE", "macroBucket": "NORMAL", "seasonBucket": "ALL", "weeksUsed": 10, "byWidth": []},
+            "technicals": {"enabled": True, "ema": {"ema21": 5000.0}, "livePrice": 5050.0},
+        },
+    )
+    monkeypatch.setattr(app_mod, "_store", store, raising=False)
+
+    seen = {"priors": []}
+
+    def _fake_agent(**kw):
+        seen["priors"].append(kw.get("prior_summary") or "")
+        return {"answer": "ok", "summary": "SESSION_SUMMARY_V1"}
+
+    monkeypatch.setattr(app_mod, "askraven_agent_chat", _fake_agent, raising=False)
+
+    client = TestClient(app_mod.app)
+    cookie_val = "test_cookie_value"
+    client.cookies.set(app_mod.AUTH_COOKIE_NAME, cookie_val)
+
+    r1 = client.post("/api/chat/message", json={"engine": "engine2", "message": "first", "image_ids": []})
+    assert r1.status_code == 200
+    assert r1.json()["reply"] == "ok"
+
+    h = hashlib.sha256(cookie_val.encode("utf-8")).hexdigest()[:16]
+    key = f"askraven:session:{h}"
+    saved = store.get_json(key)
+    assert isinstance(saved, dict) and saved.get("summary") == "SESSION_SUMMARY_V1"
+
+    r2 = client.post("/api/chat/message", json={"engine": "engine2", "message": "second", "image_ids": []})
+    assert r2.status_code == 200
+    assert r2.json()["reply"] == "ok"
+    assert seen["priors"][0] == ""
+    assert seen["priors"][1] == "SESSION_SUMMARY_V1"
 
 
 def test_chat_upload_rejects_non_image(monkeypatch):

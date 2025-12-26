@@ -74,7 +74,8 @@ def test_agent_loop_executes_function_tool_and_returns_final_text(monkeypatch):
         orats_client=_FakeOrats(),
         benzinga_client=None,
     )
-    assert out == "final answer"
+    assert out["answer"] == "final answer"
+    assert isinstance(out.get("summary"), str)
 
 
 def test_agent_loop_chat_completions_fallback_when_no_responses(monkeypatch):
@@ -131,7 +132,7 @@ def test_agent_loop_chat_completions_fallback_when_no_responses(monkeypatch):
         orats_client=_FakeOrats(),
         benzinga_client=None,
     )
-    assert out == "final answer"
+    assert out["answer"] == "final answer"
 
 
 def test_agent_loop_budget_exhaustion(monkeypatch):
@@ -158,6 +159,6 @@ def test_agent_loop_budget_exhaustion(monkeypatch):
         orats_client=_FakeOrats(),
         benzinga_client=None,
     )
-    assert "budget exhausted" in out.lower()
+    assert "budget exhausted" in str(out.get("answer") or "").lower()
 
 

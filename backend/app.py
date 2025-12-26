@@ -291,6 +291,35 @@ class ChatMessageRequest(BaseModel):
     message: str = Field(..., description="User question")
     image_ids: list[str] = Field(default_factory=list)
 
+
+def _askraven_session_key(request: Request) -> str:
+    """
+    Session-only AskRaven memory key.
+    Hash the auth cookie so we never store the raw token in Redis.
+    If there is no cookie (ungated local mode), fall back to a stable single-user key.
+    """
+    raw = request.cookies.get(AUTH_COOKIE_NAME) or "single_user"
+    h = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"askraven:session:{h}"
+
+
+def _get_askraven_summary(request: Request) -> str:
+    if _store is None:
+        return ""
+    v = _store.get_json(_askraven_session_key(request))
+    if isinstance(v, dict) and isinstance(v.get("summary"), str):
+        return str(v.get("summary") or "")
+    return ""
+
+
+def _set_askraven_summary(request: Request, summary: str) -> None:
+    if _store is None:
+        return
+    s = str(summary or "").strip()
+    if not s:
+        return
+    _store.set_json(_askraven_session_key(request), {"summary": s}, ttl_s=6 * 60 * 60)
+
 def _truncate(s: str, n: int) -> str:
     t = str(s or "").replace("\n", " ").strip()
     return (t[:n] + "…") if len(t) > n else t
@@ -417,7 +446,7 @@ async def chat_upload(files: list[UploadFile] = File(...)):
 
 
 @app.post("/api/chat/message")
-async def chat_message(req: ChatMessageRequest):
+async def chat_message(req: ChatMessageRequest, request: Request):
     if _store is None:
         raise HTTPException(status_code=500, detail="Redis not configured (REDIS_URL).")
     engine = str(req.engine or "").strip().lower()
@@ -455,13 +484,22 @@ async def chat_message(req: ChatMessageRequest):
 
     ctx = build_context_pack(engine=engine, report=report)
     try:
-        reply = askraven_agent_chat(
+        prior = _get_askraven_summary(request)
+        out = askraven_agent_chat(
             question=msg,
             context_pack=ctx,
             images=images,
             orats_client=_get_client_optional(),
             benzinga_client=_get_benzinga_client_optional(),
+            prior_summary=prior,
         )
+        if isinstance(out, dict):
+            reply = str(out.get("answer") or "").strip()
+            summary = str(out.get("summary") or "").strip()
+            if summary:
+                _set_askraven_summary(request, summary)
+        else:
+            reply = str(out or "").strip()
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
