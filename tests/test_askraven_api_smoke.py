@@ -60,6 +60,7 @@ def test_chat_message_persists_and_reuses_session_summary(monkeypatch):
 
     def _fake_agent(**kw):
         seen["priors"].append(kw.get("prior_summary") or "")
+        assert isinstance(kw.get("prior_history"), list)
         return {"answer": "ok", "summary": "SESSION_SUMMARY_V1"}
 
     monkeypatch.setattr(app_mod, "askraven_agent_chat", _fake_agent, raising=False)
@@ -76,6 +77,7 @@ def test_chat_message_persists_and_reuses_session_summary(monkeypatch):
     key = f"askraven:session:{h}"
     saved = store.get_json(key)
     assert isinstance(saved, dict) and saved.get("summary") == "SESSION_SUMMARY_V1"
+    assert isinstance(saved.get("history"), list) and len(saved.get("history")) == 2
 
     r2 = client.post("/api/chat/message", json={"engine": "engine2", "message": "second", "image_ids": []})
     assert r2.status_code == 200

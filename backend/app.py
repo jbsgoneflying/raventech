@@ -320,6 +320,47 @@ def _set_askraven_summary(request: Request, summary: str) -> None:
         return
     _store.set_json(_askraven_session_key(request), {"summary": s}, ttl_s=6 * 60 * 60)
 
+
+def _get_askraven_state(request: Request) -> dict:
+    """
+    Returns {"summary": str, "history": [{"role":"user|assistant","content":str}, ...]}
+    """
+    if _store is None:
+        return {"summary": "", "history": []}
+    v = _store.get_json(_askraven_session_key(request))
+    if not isinstance(v, dict):
+        return {"summary": "", "history": []}
+    summary = str(v.get("summary") or "")
+    hist = v.get("history")
+    if not isinstance(hist, list):
+        hist = []
+    # sanitize
+    out_hist = []
+    for m in hist:
+        if not isinstance(m, dict):
+            continue
+        role = str(m.get("role") or "")
+        content = str(m.get("content") or "")
+        if role in ("user", "assistant") and content:
+            out_hist.append({"role": role, "content": content[:8000]})
+    return {"summary": summary, "history": out_hist[-12:]}  # last 12 messages max
+
+
+def _set_askraven_state(request: Request, *, summary: str, history: list[dict]) -> None:
+    if _store is None:
+        return
+    s = str(summary or "").strip()
+    hist = []
+    for m in history or []:
+        if not isinstance(m, dict):
+            continue
+        role = str(m.get("role") or "")
+        content = str(m.get("content") or "")
+        if role in ("user", "assistant") and content:
+            hist.append({"role": role, "content": content[:8000]})
+    payload = {"summary": s, "history": hist[-12:]}
+    _store.set_json(_askraven_session_key(request), payload, ttl_s=6 * 60 * 60)
+
 def _truncate(s: str, n: int) -> str:
     t = str(s or "").replace("\n", " ").strip()
     return (t[:n] + "…") if len(t) > n else t
@@ -484,7 +525,9 @@ async def chat_message(req: ChatMessageRequest, request: Request):
 
     ctx = build_context_pack(engine=engine, report=report)
     try:
-        prior = _get_askraven_summary(request)
+        state = _get_askraven_state(request)
+        prior = str(state.get("summary") or "")
+        prior_history = state.get("history") if isinstance(state.get("history"), list) else []
         out = askraven_agent_chat(
             question=msg,
             context_pack=ctx,
@@ -492,12 +535,16 @@ async def chat_message(req: ChatMessageRequest, request: Request):
             orats_client=_get_client_optional(),
             benzinga_client=_get_benzinga_client_optional(),
             prior_summary=prior,
+            prior_history=prior_history,
         )
         if isinstance(out, dict):
             reply = str(out.get("answer") or "").strip()
             summary = str(out.get("summary") or "").strip()
-            if summary:
-                _set_askraven_summary(request, summary)
+            # append to history + persist
+            hist2 = list(prior_history)
+            hist2.append({"role": "user", "content": msg})
+            hist2.append({"role": "assistant", "content": reply})
+            _set_askraven_state(request, summary=summary, history=hist2)
         else:
             reply = str(out or "").strip()
     except RuntimeError as e:

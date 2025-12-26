@@ -615,6 +615,7 @@ def askraven_agent_chat(
     orats_client: Optional[OratsClient] = None,
     benzinga_client: Optional[BenzingaClient] = None,
     prior_summary: str = "",
+    prior_history: Optional[List[dict]] = None,
 ) -> Dict[str, str]:
     """
     ChatGPT-style agent loop: model can request tools (ORATS/Benzinga/Web) as needed,
@@ -768,8 +769,9 @@ def askraven_agent_chat(
         ASKRAVEN_SYSTEM_PROMPT
         + "\n\nSession memory (session-only; may be empty):\n"
         + (str(prior_summary or "").strip() or "(none)")
-        + "\n\nOutput format (required):\nANSWER:\n<your answer>\n\nMEMORY:\n- 5–10 bullets capturing the ongoing state (trade focus, expiries, strikes, preferences, rules)."
-        + "\n\nIMPORTANT: You may use tools if needed. When citing web/news, include URLs. Return a non-empty plain-text answer."
+        + "\n\nYou are in an open-ended chat. Answer naturally.\n"
+        + "If you want to update memory, optionally include a block at the end:\nMEMORY:\n- bullets...\n"
+        + "\nIMPORTANT: You may use tools if needed. When citing web/news, include URLs. Return a non-empty plain-text answer."
     )
 
     def _wrap(txt: str) -> Dict[str, str]:
@@ -777,6 +779,30 @@ def askraven_agent_chat(
         if not m:
             m = _fallback_memory_update(prior=str(prior_summary or ""), question=question, context_pack=ctx)
         return {"answer": (a or str(txt or "").strip()), "summary": str(m or "").strip()}
+
+    def _force_chat_answer(*, extra_system: str) -> str:
+        """
+        Last-resort: ask the model for a plain-text answer with no tools.
+        This prevents us from returning the canned fallback briefing as the primary answer.
+        """
+        base = sys_txt + "\n\n" + str(extra_system or "")
+        messages: List[dict] = [{"role": "system", "content": base}]
+        # replay limited prior history
+        for m in (prior_history or [])[-10:]:
+            if not isinstance(m, dict):
+                continue
+            role = str(m.get("role") or "")
+            content = str(m.get("content") or "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": base_user_text})
+        try:
+            resp = client.chat.completions.create(model=model, messages=messages, max_completion_tokens=max_out)
+        except TypeError:
+            resp = client.chat.completions.create(model=model, messages=messages, max_tokens=max_out)
+        msg = resp.choices[0].message
+        txt = _content_to_text(getattr(msg, "content", None)).strip()
+        return txt or "I couldn’t generate a response; please retry."
 
     # If this SDK doesn't support Responses API, run a tool-using loop via Chat Completions instead.
     if not hasattr(client, "responses"):
@@ -800,10 +826,15 @@ def askraven_agent_chat(
         else:
             user_content = base_user_text
 
-        messages: List[dict] = [
-            {"role": "system", "content": sys_txt + "\n\nNOTE: Web browsing/search may be limited in this mode; rely on Benzinga + ORATS tools + explicit URLs."},
-            {"role": "user", "content": user_content},
-        ]
+        messages: List[dict] = [{"role": "system", "content": sys_txt + "\n\nNOTE: Web browsing/search may be limited in this mode; rely on Benzinga + ORATS tools + explicit URLs."}]
+        for m in (prior_history or [])[-10:]:
+            if not isinstance(m, dict):
+                continue
+            role = str(m.get("role") or "")
+            content = str(m.get("content") or "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_content})
 
         def _chat_create(**kwargs) -> Any:
             # compatibility: some models require max_completion_tokens vs max_tokens
@@ -843,9 +874,9 @@ def askraven_agent_chat(
                     messages.append({"role": "tool", "tool_call_id": tc_id or f"tc_{step}_{name}", "content": _json_dumps_safe(result, int(budget["max_bytes_per_tool"]))})
                 continue
             # neither text nor tool calls => safe fallback
-            return _wrap(call_openai(question=question, context_pack=ctx, images=images))
+            return _wrap(_force_chat_answer(extra_system="Return a direct answer. Do not ask follow-up questions unless absolutely required."))
 
-        return _wrap(call_openai(question=question, context_pack=ctx, images=images))
+        return _wrap(_force_chat_answer(extra_system="Return a direct answer."))
 
     prev_id = None
     pending_tool_results: List[dict] = []
@@ -882,10 +913,10 @@ def askraven_agent_chat(
                     resp = _responses_create_with_tools(tools2)
                 except Exception as e2:
                     LOG.warning("AskRaven agent: responses.create failed (tools): %s", e2)
-                    return _wrap(call_openai(question=question, context_pack=ctx, images=images))
+                    return _wrap(_force_chat_answer(extra_system="Return a direct answer."))
             LOG.warning("AskRaven agent: responses.create failed: %s", e)
             # If Responses API is unavailable, fall back to the existing single-shot call.
-            return _wrap(call_openai(question=question, context_pack=ctx, images=images))
+            return _wrap(_force_chat_answer(extra_system="Return a direct answer."))
 
         prev_id = getattr(resp, "id", None) or getattr(resp, "response_id", None)
         out_txt = getattr(resp, "output_text", None)
@@ -897,7 +928,7 @@ def askraven_agent_chat(
         func_calls = [c for c in tool_calls if isinstance(c, dict) and str(c.get("name") or "").strip()]
         if not func_calls:
             # If no tool calls and no output text, degrade safely.
-            return _wrap(call_openai(question=question, context_pack=ctx, images=images))
+            return _wrap(_force_chat_answer(extra_system="Return a direct answer."))
 
         pending_tool_results = []
         for c in func_calls:
@@ -915,7 +946,7 @@ def askraven_agent_chat(
                 }
             )
 
-    return _wrap(call_openai(question=question, context_pack=ctx, images=images))
+    return _wrap(_force_chat_answer(extra_system="Return a direct answer."))
 
 def _parse_trade_from_prompt(question: str) -> Dict[str, Any]:
     """
