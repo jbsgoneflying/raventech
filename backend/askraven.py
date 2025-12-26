@@ -16,6 +16,40 @@ def _pick(d: dict, keys: List[str]) -> dict:
     return out
 
 
+def _content_to_text(content: Any) -> str:
+    """
+    Normalize OpenAI message content to plain text.
+    Some SDKs/models return `message.content` as a list of parts instead of a string.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    # list-of-parts (dicts or objects with `.text`)
+    if isinstance(content, list):
+        parts: List[str] = []
+        for p in content:
+            if isinstance(p, str):
+                parts.append(p)
+                continue
+            if isinstance(p, dict):
+                # common shapes: {"type":"text","text":"..."} or {"text":"..."}
+                t = p.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+                continue
+            # fallback for SDK objects
+            t = getattr(p, "text", None)
+            if isinstance(t, str):
+                parts.append(t)
+        return "\n".join([x for x in parts if x is not None])
+    # fallback for objects with `.text`
+    t = getattr(content, "text", None)
+    if isinstance(t, str):
+        return t
+    return ""
+
+
 def build_context_pack(*, engine: str, report: Dict[str, Any]) -> Dict[str, Any]:
     """
     Build a compact, stable context pack for the LLM.
@@ -218,33 +252,32 @@ def call_openai(
     # Some models can return tool calls with empty text content. Never return blank.
     try:
         msg_obj = resp2.choices[0].message
-        txt = getattr(msg_obj, "content", None)
-        if isinstance(txt, str) and txt.strip():
-            return txt.strip()
+        txt = _content_to_text(getattr(msg_obj, "content", None)).strip()
+        if txt:
+            return txt
 
         tool_calls = getattr(msg_obj, "tool_calls", None)
         fn_call = getattr(msg_obj, "function_call", None)
         if tool_calls or fn_call:
             return (
-                "I can’t fetch real-time headlines yet because this AskRaven instance isn’t configured with a news/browsing tool. "
-                "What I *can* do right now is: use your Engine 2 macro calendar + regime + dealer gamma context, and interpret any charts you upload. "
-                "If you want true “news of the day,” we can wire a news feed (e.g., Benzinga News endpoint) and I’ll summarize it pre-market."
+                "I didn’t get a text answer back from the model (it attempted a tool/browse-style response). "
+                "This AskRaven instance can use RavenTech context plus any provided Benzinga news snapshot, but it does not have web browsing."
             )
 
         # Retry once with an explicit non-empty response constraint.
         try:
             resp3 = _chat_once(use_parts=False)
             msg3 = resp3.choices[0].message
-            txt3 = getattr(msg3, "content", None)
-            if isinstance(txt3, str) and txt3.strip():
-                return txt3.strip()
+            txt3 = _content_to_text(getattr(msg3, "content", None)).strip()
+            if txt3:
+                return txt3
         except Exception:
             pass
 
         return (
             "I didn’t receive any text back from the model for that request. "
-            "This can happen when the model tries to use a tool (news/browsing) that isn’t configured. "
-            "If you want real-time news/headlines, we need to add a news feed tool (Benzinga News or web search)."
+            "This can happen when the model responds with structured content but no text, or attempts tool-style outputs. "
+            "Try re-sending; if it persists, we can force a different response format for this model."
         )
     except Exception:
         try:
