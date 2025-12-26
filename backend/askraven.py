@@ -112,37 +112,72 @@ def call_openai(
         except Exception:
             continue
 
-    # Prefer reasoning control when available; fall back if the SDK/model rejects it.
+    # Prefer Responses API if available (new SDK); otherwise fall back to Chat Completions.
     try:
-        resp = client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": [{"type": "text", "text": ASKRAVEN_SYSTEM_PROMPT}]},
-                {"role": "user", "content": user_parts},
-            ],
-            max_output_tokens=max_out,
-            reasoning={"effort": effort},
-        )
-    except Exception:
-        resp = client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": [{"type": "text", "text": ASKRAVEN_SYSTEM_PROMPT}]},
-                {"role": "user", "content": user_parts},
-            ],
-            max_output_tokens=max_out,
-        )
+        if hasattr(client, "responses") and getattr(client, "responses") is not None:
+            # Prefer reasoning control when available; fall back if the SDK/model rejects it.
+            try:
+                resp = client.responses.create(
+                    model=model,
+                    input=[
+                        {"role": "system", "content": [{"type": "text", "text": ASKRAVEN_SYSTEM_PROMPT}]},
+                        {"role": "user", "content": user_parts},
+                    ],
+                    max_output_tokens=max_out,
+                    reasoning={"effort": effort},
+                )
+            except Exception:
+                resp = client.responses.create(
+                    model=model,
+                    input=[
+                        {"role": "system", "content": [{"type": "text", "text": ASKRAVEN_SYSTEM_PROMPT}]},
+                        {"role": "user", "content": user_parts},
+                    ],
+                    max_output_tokens=max_out,
+                )
 
-    # SDK convenience: output_text aggregates assistant text outputs.
-    out = getattr(resp, "output_text", None)
-    if isinstance(out, str) and out.strip():
-        return out.strip()
+            out = getattr(resp, "output_text", None)
+            if isinstance(out, str) and out.strip():
+                return out.strip()
 
-    # Fallback: try to assemble from raw output
+            try:
+                raw = resp.model_dump() if hasattr(resp, "model_dump") else {}
+            except Exception:
+                raw = {}
+            return json.dumps(raw, ensure_ascii=False)[:4000]
+    except AttributeError:
+        # Older SDKs may not expose `responses`; fall through to chat.completions.
+        pass
+
+    # Chat Completions fallback (older SDK compatibility)
+    chat_messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": ASKRAVEN_SYSTEM_PROMPT},
+        {"role": "user", "content": [{"type": "text", "text": user_parts[0]["text"]}]},
+    ]
+    # Append images for vision-capable models (if supported).
+    img_parts = []
+    for img in images or []:
+        try:
+            url = encode_image_to_data_url(content=img.content, content_type=img.content_type)
+            img_parts.append({"type": "image_url", "image_url": {"url": url}})
+        except Exception:
+            continue
+    if img_parts:
+        chat_messages[-1]["content"].extend(img_parts)
+
+    resp2 = client.chat.completions.create(
+        model=model,
+        messages=chat_messages,
+        max_tokens=max_out,
+    )
     try:
-        raw = resp.model_dump() if hasattr(resp, "model_dump") else {}
+        txt = resp2.choices[0].message.content
+        return (txt or "").strip()
     except Exception:
-        raw = {}
-    return json.dumps(raw, ensure_ascii=False)[:4000]
+        try:
+            raw2 = resp2.model_dump() if hasattr(resp2, "model_dump") else {}
+        except Exception:
+            raw2 = {}
+        return json.dumps(raw2, ensure_ascii=False)[:4000]
 
 
