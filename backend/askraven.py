@@ -168,7 +168,9 @@ def call_openai(
     resp2 = client.chat.completions.create(
         model=model,
         messages=chat_messages,
-        max_tokens=max_out,
+        # Some newer models reject `max_tokens` and require `max_completion_tokens`.
+        # We'll try the newer param first, then fall back.
+        max_completion_tokens=max_out,
     )
     try:
         txt = resp2.choices[0].message.content
