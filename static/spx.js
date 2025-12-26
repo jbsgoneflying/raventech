@@ -279,8 +279,10 @@ function render(payload) {
       dgTop.textContent = tops.length ? `Top strikes: ${tops.map(x => `${Number(x.strike).toFixed(0)}${String(x.side || "")}`).join(" · ")}` : "";
       const putWall = oi && typeof oi === "object" ? oi.putWall : null;
       const callWall = oi && typeof oi === "object" ? oi.callWall : null;
-      const putTxt = putWall && Number.isFinite(Number(putWall.maxStrike)) ? `${Number(putWall.maxStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
-      const callTxt = callWall && Number.isFinite(Number(callWall.maxStrike)) ? `${Number(callWall.maxStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
+      const putStrike = putWall && (putWall.peakStrike ?? putWall.maxStrike);
+      const callStrike = callWall && (callWall.peakStrike ?? callWall.maxStrike);
+      const putTxt = putWall && Number.isFinite(Number(putStrike)) ? `${Number(putStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
+      const callTxt = callWall && Number.isFinite(Number(callStrike)) ? `${Number(callStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
       dgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
     }
   }

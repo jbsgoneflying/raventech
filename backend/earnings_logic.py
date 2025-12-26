@@ -256,6 +256,7 @@ def _compute_live_dealer_gamma_payload_diag(
         "symbolUsed": str(ticker).upper(),
         "expiry": None,
         "dealerGamma": None,
+        "oiClusters": None,
         "warnings": [],
         "notes": [],
     }
@@ -317,8 +318,10 @@ def _compute_live_dealer_gamma_payload_diag(
         return base
 
     dg = compute_dealer_gamma_context(chain_rows, expiry=str(expiry)[:10], contract_multiplier=100, band_pct=float(band_pct), top_n=int(top_n))
+    oi = compute_open_interest_clusters(chain_rows, expiry=str(expiry)[:10], band_pct=float(band_pct), top_n=int(top_n), cluster_steps=2)
     base["enabled"] = True
     base["dealerGamma"] = dg
+    base["oiClusters"] = oi
     base["warnings"] = (dg.get("warnings") if isinstance(dg, dict) else []) or []
     base["notes"] = [
         "Live, informational only. Dealer gamma context does not change historical earnings stats or breach probabilities.",

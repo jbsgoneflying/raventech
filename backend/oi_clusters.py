@@ -149,8 +149,8 @@ def _cluster_for_side(
                 "maxStrike": float(max(strikes)),
                 "centerStrike": float(center),
                 "totalOI": float(total),
-                "maxStrike": float(ms),
-                "maxOI": float(mw),
+                "peakStrike": float(ms),
+                "peakOI": float(mw),
                 "nStrikes": int(len(in_win)),
             }
         )

@@ -35,12 +35,12 @@ def test_oi_clusters_finds_walls_and_clusters_deterministically():
     assert out["callWall"] is not None
 
     # Put wall should point to the max OI strike in its top cluster (95)
-    assert out["putWall"]["maxStrike"] == 95.0
-    assert out["putWall"]["maxOI"] == 500.0
+    assert out["putWall"]["peakStrike"] == 95.0
+    assert out["putWall"]["peakOI"] == 500.0
 
     # Call wall should be centered around the 104-109 region, max strike should be 105
-    assert out["callWall"]["maxStrike"] == 105.0
-    assert out["callWall"]["maxOI"] == 300.0
+    assert out["callWall"]["peakStrike"] == 105.0
+    assert out["callWall"]["peakOI"] == 300.0
     assert out["callWall"]["minStrike"] <= 105.0 <= out["callWall"]["maxStrike"]
 
 
