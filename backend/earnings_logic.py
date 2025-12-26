@@ -210,15 +210,32 @@ def _compute_live_dealer_gamma_payload(
         return None
 
     warnings: List[str] = []
-    exp_rows = client.live_expirations(ticker=ticker).rows or []
-    exp_dates = _parse_live_expiration_dates([r for r in exp_rows if isinstance(r, dict)])
+    if not callable(getattr(client, "live_strikes", None)):
+        return None
+
+    # IMPORTANT (weeklies): Do not rely on /live/strikes/monthly for chain selection.
+    # ORATS 'monthly' endpoint can omit weeklies; the full /live/strikes surface includes them.
+    fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
+    all_rows = client.live_strikes(ticker=str(ticker).upper(), fields=fields).rows or []
+    all_rows = [r for r in all_rows if isinstance(r, dict)]
+    if not all_rows:
+        return None
+
+    exp_from_strikes = _parse_live_expiration_dates_from_strikes(all_rows)
+    exp_from_exp: list[str] = []
+    try:
+        exp_rows = client.live_expirations(ticker=ticker).rows or []
+        exp_from_exp = _parse_live_expiration_dates([r for r in exp_rows if isinstance(r, dict)])
+    except Exception:
+        exp_from_exp = []
+
+    # Union (strikes is source of truth; expirations can be incomplete).
+    exp_dates = sorted(list(dict.fromkeys([*exp_from_strikes, *exp_from_exp])))
     expiry = _select_live_expiry(exp_dates, today=today, target_on_or_after=target_date)
     if not expiry:
         return None
 
-    fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
-    chain = client.live_strikes_by_expiry(ticker=ticker, expiry=str(expiry)[:10], fields=fields).rows or []
-    chain_rows = [r for r in chain if isinstance(r, dict)]
+    chain_rows = [r for r in all_rows if str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or "")[:10] == str(expiry)[:10]]
     if not chain_rows:
         return None
 
@@ -260,57 +277,41 @@ def _compute_live_dealer_gamma_payload_diag(
         "warnings": [],
         "notes": [],
     }
-    if not (callable(getattr(client, "live_strikes_by_expiry", None)) and callable(getattr(client, "live_strikes", None))):
+    if not callable(getattr(client, "live_strikes", None)):
         base["notes"] = ["Live ORATS client methods unavailable (live endpoints not configured)."]
         return base
 
-    exp_dates: list[str] = []
+    # Fetch full live strikes once; use it as the source of truth for weeklies + chain filtering.
+    try:
+        fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
+        all_rows = client.live_strikes(ticker=str(ticker).upper(), fields=fields).rows or []
+        all_rows = [r for r in all_rows if isinstance(r, dict)]
+    except Exception as e:
+        base["notes"] = [f"Live strikes call failed: {type(e).__name__}: {e}"]
+        return base
+
+    if not all_rows:
+        base["notes"] = ["No live strikes returned for this ticker (check symbol or ORATS Live entitlement)."]
+        return base
+
+    exp_from_strikes = _parse_live_expiration_dates_from_strikes(all_rows)
+    exp_from_exp: list[str] = []
     try:
         if callable(getattr(client, "live_expirations", None)):
             exp_rows = client.live_expirations(ticker=str(ticker).upper()).rows or []
-            exp_dates = _parse_live_expiration_dates([r for r in exp_rows if isinstance(r, dict)])
+            exp_from_exp = _parse_live_expiration_dates([r for r in exp_rows if isinstance(r, dict)])
     except Exception as e:
-        # Degrade: expirations endpoint may be unavailable on some entitlements; we can infer expiries from strikes.
         base["warnings"] = [f"Live expirations call failed: {type(e).__name__}: {e}"]
-        exp_dates = []
+        exp_from_exp = []
 
-    if not exp_dates:
-        # Fallback: infer expirations from the (potentially large) strikes payload.
-        try:
-            fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
-            all_rows = client.live_strikes(ticker=str(ticker).upper(), fields=fields).rows or []
-            all_rows = [r for r in all_rows if isinstance(r, dict)]
-            exp_dates = _parse_live_expiration_dates_from_strikes(all_rows)
-            if not exp_dates:
-                base["notes"] = ["No live strikes returned for this ticker (check symbol or ORATS Live entitlement)."]
-                return base
-        except Exception as e:
-            base["notes"] = [f"Live strikes call failed: {type(e).__name__}: {e}"]
-            return base
-
+    exp_dates = sorted(list(dict.fromkeys([*exp_from_strikes, *exp_from_exp])))
     expiry = _select_live_expiry(exp_dates, today=today, target_on_or_after=target_date)
     if not expiry:
         base["notes"] = ["Could not select a live expiry (no valid upcoming expirations)."]
         return base
 
     base["expiry"] = str(expiry)[:10]
-    try:
-        fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
-        chain = client.live_strikes_by_expiry(ticker=str(ticker).upper(), expiry=str(expiry)[:10], fields=fields).rows or []
-    except Exception as e:
-        # Degrade: if strikes-by-expiry is flaky, reuse full strikes payload and filter by expiry.
-        try:
-            all_rows = client.live_strikes(ticker=str(ticker).upper(), fields=fields).rows or []
-            all_rows = [r for r in all_rows if isinstance(r, dict)]
-            chain = [r for r in all_rows if str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or "")[:10] == str(expiry)[:10]]
-            base.setdefault("warnings", [])
-            if isinstance(base["warnings"], list):
-                base["warnings"].append(f"Live strikes-by-expiry failed; fell back to filtering full strikes: {type(e).__name__}: {e}")
-        except Exception as e2:
-            base["notes"] = [f"Live strikes-by-expiry failed and strikes fallback failed: {type(e2).__name__}: {e2}"]
-            return base
-
-    chain_rows = [r for r in chain if isinstance(r, dict)]
+    chain_rows = [r for r in all_rows if str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or "")[:10] == str(expiry)[:10]]
     if not chain_rows:
         base["notes"] = [
             f"No live strikes returned for expiry={str(expiry)[:10]}. This can indicate an entitlement gap, a temporarily empty chain, or an expiry-param mismatch.",

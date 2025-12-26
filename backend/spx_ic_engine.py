@@ -129,11 +129,15 @@ def _live_chain_with_fallback(
     warnings: List[str] = []
     for t in tickers:
         try:
-            resp = client.live_strikes_by_expiry(ticker=t, expiry=str(expiry)[:10], fields=fields)
-            rows = resp.rows or []
-            if rows:
-                return t, [r for r in rows if isinstance(r, dict)], warnings
-            warnings.append(f"Live chain empty for {t} expiry={str(expiry)[:10]}")
+            # IMPORTANT (weeklies): /live/strikes/monthly can omit weeklies.
+            # Use full /live/strikes and filter locally by expiry.
+            resp = client.live_strikes(ticker=t, fields=fields)
+            rows = [r for r in (resp.rows or []) if isinstance(r, dict)]
+            ex = str(expiry)[:10]
+            filt = [r for r in rows if str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or r.get("exp_date") or "")[:10] == ex]
+            if filt:
+                return t, filt, warnings
+            warnings.append(f"Live chain empty for {t} expiry={ex} (filtered from live_strikes)")
         except Exception as e:
             warnings.append(f"Live chain error for {t}: {type(e).__name__}")
     return None, [], warnings
