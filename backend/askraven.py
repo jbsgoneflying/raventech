@@ -552,6 +552,12 @@ def askraven_agent_chat(
         raise RuntimeError("Missing OPENAI_API_KEY on server.")
 
     from openai import OpenAI  # type: ignore
+    try:
+        import openai as _openai_mod  # type: ignore
+
+        LOG.info("AskRaven OpenAI SDK version=%s has_responses=%s", getattr(_openai_mod, "__version__", "unknown"), hasattr(OpenAI(api_key=api_key), "responses"))
+    except Exception:
+        pass
 
     client = OpenAI(api_key=api_key)
     model = str(os.getenv("OPENAI_MODEL") or "gpt-5.2").strip()
@@ -565,6 +571,50 @@ def askraven_agent_chat(
 
     start = time.time()
     tool_calls_used = 0
+
+    def budget_exhausted() -> bool:
+        if (time.time() - start) > float(budget["wall_s"]):
+            return True
+        if tool_calls_used >= int(budget["max_tool_calls"]):
+            return True
+        return False
+
+    # executor map
+    def exec_tool(name: str, args: dict) -> dict:
+        nonlocal tool_calls_used
+        tool_calls_used += 1
+        if name.startswith("orats_"):
+            if orats_client is None:
+                return {"ok": False, "error": "ORATS client not available on server."}
+            if name == "orats_get_live_spot":
+                return _orats_live_spot(orats_client, ticker=str(args.get("ticker") or ""))
+            if name == "orats_get_expirations":
+                return _orats_expirations(orats_client, ticker=str(args.get("ticker") or ""))
+            if name == "orats_get_chain_slice":
+                return _orats_chain_slice(
+                    orats_client,
+                    ticker=str(args.get("ticker") or ""),
+                    expiry=str(args.get("expiry") or ""),
+                    strike_min=float(args.get("strike_min") or 0),
+                    strike_max=float(args.get("strike_max") or 0),
+                    target_strikes=[float(x) for x in (args.get("target_strikes") or []) if x is not None]
+                    if isinstance(args.get("target_strikes"), list)
+                    else None,
+                )
+        if name.startswith("benzinga_"):
+            if benzinga_client is None:
+                return {"ok": False, "error": "Benzinga client not available on server."}
+            if name == "benzinga_get_news":
+                return _benzinga_news(
+                    benzinga_client,
+                    tickers=str(args.get("tickers") or "") or None,
+                    topics=str(args.get("topics") or "") or None,
+                    days=int(float(args.get("days") or 2)),
+                    limit=int(float(args.get("limit") or 12)),
+                )
+        if name == "web_fetch":
+            return _web_fetch_public(url=str(args.get("url") or ""), max_chars=int(float(args.get("max_chars") or 6000)))
+        return {"ok": False, "error": f"Unknown tool: {name}"}
 
     # Enrich with tradeBrief only (no automatic ORATS/Benzinga fetch).
     ctx = dict(context_pack or {})
@@ -630,7 +680,7 @@ def askraven_agent_chat(
     ctx_txt = json.dumps(ctx, ensure_ascii=False, separators=(",", ":"), indent=2)
     base_user_text = f"RavenTech context pack:\n{ctx_txt}\n\nUser question:\n{str(question or '').strip()}"
 
-    # Responses API tools
+    # Tools
     tools: List[dict] = []
     if enable_orats:
         tools.extend([_tool_schema_orats_get_live_spot(), _tool_schema_orats_get_expirations(), _tool_schema_orats_get_chain_slice()])
@@ -643,50 +693,77 @@ def askraven_agent_chat(
 
     sys_txt = ASKRAVEN_SYSTEM_PROMPT + "\n\nIMPORTANT: You may use tools if needed. When citing web/news, include URLs. Return a non-empty plain-text answer."
 
+    # If this SDK doesn't support Responses API, run a tool-using loop via Chat Completions instead.
+    if not hasattr(client, "responses"):
+        # Chat Completions function tools work without Responses API.
+        # Note: built-in web_search is not supported here; we keep web_fetch + Benzinga as “outside context”.
+        if enable_web:
+            LOG.warning("AskRaven agent: OpenAI SDK has no Responses API; disabling built-in web_search for this run.")
+        chat_tools = [t for t in tools if not (isinstance(t, dict) and t.get("type") in ("web_search", "web_search_preview"))]
+
+        # Build multimodal user content when images exist.
+        user_content: Any
+        if images:
+            parts = [{"type": "text", "text": base_user_text}]
+            for img in images:
+                try:
+                    url = encode_image_to_data_url(content=img.content, content_type=img.content_type)
+                    parts.append({"type": "image_url", "image_url": {"url": url}})
+                except Exception:
+                    continue
+            user_content = parts
+        else:
+            user_content = base_user_text
+
+        messages: List[dict] = [
+            {"role": "system", "content": sys_txt + "\n\nNOTE: Web browsing/search may be limited in this mode; rely on Benzinga + ORATS tools + explicit URLs."},
+            {"role": "user", "content": user_content},
+        ]
+
+        def _chat_create(**kwargs) -> Any:
+            # compatibility: some models require max_completion_tokens vs max_tokens
+            try:
+                return client.chat.completions.create(max_completion_tokens=max_out, **kwargs)
+            except TypeError:
+                return client.chat.completions.create(max_tokens=max_out, **kwargs)
+
+        for step in range(int(budget["max_steps"])):
+            if budget_exhausted():
+                return "AskRaven budget exhausted (time/tool limit). Try a narrower question or increase ASK_RAVEN_BUDGET."
+            resp = _chat_create(model=model, messages=messages, tools=chat_tools)
+            msg = resp.choices[0].message
+            txt = _content_to_text(getattr(msg, "content", None)).strip()
+            tool_calls = getattr(msg, "tool_calls", None)
+            if txt and not tool_calls:
+                return txt
+            if tool_calls:
+                for tc in tool_calls:
+                    if budget_exhausted():
+                        return "AskRaven budget exhausted while fetching context. Try narrowing the request."
+                    try:
+                        tc_id = str(getattr(tc, "id", "") or "")
+                        fn = getattr(tc, "function", None)
+                        name = str(getattr(fn, "name", "") or "")
+                        args_raw = getattr(fn, "arguments", None)
+                        args = _parse_json_maybe(args_raw) if args_raw is not None else {}
+                    except Exception:
+                        # attempt from dict
+                        d = tc if isinstance(tc, dict) else {}
+                        tc_id = str(d.get("id") or "")
+                        fn = d.get("function") if isinstance(d.get("function"), dict) else {}
+                        name = str(fn.get("name") or "")
+                        args = _parse_json_maybe(fn.get("arguments"))
+
+                    result = exec_tool(name, args)
+                    messages.append({"role": "tool", "tool_call_id": tc_id or f"tc_{step}_{name}", "content": _json_dumps_safe(result, int(budget["max_bytes_per_tool"]))})
+                continue
+            # neither text nor tool calls => safe fallback
+            return call_openai(question=question, context_pack=ctx, images=images)
+
+        return call_openai(question=question, context_pack=ctx, images=images)
+
     prev_id = None
     pending_tool_results: List[dict] = []
-
-    def budget_exhausted() -> bool:
-        if (time.time() - start) > float(budget["wall_s"]):
-            return True
-        if tool_calls_used >= int(budget["max_tool_calls"]):
-            return True
-        return False
-
-    # executor map
-    def exec_tool(name: str, args: dict) -> dict:
-        nonlocal tool_calls_used
-        tool_calls_used += 1
-        if name.startswith("orats_"):
-            if orats_client is None:
-                return {"ok": False, "error": "ORATS client not available on server."}
-            if name == "orats_get_live_spot":
-                return _orats_live_spot(orats_client, ticker=str(args.get("ticker") or ""))
-            if name == "orats_get_expirations":
-                return _orats_expirations(orats_client, ticker=str(args.get("ticker") or ""))
-            if name == "orats_get_chain_slice":
-                return _orats_chain_slice(
-                    orats_client,
-                    ticker=str(args.get("ticker") or ""),
-                    expiry=str(args.get("expiry") or ""),
-                    strike_min=float(args.get("strike_min") or 0),
-                    strike_max=float(args.get("strike_max") or 0),
-                    target_strikes=[float(x) for x in (args.get("target_strikes") or []) if x is not None] if isinstance(args.get("target_strikes"), list) else None,
-                )
-        if name.startswith("benzinga_"):
-            if benzinga_client is None:
-                return {"ok": False, "error": "Benzinga client not available on server."}
-            if name == "benzinga_get_news":
-                return _benzinga_news(
-                    benzinga_client,
-                    tickers=str(args.get("tickers") or "") or None,
-                    topics=str(args.get("topics") or "") or None,
-                    days=int(float(args.get("days") or 2)),
-                    limit=int(float(args.get("limit") or 12)),
-                )
-        if name == "web_fetch":
-            return _web_fetch_public(url=str(args.get("url") or ""), max_chars=int(float(args.get("max_chars") or 6000)))
-        return {"ok": False, "error": f"Unknown tool: {name}"}
 
     for step in range(int(budget["max_steps"])):
         if budget_exhausted():

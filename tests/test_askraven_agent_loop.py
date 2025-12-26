@@ -77,6 +77,63 @@ def test_agent_loop_executes_function_tool_and_returns_final_text(monkeypatch):
     assert out == "final answer"
 
 
+def test_agent_loop_chat_completions_fallback_when_no_responses(monkeypatch):
+    # Fake OpenAI client without `responses`, but with chat.completions tool calling.
+    calls = {"n": 0}
+
+    class _ToolCall:
+        def __init__(self):
+            self.id = "tc1"
+
+            class Fn:
+                name = "orats_get_live_spot"
+                arguments = '{"ticker":"SPX"}'
+
+            self.function = Fn()
+
+    class _Msg:
+        def __init__(self, content, tool_calls=None):
+            self.content = content
+            self.tool_calls = tool_calls
+
+    class _Resp:
+        def __init__(self, msg):
+            self.choices = [types.SimpleNamespace(message=msg)]
+
+    class _ChatCompletions:
+        def create(self, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _Resp(_Msg("", tool_calls=[_ToolCall()]))
+            return _Resp(_Msg("final answer", tool_calls=None))
+
+    class _Chat:
+        completions = _ChatCompletions()
+
+    class _OpenAI_NoResponses:
+        def __init__(self, api_key: str):
+            self.api_key = api_key
+            self.chat = _Chat()
+
+    fake_openai = types.SimpleNamespace(OpenAI=_OpenAI_NoResponses)
+    monkeypatch.setitem(__import__("sys").modules, "openai", fake_openai)
+    monkeypatch.setenv("OPENAI_API_KEY", "x" * 10)
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.2")
+    monkeypatch.setenv("ASKRAVEN_ENABLE_ORATS_TOOLS", "1")
+    monkeypatch.setenv("ASKRAVEN_ENABLE_BENZINGA_TOOLS", "0")
+    monkeypatch.setenv("ASKRAVEN_ENABLE_WEB", "1")
+    monkeypatch.setenv("ASKRAVEN_BUDGET", "tight")
+
+    out = askraven_agent_chat(
+        question="Use tools",
+        context_pack={"engine": "engine2", "current": {}, "liveContext": {}, "technicals": {}},
+        images=[],
+        orats_client=_FakeOrats(),
+        benzinga_client=None,
+    )
+    assert out == "final answer"
+
+
 def test_agent_loop_budget_exhaustion(monkeypatch):
     # Force the loop to immediately exceed time budget by setting wall_s tiny.
     fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI)
