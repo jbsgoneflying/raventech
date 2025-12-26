@@ -139,8 +139,9 @@ def _extract_tool_calls_from_response(resp: Any) -> List[dict]:
             # - {type:\"function_call\", name:\"...\", arguments:\"{...}\", call_id:\"...\"}
             # - {type:\"tool_call\", name:\"...\", arguments:{...}, id:\"...\"}
             if t in ("function_call", "tool_call"):
-                name = node.get("name") or (node.get("function") or {}).get("name")
-                args = node.get("arguments") or (node.get("function") or {}).get("arguments")
+                fn = node.get("function") if isinstance(node.get("function"), dict) else {}
+                name = node.get("name") or fn.get("name")
+                args = node.get("arguments") or fn.get("arguments")
                 call_id = node.get("call_id") or node.get("id") or node.get("tool_call_id")
                 if isinstance(args, str):
                     args_d = _parse_json_maybe(args)
@@ -170,14 +171,14 @@ def _extract_tool_calls_from_response(resp: Any) -> List[dict]:
 
 
 def _tool_schema_orats_get_live_spot() -> dict:
+    # Responses API function tool format:
+    # {"type":"function","function":{"name":...,"description":...,"parameters":...}}
     return {
         "type": "function",
-        "name": "orats_get_live_spot",
-        "description": "Fetch best-effort live spot/stock price for ticker from ORATS Live summaries.",
-        "parameters": {
-            "type": "object",
-            "properties": {"ticker": {"type": "string"}},
-            "required": ["ticker"],
+        "function": {
+            "name": "orats_get_live_spot",
+            "description": "Fetch best-effort live spot/stock price for ticker from ORATS Live summaries.",
+            "parameters": {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]},
         },
     }
 
@@ -185,12 +186,10 @@ def _tool_schema_orats_get_live_spot() -> dict:
 def _tool_schema_orats_get_expirations() -> dict:
     return {
         "type": "function",
-        "name": "orats_get_expirations",
-        "description": "Fetch available option expirations for ticker from ORATS Live expirations (fallback: infer from live strikes).",
-        "parameters": {
-            "type": "object",
-            "properties": {"ticker": {"type": "string"}},
-            "required": ["ticker"],
+        "function": {
+            "name": "orats_get_expirations",
+            "description": "Fetch available option expirations for ticker from ORATS Live expirations (fallback: infer from live strikes).",
+            "parameters": {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]},
         },
     }
 
@@ -198,18 +197,20 @@ def _tool_schema_orats_get_expirations() -> dict:
 def _tool_schema_orats_get_chain_slice() -> dict:
     return {
         "type": "function",
-        "name": "orats_get_chain_slice",
-        "description": "Fetch an options chain slice for a ticker+expiry from ORATS Live strikes and summarize OI/volume/gamma walls within a strike range.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "ticker": {"type": "string"},
-                "expiry": {"type": "string", "description": "YYYY-MM-DD"},
-                "strike_min": {"type": "number"},
-                "strike_max": {"type": "number"},
-                "target_strikes": {"type": "array", "items": {"type": "number"}, "description": "Optional strikes to highlight"},
+        "function": {
+            "name": "orats_get_chain_slice",
+            "description": "Fetch an options chain slice for a ticker+expiry from ORATS Live strikes and summarize OI/volume/gamma walls within a strike range.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string"},
+                    "expiry": {"type": "string", "description": "YYYY-MM-DD"},
+                    "strike_min": {"type": "number"},
+                    "strike_max": {"type": "number"},
+                    "target_strikes": {"type": "array", "items": {"type": "number"}, "description": "Optional strikes to highlight"},
+                },
+                "required": ["ticker", "expiry", "strike_min", "strike_max"],
             },
-            "required": ["ticker", "expiry", "strike_min", "strike_max"],
         },
     }
 
@@ -217,17 +218,19 @@ def _tool_schema_orats_get_chain_slice() -> dict:
 def _tool_schema_benzinga_get_news() -> dict:
     return {
         "type": "function",
-        "name": "benzinga_get_news",
-        "description": "Fetch recent Benzinga headlines for tickers/topics/date window and return a compact list with URLs/snippets.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tickers": {"type": "string", "description": "Comma-separated symbols"},
-                "topics": {"type": "string", "description": "Optional topics filter"},
-                "days": {"type": "number", "description": "Lookback days (default 2)"},
-                "limit": {"type": "number", "description": "Max items (default 12)"},
+        "function": {
+            "name": "benzinga_get_news",
+            "description": "Fetch recent Benzinga headlines for tickers/topics/date window and return a compact list with URLs/snippets.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tickers": {"type": "string", "description": "Comma-separated symbols"},
+                    "topics": {"type": "string", "description": "Optional topics filter"},
+                    "days": {"type": "number", "description": "Lookback days (default 2)"},
+                    "limit": {"type": "number", "description": "Max items (default 12)"},
+                },
+                "required": [],
             },
-            "required": [],
         },
     }
 
@@ -235,15 +238,17 @@ def _tool_schema_benzinga_get_news() -> dict:
 def _tool_schema_web_fetch() -> dict:
     return {
         "type": "function",
-        "name": "web_fetch",
-        "description": "Fetch a public URL (no logins), extract readable text snippet and title. Use for public pages (including X/Reddit pages that are accessible).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "url": {"type": "string"},
-                "max_chars": {"type": "number", "description": "Max chars of extracted text (default 6000)"},
+        "function": {
+            "name": "web_fetch",
+            "description": "Fetch a public URL (no logins), extract readable text snippet and title. Use for public pages (including X/Reddit pages that are accessible).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "max_chars": {"type": "number", "description": "Max chars of extracted text (default 6000)"},
+                },
+                "required": ["url"],
             },
-            "required": ["url"],
         },
     }
 
@@ -564,6 +569,60 @@ def askraven_agent_chat(
         ctx["tradeBrief"] = build_trade_brief(question=question, context_pack=ctx)
     except Exception:
         ctx["tradeBrief"] = {"enabled": False, "notes": ["Failed to build tradeBrief."]}
+
+    # If the user explicitly asks for a specific chain (e.g., “Jan 2 option chain”),
+    # do a minimal, best-effort prefetch so the model has the data to reason over.
+    # This is not “automatic”; it is triggered by explicit user request.
+    ql = str(question or "").lower()
+    if enable_orats and orats_client is not None and ("option chain" in ql or "chain" in ql or "jan" in ql):
+        try:
+            import re
+
+            # Try to parse an explicit YYYY-MM-DD first.
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", ql)
+            expiry = m.group(1) if m else None
+            # crude month-name parse for Jan/Feb/Mar... (assume current/next year)
+            if expiry is None and "jan" in ql:
+                # choose Jan 2 (common weekly) if mentioned
+                m2 = re.search(r"jan\s*(\d{1,2})", ql)
+                day = int(m2.group(1)) if m2 else 2
+                year = dt.datetime.utcnow().year
+                # if we're already past Jan in this year, use next year
+                if dt.datetime.utcnow().month > 1:
+                    year = year + 1
+                expiry = f"{year}-01-{day:02d}"
+
+            # Determine spot for strike band.
+            sym = "SPX"
+            if isinstance(ctx.get("underlying"), dict):
+                sym = str(ctx.get("underlying", {}).get("symbol") or "SPX")
+            spot_resp = _orats_live_spot(orats_client, ticker=sym)
+            spot = _to_float(spot_resp.get("price")) if isinstance(spot_resp, dict) else None
+            if spot is None:
+                tb = ctx.get("tradeBrief") if isinstance(ctx.get("tradeBrief"), dict) else {}
+                spot = _to_float(tb.get("spot")) if isinstance(tb, dict) else None
+            if spot is not None and math.isfinite(float(spot)):
+                lo = float(spot) * 0.96
+                hi = float(spot) * 1.04
+            else:
+                lo, hi = 0.0, 0.0
+
+            if expiry and lo and hi:
+                target = None
+                tb = ctx.get("tradeBrief") if isinstance(ctx.get("tradeBrief"), dict) else {}
+                parsed = tb.get("parsedTrade") if isinstance(tb.get("parsedTrade"), dict) else {}
+                if isinstance(parsed.get("strikes"), list):
+                    target = [float(x) for x in parsed.get("strikes") if x is not None]
+                ctx["oratsChainPrefetch"] = _orats_chain_slice(
+                    orats_client,
+                    ticker=sym,
+                    expiry=str(expiry),
+                    strike_min=lo,
+                    strike_max=hi,
+                    target_strikes=target,
+                )
+        except Exception:
+            pass
 
     ctx_txt = json.dumps(ctx, ensure_ascii=False, separators=(",", ":"), indent=2)
     base_user_text = f"RavenTech context pack:\n{ctx_txt}\n\nUser question:\n{str(question or '').strip()}"
