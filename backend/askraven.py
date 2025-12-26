@@ -51,6 +51,174 @@ def _content_to_text(content: Any) -> str:
     return ""
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = str(os.getenv(name) or "").strip().lower()
+    if not v:
+        return bool(default)
+    return v in ("1", "true", "yes", "y", "on")
+
+
+def _truncate(s: Any, n: int) -> str:
+    t = str(s or "").replace("\n", " ").strip()
+    return (t[:n] + "…") if len(t) > n else t
+
+
+def _wants_news_or_gap(question: str) -> bool:
+    q = str(question or "").lower()
+    keys = (
+        "news",
+        "headline",
+        "headlines",
+        "pre-market",
+        "premarket",
+        "gap",
+        "gapping",
+        "catalyst",
+        "catalysts",
+        "what can move",
+        "what can gap",
+        "drivers",
+    )
+    return any(k in q for k in keys)
+
+
+def _parse_trade_from_prompt(question: str) -> Dict[str, Any]:
+    """
+    Best-effort extraction of trade structure from user prompt.
+    """
+    import re
+
+    q = str(question or "").strip()
+    ql = q.lower()
+    # capture digits even when suffixed like "6955c" or "500p"
+    nums = [int(n) for n in re.findall(r"(\d{3,5})(?:[cCpP])?", q)]
+    strikes = [n for n in nums if 1000 <= n <= 20000]
+    strikes = sorted(list(dict.fromkeys(strikes)))
+
+    cp = None
+    if (" call" in ql) or ("calls" in ql) or ("call spread" in ql) or ("/c" in ql) or ql.endswith("c"):
+        cp = "call"
+    if (" put" in ql) or ("puts" in ql) or ("put spread" in ql) or ("/p" in ql) or ql.endswith("p"):
+        cp = "put" if cp is None else cp
+
+    expiry_hint = None
+    if "0dte" in ql or "0-dte" in ql:
+        expiry_hint = "0DTE"
+    elif "today" in ql or "expiring today" in ql or "expires today" in ql:
+        expiry_hint = "today"
+    elif "this week" in ql:
+        expiry_hint = "this_week"
+
+    structure = None
+    if "credit" in ql:
+        structure = "credit_spread"
+    elif "debit" in ql:
+        structure = "debit_spread"
+    elif "spread" in ql:
+        structure = "spread"
+
+    return {
+        "raw": _truncate(q, 500),
+        "strikes": strikes[:6],
+        "cp": cp,
+        "expiryHint": expiry_hint,
+        "structureHint": structure,
+        "notes": ["Parsed from user prompt (best-effort)."],
+    }
+
+
+def build_trade_brief(*, question: str, context_pack: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Derive desk-style, high-signal features (spot-to-strike distance, gamma context, regime/macro, technical proximity).
+    """
+    eng = str(context_pack.get("engine") or "").strip().lower()
+    parsed = _parse_trade_from_prompt(question)
+
+    # Best-effort spot
+    spot = None
+    if eng == "engine2":
+        live = context_pack.get("liveContext") if isinstance(context_pack.get("liveContext"), dict) else {}
+        dg = live.get("dealerGamma") if isinstance(live.get("dealerGamma"), dict) else {}
+        if dg.get("spot") is not None:
+            try:
+                spot = float(dg.get("spot"))
+            except Exception:
+                spot = None
+    tech = context_pack.get("technicals") if isinstance(context_pack.get("technicals"), dict) else {}
+    if spot is None and isinstance(tech, dict) and tech.get("livePrice") is not None:
+        try:
+            spot = float(tech.get("livePrice"))
+        except Exception:
+            spot = None
+
+    # Regime/macro
+    cur = context_pack.get("current") if isinstance(context_pack.get("current"), dict) else {}
+    reg = cur.get("regime") if isinstance(cur.get("regime"), dict) else {}
+    macro = cur.get("macro") if isinstance(cur.get("macro"), dict) else {}
+
+    # Dealer gamma
+    live = context_pack.get("liveContext") if isinstance(context_pack.get("liveContext"), dict) else {}
+    dg = live.get("dealerGamma") if isinstance(live.get("dealerGamma"), dict) else {}
+    top_strikes = dg.get("topStrikes") if isinstance(dg.get("topStrikes"), list) else []
+
+    # Strike distances
+    dist = []
+    if spot is not None and math.isfinite(float(spot)) and float(spot) > 0 and parsed.get("strikes"):
+        s0 = float(spot)
+        for k in parsed["strikes"]:
+            try:
+                kk = float(k)
+            except Exception:
+                continue
+            pts = kk - s0
+            pct = (pts / s0) * 100.0
+            dist.append({"strike": int(kk), "pts": float(pts), "pct": float(pct)})
+
+    # Technical proximity (EMA + Ichimoku cloud bounds + vwap proxy)
+    prox = []
+    if spot is not None and isinstance(tech, dict):
+        ema = tech.get("ema") if isinstance(tech.get("ema"), dict) else {}
+        for k in ("ema8", "ema21", "ema50", "ema100", "ema200"):
+            if ema.get(k) is None:
+                continue
+            try:
+                lv = float(ema.get(k))
+                prox.append({"level": k, "price": lv, "pts": lv - float(spot), "pct": ((lv - float(spot)) / float(spot)) * 100.0})
+            except Exception:
+                continue
+        ich = tech.get("ichimoku") if isinstance(tech.get("ichimoku"), dict) else {}
+        cloud_now = ich.get("cloudNow") if isinstance(ich.get("cloudNow"), dict) else None
+        if cloud_now:
+            for k in ("cloudTop", "cloudBottom"):
+                if cloud_now.get(k) is None:
+                    continue
+                try:
+                    lv = float(cloud_now.get(k))
+                    prox.append({"level": f"ichimoku.{k}", "price": lv, "pts": lv - float(spot), "pct": ((lv - float(spot)) / float(spot)) * 100.0})
+                except Exception:
+                    continue
+        vp = tech.get("vwapProxy") if isinstance(tech.get("vwapProxy"), dict) else {}
+        if vp and vp.get("vwap") is not None:
+            try:
+                lv = float(vp.get("vwap"))
+                prox.append({"level": "vwapProxy", "price": lv, "pts": lv - float(spot), "pct": ((lv - float(spot)) / float(spot)) * 100.0})
+            except Exception:
+                pass
+
+    return {
+        "engine": eng,
+        "parsedTrade": parsed,
+        "spot": spot,
+        "strikeDistances": dist,
+        "regime": _pick(reg, ["score100", "bucket", "trend", "vol", "event", "stress", "dispersion"]),
+        "macro": _pick(macro, ["multiplier", "tags", "highImpactUS"]),
+        "dealerGamma": _pick(dg, ["netGammaSign", "magnitudeBucket", "spot", "band", "weighting", "expiry", "symbol"]),
+        "dealerGammaTopStrikes": top_strikes[:10],
+        "technicalProximity": prox[:16],
+        "notes": ["TradeBrief is derived from RavenTech context + the user prompt (best-effort)."],
+    }
+
+
 def _fmt_pct(x: Any) -> str:
     try:
         if x is None:
@@ -246,7 +414,7 @@ def build_context_pack(*, engine: str, report: Dict[str, Any]) -> Dict[str, Any]
     return {"engine": eng, "notes": ["Unknown engine."]}
 
 
-ASKRAVEN_SYSTEM_PROMPT = """You are AskRaven, a rigorous, skeptical quant trading assistant.\n\nHard rules:\n- Ground your answer in the provided RavenTech context pack. If a number is not in the context, say so.\n- If a question depends on missing trade inputs (credit, exact expiry, wing width, underlying proxy), ask concise clarifying questions.\n- Distinguish between:\n  (1) historical odds from the engines,\n  (2) live/informational overlays (dealer gamma, live price), and\n  (3) outside context feeds explicitly provided in the context pack (e.g., Benzinga news).\n- No hallucinated data. No fabricated citations.\n\nConstraints:\n- You do NOT have web browsing unless explicitly provided.\n- If the user asks for “news of the day” or headlines:\n  - Use the news items provided in the context pack (if present) and label them as Benzinga news.\n  - If news items are not present, say so and proceed with context-based reasoning.\n\nOutput style:\n- Prefer bullet points.\n- Include a short \"Key numbers\" section when possible.\n- Include a short \"What would change my view\" section.\n\nCompliance:\n- Educational / risk analysis only; not financial advice.\n""".strip()
+ASKRAVEN_SYSTEM_PROMPT = """You are AskRaven, a senior quant trading assistant.\n\nHard rules:\n- Ground your answer in the provided RavenTech context pack. If a number is not in the context, say so.\n- If a question depends on missing trade inputs (credit, exact expiry time, structure, entry/stop), ask concise clarifying questions.\n- Distinguish between:\n  (1) historical odds from the engines,\n  (2) live/informational overlays (dealer gamma, live price), and\n  (3) outside context feeds explicitly provided in the context pack (Benzinga news, optional web results).\n- No hallucinated data. No fabricated citations.\n\nOutside context rules:\n- If Benzinga news is present in the context pack, summarize it and connect it to SPX drivers.\n- If web results are present in the context pack, cite sources with URLs.\n- If outside news is not present, say so, then proceed with context-based reasoning.\n\nOutput style:\n- Write like a trading-desk risk review: concise, skeptical, practical.\n- Use this structure (adapt as needed):\n  1) Position recap and context\n  2) Probabilistic framing (quant view)\n  3) Dealer gamma and strike gravity\n  4) Technical structure (daily + any uploaded charts)\n  5) Holiday/low-liquidity microstructure risks\n  6) Actionable decision tree (e.g., 2:30 / 3:00 / 3:30 ET)\n  7) Bottom line\n- Include a \"Key numbers\" block.\n- Include \"What would change my view\".\n\nCompliance:\n- Educational / risk analysis only; not financial advice.\n""".strip()
 
 
 @dataclass(frozen=True)
@@ -278,7 +446,21 @@ def call_openai(
     max_out = int(float(os.getenv("ASKRAVEN_MAX_OUTPUT_TOKENS") or 900))
     effort = str(os.getenv("OPENAI_REASONING_EFFORT") or "auto").strip().lower()
 
-    ctx_txt = json.dumps(context_pack, ensure_ascii=False, separators=(",", ":"), indent=2)
+    force_text = _env_bool("ASKRAVEN_FORCE_TEXT", True)
+    enable_web = _env_bool("ASKRAVEN_ENABLE_WEB", False)
+    wants_news = _wants_news_or_gap(question) or str(context_pack.get("engine") or "").strip().lower() == "engine2"
+
+    enriched_ctx = dict(context_pack or {})
+    # Add trade-derived features that make the answer look like a desk review.
+    try:
+        enriched_ctx["tradeBrief"] = build_trade_brief(question=question, context_pack=enriched_ctx)
+    except Exception:
+        enriched_ctx["tradeBrief"] = {"enabled": False, "notes": ["Failed to build tradeBrief."]}
+    # Provide a small hint as to whether web tools are enabled.
+    if enable_web and wants_news:
+        enriched_ctx.setdefault("web", {"enabled": True, "provider": "openai_web_search", "notes": ["Web search tool enabled for news-type questions."]})
+
+    ctx_txt = json.dumps(enriched_ctx, ensure_ascii=False, separators=(",", ":"), indent=2)
     base_user_text = f"RavenTech context pack:\n{ctx_txt}\n\nUser question:\n{str(question or '').strip()}"
     user_parts: List[Dict[str, Any]] = [{"type": "text", "text": base_user_text}]
     for img in images or []:
@@ -288,53 +470,58 @@ def call_openai(
         except Exception:
             continue
 
+    base_system = ASKRAVEN_SYSTEM_PROMPT
+    if force_text:
+        base_system = base_system + "\n\nIMPORTANT: You must return a non-empty, plain-text answer. Do not return tool-only outputs."
+
     # Prefer Responses API if available (new SDK); otherwise fall back to Chat Completions.
     try:
         if hasattr(client, "responses") and getattr(client, "responses") is not None:
-            # Prefer reasoning control when available; fall back if the SDK/model rejects it.
+            def _responses_create(*, tools: Any | None, strict: bool) -> Any:
+                sys_txt = base_system
+                if strict:
+                    sys_txt = sys_txt + "\n\nIf you are missing real-time news, explicitly say so, then proceed with a best-effort risk review using the provided context."
+                kwargs: Dict[str, Any] = {
+                    "model": model,
+                    "input": [
+                        {"role": "system", "content": [{"type": "text", "text": sys_txt}]},
+                        {"role": "user", "content": user_parts},
+                    ],
+                    "max_output_tokens": max_out,
+                }
+                if tools is not None:
+                    kwargs["tools"] = tools
+                # Prefer reasoning control when available.
+                try:
+                    kwargs["reasoning"] = {"effort": effort}
+                except Exception:
+                    pass
+                return client.responses.create(**kwargs)
+
+            tools = None
+            if enable_web and wants_news:
+                # Try both tool names for compatibility across SDK versions.
+                tools = [{"type": "web_search"}]
+
             try:
-                resp = client.responses.create(
-                    model=model,
-                    input=[
-                        {"role": "system", "content": [{"type": "text", "text": ASKRAVEN_SYSTEM_PROMPT}]},
-                        {"role": "user", "content": user_parts},
-                    ],
-                    max_output_tokens=max_out,
-                    reasoning={"effort": effort},
-                )
+                resp = _responses_create(tools=tools, strict=False)
             except Exception:
-                resp = client.responses.create(
-                    model=model,
-                    input=[
-                        {"role": "system", "content": [{"type": "text", "text": ASKRAVEN_SYSTEM_PROMPT}]},
-                        {"role": "user", "content": user_parts},
-                    ],
-                    max_output_tokens=max_out,
-                )
+                # Retry with alternate tool name if the SDK rejects this tool spec.
+                if tools is not None:
+                    try:
+                        resp = _responses_create(tools=[{"type": "web_search_preview"}], strict=False)
+                    except Exception:
+                        resp = _responses_create(tools=None, strict=False)
+                else:
+                    resp = _responses_create(tools=None, strict=False)
 
             out = getattr(resp, "output_text", None)
             if isinstance(out, str) and out.strip():
                 return out.strip()
 
-            # If the model returned no text, retry once with a stricter instruction to always respond.
+            # If the model returned no text, retry once in strict mode, disabling tools.
             try:
-                resp_retry = client.responses.create(
-                    model=model,
-                    input=[
-                        {
-                            "role": "system",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": ASKRAVEN_SYSTEM_PROMPT
-                                    + "\n\nIMPORTANT: You must return a non-empty text answer. If real-time news is unavailable, say so and proceed with context-based reasoning.",
-                                }
-                            ],
-                        },
-                        {"role": "user", "content": [{"type": "text", "text": base_user_text}]},
-                    ],
-                    max_output_tokens=max_out,
-                )
+                resp_retry = _responses_create(tools=None, strict=True)
                 out2 = getattr(resp_retry, "output_text", None)
                 if isinstance(out2, str) and out2.strip():
                     return out2.strip()
@@ -345,14 +532,15 @@ def call_openai(
                 raw = resp.model_dump() if hasattr(resp, "model_dump") else {}
             except Exception:
                 raw = {}
-            return json.dumps(raw, ensure_ascii=False)[:4000]
+            # Last resort: if force_text, return a deterministic briefing; otherwise surface raw.
+            return fallback_briefing(question=question, context_pack=enriched_ctx) if force_text else json.dumps(raw, ensure_ascii=False)[:4000]
     except AttributeError:
         # Older SDKs may not expose `responses`; fall through to chat.completions.
         pass
 
     # Chat Completions fallback (older SDK compatibility)
     chat_messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": ASKRAVEN_SYSTEM_PROMPT},
+        {"role": "system", "content": base_system},
         {"role": "user", "content": [{"type": "text", "text": user_parts[0]["text"]}]},
     ]
     # Append images for vision-capable models (if supported).
@@ -369,7 +557,7 @@ def call_openai(
     def _chat_once(*, use_parts: bool) -> Any:
         if use_parts:
             msgs: List[Dict[str, Any]] = [
-                {"role": "system", "content": ASKRAVEN_SYSTEM_PROMPT},
+                {"role": "system", "content": base_system},
                 {"role": "user", "content": [{"type": "text", "text": base_user_text}]},
             ]
             if img_parts:
@@ -377,7 +565,7 @@ def call_openai(
         else:
             # Plain string content is often the most compatible across models.
             msgs = [
-                {"role": "system", "content": ASKRAVEN_SYSTEM_PROMPT},
+                {"role": "system", "content": base_system},
                 {"role": "user", "content": base_user_text},
             ]
         try:
@@ -402,7 +590,21 @@ def call_openai(
         tool_calls = getattr(msg_obj, "tool_calls", None)
         fn_call = getattr(msg_obj, "function_call", None)
         if tool_calls or fn_call:
-            return fallback_briefing(question=question, context_pack=context_pack)
+            # Try one more time with a very explicit plain-text constraint.
+            try:
+                strict_sys = base_system + "\n\nIMPORTANT: Return a non-empty plain-text answer. Do not use tools. Proceed with the provided context only."
+                resp4 = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": strict_sys}, {"role": "user", "content": base_user_text}],
+                    max_completion_tokens=max_out,
+                )
+                msg4 = resp4.choices[0].message
+                txt4 = _content_to_text(getattr(msg4, "content", None)).strip()
+                if txt4:
+                    return txt4
+            except Exception:
+                pass
+            return fallback_briefing(question=question, context_pack=enriched_ctx) if force_text else ""
 
         # Retry once with an explicit non-empty response constraint.
         try:
@@ -414,9 +616,7 @@ def call_openai(
         except Exception:
             pass
 
-        return (
-            fallback_briefing(question=question, context_pack=context_pack)
-        )
+        return fallback_briefing(question=question, context_pack=enriched_ctx) if force_text else ""
     except Exception:
         try:
             raw2 = resp2.model_dump() if hasattr(resp2, "model_dump") else {}

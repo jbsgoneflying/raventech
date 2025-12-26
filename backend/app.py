@@ -350,13 +350,19 @@ def _benzinga_news_context(*, engine: str, report: dict, question: str) -> dict 
         title = _truncate(str(r.get("title") or r.get("headline") or ""), 220)
         if not title:
             continue
+        tickers_out = r.get("tickers") or r.get("symbols") or r.get("stocks")
+        if isinstance(tickers_out, list):
+            tickers_out = ",".join(str(x) for x in tickers_out if x is not None)[:120]
         items.append(
             {
+                "id": _truncate(str(r.get("id") or r.get("news_id") or ""), 40),
                 "title": title,
                 "created": _truncate(str(r.get("created") or r.get("created_at") or r.get("published") or ""), 40),
                 "updated": _truncate(str(r.get("updated") or r.get("updated_at") or ""), 40),
                 "url": _truncate(str(r.get("url") or ""), 260),
                 "source": _truncate(str(r.get("source") or ""), 40),
+                "tickers": _truncate(str(tickers_out or ""), 120),
+                "channels": _truncate(str(r.get("channels") or ""), 120),
                 "summary": _truncate(str(r.get("summary") or r.get("teaser") or ""), 280),
             }
         )
