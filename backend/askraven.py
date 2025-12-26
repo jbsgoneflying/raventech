@@ -69,7 +69,7 @@ def build_context_pack(*, engine: str, report: Dict[str, Any]) -> Dict[str, Any]
     return {"engine": eng, "notes": ["Unknown engine."]}
 
 
-ASKRAVEN_SYSTEM_PROMPT = """You are AskRaven, a rigorous, skeptical quant trading assistant.\n\nHard rules:\n- Ground your answer in the provided RavenTech context pack. If a number is not in the context, say so.\n- If a question depends on missing trade inputs (credit, exact expiry, wing width, underlying proxy), ask concise clarifying questions.\n- Distinguish between:\n  (1) historical odds from the engines,\n  (2) live/informational overlays (dealer gamma, live price), and\n  (3) outside reasoning.\n- No hallucinated data. No fabricated citations.\n\nOutput style:\n- Prefer bullet points.\n- Include a short \"Key numbers\" section when possible.\n- Include a short \"What would change my view\" section.\n\nCompliance:\n- Educational / risk analysis only; not financial advice.\n""".strip()
+ASKRAVEN_SYSTEM_PROMPT = """You are AskRaven, a rigorous, skeptical quant trading assistant.\n\nHard rules:\n- Ground your answer in the provided RavenTech context pack. If a number is not in the context, say so.\n- If a question depends on missing trade inputs (credit, exact expiry, wing width, underlying proxy), ask concise clarifying questions.\n- Distinguish between:\n  (1) historical odds from the engines,\n  (2) live/informational overlays (dealer gamma, live price), and\n  (3) outside reasoning.\n- No hallucinated data. No fabricated citations.\n\nConstraints:\n- You do NOT have web browsing or a real-time news feed unless explicitly provided in the context pack.\n- If the user asks for “news of the day” or headlines, explain what you can use (e.g., the Benzinga macro calendar already in context) and what would be needed to add real-time news.\n\nOutput style:\n- Prefer bullet points.\n- Include a short \"Key numbers\" section when possible.\n- Include a short \"What would change my view\" section.\n\nCompliance:\n- Educational / risk analysis only; not financial advice.\n""".strip()
 
 
 @dataclass(frozen=True)
@@ -165,16 +165,41 @@ def call_openai(
     if img_parts:
         chat_messages[-1]["content"].extend(img_parts)
 
-    resp2 = client.chat.completions.create(
-        model=model,
-        messages=chat_messages,
-        # Some newer models reject `max_tokens` and require `max_completion_tokens`.
-        # We'll try the newer param first, then fall back.
-        max_completion_tokens=max_out,
-    )
     try:
-        txt = resp2.choices[0].message.content
-        return (txt or "").strip()
+        resp2 = client.chat.completions.create(
+            model=model,
+            messages=chat_messages,
+            max_completion_tokens=max_out,
+        )
+    except TypeError:
+        # Some older models/SDKs only accept max_tokens.
+        resp2 = client.chat.completions.create(
+            model=model,
+            messages=chat_messages,
+            max_tokens=max_out,
+        )
+
+    # Some models can return tool calls with empty text content. Never return blank.
+    try:
+        msg_obj = resp2.choices[0].message
+        txt = getattr(msg_obj, "content", None)
+        if isinstance(txt, str) and txt.strip():
+            return txt.strip()
+
+        tool_calls = getattr(msg_obj, "tool_calls", None)
+        fn_call = getattr(msg_obj, "function_call", None)
+        if tool_calls or fn_call:
+            return (
+                "I can’t fetch real-time headlines yet because this AskRaven instance isn’t configured with a news/browsing tool. "
+                "What I *can* do right now is: use your Engine 2 macro calendar + regime + dealer gamma context, and interpret any charts you upload. "
+                "If you want true “news of the day,” we can wire a news feed (e.g., Benzinga News endpoint) and I’ll summarize it pre-market."
+            )
+
+        return (
+            "I didn’t receive any text back from the model for that request. "
+            "Try re-sending, or ask using the engine context (macro events, regime, dealer gamma, odds-like-now). "
+            "If you want real-time news/headlines, we need to add a news feed tool."
+        )
     except Exception:
         try:
             raw2 = resp2.model_dump() if hasattr(resp2, "model_dump") else {}
