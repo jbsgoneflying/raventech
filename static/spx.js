@@ -12,39 +12,6 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
-function appendChatMessage(role, text) {
-  const host = $("askRavenTranscript");
-  if (!host) return;
-  const msg = document.createElement("div");
-  msg.className = role === "user" ? "chatMsg chatMsg--user" : "chatMsg chatMsg--assistant";
-  msg.innerHTML = `
-    <div class="chatRole">${escapeHtml(role === "user" ? "You" : "AskRaven")}</div>
-    <div class="chatText">${escapeHtml(String(text || ""))}</div>
-  `;
-  host.appendChild(msg);
-  host.scrollTop = host.scrollHeight;
-}
-
-async function uploadAskRavenImages(files) {
-  const fd = new FormData();
-  for (const f of files) fd.append("files", f);
-  const res = await fetch("/api/chat/upload", { method: "POST", body: fd });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.detail || `Upload failed (${res.status})`);
-  return Array.isArray(body?.image_ids) ? body.image_ids : [];
-}
-
-async function askRavenSend({ engine, message, imageIds }) {
-  const res = await fetch("/api/chat/message", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify({ engine, message, image_ids: imageIds || [] }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.detail || `AskRaven failed (${res.status})`);
-  return body?.reply || "";
-}
-
 function fmtPct(x, d = 2) {
   const n = Number(x);
   if (!Number.isFinite(n)) return "—";
@@ -292,9 +259,11 @@ function render(payload) {
   const dgMain = $("dgMain");
   const dgNote = $("dgNote");
   const dgTop = $("dgTop");
+  const dgOi = $("dgOi");
   const lc = payload?.liveContext || null;
   const dg = lc?.dealerGamma || null;
-  if (dgMain && dgNote && dgTop) {
+  const oi = lc?.oiClusters || null;
+  if (dgMain && dgNote && dgTop && dgOi) {
     const enabled = !!(lc && lc.enabled && dg && dg.netGammaSign);
     if (!enabled) {
       dgMain.textContent = "—";
@@ -302,11 +271,17 @@ function render(payload) {
       const warn = Array.isArray(lc?.warnings) ? lc.warnings.filter(Boolean) : [];
       dgNote.textContent = notes[0] || warn[0] || "Live context unavailable.";
       dgTop.textContent = "";
+      dgOi.textContent = "—";
     } else {
       dgMain.textContent = `${String(dg.netGammaSign || "").toUpperCase()} · ${String(dg.magnitudeBucket || "").toUpperCase()}`;
       dgNote.textContent = `symbol=${String(lc.symbolUsed || "—")} · expiry=${String(lc.expiry || "—")} · spot=${Number(dg.spot || 0).toFixed(2)} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}% · weighting=${String(dg.weightingMode || "—")}`;
       const tops = Array.isArray(dg.topGammaStrikes) ? dg.topGammaStrikes : [];
       dgTop.textContent = tops.length ? `Top strikes: ${tops.map(x => `${Number(x.strike).toFixed(0)}${String(x.side || "")}`).join(" · ")}` : "";
+      const putWall = oi && typeof oi === "object" ? oi.putWall : null;
+      const callWall = oi && typeof oi === "object" ? oi.callWall : null;
+      const putTxt = putWall && Number.isFinite(Number(putWall.maxStrike)) ? `${Number(putWall.maxStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
+      const callTxt = callWall && Number.isFinite(Number(callWall.maxStrike)) ? `${Number(callWall.maxStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
+      dgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
     }
   }
 
@@ -412,48 +387,7 @@ async function main() {
   }
 
   initTooltips();
-
-  // ---- AskRaven (Engine 2) ----
-  const chatInput = $("askRavenInput");
-  const chatSend = $("askRavenSend");
-  const chatFiles = $("askRavenFiles");
-  const chatMeta = $("askRavenMeta");
-  let chatBusy = false;
-
-  async function doSend() {
-    if (chatBusy) return;
-    const q = String(chatInput?.value || "").trim();
-    if (!q) return;
-    chatBusy = true;
-    if (chatSend) chatSend.disabled = true;
-    appendChatMessage("user", q);
-    if (chatInput) chatInput.value = "";
-
-    try {
-      const files = chatFiles?.files ? Array.from(chatFiles.files).slice(0, 4) : [];
-      const imageIds = files.length ? await uploadAskRavenImages(files) : [];
-      if (chatFiles) chatFiles.value = "";
-      const reply = await askRavenSend({ engine: "engine2", message: q, imageIds });
-      appendChatMessage("assistant", reply);
-      if (chatMeta) chatMeta.textContent = `Last response OK · images=${imageIds.length}`;
-    } catch (e) {
-      appendChatMessage("assistant", `Error: ${String(e?.message || e)}`);
-      if (chatMeta) chatMeta.textContent = "AskRaven error (see transcript).";
-    } finally {
-      chatBusy = false;
-      if (chatSend) chatSend.disabled = false;
-    }
-  }
-
-  if (chatSend) chatSend.addEventListener("click", doSend);
-  if (chatInput) {
-    chatInput.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && !ev.shiftKey) {
-        ev.preventDefault();
-        doSend();
-      }
-    });
-  }
+  // AskRaven removed
 
   // Do NOT auto-run: user must review selections and click Run.
   const results = $("results");

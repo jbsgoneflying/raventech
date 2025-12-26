@@ -44,39 +44,6 @@ function escapeHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
-function appendChatMessage(role, text) {
-  const host = $("askRavenTranscript");
-  if (!host) return;
-  const msg = document.createElement("div");
-  msg.className = role === "user" ? "chatMsg chatMsg--user" : "chatMsg chatMsg--assistant";
-  msg.innerHTML = `
-    <div class="chatRole">${escapeHtml(role === "user" ? "You" : "AskRaven")}</div>
-    <div class="chatText">${escapeHtml(String(text || ""))}</div>
-  `;
-  host.appendChild(msg);
-  host.scrollTop = host.scrollHeight;
-}
-
-async function uploadAskRavenImages(files) {
-  const fd = new FormData();
-  for (const f of files) fd.append("files", f);
-  const res = await fetch("/api/chat/upload", { method: "POST", body: fd });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.detail || `Upload failed (${res.status})`);
-  return Array.isArray(body?.image_ids) ? body.image_ids : [];
-}
-
-async function askRavenSend({ engine, message, imageIds }) {
-  const res = await fetch("/api/chat/message", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify({ engine, message, image_ids: imageIds || [] }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.detail || `AskRaven failed (${res.status})`);
-  return body?.reply || "";
-}
-
 function pill(text, kind) {
   const cls = kind ? `pill ${kind}` : "pill";
   return `<span class="${cls}">${escapeHtml(text)}</span>`;
@@ -874,15 +841,18 @@ function render(payload) {
   // Market dealer gamma (live, informational only)
   const mgMain = $("marketGammaMain");
   const mgNote = $("marketGammaNote");
+  const mgOi = $("marketOiNote");
   const mg = payload?.marketDealerGamma || null;
-  if (mgMain && mgNote) {
+  if (mgMain && mgNote && mgOi) {
     const dg = mg?.dealerGamma || null;
+    const oi = mg?.oiClusters || null;
     const enabled = !!(mg && mg.enabled && dg && dg.netGammaSign);
     if (!enabled) {
       mgMain.textContent = "—";
       const notes = Array.isArray(mg?.notes) ? mg.notes.filter(Boolean) : [];
       const warn = Array.isArray(mg?.warnings) ? mg.warnings.filter(Boolean) : [];
       mgNote.textContent = (notes[0] || warn[0] || "Live context unavailable (market closed, entitlement gap, or no live chain).");
+      mgOi.textContent = "—";
     } else {
       const sign = String(dg.netGammaSign || "—");
       const bucket = String(dg.magnitudeBucket || "—");
@@ -891,6 +861,11 @@ function render(payload) {
       mgMain.textContent = `${sym.toUpperCase()} · ${sign.toUpperCase()} · ${bucket.toUpperCase()}`;
       const warn = mg.warning ? ` ${String(mg.warning)}` : "";
       mgNote.textContent = `expiry=${exp} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}% · weighting=${String(dg.weightingMode || "—")}.${warn}`;
+      const putWall = oi && typeof oi === "object" ? oi.putWall : null;
+      const callWall = oi && typeof oi === "object" ? oi.callWall : null;
+      const putTxt = putWall && Number.isFinite(Number(putWall.maxStrike)) ? `${Number(putWall.maxStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
+      const callTxt = callWall && Number.isFinite(Number(callWall.maxStrike)) ? `${Number(callWall.maxStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
+      mgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
     }
   }
 
@@ -899,16 +874,19 @@ function render(payload) {
   const tgLabel = $("tickerGammaLabel");
   const tgMain = $("tickerGammaMain");
   const tgNote = $("tickerGammaNote");
+  const tgOi = $("tickerOiNote");
   const tgd = payload?.tickerDealerGamma || null;
   if (tgLabel) tgLabel.textContent = `${String(payload?.ticker || "Ticker").toUpperCase()} Dealer Gamma (Live)`;
-  if (tgCard && tgMain && tgNote) {
+  if (tgCard && tgMain && tgNote && tgOi) {
     const dg = tgd?.dealerGamma || null;
+    const oi = tgd?.oiClusters || null;
     const enabled = !!(tgd && tgd.enabled && dg && dg.netGammaSign);
     if (!enabled) {
       tgMain.textContent = "—";
       const notes = Array.isArray(tgd?.notes) ? tgd.notes.filter(Boolean) : [];
       const warn = Array.isArray(tgd?.warnings) ? tgd.warnings.filter(Boolean) : [];
       tgNote.textContent = (notes[0] || warn[0] || "Live context unavailable (market closed, entitlement gap, or no live chain).");
+      tgOi.textContent = "—";
     } else {
       const sign = String(dg.netGammaSign || "—");
       const bucket = String(dg.magnitudeBucket || "—");
@@ -919,6 +897,11 @@ function render(payload) {
       const warns = Array.isArray(tgd.warnings) && tgd.warnings.length ? ` · ${tgd.warnings.join(" · ")}` : "";
       const bandMode = tgd.bandMode ? ` · ${String(tgd.bandMode)}` : "";
       tgNote.textContent = `expiry=${exp}${earn} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}%${bandMode} · weighting=${String(dg.weightingMode || "—")}${warns}`;
+      const putWall = oi && typeof oi === "object" ? oi.putWall : null;
+      const callWall = oi && typeof oi === "object" ? oi.callWall : null;
+      const putTxt = putWall && Number.isFinite(Number(putWall.maxStrike)) ? `${Number(putWall.maxStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
+      const callTxt = callWall && Number.isFinite(Number(callWall.maxStrike)) ? `${Number(callWall.maxStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
+      tgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
     }
   }
   const rm = $("regimeMessage");
@@ -1248,48 +1231,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // ---- AskRaven (Engine 1) ----
-  const chatInput = $("askRavenInput");
-  const chatSend = $("askRavenSend");
-  const chatFiles = $("askRavenFiles");
-  const chatMeta = $("askRavenMeta");
-  let chatBusy = false;
-
-  async function doSend() {
-    if (chatBusy) return;
-    const q = String(chatInput?.value || "").trim();
-    if (!q) return;
-    chatBusy = true;
-    if (chatSend) chatSend.disabled = true;
-    appendChatMessage("user", q);
-    if (chatInput) chatInput.value = "";
-
-    try {
-      const files = chatFiles?.files ? Array.from(chatFiles.files).slice(0, 4) : [];
-      const imageIds = files.length ? await uploadAskRavenImages(files) : [];
-      if (chatFiles) chatFiles.value = "";
-      const reply = await askRavenSend({ engine: "engine1", message: q, imageIds });
-      appendChatMessage("assistant", reply);
-      if (chatMeta) chatMeta.textContent = `Last response OK · images=${imageIds.length}`;
-    } catch (e) {
-      appendChatMessage("assistant", `Error: ${String(e?.message || e)}`);
-      if (chatMeta) chatMeta.textContent = "AskRaven error (see transcript).";
-    } finally {
-      chatBusy = false;
-      if (chatSend) chatSend.disabled = false;
-    }
-  }
-
-  if (chatSend) chatSend.addEventListener("click", doSend);
-  if (chatInput) {
-    chatInput.addEventListener("keydown", (ev) => {
-      // Enter to send; Shift+Enter for newline
-      if (ev.key === "Enter" && !ev.shiftKey) {
-        ev.preventDefault();
-        doSend();
-      }
-    });
-  }
+  // AskRaven removed
 });
 
 

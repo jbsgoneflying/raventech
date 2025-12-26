@@ -13,7 +13,7 @@ import threading
 from dataclasses import replace
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, Request, Form, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Request, Form
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from cachetools import TTLCache
@@ -27,7 +27,6 @@ from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
 from backend.spx_ic_engine import compute_engine2_spx_ic
 from backend.redis_store import get_store_optional
-from backend.askraven import UploadedImage, build_context_pack, askraven_agent_chat
 
 
 try:
@@ -237,335 +236,10 @@ _breach_cache_lock = threading.Lock()
 _spx_ic_cache = TTLCache(maxsize=128, ttl=30 * 60)  # 30 minutes (interactive)
 _spx_ic_cache_lock = threading.Lock()
 
-# AskRaven/session store (Redis recommended; optional for local dev)
-_store = get_store_optional()
-
-
-def _store_set_latest(engine: str, payload: dict) -> None:
-    """
-    Best-effort: persist the latest engine payload for AskRaven grounding.
-    We intentionally ignore failures so the core app keeps working.
-    """
-    try:
-        if _store is None:
-            return
-        if not isinstance(payload, dict):
-            return
-        _store.set_json(f"latest_report:{str(engine)}", payload)
-    except Exception:
-        return
-
-
-ASKRAVEN_MAX_IMAGES = 4
-ASKRAVEN_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB
-ASKRAVEN_UPLOAD_DIR = pathlib.Path(os.getenv("ASKRAVEN_UPLOAD_DIR") or "/tmp/askraven_uploads")
-
-
-def _is_webp(content: bytes) -> bool:
-    # Minimal WEBP signature: RIFF....WEBP
-    return bool(len(content) >= 12 and content[0:4] == b"RIFF" and content[8:12] == b"WEBP")
-
-
-def _sniff_image_type(content: bytes) -> str | None:
-    # Minimal magic checks: png/jpeg/gif/webp
-    if len(content) >= 8 and content[:8] == b"\x89PNG\r\n\x1a\n":
-        return "image/png"
-    if len(content) >= 3 and content[:3] == b"\xff\xd8\xff":
-        return "image/jpeg"
-    if len(content) >= 6 and content[:6] in (b"GIF87a", b"GIF89a"):
-        return "image/gif"
-    if _is_webp(content):
-        return "image/webp"
-    return None
-
-
-def _ensure_upload_dir() -> None:
-    try:
-        ASKRAVEN_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        return
-
-
-class ChatMessageRequest(BaseModel):
-    engine: str = Field(..., description="engine1|engine2")
-    message: str = Field(..., description="User question")
-    image_ids: list[str] = Field(default_factory=list)
-
-
-def _askraven_session_key(request: Request) -> str:
-    """
-    Session-only AskRaven memory key.
-    Hash the auth cookie so we never store the raw token in Redis.
-    If there is no cookie (ungated local mode), fall back to a stable single-user key.
-    """
-    raw = request.cookies.get(AUTH_COOKIE_NAME) or "single_user"
-    h = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    return f"askraven:session:{h}"
-
-
-def _get_askraven_summary(request: Request) -> str:
-    if _store is None:
-        return ""
-    v = _store.get_json(_askraven_session_key(request))
-    if isinstance(v, dict) and isinstance(v.get("summary"), str):
-        return str(v.get("summary") or "")
-    return ""
-
-
-def _set_askraven_summary(request: Request, summary: str) -> None:
-    if _store is None:
-        return
-    s = str(summary or "").strip()
-    if not s:
-        return
-    _store.set_json(_askraven_session_key(request), {"summary": s}, ttl_s=6 * 60 * 60)
-
-
-def _get_askraven_state(request: Request) -> dict:
-    """
-    Returns {"summary": str, "history": [{"role":"user|assistant","content":str}, ...]}
-    """
-    if _store is None:
-        return {"summary": "", "history": []}
-    v = _store.get_json(_askraven_session_key(request))
-    if not isinstance(v, dict):
-        return {"summary": "", "history": []}
-    summary = str(v.get("summary") or "")
-    hist = v.get("history")
-    if not isinstance(hist, list):
-        hist = []
-    # sanitize
-    out_hist = []
-    for m in hist:
-        if not isinstance(m, dict):
-            continue
-        role = str(m.get("role") or "")
-        content = str(m.get("content") or "")
-        if role in ("user", "assistant") and content:
-            out_hist.append({"role": role, "content": content[:8000]})
-    return {"summary": summary, "history": out_hist[-12:]}  # last 12 messages max
-
-
-def _set_askraven_state(request: Request, *, summary: str, history: list[dict]) -> None:
-    if _store is None:
-        return
-    s = str(summary or "").strip()
-    hist = []
-    for m in history or []:
-        if not isinstance(m, dict):
-            continue
-        role = str(m.get("role") or "")
-        content = str(m.get("content") or "")
-        if role in ("user", "assistant") and content:
-            hist.append({"role": role, "content": content[:8000]})
-    payload = {"summary": s, "history": hist[-12:]}
-    _store.set_json(_askraven_session_key(request), payload, ttl_s=6 * 60 * 60)
-
 def _truncate(s: str, n: int) -> str:
     t = str(s or "").replace("\n", " ").strip()
     return (t[:n] + "…") if len(t) > n else t
 
-
-def _benzinga_news_context(*, engine: str, report: dict, question: str) -> dict | None:
-    """
-    Best-effort, recent Benzinga news snapshot for AskRaven.
-    Uses BenzingaClient's internal cache, and we also keep our own tiny TTL in Redis if available.
-    """
-    bz = _get_benzinga_client_optional()
-    if bz is None:
-        return None
-
-    eng = str(engine or "").strip().lower()
-    q = str(question or "").lower()
-    wants_news = any(k in q for k in ("news", "headline", "headlines", "pre-market", "premarket", "gap", "catalyst", "catalysts"))
-    # Always attach for Engine 2 (market context), or when explicitly requested.
-    if not (wants_news or eng == "engine2"):
-        return None
-
-    tickers = None
-    if eng == "engine1":
-        t = str((report or {}).get("ticker") or "").strip().upper()
-        tickers = t if t else None
-    else:
-        # SPX often isn't a standard equity ticker in news feeds; SPY reliably is.
-        tickers = "SPY,SPX"
-
-    now = dt.datetime.utcnow().date()
-    date_to = now.isoformat()
-    date_from = (now - dt.timedelta(days=2)).isoformat()
-    cache_key = f"benzinga_news:{tickers}:{date_from}:{date_to}"
-
-    if _store is not None:
-        cached = _store.get_json(cache_key)
-        if isinstance(cached, dict) and cached.get("items"):
-            return cached
-
-    try:
-        resp = bz.news(
-            tickers=tickers,
-            date_from=date_from,
-            date_to=date_to,
-            page=0,
-            page_size=50,
-            sort="updated",
-        )
-        rows = resp.rows or []
-    except Exception:
-        rows = []
-
-    items = []
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        title = _truncate(str(r.get("title") or r.get("headline") or ""), 220)
-        if not title:
-            continue
-        tickers_out = r.get("tickers") or r.get("symbols") or r.get("stocks")
-        if isinstance(tickers_out, list):
-            tickers_out = ",".join(str(x) for x in tickers_out if x is not None)[:120]
-        items.append(
-            {
-                "id": _truncate(str(r.get("id") or r.get("news_id") or ""), 40),
-                "title": title,
-                "created": _truncate(str(r.get("created") or r.get("created_at") or r.get("published") or ""), 40),
-                "updated": _truncate(str(r.get("updated") or r.get("updated_at") or ""), 40),
-                "url": _truncate(str(r.get("url") or ""), 260),
-                "source": _truncate(str(r.get("source") or ""), 40),
-                "tickers": _truncate(str(tickers_out or ""), 120),
-                "channels": _truncate(str(r.get("channels") or ""), 120),
-                "summary": _truncate(str(r.get("summary") or r.get("teaser") or ""), 280),
-            }
-        )
-        if len(items) >= 12:
-            break
-
-    out = {
-        "enabled": True,
-        "provider": "benzinga",
-        "tickers": tickers,
-        "window": {"from": date_from, "to": date_to},
-        "items": items,
-        "notes": ["Recent Benzinga headlines snapshot (best-effort)."],
-    }
-    if _store is not None:
-        _store.set_json(cache_key, out, ttl_s=15 * 60)  # 15 min
-    return out
-
-
-@app.post("/api/chat/upload")
-async def chat_upload(files: list[UploadFile] = File(...)):
-    if _store is None:
-        raise HTTPException(status_code=500, detail="Redis not configured (REDIS_URL).")
-    if not files:
-        raise HTTPException(status_code=400, detail="No files provided.")
-    if len(files) > ASKRAVEN_MAX_IMAGES:
-        raise HTTPException(status_code=400, detail=f"Max {ASKRAVEN_MAX_IMAGES} images per upload.")
-
-    _ensure_upload_dir()
-    ids: list[str] = []
-    for f in files:
-        content = await f.read()
-        if content is None:
-            continue
-        if len(content) > ASKRAVEN_MAX_IMAGE_BYTES:
-            raise HTTPException(status_code=400, detail=f"Image too large (max {ASKRAVEN_MAX_IMAGE_BYTES} bytes).")
-        sniffed = _sniff_image_type(content)
-        if sniffed is None:
-            raise HTTPException(status_code=400, detail="Unsupported image type. Use png/jpg/gif/webp.")
-        ext = "png" if sniffed == "image/png" else "jpg" if sniffed == "image/jpeg" else "gif" if sniffed == "image/gif" else "webp"
-        image_id = uuid.uuid4().hex
-        path = ASKRAVEN_UPLOAD_DIR / f"{image_id}.{ext}"
-        try:
-            path.write_bytes(content)
-        except Exception:
-            raise HTTPException(status_code=500, detail="Failed to store upload.") from None
-        meta = {"id": image_id, "path": str(path), "content_type": sniffed, "bytes": int(len(content))}
-        _store.set_json(f"image_meta:{image_id}", meta)
-        ids.append(image_id)
-
-    return {"ok": True, "image_ids": ids, "max_images": ASKRAVEN_MAX_IMAGES, "max_bytes_each": ASKRAVEN_MAX_IMAGE_BYTES}
-
-
-@app.post("/api/chat/message")
-async def chat_message(req: ChatMessageRequest, request: Request):
-    if _store is None:
-        raise HTTPException(status_code=500, detail="Redis not configured (REDIS_URL).")
-    engine = str(req.engine or "").strip().lower()
-    if engine not in ("engine1", "engine2"):
-        raise HTTPException(status_code=400, detail="engine must be engine1 or engine2.")
-    msg = str(req.message or "").strip()
-    if not msg:
-        raise HTTPException(status_code=400, detail="message is required.")
-    if len(msg) > 8000:
-        raise HTTPException(status_code=400, detail="message too long (max 8000 chars).")
-
-    report = _store.get_json(f"latest_report:{engine}")
-    if report is None:
-        raise HTTPException(status_code=400, detail=f"No recent {engine} report found. Run the engine first.")
-    if not isinstance(report, dict):
-        raise HTTPException(status_code=500, detail="Stored report is invalid.")
-
-    image_ids = list(req.image_ids or [])[:ASKRAVEN_MAX_IMAGES]
-    images: list[UploadedImage] = []
-    for image_id in image_ids:
-        meta = _store.get_json(f"image_meta:{str(image_id)}")
-        if not isinstance(meta, dict):
-            continue
-        path = meta.get("path")
-        ct = meta.get("content_type") or "application/octet-stream"
-        if not path:
-            continue
-        try:
-            b = pathlib.Path(str(path)).read_bytes()
-        except Exception:
-            continue
-        if len(b) > ASKRAVEN_MAX_IMAGE_BYTES:
-            continue
-        images.append(UploadedImage(content=b, content_type=str(ct), image_id=str(image_id)))
-
-    ctx = build_context_pack(engine=engine, report=report)
-    try:
-        state = _get_askraven_state(request)
-        prior = str(state.get("summary") or "")
-        prior_history = state.get("history") if isinstance(state.get("history"), list) else []
-        out = askraven_agent_chat(
-            question=msg,
-            context_pack=ctx,
-            images=images,
-            orats_client=_get_client_optional(),
-            benzinga_client=_get_benzinga_client_optional(),
-            prior_summary=prior,
-            prior_history=prior_history,
-        )
-        if isinstance(out, dict):
-            reply = str(out.get("answer") or "").strip()
-            summary = str(out.get("summary") or "").strip()
-            # append to history + persist
-            hist2 = list(prior_history)
-            hist2.append({"role": "user", "content": msg})
-            hist2.append({"role": "assistant", "content": reply})
-            _set_askraven_state(request, summary=summary, history=hist2)
-        else:
-            reply = str(out or "").strip()
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    except Exception as e:
-        # Surface a small, safe snippet so we can debug model/config issues in production.
-        snippet = str(e) if e is not None else ""
-        snippet = (snippet or "").replace("\n", " ").strip()
-        if len(snippet) > 380:
-            snippet = snippet[:380] + "…"
-        # Some OpenAI SDK errors include a JSON-like body; try to include it if available.
-        body = getattr(e, "body", None)
-        if body is not None:
-            try:
-                body_txt = json.dumps(body, ensure_ascii=False)[:380]
-                snippet = f"{snippet} body={body_txt}"
-            except Exception:
-                pass
-        raise HTTPException(status_code=502, detail=f"LLM call failed: {type(e).__name__}: {snippet}") from e
-
-    return {"ok": True, "engine": engine, "reply": reply, "used": {"images": len(images), "hasReport": True}}
 
 def _get_client() -> OratsClient:
     global _client
@@ -579,7 +253,7 @@ def _get_client() -> OratsClient:
 
 def _get_client_optional() -> OratsClient | None:
     """
-    Optional ORATS client so tests / misconfigured envs don't 500 before AskRaven can degrade safely.
+    Optional ORATS client so tests / misconfigured envs don't 500.
     """
     try:
         return _get_client()
@@ -689,7 +363,7 @@ def spx_ic(
         if cached is not None:
             return cached
 
-        ws: List[float] = []
+        ws: list[float] = []
         for part in str(widths).split(","):
             p = part.strip()
             if not p:
@@ -736,7 +410,6 @@ def spx_ic(
 
         with _spx_ic_cache_lock:
             _spx_ic_cache[key] = payload
-        _store_set_latest("engine2", payload)
         return payload
     except OratsError as e:
         LOG.exception("ORATS failure (spx-ic)")
@@ -829,7 +502,6 @@ def breach(
         if not has_trade_builder:
             with _breach_cache_lock:
                 _breach_cache[key] = payload
-        _store_set_latest("engine1", payload)
         return payload
     except BreachInputError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

@@ -18,6 +18,7 @@ from backend.orats_client import OratsClient
 LOG = logging.getLogger("spx_ic_engine")
 
 from backend.dealer_gamma_context import compute_dealer_gamma_context
+from backend.oi_clusters import compute_open_interest_clusters
 from backend.technicals import DailyBar as TechDailyBar
 from backend.technicals import compute_distances, compute_ema_levels, compute_ichimoku_levels, compute_vwap_proxy, fetch_live_price_optional
 
@@ -2003,6 +2004,7 @@ def compute_engine2_spx_ic(
 
                 if chain_rows:
                     dg = compute_dealer_gamma_context(chain_rows, expiry=expiry_live, contract_multiplier=100, band_pct=0.05, top_n=5)
+                    oi = compute_open_interest_clusters(chain_rows, expiry=expiry_live, band_pct=0.05, top_n=5, cluster_steps=2)
                     # Simple greek aggregates near spot band (same band as dealer gamma)
                     spot = dg.get("spot")
                     lo = float(spot) * (1.0 - 0.05) if spot else None
@@ -2053,6 +2055,7 @@ def compute_engine2_spx_ic(
                             "weightingMode": w_mode,
                         },
                         "dealerGamma": dg,
+                        "oiClusters": oi,
                         "warnings": [*exp_warn, *chain_warn],
                         "notes": [
                             "Live, informational only. Dealer gamma context does not change breach odds or any historical stats.",

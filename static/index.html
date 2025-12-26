@@ -123,26 +123,7 @@
           <div id="actionSummary" class="actionSummary muted" aria-live="polite">—</div>
         </section>
 
-        <section class="surface" id="askRavenSection" aria-label="AskRaven">
-          <div class="sectionHeader">
-            <h2 class="sectionTitle">
-              AskRaven
-              <span class="info" title="Ask questions grounded in the latest Engine 1 report. You can attach up to 4 images (10MB each).">ⓘ</span>
-            </h2>
-            <div class="sectionMeta muted" id="askRavenMeta">Run a report, then ask questions.</div>
-          </div>
-
-          <div id="askRavenTranscript" class="chatTranscript" aria-live="polite"></div>
-
-          <div class="chatControls">
-            <textarea id="askRavenInput" class="chatInput" rows="3" placeholder="Ask about breach odds, seasonality, tails, strikes, etc."></textarea>
-            <div class="chatActions">
-              <input id="askRavenFiles" class="chatFile" type="file" accept="image/*" multiple />
-              <button id="askRavenSend" class="primaryButton" type="button">Send</button>
-            </div>
-            <div class="metricCaption muted">Note: indicators are daily (EOD) + live price overlay when available. True intraday VWAP requires intraday OHLCV.</div>
-          </div>
-        </section>
+        <!-- AskRaven removed -->
 
         <section class="surface">
           <div class="sectionHeader">
@@ -171,6 +152,7 @@
               </div>
               <div id="marketGammaMain" class="metricValue">—</div>
               <div id="marketGammaNote" class="metricCaption muted">—</div>
+              <div id="marketOiNote" class="metricCaption muted">—</div>
             </div>
             <div class="metricCard" id="tickerGammaCard">
               <div class="metricLabel">
@@ -179,6 +161,7 @@
               </div>
               <div id="tickerGammaMain" class="metricValue">—</div>
               <div id="tickerGammaNote" class="metricCaption muted">—</div>
+              <div id="tickerOiNote" class="metricCaption muted">—</div>
             </div>
             <div class="metricCard">
               <div class="metricLabel">Trade Gate</div>

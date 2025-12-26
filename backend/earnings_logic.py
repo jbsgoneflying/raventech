@@ -10,6 +10,7 @@ from backend.config import get_flags
 from backend.earnings_calendar import benzinga_next_earnings
 from backend.event_risk_overlay import compute_event_risk_overlay_optional
 from backend.dealer_gamma_context import compute_dealer_gamma_context
+from backend.oi_clusters import compute_open_interest_clusters
 from backend.orats_client import OratsClient, OratsError
 from backend.regime_overlay import apply_event_risk_adjustment, compute_regime_backtest_view, compute_regime_overlay
 from backend.skew_overlay import compute_skew_overlay
@@ -222,12 +223,14 @@ def _compute_live_dealer_gamma_payload(
         return None
 
     dg = compute_dealer_gamma_context(chain_rows, expiry=str(expiry)[:10], contract_multiplier=100, band_pct=float(band_pct), top_n=int(top_n))
+    oi = compute_open_interest_clusters(chain_rows, expiry=str(expiry)[:10], band_pct=float(band_pct), top_n=int(top_n), cluster_steps=2)
     warnings.extend(dg.get("warnings") if isinstance(dg, dict) else [])
     return {
         "enabled": True,
         "symbolUsed": str(ticker).upper(),
         "expiry": str(expiry)[:10],
         "dealerGamma": dg,
+        "oiClusters": oi,
         "warnings": warnings,
         "notes": [
             "Live, informational only. Dealer gamma context does not change historical earnings stats or breach probabilities.",
