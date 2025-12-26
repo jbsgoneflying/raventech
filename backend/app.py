@@ -12,19 +12,28 @@ import threading
 from dataclasses import replace
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, Request, Form
+from fastapi import FastAPI, HTTPException, Query, Request, Form, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from cachetools import TTLCache
+from pydantic import BaseModel, Field
+import uuid
+import pathlib
 
 from backend.earnings_logic import BreachInputError, compute_breach_stats, compute_current_snapshot
 from backend.config import get_flags
 from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
 from backend.spx_ic_engine import compute_engine2_spx_ic
+from backend.redis_store import get_store_optional
+from backend.askraven import UploadedImage, build_context_pack, call_openai
 
 
-load_dotenv()
+try:
+    # In some environments (CI/sandboxes), `.env` may be unreadable; keep startup resilient.
+    load_dotenv()
+except Exception:
+    pass
 
 
 def _configure_logging() -> None:
@@ -227,6 +236,141 @@ _breach_cache_lock = threading.Lock()
 _spx_ic_cache = TTLCache(maxsize=128, ttl=30 * 60)  # 30 minutes (interactive)
 _spx_ic_cache_lock = threading.Lock()
 
+# AskRaven/session store (Redis recommended; optional for local dev)
+_store = get_store_optional()
+
+
+def _store_set_latest(engine: str, payload: dict) -> None:
+    """
+    Best-effort: persist the latest engine payload for AskRaven grounding.
+    We intentionally ignore failures so the core app keeps working.
+    """
+    try:
+        if _store is None:
+            return
+        if not isinstance(payload, dict):
+            return
+        _store.set_json(f"latest_report:{str(engine)}", payload)
+    except Exception:
+        return
+
+
+ASKRAVEN_MAX_IMAGES = 4
+ASKRAVEN_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB
+ASKRAVEN_UPLOAD_DIR = pathlib.Path(os.getenv("ASKRAVEN_UPLOAD_DIR") or "/tmp/askraven_uploads")
+
+
+def _is_webp(content: bytes) -> bool:
+    # Minimal WEBP signature: RIFF....WEBP
+    return bool(len(content) >= 12 and content[0:4] == b"RIFF" and content[8:12] == b"WEBP")
+
+
+def _sniff_image_type(content: bytes) -> str | None:
+    # Minimal magic checks: png/jpeg/gif/webp
+    if len(content) >= 8 and content[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if len(content) >= 3 and content[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if len(content) >= 6 and content[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if _is_webp(content):
+        return "image/webp"
+    return None
+
+
+def _ensure_upload_dir() -> None:
+    try:
+        ASKRAVEN_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+
+class ChatMessageRequest(BaseModel):
+    engine: str = Field(..., description="engine1|engine2")
+    message: str = Field(..., description="User question")
+    image_ids: list[str] = Field(default_factory=list)
+
+
+@app.post("/api/chat/upload")
+async def chat_upload(files: list[UploadFile] = File(...)):
+    if _store is None:
+        raise HTTPException(status_code=500, detail="Redis not configured (REDIS_URL).")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+    if len(files) > ASKRAVEN_MAX_IMAGES:
+        raise HTTPException(status_code=400, detail=f"Max {ASKRAVEN_MAX_IMAGES} images per upload.")
+
+    _ensure_upload_dir()
+    ids: list[str] = []
+    for f in files:
+        content = await f.read()
+        if content is None:
+            continue
+        if len(content) > ASKRAVEN_MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail=f"Image too large (max {ASKRAVEN_MAX_IMAGE_BYTES} bytes).")
+        sniffed = _sniff_image_type(content)
+        if sniffed is None:
+            raise HTTPException(status_code=400, detail="Unsupported image type. Use png/jpg/gif/webp.")
+        ext = "png" if sniffed == "image/png" else "jpg" if sniffed == "image/jpeg" else "gif" if sniffed == "image/gif" else "webp"
+        image_id = uuid.uuid4().hex
+        path = ASKRAVEN_UPLOAD_DIR / f"{image_id}.{ext}"
+        try:
+            path.write_bytes(content)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Failed to store upload.") from None
+        meta = {"id": image_id, "path": str(path), "content_type": sniffed, "bytes": int(len(content))}
+        _store.set_json(f"image_meta:{image_id}", meta)
+        ids.append(image_id)
+
+    return {"ok": True, "image_ids": ids, "max_images": ASKRAVEN_MAX_IMAGES, "max_bytes_each": ASKRAVEN_MAX_IMAGE_BYTES}
+
+
+@app.post("/api/chat/message")
+async def chat_message(req: ChatMessageRequest):
+    if _store is None:
+        raise HTTPException(status_code=500, detail="Redis not configured (REDIS_URL).")
+    engine = str(req.engine or "").strip().lower()
+    if engine not in ("engine1", "engine2"):
+        raise HTTPException(status_code=400, detail="engine must be engine1 or engine2.")
+    msg = str(req.message or "").strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="message is required.")
+    if len(msg) > 8000:
+        raise HTTPException(status_code=400, detail="message too long (max 8000 chars).")
+
+    report = _store.get_json(f"latest_report:{engine}")
+    if report is None:
+        raise HTTPException(status_code=400, detail=f"No recent {engine} report found. Run the engine first.")
+    if not isinstance(report, dict):
+        raise HTTPException(status_code=500, detail="Stored report is invalid.")
+
+    image_ids = list(req.image_ids or [])[:ASKRAVEN_MAX_IMAGES]
+    images: list[UploadedImage] = []
+    for image_id in image_ids:
+        meta = _store.get_json(f"image_meta:{str(image_id)}")
+        if not isinstance(meta, dict):
+            continue
+        path = meta.get("path")
+        ct = meta.get("content_type") or "application/octet-stream"
+        if not path:
+            continue
+        try:
+            b = pathlib.Path(str(path)).read_bytes()
+        except Exception:
+            continue
+        if len(b) > ASKRAVEN_MAX_IMAGE_BYTES:
+            continue
+        images.append(UploadedImage(content=b, content_type=str(ct), image_id=str(image_id)))
+
+    ctx = build_context_pack(engine=engine, report=report)
+    try:
+        reply = call_openai(question=msg, context_pack=ctx, images=images)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {type(e).__name__}") from e
+
+    return {"ok": True, "engine": engine, "reply": reply, "used": {"images": len(images), "hasReport": True}}
 
 def _get_client() -> OratsClient:
     global _client
@@ -387,6 +531,7 @@ def spx_ic(
 
         with _spx_ic_cache_lock:
             _spx_ic_cache[key] = payload
+        _store_set_latest("engine2", payload)
         return payload
     except OratsError as e:
         LOG.exception("ORATS failure (spx-ic)")
@@ -479,6 +624,7 @@ def breach(
         if not has_trade_builder:
             with _breach_cache_lock:
                 _breach_cache[key] = payload
+        _store_set_latest("engine1", payload)
         return payload
     except BreachInputError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

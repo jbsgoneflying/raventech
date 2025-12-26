@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -7,10 +8,9 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-import requests
 from cachetools import TTLCache
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import urllib.parse
+import urllib.request
 
 
 ORATS_BASE_URL = "https://api.orats.io/datav2"
@@ -33,23 +33,21 @@ class OratsResponse:
     raw: Any
 
 
-def _make_session() -> requests.Session:
-    session = requests.Session()
-
-    retry = Retry(
-        total=5,
-        connect=5,
-        read=5,
-        backoff_factor=0.6,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=("GET",),
-        raise_on_status=False,
-        respect_retry_after_header=True,
-    )
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+def _http_get(url: str, params: Dict[str, Any], timeout_s: float) -> tuple[int, Dict[str, str], bytes]:
+    q = urllib.parse.urlencode({k: str(v) for k, v in (params or {}).items() if v is not None})
+    full = f"{url}?{q}" if q else url
+    req = urllib.request.Request(full, method="GET", headers={"Accept": "application/json", "User-Agent": "Breach-Algo/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
+            status = int(getattr(resp, "status", 200))
+            headers = {str(k): str(v) for k, v in (getattr(resp, "headers", {}) or {}).items()}
+            body = resp.read() or b""
+            return status, headers, body
+    except urllib.error.HTTPError as e:  # type: ignore[attr-defined]
+        status = int(getattr(e, "code", 500))
+        headers = {str(k): str(v) for k, v in (getattr(e, "headers", {}) or {}).items()}
+        body = e.read() if hasattr(e, "read") else b""
+        return status, headers, body
 
 
 class OratsClient:
@@ -69,7 +67,9 @@ class OratsClient:
         self._token = token
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
-        self._session = _make_session()
+        # Compatibility hook for unit tests that monkeypatch `._session.get(...)`.
+        # If set, we will use it instead of urllib.
+        self._session = None
         self._cache = TTLCache(maxsize=cache_maxsize, ttl=cache_ttl_s)
         self._cache_lock = threading.Lock()
         self._live_base_url = ORATS_LIVE_BASE_URL
@@ -121,9 +121,22 @@ class OratsClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, 4):
             try:
-                resp = self._session.get(url, params=q, timeout=self._timeout_s)
-                if resp.status_code == 429:
-                    retry_after = resp.headers.get("Retry-After")
+                # Prefer a monkeypatched session if present (tests).
+                sess = getattr(self, "_session", None)
+                if sess is not None and callable(getattr(sess, "get", None)):
+                    resp = sess.get(url, params=q, timeout=self._timeout_s)
+                    status = int(getattr(resp, "status_code", 0) or 0)
+                    headers = getattr(resp, "headers", {}) or {}
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+                    body = (getattr(resp, "text", "") or "").encode("utf-8")
+                else:
+                    status, headers, body = _http_get(url, q, self._timeout_s)
+                    data = None
+                if status == 429:
+                    retry_after = headers.get("Retry-After")
                     sleep_s = float(retry_after) if retry_after else min(2.0 * attempt, 6.0)
                     self._log.warning("ORATS 429 rate-limited; sleeping %.1fs (attempt %d/3)", sleep_s, attempt)
                     time.sleep(sleep_s)
@@ -131,10 +144,11 @@ class OratsClient:
 
                 # For certain hist endpoints, ORATS returns 404 on dates with no data (weekends/holidays).
                 # We treat that as "empty result" so callers can probe for the nearest trading day.
-                if resp.status_code == 404 and path in ("/hist/dailies", "/hist/cores", "/hist/monies/implied", "/hist/strikes"):
+                if status == 404 and path in ("/hist/dailies", "/hist/cores", "/hist/monies/implied", "/hist/strikes"):
                     try:
-                        data = resp.json()
-                    except ValueError:
+                        if data is None:
+                            data = json.loads(body.decode("utf-8") or "{}")
+                    except Exception:
                         data = {"data": []}
                     # Force empty rows even if the body is a dict like {"message":"Not Found."}
                     out = OratsResponse(rows=[], raw=data)
@@ -142,21 +156,22 @@ class OratsClient:
                     return out
 
                 # Auth / entitlement errors should not be retried.
-                if resp.status_code in (401, 403):
-                    snippet = resp.text[:500]
-                    raise OratsError(f"ORATS auth/entitlement error {resp.status_code} for {path}: {snippet}")
+                if status in (401, 403):
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise OratsError(f"ORATS auth/entitlement error {status} for {path}: {snippet}")
 
-                if resp.status_code >= 400:
+                if status >= 400:
                     # include a small response snippet to help debugging
-                    snippet = resp.text[:500]
-                    raise OratsError(f"ORATS error {resp.status_code} for {path}: {snippet}")
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise OratsError(f"ORATS error {status} for {path}: {snippet}")
 
-                data = resp.json()
+                if data is None:
+                    data = json.loads(body.decode("utf-8") or "{}")
                 rows = self._normalize_rows(data)
                 out = OratsResponse(rows=rows, raw=data)
                 self._cache_set(key, out)
                 return out
-            except (requests.RequestException, ValueError, OratsError) as e:
+            except (Exception, OratsError) as e:
                 last_err = e
                 # Don't retry auth/entitlement errors.
                 if isinstance(e, OratsError) and ("auth/entitlement error 401" in str(e) or "auth/entitlement error 403" in str(e)):
@@ -181,28 +196,41 @@ class OratsClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, 4):
             try:
-                resp = self._session.get(url, params=q, timeout=self._timeout_s)
-                if resp.status_code == 429:
-                    retry_after = resp.headers.get("Retry-After")
+                sess = getattr(self, "_session", None)
+                if sess is not None and callable(getattr(sess, "get", None)):
+                    resp = sess.get(url, params=q, timeout=self._timeout_s)
+                    status = int(getattr(resp, "status_code", 0) or 0)
+                    headers = getattr(resp, "headers", {}) or {}
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+                    body = (getattr(resp, "text", "") or "").encode("utf-8")
+                else:
+                    status, headers, body = _http_get(url, q, self._timeout_s)
+                    data = None
+                if status == 429:
+                    retry_after = headers.get("Retry-After")
                     sleep_s = float(retry_after) if retry_after else min(2.0 * attempt, 6.0)
                     self._log.warning("ORATS live 429 rate-limited; sleeping %.1fs (attempt %d/3)", sleep_s, attempt)
                     time.sleep(sleep_s)
                     continue
 
-                if resp.status_code in (401, 403):
-                    snippet = resp.text[:500]
-                    raise OratsError(f"ORATS auth/entitlement error {resp.status_code} for LIVE {path}: {snippet}")
+                if status in (401, 403):
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise OratsError(f"ORATS auth/entitlement error {status} for LIVE {path}: {snippet}")
 
-                if resp.status_code >= 400:
-                    snippet = resp.text[:500]
-                    raise OratsError(f"ORATS error {resp.status_code} for LIVE {path}: {snippet}")
+                if status >= 400:
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise OratsError(f"ORATS error {status} for LIVE {path}: {snippet}")
 
-                data = resp.json()
+                if data is None:
+                    data = json.loads(body.decode("utf-8") or "{}")
                 rows = self._normalize_rows(data)
                 out = OratsResponse(rows=rows, raw=data)
                 self._live_cache_set(key, out)
                 return out
-            except (requests.RequestException, ValueError, OratsError) as e:
+            except (Exception, OratsError) as e:
                 last_err = e
                 if isinstance(e, OratsError) and ("auth/entitlement error 401" in str(e) or "auth/entitlement error 403" in str(e)):
                     raise

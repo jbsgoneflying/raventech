@@ -17,6 +17,7 @@ from backend.stats_utils import beta_posterior_from_counts
 from backend.trade_builder import compute_trade_builder
 from backend.wing_recommendation import compute_wing_recommendation
 from backend.mc_simulator import bootstrap_tas_stability, optimize_wings_risk_only, run_monte_carlo
+from backend.technicals import compute_technicals_payload
 
 
 LOG = logging.getLogger(__name__)
@@ -1355,6 +1356,9 @@ def compute_breach_stats(
         target_dte=2,
     )
 
+    # --- Technicals (daily indicators + live overlay; additive, does not affect stats) ---
+    technicals = compute_technicals_payload(client, ticker=t, as_of_date=str(current.get("asOfDate") or _fmt_date(now))[:10])
+
     out: Dict[str, Any] = {
         "ticker": t,
         "params": {"n": n, "years": years, "k": float(k)},
@@ -1369,6 +1373,7 @@ def compute_breach_stats(
         "skipped": skipped,
         "wingRecommendation": wing_rec,
         "skewOverlay": skew_overlay,
+        "technicals": technicals,
     }
     if event_risk is not None:
         out["eventRisk"] = event_risk

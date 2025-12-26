@@ -12,11 +12,46 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+function appendChatMessage(role, text) {
+  const host = $("askRavenTranscript");
+  if (!host) return;
+  const msg = document.createElement("div");
+  msg.className = role === "user" ? "chatMsg chatMsg--user" : "chatMsg chatMsg--assistant";
+  msg.innerHTML = `
+    <div class="chatRole">${escapeHtml(role === "user" ? "You" : "AskRaven")}</div>
+    <div class="chatText">${escapeHtml(String(text || ""))}</div>
+  `;
+  host.appendChild(msg);
+  host.scrollTop = host.scrollHeight;
+}
+
+async function uploadAskRavenImages(files) {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  const res = await fetch("/api/chat/upload", { method: "POST", body: fd });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `Upload failed (${res.status})`);
+  return Array.isArray(body?.image_ids) ? body.image_ids : [];
+}
+
+async function askRavenSend({ engine, message, imageIds }) {
+  const res = await fetch("/api/chat/message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ engine, message, image_ids: imageIds || [] }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `AskRaven failed (${res.status})`);
+  return body?.reply || "";
+}
+
 function fmtPct(x, d = 2) {
   const n = Number(x);
   if (!Number.isFinite(n)) return "—";
   return `${n.toFixed(d)}%`;
 }
+
+let lastPayload = null;
 
 function setLoading(isLoading) {
   const btn = $("runBtn");
@@ -129,6 +164,7 @@ function downloadText(filename, text) {
 }
 
 function render(payload) {
+  lastPayload = payload;
   const status = $("status");
   const results = $("results");
   if (results) results.classList.toggle("hidden", false);
@@ -376,6 +412,48 @@ async function main() {
   }
 
   initTooltips();
+
+  // ---- AskRaven (Engine 2) ----
+  const chatInput = $("askRavenInput");
+  const chatSend = $("askRavenSend");
+  const chatFiles = $("askRavenFiles");
+  const chatMeta = $("askRavenMeta");
+  let chatBusy = false;
+
+  async function doSend() {
+    if (chatBusy) return;
+    const q = String(chatInput?.value || "").trim();
+    if (!q) return;
+    chatBusy = true;
+    if (chatSend) chatSend.disabled = true;
+    appendChatMessage("user", q);
+    if (chatInput) chatInput.value = "";
+
+    try {
+      const files = chatFiles?.files ? Array.from(chatFiles.files).slice(0, 4) : [];
+      const imageIds = files.length ? await uploadAskRavenImages(files) : [];
+      if (chatFiles) chatFiles.value = "";
+      const reply = await askRavenSend({ engine: "engine2", message: q, imageIds });
+      appendChatMessage("assistant", reply);
+      if (chatMeta) chatMeta.textContent = `Last response OK · images=${imageIds.length}`;
+    } catch (e) {
+      appendChatMessage("assistant", `Error: ${String(e?.message || e)}`);
+      if (chatMeta) chatMeta.textContent = "AskRaven error (see transcript).";
+    } finally {
+      chatBusy = false;
+      if (chatSend) chatSend.disabled = false;
+    }
+  }
+
+  if (chatSend) chatSend.addEventListener("click", doSend);
+  if (chatInput) {
+    chatInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        doSend();
+      }
+    });
+  }
 
   // Do NOT auto-run: user must review selections and click Run.
   const results = $("results");

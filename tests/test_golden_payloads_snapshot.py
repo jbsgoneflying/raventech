@@ -15,6 +15,7 @@ _ADDITIVE_KEYS = {
     # These should not break deterministic golden comparisons for core Engine 1 payloads.
     "marketDealerGamma",
     "tickerDealerGamma",
+    "technicals",
 }
 
 

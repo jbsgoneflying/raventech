@@ -44,6 +44,39 @@ function escapeHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
+function appendChatMessage(role, text) {
+  const host = $("askRavenTranscript");
+  if (!host) return;
+  const msg = document.createElement("div");
+  msg.className = role === "user" ? "chatMsg chatMsg--user" : "chatMsg chatMsg--assistant";
+  msg.innerHTML = `
+    <div class="chatRole">${escapeHtml(role === "user" ? "You" : "AskRaven")}</div>
+    <div class="chatText">${escapeHtml(String(text || ""))}</div>
+  `;
+  host.appendChild(msg);
+  host.scrollTop = host.scrollHeight;
+}
+
+async function uploadAskRavenImages(files) {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  const res = await fetch("/api/chat/upload", { method: "POST", body: fd });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `Upload failed (${res.status})`);
+  return Array.isArray(body?.image_ids) ? body.image_ids : [];
+}
+
+async function askRavenSend({ engine, message, imageIds }) {
+  const res = await fetch("/api/chat/message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ engine, message, image_ids: imageIds || [] }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `AskRaven failed (${res.status})`);
+  return body?.reply || "";
+}
+
 function pill(text, kind) {
   const cls = kind ? `pill ${kind}` : "pill";
   return `<span class="${cls}">${escapeHtml(text)}</span>`;
@@ -1212,6 +1245,49 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!mcEnabledPref) return;
       if (!lastPayload || isBusy) return;
       await runCalculation();
+    });
+  }
+
+  // ---- AskRaven (Engine 1) ----
+  const chatInput = $("askRavenInput");
+  const chatSend = $("askRavenSend");
+  const chatFiles = $("askRavenFiles");
+  const chatMeta = $("askRavenMeta");
+  let chatBusy = false;
+
+  async function doSend() {
+    if (chatBusy) return;
+    const q = String(chatInput?.value || "").trim();
+    if (!q) return;
+    chatBusy = true;
+    if (chatSend) chatSend.disabled = true;
+    appendChatMessage("user", q);
+    if (chatInput) chatInput.value = "";
+
+    try {
+      const files = chatFiles?.files ? Array.from(chatFiles.files).slice(0, 4) : [];
+      const imageIds = files.length ? await uploadAskRavenImages(files) : [];
+      if (chatFiles) chatFiles.value = "";
+      const reply = await askRavenSend({ engine: "engine1", message: q, imageIds });
+      appendChatMessage("assistant", reply);
+      if (chatMeta) chatMeta.textContent = `Last response OK · images=${imageIds.length}`;
+    } catch (e) {
+      appendChatMessage("assistant", `Error: ${String(e?.message || e)}`);
+      if (chatMeta) chatMeta.textContent = "AskRaven error (see transcript).";
+    } finally {
+      chatBusy = false;
+      if (chatSend) chatSend.disabled = false;
+    }
+  }
+
+  if (chatSend) chatSend.addEventListener("click", doSend);
+  if (chatInput) {
+    chatInput.addEventListener("keydown", (ev) => {
+      // Enter to send; Shift+Enter for newline
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        doSend();
+      }
     });
   }
 });

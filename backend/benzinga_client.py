@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -7,10 +8,9 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-import requests
 from cachetools import TTLCache
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import urllib.parse
+import urllib.request
 
 LOG = logging.getLogger(__name__)
 
@@ -30,22 +30,21 @@ class BenzingaResponse:
     raw: Any
 
 
-def _make_session() -> requests.Session:
-    session = requests.Session()
-    retry = Retry(
-        total=5,
-        connect=5,
-        read=5,
-        backoff_factor=0.6,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=("GET",),
-        raise_on_status=False,
-        respect_retry_after_header=True,
-    )
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+def _http_get(url: str, params: Dict[str, Any], timeout_s: float) -> tuple[int, Dict[str, str], bytes]:
+    q = urllib.parse.urlencode({k: str(v) for k, v in (params or {}).items() if v is not None})
+    full = f"{url}?{q}" if q else url
+    req = urllib.request.Request(full, method="GET", headers={"Accept": "application/json", "User-Agent": "Breach-Algo/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
+            status = int(getattr(resp, "status", 200))
+            headers = {str(k): str(v) for k, v in (getattr(resp, "headers", {}) or {}).items()}
+            body = resp.read() or b""
+            return status, headers, body
+    except urllib.error.HTTPError as e:  # type: ignore[attr-defined]
+        status = int(getattr(e, "code", 500))
+        headers = {str(k): str(v) for k, v in (getattr(e, "headers", {}) or {}).items()}
+        body = e.read() if hasattr(e, "read") else b""
+        return status, headers, body
 
 
 def _normalize_rows(data: Any) -> list[dict]:
@@ -96,7 +95,6 @@ class BenzingaClient:
         self._base_url_v1 = base_url_v1.rstrip("/")
         self._timeout_s = float(timeout_s)
         self._prefer_v21_calendar = bool(prefer_v21_calendar)
-        self._session = _make_session()
         self._cache = TTLCache(maxsize=int(cache_maxsize), ttl=int(cache_ttl_s))
         self._cache_lock = threading.Lock()
 
@@ -174,42 +172,35 @@ class BenzingaClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, 4):
             try:
-                resp = self._session.get(
-                    url,
-                    params=q,
-                    timeout=self._timeout_s,
-                    headers={
-                        "Accept": "application/json",
-                        "User-Agent": "Breach-Algo/1.0",
-                    },
-                )
-                if resp.status_code == 429:
-                    retry_after = resp.headers.get("Retry-After")
+                status, headers, body = _http_get(url, q, self._timeout_s)
+                if status == 429:
+                    retry_after = headers.get("Retry-After")
                     sleep_s = float(retry_after) if retry_after else min(2.0 * attempt, 6.0)
                     self._log.warning("Benzinga 429 rate-limited; sleeping %.1fs (attempt %d/3)", sleep_s, attempt)
                     time.sleep(sleep_s)
                     continue
 
-                if resp.status_code == 404:
+                if status == 404:
                     # Treat as empty dataset (useful for date-range probes).
-                    out = BenzingaResponse(rows=[], raw={"status": 404, "body": resp.text[:500]})
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    out = BenzingaResponse(rows=[], raw={"status": 404, "body": snippet})
                     self._cache_set(key, out)
                     return out
 
-                if resp.status_code in (401, 403):
-                    snippet = resp.text[:500]
-                    raise BenzingaError(f"Benzinga auth/entitlement error {resp.status_code} for {path}: {snippet}")
+                if status in (401, 403):
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise BenzingaError(f"Benzinga auth/entitlement error {status} for {path}: {snippet}")
 
-                if resp.status_code >= 400:
-                    snippet = resp.text[:500]
-                    raise BenzingaError(f"Benzinga error {resp.status_code} for {path}: {snippet}")
+                if status >= 400:
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise BenzingaError(f"Benzinga error {status} for {path}: {snippet}")
 
-                data = resp.json()
+                data = json.loads(body.decode("utf-8") or "{}")
                 rows = _normalize_rows(data)
                 out = BenzingaResponse(rows=rows, raw=data)
                 self._cache_set(key, out)
                 return out
-            except (requests.RequestException, ValueError, BenzingaError) as e:
+            except (Exception, BenzingaError) as e:
                 last_err = e
                 # Don't retry auth/entitlement errors.
                 if isinstance(e, BenzingaError) and ("auth/entitlement error 401" in str(e) or "auth/entitlement error 403" in str(e)):

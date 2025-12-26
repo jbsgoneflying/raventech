@@ -18,6 +18,8 @@ from backend.orats_client import OratsClient
 LOG = logging.getLogger("spx_ic_engine")
 
 from backend.dealer_gamma_context import compute_dealer_gamma_context
+from backend.technicals import DailyBar as TechDailyBar
+from backend.technicals import compute_distances, compute_ema_levels, compute_ichimoku_levels, compute_vwap_proxy, fetch_live_price_optional
 
 
 def _fmt_date(d: dt.date) -> str:
@@ -170,6 +172,8 @@ class DailyOHLC:
     high: Optional[float]
     low: Optional[float]
     close: Optional[float]
+    volume: Optional[float] = None
+    vwap: Optional[float] = None
 
 
 _ohlc_cache = TTLCache(maxsize=250_000, ttl=24 * 60 * 60)
@@ -196,7 +200,7 @@ def fetch_daily_ohlc(client: OratsClient, *, ticker: str, date: dt.date) -> Opti
         return cached
 
     try:
-        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low"
+        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,vwap"
         resp = client.hist_dailies(ticker=ticker, trade_date=_fmt_date(date), fields=fields)
         row = _first_row(resp.rows)
     except Exception:
@@ -211,7 +215,9 @@ def fetch_daily_ohlc(client: OratsClient, *, ticker: str, date: dt.date) -> Opti
     h = _to_float(row.get("hiPx") or row.get("high") or row.get("hi") or row.get("hPx"))
     l = _to_float(row.get("loPx") or row.get("low") or row.get("lo") or row.get("lPx"))
     c = _to_float(row.get("clsPx") or row.get("close") or row.get("cls_px"))
-    out = DailyOHLC(trade_date=td, open=o, high=h, low=l, close=c)
+    vol = _to_float(row.get("volume") or row.get("vol") or row.get("totalVolume"))
+    vwap = _to_float(row.get("vwap"))
+    out = DailyOHLC(trade_date=td, open=o, high=h, low=l, close=c, volume=vol, vwap=vwap)
     _cache_set(_ohlc_cache, _ohlc_lock, key, out)
     return out
 
@@ -954,7 +960,7 @@ def fetch_dailies_ohlc_range(
         return []
     try:
         td = f"{_fmt_date(start)},{_fmt_date(end)}"
-        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low"
+        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,vwap"
         resp = client.hist_dailies(ticker=ticker, trade_date=td, fields=fields)
         rows = resp.rows or []
     except Exception:
@@ -972,7 +978,9 @@ def fetch_dailies_ohlc_range(
         c = _to_float(r.get("clsPx") or r.get("close") or r.get("cls_px"))
         if c is None or c <= 0:
             continue
-        out.append(DailyOHLC(trade_date=td0, open=o, high=h, low=l, close=c))
+        vol = _to_float(r.get("volume") or r.get("vol") or r.get("totalVolume"))
+        vwap = _to_float(r.get("vwap"))
+        out.append(DailyOHLC(trade_date=td0, open=o, high=h, low=l, close=c, volume=vol, vwap=vwap))
     out.sort(key=lambda b: b.trade_date)
     return out
 
@@ -2351,6 +2359,70 @@ def compute_engine2_spx_ic(
     bt = {"rowsUsed": int(len(week_rows)), "rows": [], "byWidth": by_width, "byQuarter": by_q, "notes": ["Derived from Engine 2 weekly rows (fast path)."]}
     rec_simple = recommend_width(by_width=by_width, risk_target_breach_pct=float(risk_target_breach_pct))
 
+    # --- Technicals (daily indicators + live overlay; additive, does not affect backtest) ---
+    tech_bars: List[TechDailyBar] = []
+    for b in bars:
+        # only keep fully ordered series, tolerate missing volume/vwap
+        if not b or not b.trade_date:
+            continue
+        tech_bars.append(
+            TechDailyBar(
+                trade_date=str(b.trade_date)[:10],
+                open=b.open,
+                high=b.high,
+                low=b.low,
+                close=b.close,
+                volume=b.volume,
+                vwap=b.vwap,
+            )
+        )
+    closes_tech = [float(b.close) for b in tech_bars if b.close is not None and float(b.close) > 0]
+    ema = compute_ema_levels(closes_tech, spans=[8, 21, 50, 100, 200]) if closes_tech else {}
+    ich = compute_ichimoku_levels(tech_bars) if tech_bars else {"enabled": False, "notes": ["No bars available."]}
+    vwap_proxy = compute_vwap_proxy(tech_bars, window=20) if tech_bars else {"enabled": False}
+    live_px = None
+    # Prefer liveContext spot if available, else try live summaries for the underlying/proxy
+    try:
+        live_px = _to_float((live_context.get("spot") if isinstance(live_context, dict) else None))
+    except Exception:
+        live_px = None
+    if live_px is None:
+        live_px = fetch_live_price_optional(client, ticker=str(underlying).upper())
+    level_map: Dict[str, Optional[float]] = {}
+    level_map.update(ema)
+    if isinstance(vwap_proxy, dict) and vwap_proxy.get("enabled") and vwap_proxy.get("value") is not None:
+        try:
+            level_map["vwapProxy"] = float(vwap_proxy["value"])
+        except Exception:
+            pass
+    if isinstance(ich, dict) and ich.get("enabled"):
+        if isinstance(ich.get("tenkan"), (int, float)):
+            level_map["tenkan"] = float(ich["tenkan"])
+        if isinstance(ich.get("kijun"), (int, float)):
+            level_map["kijun"] = float(ich["kijun"])
+        cn = ich.get("cloudNow") if isinstance(ich.get("cloudNow"), dict) else None
+        if cn and isinstance(cn.get("cloudTop"), (int, float)) and isinstance(cn.get("cloudBottom"), (int, float)):
+            level_map["cloudTopNow"] = float(cn["cloudTop"])
+            level_map["cloudBottomNow"] = float(cn["cloudBottom"])
+    distances = compute_distances(live_price=live_px, levels=level_map)
+    last_bar = tech_bars[-1] if tech_bars else None
+    technicals = {
+        "enabled": bool(bool(tech_bars)),
+        "ticker": str(underlying).upper(),
+        "asOfDate": _fmt_date(now),
+        "barDateUsed": None if last_bar is None else str(last_bar.trade_date)[:10],
+        "lastDailyClose": None if (last_bar is None or last_bar.close is None) else round(float(last_bar.close), 4),
+        "livePrice": None if live_px is None else round(float(live_px), 4),
+        "ema": {k: (None if v is None else round(float(v), 4)) for k, v in (ema or {}).items()},
+        "ichimoku": ich,
+        "vwapProxy": ({"enabled": False} if not isinstance(vwap_proxy, dict) else {**vwap_proxy, "value": (None if vwap_proxy.get("value") is None else round(float(vwap_proxy["value"]), 4))}),
+        "distances": distances,
+        "notes": [
+            "Indicators computed on daily bars (EOD).",
+            "Live overlay uses ORATS Live spot/stockPrice when available (may reflect afterhours/last known).",
+        ],
+    }
+
     telemetry["counts"]["backtest.rowsUsed"] = int(len(week_rows))
     mark("compute.total")
     LOG.info(
@@ -2386,6 +2458,7 @@ def compute_engine2_spx_ic(
             "notes": ["Conditioned on current buckets (regime/macro/season). Risk-only: breach is expiry-close outside ±(width×EM)."],
         },
         "backtest": bt,
+        "technicals": technicals,
         "telemetry": telemetry,
         "notes": proxy_notes,
     }
