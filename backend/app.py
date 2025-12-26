@@ -368,7 +368,20 @@ async def chat_message(req: ChatMessageRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM call failed: {type(e).__name__}") from e
+        # Surface a small, safe snippet so we can debug model/config issues in production.
+        snippet = str(e) if e is not None else ""
+        snippet = (snippet or "").replace("\n", " ").strip()
+        if len(snippet) > 380:
+            snippet = snippet[:380] + "…"
+        # Some OpenAI SDK errors include a JSON-like body; try to include it if available.
+        body = getattr(e, "body", None)
+        if body is not None:
+            try:
+                body_txt = json.dumps(body, ensure_ascii=False)[:380]
+                snippet = f"{snippet} body={body_txt}"
+            except Exception:
+                pass
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {type(e).__name__}: {snippet}") from e
 
     return {"ok": True, "engine": engine, "reply": reply, "used": {"images": len(images), "hasReport": True}}
 
