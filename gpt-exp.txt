@@ -1,6 +1,6 @@
 User Prompt: 
 
-    Can you review the data on the SPX, and help me understand how my trade is looking; I currently have the 6950/6955c spread on expiring at the close today. Act as a senior quant with a trading firm and deep-dive into this trade for me. Note that we are inside the holiday week, today is the day after Christmas and is a Friday as well.
+      Can you review the data on the SPX, and help me understand how my trade is looking; I currently have the 6950/6955c spread on expiring at the close today. Act as a senior quant with a trading firm and deep-dive into this trade for me. Note that we are inside the holiday week, today is the day after Christmas and is a Friday as well.
 
 ***** CHATGPT 5.2
 

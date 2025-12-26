@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 import os
 import math
+import time
+import datetime as dt
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Callable, Iterable
 
 from backend.technicals import encode_image_to_data_url
+from backend.orats_client import OratsClient
+from backend.benzinga_client import BenzingaClient, BenzingaResponse
 
 
 def _pick(d: dict, keys: List[str]) -> dict:
@@ -81,6 +85,601 @@ def _wants_news_or_gap(question: str) -> bool:
     )
     return any(k in q for k in keys)
 
+def _budget_profile(name: str) -> dict:
+    p = str(name or "").strip().lower() or "default"
+    if p == "tight":
+        return {"max_tool_calls": 3, "max_steps": 4, "wall_s": 10.0, "max_bytes_per_tool": 30_000}
+    if p == "loose":
+        return {"max_tool_calls": 12, "max_steps": 10, "wall_s": 45.0, "max_bytes_per_tool": 120_000}
+    return {"max_tool_calls": 6, "max_steps": 6, "wall_s": 20.0, "max_bytes_per_tool": 60_000}
+
+
+def _json_dumps_safe(obj: Any, max_len: int) -> str:
+    try:
+        s = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=str)
+    except Exception:
+        s = str(obj)
+    if len(s) > int(max_len):
+        s = s[: int(max_len)] + "…"
+    return s
+
+
+def _parse_json_maybe(x: Any) -> dict:
+    if isinstance(x, dict):
+        return x
+    if isinstance(x, str):
+        s = x.strip()
+        if not s:
+            return {}
+        try:
+            v = json.loads(s)
+            return v if isinstance(v, dict) else {"value": v}
+        except Exception:
+            return {"value": s}
+    return {}
+
+
+def _extract_tool_calls_from_response(resp: Any) -> List[dict]:
+    """
+    Robustly extract tool/function calls from OpenAI Responses API output across SDK versions.
+    Returns a list of dicts: {\"id\":..., \"name\":..., \"arguments\":{...}}
+    """
+    calls: List[dict] = []
+    try:
+        raw = resp.model_dump() if hasattr(resp, "model_dump") else {}
+    except Exception:
+        raw = {}
+
+    def walk(node: Any) -> None:
+        if node is None:
+            return
+        if isinstance(node, dict):
+            t = node.get("type")
+            # common shapes:
+            # - {type:\"function_call\", name:\"...\", arguments:\"{...}\", call_id:\"...\"}
+            # - {type:\"tool_call\", name:\"...\", arguments:{...}, id:\"...\"}
+            if t in ("function_call", "tool_call"):
+                name = node.get("name") or (node.get("function") or {}).get("name")
+                args = node.get("arguments") or (node.get("function") or {}).get("arguments")
+                call_id = node.get("call_id") or node.get("id") or node.get("tool_call_id")
+                if isinstance(args, str):
+                    args_d = _parse_json_maybe(args)
+                elif isinstance(args, dict):
+                    args_d = args
+                else:
+                    args_d = {}
+                if isinstance(name, str) and name:
+                    calls.append({"id": str(call_id or ""), "name": str(name), "arguments": args_d})
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(raw.get("output") or raw)
+    # de-dupe by (id,name)
+    seen = set()
+    out = []
+    for c in calls:
+        k = (c.get("id") or "", c.get("name") or "")
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(c)
+    return out
+
+
+def _tool_schema_orats_get_live_spot() -> dict:
+    return {
+        "type": "function",
+        "name": "orats_get_live_spot",
+        "description": "Fetch best-effort live spot/stock price for ticker from ORATS Live summaries.",
+        "parameters": {
+            "type": "object",
+            "properties": {"ticker": {"type": "string"}},
+            "required": ["ticker"],
+        },
+    }
+
+
+def _tool_schema_orats_get_expirations() -> dict:
+    return {
+        "type": "function",
+        "name": "orats_get_expirations",
+        "description": "Fetch available option expirations for ticker from ORATS Live expirations (fallback: infer from live strikes).",
+        "parameters": {
+            "type": "object",
+            "properties": {"ticker": {"type": "string"}},
+            "required": ["ticker"],
+        },
+    }
+
+
+def _tool_schema_orats_get_chain_slice() -> dict:
+    return {
+        "type": "function",
+        "name": "orats_get_chain_slice",
+        "description": "Fetch an options chain slice for a ticker+expiry from ORATS Live strikes and summarize OI/volume/gamma walls within a strike range.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+                "expiry": {"type": "string", "description": "YYYY-MM-DD"},
+                "strike_min": {"type": "number"},
+                "strike_max": {"type": "number"},
+                "target_strikes": {"type": "array", "items": {"type": "number"}, "description": "Optional strikes to highlight"},
+            },
+            "required": ["ticker", "expiry", "strike_min", "strike_max"],
+        },
+    }
+
+
+def _tool_schema_benzinga_get_news() -> dict:
+    return {
+        "type": "function",
+        "name": "benzinga_get_news",
+        "description": "Fetch recent Benzinga headlines for tickers/topics/date window and return a compact list with URLs/snippets.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tickers": {"type": "string", "description": "Comma-separated symbols"},
+                "topics": {"type": "string", "description": "Optional topics filter"},
+                "days": {"type": "number", "description": "Lookback days (default 2)"},
+                "limit": {"type": "number", "description": "Max items (default 12)"},
+            },
+            "required": [],
+        },
+    }
+
+
+def _tool_schema_web_fetch() -> dict:
+    return {
+        "type": "function",
+        "name": "web_fetch",
+        "description": "Fetch a public URL (no logins), extract readable text snippet and title. Use for public pages (including X/Reddit pages that are accessible).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "max_chars": {"type": "number", "description": "Max chars of extracted text (default 6000)"},
+            },
+            "required": ["url"],
+        },
+    }
+
+
+def _orats_live_spot(client: OratsClient, *, ticker: str) -> dict:
+    t = str(ticker or "").strip().upper()
+    if not t:
+        return {"ok": False, "error": "ticker required"}
+    try:
+        rows = client.live_summaries(ticker=t).rows or []
+        row = next((x for x in rows if isinstance(x, dict)), None) or {}
+        spot = row.get("spotPrice")
+        px = spot if spot not in (None, "", 0) else row.get("stockPrice")
+        return {"ok": True, "ticker": t, "spotPrice": spot, "stockPrice": row.get("stockPrice"), "price": px, "row": _pick(row, ["tradeDate", "spotPrice", "stockPrice"])}
+    except Exception as e:
+        return {"ok": False, "ticker": t, "error": f"{type(e).__name__}: {e}"}
+
+
+def _infer_expiries_from_strikes(rows: List[dict]) -> List[str]:
+    out: List[str] = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        d = r.get("expirDate") or r.get("expiry") or r.get("expDate") or r.get("exp_date")
+        if not d:
+            continue
+        ds = str(d)[:10]
+        if len(ds) == 10 and ds not in out:
+            out.append(ds)
+    out.sort()
+    return out
+
+
+def _orats_expirations(client: OratsClient, *, ticker: str) -> dict:
+    t = str(ticker or "").strip().upper()
+    if not t:
+        return {"ok": False, "error": "ticker required"}
+    try:
+        if callable(getattr(client, "live_expirations", None)):
+            rows = client.live_expirations(ticker=t).rows or []
+            exps = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                d = r.get("expirDate") or r.get("expiry") or r.get("expDate")
+                if d:
+                    exps.append(str(d)[:10])
+            exps = sorted(list(dict.fromkeys([x for x in exps if x and len(x) == 10])))
+            if exps:
+                return {"ok": True, "ticker": t, "expirations": exps, "source": "live_expirations"}
+    except Exception:
+        pass
+    # fallback: infer from strikes
+    try:
+        fields = "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,spotPrice,stockPrice,callOpenInterest,putOpenInterest,callVolume,putVolume"
+        rows2 = client.live_strikes(ticker=t, fields=fields).rows or []
+        exps2 = _infer_expiries_from_strikes([x for x in rows2 if isinstance(x, dict)])
+        return {"ok": True, "ticker": t, "expirations": exps2, "source": "live_strikes_infer"}
+    except Exception as e:
+        return {"ok": False, "ticker": t, "error": f"{type(e).__name__}: {e}"}
+
+
+def _to_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        f = float(v)
+        if not math.isfinite(f):
+            return None
+        return f
+    except Exception:
+        return None
+
+
+def _orats_chain_slice(
+    client: OratsClient,
+    *,
+    ticker: str,
+    expiry: str,
+    strike_min: float,
+    strike_max: float,
+    target_strikes: Optional[List[float]] = None,
+) -> dict:
+    t = str(ticker or "").strip().upper()
+    exp = str(expiry or "").strip()[:10]
+    lo = float(strike_min)
+    hi = float(strike_max)
+    if not t or not exp:
+        return {"ok": False, "error": "ticker and expiry required"}
+    if hi < lo:
+        lo, hi = hi, lo
+
+    fields = ",".join(
+        [
+            "ticker",
+            "tradeDate",
+            "expirDate",
+            "strike",
+            "spotPrice",
+            "stockPrice",
+            "gamma",
+            "callOpenInterest",
+            "putOpenInterest",
+            "callVolume",
+            "putVolume",
+            "callDelta",
+            "putDelta",
+            "callMidIv",
+            "putMidIv",
+        ]
+    )
+    warnings: List[str] = []
+    try:
+        rows = client.live_strikes_by_expiry(ticker=t, expiry=exp, fields=fields).rows or []
+    except Exception as e:
+        warnings.append(f"live_strikes_by_expiry failed: {type(e).__name__}: {e}")
+        try:
+            rows = client.live_strikes(ticker=t, fields=fields).rows or []
+            rows = [r for r in rows if isinstance(r, dict) and str(r.get('expirDate') or r.get('expiry') or '')[:10] == exp]
+            warnings.append("fell back to live_strikes filtered by expiry")
+        except Exception as e2:
+            return {"ok": False, "ticker": t, "expiry": exp, "error": f"{type(e2).__name__}: {e2}", "warnings": warnings}
+
+    chain = [r for r in rows if isinstance(r, dict)]
+    filt = []
+    spot = None
+    for r in chain:
+        k = _to_float(r.get("strike"))
+        if k is None:
+            continue
+        if not (lo <= float(k) <= hi):
+            continue
+        filt.append(r)
+        if spot is None:
+            spot = _to_float(r.get("spotPrice")) or _to_float(r.get("stockPrice"))
+    if not filt:
+        return {"ok": True, "ticker": t, "expiry": exp, "spot": spot, "range": {"lo": lo, "hi": hi}, "rowsUsed": 0, "warnings": warnings, "notes": ["No chain rows in strike range (check range/expiry)."]}
+
+    def top_n(key: str, n: int = 8) -> List[dict]:
+        pairs = []
+        for r in filt:
+            k = _to_float(r.get("strike"))
+            v = _to_float(r.get(key))
+            if k is None or v is None:
+                continue
+            pairs.append((float(v), float(k)))
+        pairs.sort(reverse=True)
+        out = [{"strike": int(k), key: v} for (v, k) in pairs[:n]]
+        return out
+
+    top_call_oi = top_n("callOpenInterest", 10)
+    top_put_oi = top_n("putOpenInterest", 10)
+    top_call_vol = top_n("callVolume", 8)
+    top_put_vol = top_n("putVolume", 8)
+    top_gamma = top_n("gamma", 10)
+
+    # Sample rows near target strikes or around spot.
+    targets = [float(x) for x in (target_strikes or []) if x is not None]
+    sample: List[dict] = []
+    def row_obj(r: dict) -> dict:
+        return {
+            "strike": _to_float(r.get("strike")),
+            "callDelta": _to_float(r.get("callDelta")),
+            "putDelta": _to_float(r.get("putDelta")),
+            "callIv": _to_float(r.get("callMidIv")),
+            "putIv": _to_float(r.get("putMidIv")),
+            "callOI": _to_float(r.get("callOpenInterest")),
+            "putOI": _to_float(r.get("putOpenInterest")),
+            "callVol": _to_float(r.get("callVolume")),
+            "putVol": _to_float(r.get("putVolume")),
+            "gamma": _to_float(r.get("gamma")),
+        }
+
+    if targets:
+        for tgt in targets:
+            near = sorted(filt, key=lambda r: abs((_to_float(r.get("strike")) or 0.0) - float(tgt)))[:3]
+            for r in near:
+                sample.append(row_obj(r))
+    elif spot is not None:
+        near = sorted(filt, key=lambda r: abs((_to_float(r.get("strike")) or 0.0) - float(spot)))[:10]
+        sample = [row_obj(r) for r in near]
+
+    return {
+        "ok": True,
+        "ticker": t,
+        "expiry": exp,
+        "spot": spot,
+        "range": {"lo": lo, "hi": hi},
+        "rowsUsed": int(len(filt)),
+        "top": {
+            "callOI": top_call_oi,
+            "putOI": top_put_oi,
+            "callVolume": top_call_vol,
+            "putVolume": top_put_vol,
+            "gamma": top_gamma,
+        },
+        "sample": sample[:20],
+        "warnings": warnings,
+        "notes": ["ORATS Live chain slice (best-effort). Field availability depends on entitlement."],
+    }
+
+
+def _benzinga_news(
+    client: BenzingaClient,
+    *,
+    tickers: Optional[str] = None,
+    topics: Optional[str] = None,
+    days: int = 2,
+    limit: int = 12,
+) -> dict:
+    now = dt.datetime.utcnow().date()
+    date_to = now.isoformat()
+    date_from = (now - dt.timedelta(days=max(1, int(days or 2)))).isoformat()
+    lim = int(limit or 12)
+    lim = max(1, min(lim, 20))
+    try:
+        resp: BenzingaResponse = client.news(tickers=tickers, topics=topics, date_from=date_from, date_to=date_to, page=0, page_size=50, sort="updated")
+        rows = resp.rows or []
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    items = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        title = _truncate(r.get("title") or r.get("headline") or "", 240)
+        if not title:
+            continue
+        items.append(
+            {
+                "title": title,
+                "updated": _truncate(r.get("updated") or r.get("updated_at") or "", 40),
+                "created": _truncate(r.get("created") or r.get("created_at") or r.get("published") or "", 40),
+                "source": _truncate(r.get("source") or "", 40),
+                "url": _truncate(r.get("url") or "", 300),
+                "summary": _truncate(r.get("summary") or r.get("teaser") or "", 360),
+                "tickers": _truncate(r.get("tickers") or r.get("symbols") or "", 120),
+            }
+        )
+        if len(items) >= lim:
+            break
+    return {
+        "ok": True,
+        "provider": "benzinga",
+        "window": {"from": date_from, "to": date_to},
+        "tickers": tickers,
+        "topics": topics,
+        "items": items,
+    }
+
+
+def _web_fetch_public(*, url: str, max_chars: int = 6000, timeout_s: float = 12.0) -> dict:
+    u = str(url or "").strip()
+    if not u:
+        return {"ok": False, "error": "url required"}
+    if not (u.startswith("http://") or u.startswith("https://")):
+        return {"ok": False, "error": "url must be http(s)"}
+    max_c = int(max_chars or 6000)
+    max_c = max(500, min(max_c, 20_000))
+    try:
+        import urllib.request
+        import re
+
+        req = urllib.request.Request(
+            u,
+            headers={"User-Agent": "RavenTech/AskRaven (public fetch)", "Accept": "text/html,application/json;q=0.9,*/*;q=0.8"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:  # nosec - public URL fetch by design
+            raw = resp.read(250_000) or b""
+            txt = raw.decode("utf-8", errors="ignore")
+        title = ""
+        m = re.search(r"<title[^>]*>(.*?)</title>", txt, flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            title = re.sub(r"\s+", " ", re.sub(r"<.*?>", " ", m.group(1))).strip()[:240]
+        # crude HTML strip
+        body = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\\1>", " ", txt)
+        body = re.sub(r"(?is)<.*?>", " ", body)
+        body = re.sub(r"\s+", " ", body).strip()
+        return {"ok": True, "url": u, "title": title, "text": body[:max_c], "notes": ["Public web fetch; content may be truncated."]}
+    except Exception as e:
+        return {"ok": False, "url": u, "error": f"{type(e).__name__}: {e}"}
+
+
+def askraven_agent_chat(
+    *,
+    question: str,
+    context_pack: Dict[str, Any],
+    images: List[UploadedImage],
+    orats_client: Optional[OratsClient] = None,
+    benzinga_client: Optional[BenzingaClient] = None,
+) -> str:
+    """
+    ChatGPT-style agent loop: model can request tools (ORATS/Benzinga/Web) as needed,
+    and we iterate until we get a final answer or budgets are hit.
+    """
+    api_key = str(os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("Missing OPENAI_API_KEY on server.")
+
+    from openai import OpenAI  # type: ignore
+
+    client = OpenAI(api_key=api_key)
+    model = str(os.getenv("OPENAI_MODEL") or "gpt-5.2").strip()
+    max_out = int(float(os.getenv("ASKRAVEN_MAX_OUTPUT_TOKENS") or 1400))
+    effort = str(os.getenv("OPENAI_REASONING_EFFORT") or "high").strip().lower()
+
+    enable_web = _env_bool("ASKRAVEN_ENABLE_WEB", False)
+    enable_orats = _env_bool("ASKRAVEN_ENABLE_ORATS_TOOLS", True)
+    enable_bz = _env_bool("ASKRAVEN_ENABLE_BENZINGA_TOOLS", True)
+    budget = _budget_profile(os.getenv("ASKRAVEN_BUDGET") or "loose")
+
+    start = time.time()
+    tool_calls_used = 0
+
+    # Enrich with tradeBrief only (no automatic ORATS/Benzinga fetch).
+    ctx = dict(context_pack or {})
+    try:
+        ctx["tradeBrief"] = build_trade_brief(question=question, context_pack=ctx)
+    except Exception:
+        ctx["tradeBrief"] = {"enabled": False, "notes": ["Failed to build tradeBrief."]}
+
+    ctx_txt = json.dumps(ctx, ensure_ascii=False, separators=(",", ":"), indent=2)
+    base_user_text = f"RavenTech context pack:\n{ctx_txt}\n\nUser question:\n{str(question or '').strip()}"
+
+    # Responses API tools
+    tools: List[dict] = []
+    if enable_orats:
+        tools.extend([_tool_schema_orats_get_live_spot(), _tool_schema_orats_get_expirations(), _tool_schema_orats_get_chain_slice()])
+    if enable_bz:
+        tools.append(_tool_schema_benzinga_get_news())
+    tools.append(_tool_schema_web_fetch())
+    if enable_web:
+        # built-in tool (executed by OpenAI)
+        tools.append({"type": "web_search"})
+
+    sys_txt = ASKRAVEN_SYSTEM_PROMPT + "\n\nIMPORTANT: You may use tools if needed. When citing web/news, include URLs. Return a non-empty plain-text answer."
+
+    prev_id = None
+    pending_tool_results: List[dict] = []
+
+    def budget_exhausted() -> bool:
+        if (time.time() - start) > float(budget["wall_s"]):
+            return True
+        if tool_calls_used >= int(budget["max_tool_calls"]):
+            return True
+        return False
+
+    # executor map
+    def exec_tool(name: str, args: dict) -> dict:
+        nonlocal tool_calls_used
+        tool_calls_used += 1
+        if name.startswith("orats_"):
+            if orats_client is None:
+                return {"ok": False, "error": "ORATS client not available on server."}
+            if name == "orats_get_live_spot":
+                return _orats_live_spot(orats_client, ticker=str(args.get("ticker") or ""))
+            if name == "orats_get_expirations":
+                return _orats_expirations(orats_client, ticker=str(args.get("ticker") or ""))
+            if name == "orats_get_chain_slice":
+                return _orats_chain_slice(
+                    orats_client,
+                    ticker=str(args.get("ticker") or ""),
+                    expiry=str(args.get("expiry") or ""),
+                    strike_min=float(args.get("strike_min") or 0),
+                    strike_max=float(args.get("strike_max") or 0),
+                    target_strikes=[float(x) for x in (args.get("target_strikes") or []) if x is not None] if isinstance(args.get("target_strikes"), list) else None,
+                )
+        if name.startswith("benzinga_"):
+            if benzinga_client is None:
+                return {"ok": False, "error": "Benzinga client not available on server."}
+            if name == "benzinga_get_news":
+                return _benzinga_news(
+                    benzinga_client,
+                    tickers=str(args.get("tickers") or "") or None,
+                    topics=str(args.get("topics") or "") or None,
+                    days=int(float(args.get("days") or 2)),
+                    limit=int(float(args.get("limit") or 12)),
+                )
+        if name == "web_fetch":
+            return _web_fetch_public(url=str(args.get("url") or ""), max_chars=int(float(args.get("max_chars") or 6000)))
+        return {"ok": False, "error": f"Unknown tool: {name}"}
+
+    for step in range(int(budget["max_steps"])):
+        if budget_exhausted():
+            return "AskRaven budget exhausted (time/tool limit). Try a narrower question or increase ASK_RAVEN_BUDGET."
+
+        try:
+            kwargs: Dict[str, Any] = {"model": model, "max_output_tokens": max_out, "tools": tools}
+            try:
+                kwargs["reasoning"] = {"effort": effort}
+            except Exception:
+                pass
+
+            if prev_id is None:
+                kwargs["input"] = [
+                    {"role": "system", "content": [{"type": "text", "text": sys_txt}]},
+                    {"role": "user", "content": [{"type": "text", "text": base_user_text}]},
+                ]
+            else:
+                kwargs["previous_response_id"] = prev_id
+                kwargs["input"] = pending_tool_results
+
+            resp = client.responses.create(**kwargs)
+        except Exception as e:
+            # If Responses API is unavailable, fall back to the existing single-shot call.
+            return call_openai(question=question, context_pack=ctx, images=images)
+
+        prev_id = getattr(resp, "id", None) or getattr(resp, "response_id", None)
+        out_txt = getattr(resp, "output_text", None)
+        if isinstance(out_txt, str) and out_txt.strip():
+            return out_txt.strip()
+
+        # Execute function tools requested by the model (web_search runs inside OpenAI).
+        tool_calls = _extract_tool_calls_from_response(resp)
+        func_calls = [c for c in tool_calls if isinstance(c, dict) and str(c.get("name") or "").strip()]
+        if not func_calls:
+            # If no tool calls and no output text, degrade safely.
+            return call_openai(question=question, context_pack=ctx, images=images)
+
+        pending_tool_results = []
+        for c in func_calls:
+            if budget_exhausted():
+                return "AskRaven budget exhausted while fetching context. Try narrowing the request."
+            name = str(c.get("name") or "")
+            args = c.get("arguments") if isinstance(c.get("arguments"), dict) else {}
+            call_id = str(c.get("id") or "") or f"call_{step}_{name}"
+            result = exec_tool(name, args)
+            pending_tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_call_id": call_id,
+                    "output": _json_dumps_safe(result, int(budget["max_bytes_per_tool"])),
+                }
+            )
+
+    return call_openai(question=question, context_pack=ctx, images=images)
 
 def _parse_trade_from_prompt(question: str) -> Dict[str, Any]:
     """

@@ -27,7 +27,7 @@ from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
 from backend.spx_ic_engine import compute_engine2_spx_ic
 from backend.redis_store import get_store_optional
-from backend.askraven import UploadedImage, build_context_pack, call_openai
+from backend.askraven import UploadedImage, build_context_pack, askraven_agent_chat
 
 
 try:
@@ -454,12 +454,14 @@ async def chat_message(req: ChatMessageRequest):
         images.append(UploadedImage(content=b, content_type=str(ct), image_id=str(image_id)))
 
     ctx = build_context_pack(engine=engine, report=report)
-    # Add Benzinga News snapshot (market/ticker) for “news of the day” style questions.
-    news_ctx = _benzinga_news_context(engine=engine, report=report, question=msg)
-    if news_ctx is not None:
-        ctx["news"] = news_ctx
     try:
-        reply = call_openai(question=msg, context_pack=ctx, images=images)
+        reply = askraven_agent_chat(
+            question=msg,
+            context_pack=ctx,
+            images=images,
+            orats_client=_get_client_optional(),
+            benzinga_client=_get_benzinga_client_optional(),
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
@@ -488,6 +490,16 @@ def _get_client() -> OratsClient:
         if _client is None:
             _client = OratsClient.from_env()
     return _client
+
+
+def _get_client_optional() -> OratsClient | None:
+    """
+    Optional ORATS client so tests / misconfigured envs don't 500 before AskRaven can degrade safely.
+    """
+    try:
+        return _get_client()
+    except Exception:
+        return None
 
 
 def _get_benzinga_client_optional() -> BenzingaClient | None:

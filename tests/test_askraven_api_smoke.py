@@ -1,9 +1,6 @@
 from fastapi.testclient import TestClient
 
 import backend.app as app_mod
-from backend.benzinga_client import BenzingaResponse
-
-
 class FakeStore:
     def __init__(self):
         self._m = {}
@@ -31,8 +28,8 @@ def test_chat_message_uses_latest_report_and_mocked_llm(monkeypatch):
     )
     monkeypatch.setattr(app_mod, "_store", store, raising=False)
 
-    # Mock LLM call (app.py imports call_openai into its own module namespace)
-    monkeypatch.setattr(app_mod, "call_openai", lambda **kw: "mocked reply", raising=False)
+    # Mock agent call (app.py imports askraven_agent_chat into its own module namespace)
+    monkeypatch.setattr(app_mod, "askraven_agent_chat", lambda **kw: "mocked reply", raising=False)
 
     client = TestClient(app_mod.app)
     r = client.post("/api/chat/message", json={"engine": "engine2", "message": "what are odds?", "image_ids": []})
@@ -40,52 +37,6 @@ def test_chat_message_uses_latest_report_and_mocked_llm(monkeypatch):
     body = r.json()
     assert body["ok"] is True
     assert body["reply"] == "mocked reply"
-
-
-def test_chat_message_injects_benzinga_news_when_available(monkeypatch):
-    # Arrange: fake redis store with a minimal engine2 report
-    store = FakeStore()
-    store.set_json(
-        "latest_report:engine2",
-        {
-            "asOfDate": "2025-12-26",
-            "params": {"entryDay": "mon"},
-            "underlying": {"symbol": "SPX", "isProxy": False},
-            "current": {"macro": {"highImpactUS": {"top": ["2025-12-31 FOMC Minutes"]}}},
-            "oddsLikeNow": {"regimeBucket": "MODERATE", "macroBucket": "NORMAL", "seasonBucket": "ALL", "weeksUsed": 10, "byWidth": []},
-            "technicals": {"enabled": True, "ema": {"ema21": 5000.0}, "livePrice": 5050.0},
-        },
-    )
-    monkeypatch.setattr(app_mod, "_store", store, raising=False)
-
-    class FakeBZ:
-        def news(self, **kwargs):
-            return BenzingaResponse(
-                rows=[
-                    {"title": "SPX preview headline", "updated": "2025-12-26T12:00:00Z", "url": "https://example.com/x", "source": "benzinga"}
-                ],
-                raw={},
-            )
-
-    monkeypatch.setattr(app_mod, "_get_benzinga_client_optional", lambda: FakeBZ(), raising=True)
-
-    captured = {}
-
-    def _fake_llm(**kw):
-        captured["ctx"] = kw.get("context_pack")
-        return "ok"
-
-    monkeypatch.setattr(app_mod, "call_openai", _fake_llm, raising=False)
-
-    client = TestClient(app_mod.app)
-    r = client.post("/api/chat/message", json={"engine": "engine2", "message": "news: what can gap the open?", "image_ids": []})
-    assert r.status_code == 200
-    assert r.json()["reply"] == "ok"
-    ctx = captured.get("ctx") or {}
-    assert isinstance(ctx, dict)
-    assert "news" in ctx
-    assert ctx["news"]["provider"] == "benzinga"
-    assert isinstance(ctx["news"]["items"], list) and len(ctx["news"]["items"]) >= 1
 
 
 def test_chat_upload_rejects_non_image(monkeypatch):
