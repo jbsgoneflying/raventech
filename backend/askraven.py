@@ -915,7 +915,8 @@ def fallback_briefing(*, question: str, context_pack: Dict[str, Any]) -> str:
                 # parse strikes from question (very simple heuristic)
                 import re
 
-                nums = [int(n) for n in re.findall(r"\b(\d{4,5})\b", q)]
+                # capture digits even when suffixed like "6955c" or "500p"
+                nums = [int(n) for n in re.findall(r"(\d{4,5})(?:[cCpP])?", q)]
                 nums = sorted(list(dict.fromkeys(nums)))
                 # If user provided 6950/6955 style, these will show.
                 if nums:
@@ -953,9 +954,9 @@ def fallback_briefing(*, question: str, context_pack: Dict[str, Any]) -> str:
     lines.append("- In holiday/low-liquidity tape, *smaller* catalysts can move price more than usual; treat gamma + liquidity as multipliers, not predictors.")
     lines.append("")
     lines.append("## What would change my view (quick questions)")
-    lines.append("- What’s the **current spot** and your **exact expiration time** (0DTE vs next session)?")
-    lines.append("- What credit did you take for the 6950/6955c spread, and what’s your stop/adjust plan?")
-    lines.append("- Are you holding through any of the listed macro events, or can you flatten before them?")
+    lines.append("- What’s the **expiry** you’re trading (e.g., next Friday), and are you entering **Friday close** or **Monday open**?")
+    lines.append("- What are your proposed **iron condor legs** (short put/call strikes + wing width) and your **target credit**?")
+    lines.append("- What are your **management rules** (close at X% profit, max loss, roll triggers, delta/strike proximity triggers)?")
 
     return "\n".join(lines).strip()
 
