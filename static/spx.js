@@ -292,54 +292,76 @@ function render(payload) {
   if (btMain) btMain.textContent = (bt.rowsUsed !== null && bt.rowsUsed !== undefined) ? `${bt.rowsUsed}` : "—";
   if (btNote) btNote.textContent = "Weeks used in backtest (filtered for missing prices/IV).";
 
-  // Live dealer gamma context (informational only)
-  const dgMain = $("dgMain");
-  const dgNote = $("dgNote");
-  const dgTop = $("dgTop");
-  const dgOi = $("dgOi");
-  const oiMeta = $("oiMeta");
-  const oiPut = $("oiPut");
-  const oiCall = $("oiCall");
+  // Live dealer gamma context (informational only) — render BOTH weekly + nearest-daily views
   const lc = payload?.liveContext || null;
-  const dg = lc?.dealerGamma || null;
-  const oi = lc?.oiClusters || null;
-  if (dgMain && dgNote && dgTop && dgOi && oiMeta && oiPut && oiCall) {
-    const enabled = !!(lc && lc.enabled && dg && dg.netGammaSign);
+  const weekly = lc?.weeklyFriday || null;
+  const daily = lc?.nearestDaily || null;
+
+  // Backwards compatibility: if backend returns legacy liveContext shape, treat it as weekly.
+  const weeklyFallback = (!weekly && lc && lc.dealerGamma) ? {
+    enabled: !!lc.enabled,
+    symbolUsed: lc.symbolUsed,
+    expiry: lc.expiry,
+    dealerGamma: lc.dealerGamma,
+    oiClusters: lc.oiClusters,
+    warnings: lc.warnings,
+    notes: lc.notes,
+  } : null;
+
+  function renderLive(prefix, view) {
+    const dgMain = $(prefix === "W" ? "dgMainW" : "dgMainD");
+    const dgNote = $(prefix === "W" ? "dgNoteW" : "dgNoteD");
+    const dgTop = $(prefix === "W" ? "dgTopW" : "dgTopD");
+    const dgOi = $(prefix === "W" ? "dgOiW" : "dgOiD");
+    const oiMeta = $(prefix === "W" ? "oiMetaW" : "oiMetaD");
+    const oiPut = $(prefix === "W" ? "oiPutW" : "oiPutD");
+    const oiCall = $(prefix === "W" ? "oiCallW" : "oiCallD");
+    if (!dgMain || !dgNote || !dgTop || !dgOi || !oiMeta || !oiPut || !oiCall) return;
+
+    const dg = view?.dealerGamma || null;
+    const oi = view?.oiClusters || null;
+    const enabled = !!(view && view.enabled && dg && dg.netGammaSign);
     if (!enabled) {
       dgMain.textContent = "—";
-      const notes = Array.isArray(lc?.notes) ? lc.notes.filter(Boolean) : [];
-      const warn = Array.isArray(lc?.warnings) ? lc.warnings.filter(Boolean) : [];
+      const notes = Array.isArray(view?.notes) ? view.notes.filter(Boolean) : [];
+      const warn = Array.isArray(view?.warnings) ? view.warnings.filter(Boolean) : [];
       dgNote.textContent = notes[0] || warn[0] || "Live context unavailable.";
       dgTop.textContent = "";
       dgOi.textContent = "—";
       oiMeta.textContent = "—";
       oiPut.textContent = "Put: —";
       oiCall.textContent = "Call: —";
-    } else {
-      dgMain.textContent = `${String(dg.netGammaSign || "").toUpperCase()} · ${String(dg.magnitudeBucket || "").toUpperCase()}`;
-      dgNote.textContent = `symbol=${String(lc.symbolUsed || "—")} · expiry=${String(lc.expiry || "—")} · spot=${Number(dg.spot || 0).toFixed(2)} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}% · weighting=${String(dg.weightingMode || "—")}`;
-      const tops = Array.isArray(dg.topGammaStrikes) ? dg.topGammaStrikes : [];
-      dgTop.textContent = tops.length ? `Top strikes: ${tops.map(x => `${Number(x.strike).toFixed(0)}${String(x.side || "")}`).join(" · ")}` : "";
-      const putWall = oi && typeof oi === "object" ? oi.putWall : null;
-      const callWall = oi && typeof oi === "object" ? oi.callWall : null;
-      const putStrike = putWall && (putWall.peakStrike ?? putWall.maxStrike);
-      const callStrike = callWall && (callWall.peakStrike ?? callWall.maxStrike);
-      const putTxt = putWall && Number.isFinite(Number(putStrike)) ? `${Number(putStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
-      const callTxt = callWall && Number.isFinite(Number(callStrike)) ? `${Number(callStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
-      dgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
-
-      // OI clusters card
-      const spot = Number(oi?.spot);
-      const step = Number(oi?.strikeStep);
-      const band = Number(oi?.bandPct);
-      oiMeta.textContent = `expiry=${String(oi?.expiry || lc.expiry || "—")} · spot=${fmt0(spot)} · band=±${Math.round((Number.isFinite(band) ? band : 0.05) * 100)}% · step=${fmt0(step)}`;
-
-      const puts = _pickMeaningfulClusters(oi?.putClusters, spot, step).map(_fmtClusterLine);
-      const calls = _pickMeaningfulClusters(oi?.callClusters, spot, step).map(_fmtClusterLine);
-      oiPut.textContent = puts.length ? `Put: ${puts.join(" | ")}` : "Put: —";
-      oiCall.textContent = calls.length ? `Call: ${calls.join(" | ")}` : "Call: —";
+      return;
     }
+
+    dgMain.textContent = `${String(dg.netGammaSign || "").toUpperCase()} · ${String(dg.magnitudeBucket || "").toUpperCase()}`;
+    dgNote.textContent = `symbol=${String(view.symbolUsed || "—")} · expiry=${String(view.expiry || "—")} · spot=${Number(dg.spot || 0).toFixed(2)} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}% · weighting=${String(dg.weightingMode || "—")}`;
+
+    const tops = Array.isArray(dg.topGammaStrikes) ? dg.topGammaStrikes : [];
+    dgTop.textContent = tops.length ? `Top strikes: ${tops.map(x => `${Number(x.strike).toFixed(0)}${String(x.side || "")}`).join(" · ")}` : "";
+
+    const putWall = oi && typeof oi === "object" ? oi.putWall : null;
+    const callWall = oi && typeof oi === "object" ? oi.callWall : null;
+    const putStrike = putWall && (putWall.peakStrike ?? putWall.maxStrike);
+    const callStrike = callWall && (callWall.peakStrike ?? callWall.maxStrike);
+    const putTxt = putWall && Number.isFinite(Number(putStrike)) ? `${Number(putStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
+    const callTxt = callWall && Number.isFinite(Number(callStrike)) ? `${Number(callStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
+    dgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
+
+    // OI clusters card
+    const spot = Number(oi?.spot);
+    const step = Number(oi?.strikeStep);
+    const band = Number(oi?.bandPct);
+    oiMeta.textContent = `expiry=${String(oi?.expiry || view.expiry || "—")} · spot=${fmt0(spot)} · band=±${Math.round((Number.isFinite(band) ? band : 0.05) * 100)}% · step=${fmt0(step)}`;
+
+    const puts = _pickMeaningfulClusters(oi?.putClusters, spot, step).map(_fmtClusterLine);
+    const calls = _pickMeaningfulClusters(oi?.callClusters, spot, step).map(_fmtClusterLine);
+    oiPut.textContent = puts.length ? `Put: ${puts.join(" | ")}` : "Put: —";
+    oiCall.textContent = calls.length ? `Call: ${calls.join(" | ")}` : "Call: —";
   }
+
+  renderLive("W", weekly || weeklyFallback);
+  renderLive("D", daily);
 
   const oddsMeta = $("oddsMeta");
   if (oddsMeta) {

@@ -7,4 +7,5 @@ pydantic==2.10.4
 gunicorn==23.0.0
 python-multipart==0.0.20
 redis==5.0.8
+certifi==2024.12.14
 pytest==8.3.4

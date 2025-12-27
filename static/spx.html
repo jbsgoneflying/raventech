@@ -222,15 +222,15 @@
               <div id="btNote" class="metricCaption muted">—</div>
             </div>
 
-            <div class="metricCard" id="dealerGammaCard">
+            <div class="metricCard" id="dealerGammaCardWeekly">
               <div class="metricLabel">
-                Dealer Gamma (Live)
+                Dealer Gamma (Live · Weekly Friday)
                 <span class="tipWrap">
                   <button class="tipBtn" type="button" aria-label="Dealer gamma help" aria-expanded="false">i</button>
                   <div class="tipPanel" role="tooltip">
-                    <div class="tipTitle">Dealer Gamma Context (Live, informational)</div>
+                    <div class="tipTitle">Dealer Gamma Context (Live, weekly Friday)</div>
                     <div class="tipBody">
-                      <p>Computed from ORATS Live strike-level gamma concentration near spot (±5%). It can change intraday.</p>
+                      <p>Computed from ORATS Live strike-level gamma concentration near spot (±5%) for the <b>weekly Friday</b> expiry. It can change intraday.</p>
                       <ul>
                         <li><b>Positive</b>: more pinning/mean reversion tendency.</li>
                         <li><b>Negative</b>: more acceleration/tail risk tendency.</li>
@@ -242,29 +242,68 @@
                   </div>
                 </span>
               </div>
-              <div id="dgMain" class="metricValue">—</div>
-              <div id="dgNote" class="metricCaption muted">—</div>
-              <div id="dgTop" class="metricCaption muted">—</div>
-              <div id="dgOi" class="metricCaption muted">—</div>
+              <div id="dgMainW" class="metricValue">—</div>
+              <div id="dgNoteW" class="metricCaption muted">—</div>
+              <div id="dgTopW" class="metricCaption muted">—</div>
+              <div id="dgOiW" class="metricCaption muted">—</div>
             </div>
 
-            <div class="metricCard" id="oiClustersCard">
+            <div class="metricCard" id="oiClustersCardWeekly">
               <div class="metricLabel">
-                OI Clusters (Live)
+                OI Clusters (Live · Weekly Friday)
                 <span class="tipWrap">
                   <button class="tipBtn" type="button" aria-label="OI clusters help" aria-expanded="false">i</button>
                   <div class="tipPanel" role="tooltip">
-                    <div class="tipTitle">OI Clusters (Live)</div>
+                    <div class="tipTitle">OI Clusters (Live, weekly Friday)</div>
                     <div class="tipBody">
-                      <p>Dominant open interest shelves near spot (same band as dealer gamma). Shows multiple clusters only when they’re meaningful.</p>
+                      <p>Dominant open interest shelves near spot for the <b>weekly Friday</b> expiry (same band as dealer gamma). Shows multiple clusters only when they’re meaningful.</p>
                       <p><b>Important</b>: informational only — does not change breach odds or any historical calculations.</p>
                     </div>
                   </div>
                 </span>
               </div>
-              <div id="oiMeta" class="metricCaption muted">—</div>
-              <div id="oiPut" class="metricCaption muted">Put: —</div>
-              <div id="oiCall" class="metricCaption muted">Call: —</div>
+              <div id="oiMetaW" class="metricCaption muted">—</div>
+              <div id="oiPutW" class="metricCaption muted">Put: —</div>
+              <div id="oiCallW" class="metricCaption muted">Call: —</div>
+            </div>
+
+            <div class="metricCard" id="dealerGammaCardDaily">
+              <div class="metricLabel">
+                Dealer Gamma (Live · Nearest Daily/0DTE)
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="Dealer gamma (nearest) help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">Dealer Gamma Context (Live, nearest expiry)</div>
+                    <div class="tipBody">
+                      <p>This panel tracks the <b>nearest expiry</b> (0DTE if available, else next upcoming). This can dominate intraday flows and differ from the weekly chain you trade.</p>
+                      <p><b>Important</b>: informational only — does not change breach odds or any historical calculations.</p>
+                    </div>
+                  </div>
+                </span>
+              </div>
+              <div id="dgMainD" class="metricValue">—</div>
+              <div id="dgNoteD" class="metricCaption muted">—</div>
+              <div id="dgTopD" class="metricCaption muted">—</div>
+              <div id="dgOiD" class="metricCaption muted">—</div>
+            </div>
+
+            <div class="metricCard" id="oiClustersCardDaily">
+              <div class="metricLabel">
+                OI Clusters (Live · Nearest Daily/0DTE)
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="OI clusters (nearest) help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">OI Clusters (Live, nearest expiry)</div>
+                    <div class="tipBody">
+                      <p>Dominant open interest shelves near spot for the <b>nearest expiry</b>. Useful for intraday “wall” context; can differ materially from the weekly expiry.</p>
+                      <p><b>Important</b>: informational only — does not change breach odds or any historical calculations.</p>
+                    </div>
+                  </div>
+                </span>
+              </div>
+              <div id="oiMetaD" class="metricCaption muted">—</div>
+              <div id="oiPutD" class="metricCaption muted">Put: —</div>
+              <div id="oiCallD" class="metricCaption muted">Call: —</div>
             </div>
           </div>
         </section>

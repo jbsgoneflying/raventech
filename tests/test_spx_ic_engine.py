@@ -8,6 +8,7 @@ from backend.spx_ic_engine import (
     beta_binomial_mean,
     compute_engine2_spx_ic,
     pctile,
+    _pick_weekly_close_expiry_date,
 )
 
 
@@ -122,6 +123,24 @@ def test_compute_engine2_spx_ic_enabled_flag_and_proxy_fallback():
     assert out["enabled"] is True
     assert out["underlying"]["symbol"] == "SPY"
     assert out["underlying"]["isProxy"] is True
+    # Payload shape: liveContext includes both weekly and nearest views (may be None if live endpoints absent)
+    assert "liveContext" in out
+    assert "weeklyFriday" in out["liveContext"]
+    assert "nearestDaily" in out["liveContext"]
+
+
+def test_engine2_weekly_expiry_roll_pre_and_post_close():
+    # Expiries include this Friday and next Friday.
+    exp_dates = ["2025-01-03", "2025-01-06", "2025-01-10"]
+    today = dt.date(2025, 1, 3)  # Friday
+
+    # Before 4:15pm ET (3:00pm ET == 20:00 UTC in winter)
+    pre_close_utc = dt.datetime(2025, 1, 3, 20, 0, tzinfo=dt.timezone.utc)
+    assert _pick_weekly_close_expiry_date(exp_dates, today=today, now_dt=pre_close_utc) == "2025-01-03"
+
+    # After 4:15pm ET (5:00pm ET == 22:00 UTC in winter)
+    post_close_utc = dt.datetime(2025, 1, 3, 22, 0, tzinfo=dt.timezone.utc)
+    assert _pick_weekly_close_expiry_date(exp_dates, today=today, now_dt=post_close_utc) == "2025-01-10"
 
 
 def test_beta_binomial_mean_and_pctile_helpers():

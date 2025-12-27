@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 from cachetools import TTLCache
+import ssl
 import urllib.parse
 import urllib.request
 
@@ -33,12 +34,54 @@ class OratsResponse:
     raw: Any
 
 
+def _env_truthy(name: str) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return False
+    s = str(v).strip().lower()
+    return s in ("1", "true", "t", "yes", "y", "on")
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    """
+    Build an SSL context for HTTPS calls.
+
+    Why: some macOS Python installs (notably python.org builds) can lack a configured
+    CA bundle inside virtualenvs, causing:
+      ssl.SSLCertVerificationError: certificate verify failed: unable to get local issuer certificate
+
+    Defaults:
+    - Verification ON (secure).
+    - Allow explicit CA bundle override via env.
+    - Allow a dev-only opt-out via ORATS_SSL_VERIFY=0 (NOT recommended).
+    """
+    # Dev-only escape hatch (keep verification on by default).
+    if os.getenv("ORATS_SSL_VERIFY") is not None and not _env_truthy("ORATS_SSL_VERIFY"):
+        return ssl._create_unverified_context()
+
+    # Standard env knobs supported by many tools; we honor them for urllib as well.
+    cafile = os.getenv("ORATS_CA_BUNDLE") or os.getenv("SSL_CERT_FILE") or os.getenv("REQUESTS_CA_BUNDLE")
+    if cafile and os.path.exists(cafile):
+        return ssl.create_default_context(cafile=cafile)
+
+    # Prefer certifi's bundle if available (common fix for macOS local dev).
+    try:
+        import certifi  # type: ignore
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _http_get(url: str, params: Dict[str, Any], timeout_s: float) -> tuple[int, Dict[str, str], bytes]:
     q = urllib.parse.urlencode({k: str(v) for k, v in (params or {}).items() if v is not None})
     full = f"{url}?{q}" if q else url
     req = urllib.request.Request(full, method="GET", headers={"Accept": "application/json", "User-Agent": "Breach-Algo/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
+        # Provide an explicit SSL context so local macOS dev environments can supply a CA bundle.
+        # This stays fully verified unless ORATS_SSL_VERIFY=0 is set.
+        ctx = _build_ssl_context()
+        with urllib.request.urlopen(req, timeout=float(timeout_s), context=ctx) as resp:
             status = int(getattr(resp, "status", 200))
             headers = {str(k): str(v) for k, v in (getattr(resp, "headers", {}) or {}).items()}
             body = resp.read() or b""
@@ -48,6 +91,17 @@ def _http_get(url: str, params: Dict[str, Any], timeout_s: float) -> tuple[int, 
         headers = {str(k): str(v) for k, v in (getattr(e, "headers", {}) or {}).items()}
         body = e.read() if hasattr(e, "read") else b""
         return status, headers, body
+    except urllib.error.URLError as e:  # type: ignore[attr-defined]
+        # Make SSL failures actionable (common on macOS).
+        reason = getattr(e, "reason", None)
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            raise OratsError(
+                "SSL certificate verification failed while calling ORATS. "
+                "On macOS this is commonly due to a missing CA bundle in your Python/venv. "
+                "Fix options: install certifi (recommended), or set SSL_CERT_FILE / REQUESTS_CA_BUNDLE / ORATS_CA_BUNDLE "
+                "to a valid CA bundle path. Dev-only fallback: set ORATS_SSL_VERIFY=0."
+            ) from e
+        raise
 
 
 class OratsClient:

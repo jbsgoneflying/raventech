@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from cachetools import TTLCache
+from zoneinfo import ZoneInfo
 
 from backend.benzinga_client import BenzingaClient
 from backend.config import FeatureFlags
@@ -55,30 +56,120 @@ def _iv_to_pct(v: Any) -> Optional[float]:
     return x * 100.0 if x <= 1.0 else x
 
 
-def _pick_live_expiry(expirations_rows: List[dict], *, today: dt.date) -> Optional[str]:
-    ds: List[str] = []
-    for r in expirations_rows or []:
-        if not isinstance(r, dict):
-            continue
-        d0 = str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or r.get("exp_date") or "")[:10]
-        if d0 and len(d0) >= 10:
-            ds.append(d0)
-    ds = sorted(list(dict.fromkeys(ds)))
+_ET = ZoneInfo("America/New_York")
+
+
+def _now_et(now_dt: Optional[dt.datetime] = None) -> dt.datetime:
+    """
+    Return timezone-aware datetime in US/Eastern.
+    - If now_dt is None: uses current wall clock in ET.
+    - If now_dt is naive: assumes it is already ET.
+    - If now_dt is aware: converts to ET.
+    """
+    if now_dt is None:
+        return dt.datetime.now(tz=_ET)
+    if now_dt.tzinfo is None:
+        return now_dt.replace(tzinfo=_ET)
+    return now_dt.astimezone(_ET)
+
+
+def _after_cash_close_et(now_et: dt.datetime) -> bool:
+    """
+    Define when to roll weekly expiry after Friday close.
+    We use 4:15pm ET to allow for settlement/prints and to keep behavior stable.
+    """
+    return now_et.time() >= dt.time(16, 15)
+
+
+def _normalize_expiry_dates(exp_dates: List[str]) -> List[str]:
+    ds = [str(d)[:10] for d in (exp_dates or []) if d]
+    # unique + sorted
+    return sorted(list(dict.fromkeys(ds)))
+
+
+def _pick_nearest_expiry_date(exp_dates: List[str], *, today: dt.date) -> Optional[str]:
+    """
+    Nearest-expiry selector (daily/0DTE behavior):
+    - Prefer 0DTE if present
+    - Else nearest upcoming
+    - Else last known
+    """
+    ds = _normalize_expiry_dates(exp_dates)
     if not ds:
         return None
     td = _fmt_date(today)
-    # 0DTE if present
     if td in ds:
         return td
-    # else nearest upcoming
     for d0 in ds:
         try:
             if _parse_date(d0) > today:
                 return d0
         except Exception:
             continue
+    return ds[-1]
+
+
+def _pick_weekly_close_expiry_date(
+    exp_dates: List[str],
+    *,
+    today: dt.date,
+    now_dt: Optional[dt.datetime] = None,
+) -> Optional[str]:
+    """
+    Weekly trade-management selector:
+    - If today is Friday and BEFORE 4:15pm ET: pick today's Friday expiry (if listed)
+    - Otherwise: pick the next Friday
+    - Holiday week fallback: if no Friday, pick the next Thursday
+    - Otherwise fallback: nearest upcoming expiry
+    """
+    ds = _normalize_expiry_dates(exp_dates)
+    if not ds:
+        return None
+
+    now_et = _now_et(now_dt)
+    after_close = _after_cash_close_et(now_et)
+
+    # On Friday pre-close, use same-day Friday if present.
+    td = _fmt_date(today)
+    if today.weekday() == 4 and (not after_close) and td in ds:
+        return td
+
+    # Start date: if we're after close, search from tomorrow; else from today.
+    start = today + dt.timedelta(days=1) if after_close else today
+    future: List[Tuple[str, dt.date]] = []
+    for d0 in ds:
+        try:
+            dd = _parse_date(d0)
+        except Exception:
+            continue
+        if dd >= start:
+            future.append((d0, dd))
+
+    # Prefer next Friday
+    for d0, dd in future:
+        if dd.weekday() == 4:
+            return d0
+    # Holiday fallback: next Thursday
+    for d0, dd in future:
+        if dd.weekday() == 3:
+            return d0
+    # Fallback: nearest upcoming
+    if future:
+        return future[0][0]
     # else last known
     return ds[-1]
+
+
+def _pick_live_expiry(expirations_rows: List[dict], *, today: dt.date) -> Optional[str]:
+    # Backwards-compatible wrapper: preserve old semantics (nearest / 0DTE).
+    exp_dates: List[str] = []
+    for r in expirations_rows or []:
+        if not isinstance(r, dict):
+            continue
+        d0 = str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or r.get("exp_date") or "")[:10]
+        if d0 and len(d0) >= 10:
+            exp_dates.append(d0)
+    return _pick_nearest_expiry_date(exp_dates, today=today)
 
 
 def _infer_live_expiries_from_strikes(rows: List[dict]) -> List[str]:
@@ -93,18 +184,8 @@ def _infer_live_expiries_from_strikes(rows: List[dict]) -> List[str]:
 
 
 def _select_expiry_from_dates(exp_dates: List[str], *, today: dt.date) -> Optional[str]:
-    if not exp_dates:
-        return None
-    td = _fmt_date(today)
-    if td in exp_dates:
-        return td
-    for d0 in exp_dates:
-        try:
-            if _parse_date(d0) > today:
-                return d0
-        except Exception:
-            continue
-    return exp_dates[-1]
+    # Backwards-compatible wrapper: preserve old semantics (nearest / 0DTE).
+    return _pick_nearest_expiry_date(exp_dates, today=today)
 
 
 def _filter_chain_by_expiry(rows: List[dict], *, expiry: str) -> List[dict]:
@@ -1597,6 +1678,9 @@ def compute_engine2_spx_ic(
     ed = str(entry_day or "mon").strip().lower()
     entry_dow = 0 if ed.startswith("mon") else 1 if ed.startswith("tue") else 2 if ed.startswith("wed") else 0
     now = today or dt.date.today()
+    # Use an explicit, timezone-aware "now" for live expiry roll logic.
+    # (Weekly expiry rolls after 4:15pm ET on Fridays.)
+    now_dt_utc = dt.datetime.now(dt.timezone.utc)
     season_mode = str(seasonality_mode or "none").strip().lower()
     LOG.info("Engine2 compute start (desk-locked): entry_day=%s years=%s widths=%s wingPts=%s seasonality=%s", ed, yrs, widths_use, wing_pts, season_mode)
 
@@ -1927,6 +2011,7 @@ def compute_engine2_spx_ic(
     # --- Live options context (current-only, informational) ---
     live_context: Dict[str, Any] = {
         "enabled": False,
+        # Backwards-compatible "primary" view fields (we set these to weeklyFriday if available).
         "symbolUsed": None,
         "expiry": None,
         "spot": None,
@@ -1934,20 +2019,28 @@ def compute_engine2_spx_ic(
         "atmIvPct": None,
         "greeksAgg": None,
         "dealerGamma": None,
+        "oiClusters": None,
+        # New: dual live views
+        "weeklyFriday": None,
+        "nearestDaily": None,
         "warnings": [],
         "notes": ["Live context unavailable."],
     }
     try:
         # Only attempt if live methods exist (keeps unit tests/mock clients safe).
         if callable(getattr(client, "live_strikes_by_expiry", None)) and callable(getattr(client, "live_strikes", None)):
-            # Find expiry (prefer 0DTE, else nearest upcoming). Do NOT hard depend on /live/expirations
-            # since some entitlements return empty expirations; infer expiries from strikes as fallback.
-            used_symbol = None
-            expiry_live = None
+            # Build expiries list once per symbol.
+            # Do NOT hard depend on /live/expirations since some entitlements return empty expirations;
+            # infer expiries from full strikes as fallback.
             exp_warn: List[str] = []
             strikes_cache_by_symbol: Dict[str, List[dict]] = {}
+            exp_dates_by_symbol: Dict[str, List[str]] = {}
 
-            for sym in ("SPX", "SPXW", "SPY"):
+            symbols = ("SPXW", "SPX", "SPY")  # prefer weeklies for trade management
+            fields0 = "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,spotPrice,stockPrice,gamma,theta,vega,callOpenInterest,putOpenInterest,callVolume,putVolume,callMidIv,putMidIv"
+
+            for sym in symbols:
+                exp_dates: List[str] = []
                 exp_rows: List[dict] = []
                 try:
                     if callable(getattr(client, "live_expirations", None)):
@@ -1956,25 +2049,59 @@ def compute_engine2_spx_ic(
                     exp_warn.append(f"Live expirations error for {sym}: {type(e).__name__}: {e}")
                     exp_rows = []
 
-                expiry_live = _pick_live_expiry([r for r in exp_rows if isinstance(r, dict)], today=now) if exp_rows else None
-                if not expiry_live:
+                if exp_rows:
+                    for r in exp_rows:
+                        if not isinstance(r, dict):
+                            continue
+                        d0 = str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or r.get("exp_date") or "")[:10]
+                        if d0 and len(d0) >= 10:
+                            exp_dates.append(d0)
+                else:
+                    # Fallback: infer expiries from full strikes payload (cached short-TTL).
                     try:
-                        # Fallback: infer expiries from full strikes payload (cached short-TTL).
-                        fields0 = "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,spotPrice,stockPrice,gamma,theta,vega,callOpenInterest,putOpenInterest,callVolume,putVolume,callMidIv,putMidIv"
                         all_rows = client.live_strikes(ticker=sym, fields=fields0).rows or []
                         all_rows = [r for r in all_rows if isinstance(r, dict)]
                         strikes_cache_by_symbol[sym] = all_rows
                         exp_dates = _infer_live_expiries_from_strikes(all_rows)
-                        expiry_live = _select_expiry_from_dates(exp_dates, today=now)
                     except Exception as e:
                         exp_warn.append(f"Live strikes fallback error for {sym}: {type(e).__name__}: {e}")
-                        expiry_live = None
+                        exp_dates = []
 
-                if expiry_live:
-                    used_symbol = sym
-                    break
+                exp_dates_by_symbol[sym] = exp_dates
 
-            if used_symbol and expiry_live:
+            def _pick_symbol_and_expiry(*, mode: str) -> Tuple[Optional[str], Optional[str]]:
+                for sym in symbols:
+                    ds = exp_dates_by_symbol.get(sym) or []
+                    if mode == "weekly":
+                        ex = _pick_weekly_close_expiry_date(ds, today=now, now_dt=now_dt_utc)
+                    else:
+                        ex = _pick_nearest_expiry_date(ds, today=now)
+                    if ex:
+                        return sym, ex
+                return None, None
+
+            weekly_sym, weekly_expiry = _pick_symbol_and_expiry(mode="weekly")
+            daily_sym, daily_expiry = _pick_symbol_and_expiry(mode="daily")
+
+            def _build_view(*, symbol: Optional[str], expiry: Optional[str], label: str) -> Dict[str, Any]:
+                base = {
+                    "enabled": False,
+                    "label": label,
+                    "symbolUsed": symbol,
+                    "expiry": str(expiry)[:10] if expiry else None,
+                    "spot": None,
+                    "bandPct": 0.05,
+                    "atmIvPct": None,
+                    "greeksAgg": None,
+                    "dealerGamma": None,
+                    "oiClusters": None,
+                    "warnings": [],
+                    "notes": [],
+                }
+                if not symbol or not expiry:
+                    base["notes"] = ["No suitable expiry found for this view."]
+                    return base
+
                 fields = ",".join(
                     [
                         "ticker",
@@ -1996,61 +2123,66 @@ def compute_engine2_spx_ic(
                 )
                 used_chain_sym, chain_rows, chain_warn = _live_chain_with_fallback(
                     client,
-                    tickers=[used_symbol] if used_symbol else ["SPX", "SPXW", "SPY"],
-                    expiry=expiry_live,
+                    tickers=[symbol],
+                    expiry=expiry,
                     fields=fields,
                 )
                 # If strikes-by-expiry is empty, fall back to filtering full strikes payload (if we have it).
-                if (not chain_rows) and used_symbol in strikes_cache_by_symbol:
-                    chain_rows = _filter_chain_by_expiry(strikes_cache_by_symbol.get(used_symbol) or [], expiry=expiry_live)
+                if (not chain_rows) and symbol in strikes_cache_by_symbol:
+                    chain_rows = _filter_chain_by_expiry(strikes_cache_by_symbol.get(symbol) or [], expiry=expiry)
                     if chain_rows:
                         chain_warn.append("Live strikes-by-expiry empty; used full strikes filtered by expiry.")
 
-                if chain_rows:
-                    dg = compute_dealer_gamma_context(chain_rows, expiry=expiry_live, contract_multiplier=100, band_pct=0.05, top_n=5)
-                    oi = compute_open_interest_clusters(chain_rows, expiry=expiry_live, band_pct=0.05, top_n=5, cluster_steps=2)
-                    # Simple greek aggregates near spot band (same band as dealer gamma)
-                    spot = dg.get("spot")
-                    lo = float(spot) * (1.0 - 0.05) if spot else None
-                    hi = float(spot) * (1.0 + 0.05) if spot else None
-                    w_mode = str(dg.get("weightingMode") or "oi")
-                    g_sum = 0.0
-                    t_sum = 0.0
-                    v_sum = 0.0
-                    iv_atm = None
-                    if spot and lo and hi:
-                        best_dist = None
-                        for r in chain_rows:
-                            strike = _to_float(r.get("strike"))
-                            if strike is None or not (lo <= float(strike) <= hi):
-                                continue
-                            gamma = _to_float(r.get("gamma")) or 0.0
-                            theta = _to_float(r.get("theta")) or 0.0
-                            vega = _to_float(r.get("vega")) or 0.0
-                            if w_mode == "oi":
-                                w = (_to_float(r.get("callOpenInterest")) or 0.0) + (_to_float(r.get("putOpenInterest")) or 0.0)
-                            elif w_mode == "volume":
-                                w = (_to_float(r.get("callVolume")) or 0.0) + (_to_float(r.get("putVolume")) or 0.0)
-                            else:
-                                w = 1.0
-                            w = max(0.0, float(w))
-                            g_sum += float(gamma) * w * 100.0
-                            t_sum += float(theta) * w * 100.0
-                            v_sum += float(vega) * w * 100.0
+                if not chain_rows:
+                    base["warnings"] = chain_warn
+                    base["notes"] = ["Live strikes returned no usable chain rows for the selected expiry (check entitlement, symbol, or expiry selection)."]
+                    return base
 
-                            dist = abs(float(strike) - float(spot))
-                            if best_dist is None or dist < best_dist:
-                                best_dist = dist
-                                # Prefer call mid iv, fallback to put mid iv
-                                iv = _iv_to_pct(r.get("callMidIv")) or _iv_to_pct(r.get("putMidIv"))
-                                iv_atm = iv
+                dg = compute_dealer_gamma_context(chain_rows, expiry=expiry, contract_multiplier=100, band_pct=0.05, top_n=5)
+                oi = compute_open_interest_clusters(chain_rows, expiry=expiry, band_pct=0.05, top_n=5, cluster_steps=2)
 
-                    live_context = {
+                # Simple greek aggregates near spot band (same band as dealer gamma)
+                spot = dg.get("spot")
+                lo = float(spot) * (1.0 - 0.05) if spot else None
+                hi = float(spot) * (1.0 + 0.05) if spot else None
+                w_mode = str(dg.get("weightingMode") or "oi")
+                g_sum = 0.0
+                t_sum = 0.0
+                v_sum = 0.0
+                iv_atm = None
+                if spot and lo and hi:
+                    best_dist = None
+                    for r in chain_rows:
+                        strike = _to_float(r.get("strike"))
+                        if strike is None or not (lo <= float(strike) <= hi):
+                            continue
+                        gamma = _to_float(r.get("gamma")) or 0.0
+                        theta = _to_float(r.get("theta")) or 0.0
+                        vega = _to_float(r.get("vega")) or 0.0
+                        if w_mode == "oi":
+                            w = (_to_float(r.get("callOpenInterest")) or 0.0) + (_to_float(r.get("putOpenInterest")) or 0.0)
+                        elif w_mode == "volume":
+                            w = (_to_float(r.get("callVolume")) or 0.0) + (_to_float(r.get("putVolume")) or 0.0)
+                        else:
+                            w = 1.0
+                        w = max(0.0, float(w))
+                        g_sum += float(gamma) * w * 100.0
+                        t_sum += float(theta) * w * 100.0
+                        v_sum += float(vega) * w * 100.0
+
+                        dist = abs(float(strike) - float(spot))
+                        if best_dist is None or dist < best_dist:
+                            best_dist = dist
+                            # Prefer call mid iv, fallback to put mid iv
+                            iv = _iv_to_pct(r.get("callMidIv")) or _iv_to_pct(r.get("putMidIv"))
+                            iv_atm = iv
+
+                base.update(
+                    {
                         "enabled": True,
-                        "symbolUsed": used_chain_sym or used_symbol,
-                        "expiry": str(expiry_live)[:10],
+                        "symbolUsed": used_chain_sym or symbol,
+                        "expiry": str(expiry)[:10],
                         "spot": dg.get("spot"),
-                        "bandPct": 0.05,
                         "atmIvPct": None if iv_atm is None else round(float(iv_atm), 2),
                         "greeksAgg": {
                             "gamma": round(float(g_sum), 3),
@@ -2060,26 +2192,46 @@ def compute_engine2_spx_ic(
                         },
                         "dealerGamma": dg,
                         "oiClusters": oi,
-                        "warnings": [*exp_warn, *chain_warn],
+                        "warnings": chain_warn,
                         "notes": [
                             "Live, informational only. Dealer gamma context does not change breach odds or any historical stats.",
                             "spotPrice is preferred; stockPrice may be parity-derived intraday.",
                         ],
                     }
-                else:
-                    live_context["enabled"] = False
-                    live_context["symbolUsed"] = used_symbol
-                    live_context["expiry"] = str(expiry_live)[:10]
-                    live_context["warnings"] = [*exp_warn, *chain_warn]
-                    live_context["notes"] = [
-                        "Live strikes returned no usable chain rows for the selected expiry (check entitlement, symbol, or expiry selection)."
-                    ]
-            else:
+                )
+                return base
+
+            weekly_view = _build_view(symbol=weekly_sym, expiry=weekly_expiry, label="weeklyFriday")
+            daily_view = _build_view(symbol=daily_sym, expiry=daily_expiry, label="nearestDaily")
+
+            # Back-compat: expose a primary view at top-level (weekly preferred).
+            primary = weekly_view if weekly_view.get("enabled") else daily_view
+            any_enabled = bool(weekly_view.get("enabled") or daily_view.get("enabled"))
+            live_context = {
+                "enabled": any_enabled,
+                "symbolUsed": primary.get("symbolUsed"),
+                "expiry": primary.get("expiry"),
+                "spot": primary.get("spot"),
+                "bandPct": 0.05,
+                "atmIvPct": primary.get("atmIvPct"),
+                "greeksAgg": primary.get("greeksAgg"),
+                "dealerGamma": primary.get("dealerGamma"),
+                "oiClusters": primary.get("oiClusters"),
+                "weeklyFriday": weekly_view,
+                "nearestDaily": daily_view,
+                "warnings": [*exp_warn, *(primary.get("warnings") or [])],
+                "notes": [
+                    "Live, informational only. Backtest/odds use ORATS EOD and are not affected by these live panels.",
+                    "Weekly view targets the Friday weekly expiry (rolls after 4:15pm ET on Fridays).",
+                    "Nearest view targets 0DTE/nearest expiry (intraday microstructure).",
+                ],
+            }
+            if not any_enabled:
                 live_context["enabled"] = False
-                live_context["warnings"] = exp_warn
                 live_context["notes"] = [
-                    "Could not select a live expiry (no expirations and strikes fallback failed)."
+                    "Live context unavailable (no usable chain rows for weekly or nearest expiry).",
                 ]
+                live_context["warnings"] = exp_warn
         else:
             live_context["notes"] = ["Live endpoints not configured on this ORATS client (missing live_* methods)."]
     except Exception:
@@ -2093,6 +2245,9 @@ def compute_engine2_spx_ic(
             "atmIvPct": None,
             "greeksAgg": None,
             "dealerGamma": None,
+            "oiClusters": None,
+            "weeklyFriday": None,
+            "nearestDaily": None,
             "warnings": [],
             "notes": ["Live context unavailable (unexpected error)."],
         }
