@@ -35,6 +35,43 @@ function fmtSignedPct(v) {
   return `${sign}${n.toFixed(2)}%`;
 }
 
+function fmt0(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(0) : "—";
+}
+
+function _pickMeaningfulClusters(sideClusters, spot, strikeStep) {
+  const xs = Array.isArray(sideClusters) ? sideClusters : [];
+  if (!xs.length) return [];
+
+  const top = xs[0];
+  const topTotal = Number(top?.totalOI || 0);
+  const topPeak = Number(top?.peakStrike ?? top?.maxStrike);
+  const topDist = (Number.isFinite(spot) && Number.isFinite(topPeak)) ? Math.abs(topPeak - spot) : Number.POSITIVE_INFINITY;
+
+  const out = [top];
+  for (let i = 1; i < xs.length && out.length < 3; i++) {
+    const c = xs[i];
+    const total = Number(c?.totalOI || 0);
+    const peak = Number(c?.peakStrike ?? c?.maxStrike);
+    const dist = (Number.isFinite(spot) && Number.isFinite(peak)) ? Math.abs(peak - spot) : Number.POSITIVE_INFINITY;
+
+    const bigEnough = (topTotal > 0) ? (total / topTotal) >= 0.6 : false;
+    const closerToSpot = dist + 1e-9 < topDist;
+    const separated = (Number.isFinite(strikeStep) && strikeStep > 0 && Number.isFinite(peak) && Number.isFinite(topPeak))
+      ? Math.abs(peak - topPeak) >= 2 * strikeStep
+      : false;
+
+    if (bigEnough || closerToSpot || separated) out.push(c);
+  }
+  return out;
+}
+
+function _fmtClusterLine(c) {
+  const peak = c?.peakStrike ?? c?.maxStrike;
+  return `${fmt0(peak)} (${fmt0(c?.totalOI)}) · range=${fmt0(c?.minStrike)}–${fmt0(c?.maxStrike)} · n=${fmt0(c?.nStrikes)}`;
+}
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -908,6 +945,37 @@ function render(payload) {
       tgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
     }
   }
+
+  // OI Clusters cards (Market + Ticker)
+  function renderOiClustersCard(prefix, container) {
+    const meta = $(`${prefix}OiMeta`);
+    const put = $(`${prefix}OiPut`);
+    const call = $(`${prefix}OiCall`);
+    if (!meta || !put || !call) return;
+
+    const oiObj = container?.oiClusters || null;
+    const enabled = !!(container && container.enabled && oiObj && typeof oiObj === "object");
+    if (!enabled) {
+      meta.textContent = "—";
+      put.textContent = "Put: —";
+      call.textContent = "Call: —";
+      return;
+    }
+
+    const spot = Number(oiObj.spot);
+    const step = Number(oiObj.strikeStep);
+    const band = Number(oiObj.bandPct);
+    meta.textContent = `expiry=${String(oiObj.expiry || container.expiry || "—")} · spot=${fmt0(spot)} · band=±${Math.round((Number.isFinite(band) ? band : 0.05) * 100)}% · step=${fmt0(step)}`;
+
+    const puts = _pickMeaningfulClusters(oiObj.putClusters, spot, step).map(_fmtClusterLine);
+    const calls = _pickMeaningfulClusters(oiObj.callClusters, spot, step).map(_fmtClusterLine);
+    put.textContent = puts.length ? `Put: ${puts.join(" | ")}` : "Put: —";
+    call.textContent = calls.length ? `Call: ${calls.join(" | ")}` : "Call: —";
+  }
+
+  renderOiClustersCard("market", mg);
+  renderOiClustersCard("ticker", tgd);
+
   const rm = $("regimeMessage");
   if (rm) rm.textContent = rg?.guidance?.message || "—";
 

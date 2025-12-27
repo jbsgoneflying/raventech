@@ -18,6 +18,43 @@ function fmtPct(x, d = 2) {
   return `${n.toFixed(d)}%`;
 }
 
+function fmt0(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n.toFixed(0) : "—";
+}
+
+function _pickMeaningfulClusters(sideClusters, spot, strikeStep) {
+  const xs = Array.isArray(sideClusters) ? sideClusters : [];
+  if (!xs.length) return [];
+
+  const top = xs[0];
+  const topTotal = Number(top?.totalOI || 0);
+  const topPeak = Number(top?.peakStrike ?? top?.maxStrike);
+  const topDist = (Number.isFinite(spot) && Number.isFinite(topPeak)) ? Math.abs(topPeak - spot) : Number.POSITIVE_INFINITY;
+
+  const out = [top];
+  for (let i = 1; i < xs.length && out.length < 3; i++) {
+    const c = xs[i];
+    const total = Number(c?.totalOI || 0);
+    const peak = Number(c?.peakStrike ?? c?.maxStrike);
+    const dist = (Number.isFinite(spot) && Number.isFinite(peak)) ? Math.abs(peak - spot) : Number.POSITIVE_INFINITY;
+
+    const bigEnough = (topTotal > 0) ? (total / topTotal) >= 0.6 : false;
+    const closerToSpot = dist + 1e-9 < topDist;
+    const separated = (Number.isFinite(strikeStep) && strikeStep > 0 && Number.isFinite(peak) && Number.isFinite(topPeak))
+      ? Math.abs(peak - topPeak) >= 2 * strikeStep
+      : false;
+
+    if (bigEnough || closerToSpot || separated) out.push(c);
+  }
+  return out;
+}
+
+function _fmtClusterLine(c) {
+  const peak = c?.peakStrike ?? c?.maxStrike;
+  return `${fmt0(peak)} (${fmt0(c?.totalOI)}) · range=${fmt0(c?.minStrike)}–${fmt0(c?.maxStrike)} · n=${fmt0(c?.nStrikes)}`;
+}
+
 let lastPayload = null;
 
 function setLoading(isLoading) {
@@ -260,10 +297,13 @@ function render(payload) {
   const dgNote = $("dgNote");
   const dgTop = $("dgTop");
   const dgOi = $("dgOi");
+  const oiMeta = $("oiMeta");
+  const oiPut = $("oiPut");
+  const oiCall = $("oiCall");
   const lc = payload?.liveContext || null;
   const dg = lc?.dealerGamma || null;
   const oi = lc?.oiClusters || null;
-  if (dgMain && dgNote && dgTop && dgOi) {
+  if (dgMain && dgNote && dgTop && dgOi && oiMeta && oiPut && oiCall) {
     const enabled = !!(lc && lc.enabled && dg && dg.netGammaSign);
     if (!enabled) {
       dgMain.textContent = "—";
@@ -272,6 +312,9 @@ function render(payload) {
       dgNote.textContent = notes[0] || warn[0] || "Live context unavailable.";
       dgTop.textContent = "";
       dgOi.textContent = "—";
+      oiMeta.textContent = "—";
+      oiPut.textContent = "Put: —";
+      oiCall.textContent = "Call: —";
     } else {
       dgMain.textContent = `${String(dg.netGammaSign || "").toUpperCase()} · ${String(dg.magnitudeBucket || "").toUpperCase()}`;
       dgNote.textContent = `symbol=${String(lc.symbolUsed || "—")} · expiry=${String(lc.expiry || "—")} · spot=${Number(dg.spot || 0).toFixed(2)} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}% · weighting=${String(dg.weightingMode || "—")}`;
@@ -284,6 +327,17 @@ function render(payload) {
       const putTxt = putWall && Number.isFinite(Number(putStrike)) ? `${Number(putStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
       const callTxt = callWall && Number.isFinite(Number(callStrike)) ? `${Number(callStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
       dgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
+
+      // OI clusters card
+      const spot = Number(oi?.spot);
+      const step = Number(oi?.strikeStep);
+      const band = Number(oi?.bandPct);
+      oiMeta.textContent = `expiry=${String(oi?.expiry || lc.expiry || "—")} · spot=${fmt0(spot)} · band=±${Math.round((Number.isFinite(band) ? band : 0.05) * 100)}% · step=${fmt0(step)}`;
+
+      const puts = _pickMeaningfulClusters(oi?.putClusters, spot, step).map(_fmtClusterLine);
+      const calls = _pickMeaningfulClusters(oi?.callClusters, spot, step).map(_fmtClusterLine);
+      oiPut.textContent = puts.length ? `Put: ${puts.join(" | ")}` : "Put: —";
+      oiCall.textContent = calls.length ? `Call: ${calls.join(" | ")}` : "Call: —";
     }
   }
 
