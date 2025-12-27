@@ -28,14 +28,42 @@
       <section class="controlBar" aria-label="Controls">
         <form id="form" class="controlBarForm">
           <div class="controlGroup">
-            <label class="controlLabel" for="ticker">Ticker</label>
+            <label class="controlLabel" for="ticker">
+              Ticker
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Ticker help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Ticker (earnings event study)</div>
+                  <div class="tipBody">
+                    <p>Engine 1 studies the last ~20 earnings events (about 5 years) for the ticker and compares the <b>realized close→open move</b> to the <b>implied earnings move</b>.</p>
+                    <ul>
+                      <li><b>What to look for</b>: frequent breaches and large overshoots = a “tail-y” name.</li>
+                      <li><b>Desk view</b>: use this as a sizing/wing-distance guardrail before selling premium into earnings.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </label>
             <input id="ticker" name="ticker" class="controlInput" inputmode="text" placeholder="AAPL" autocomplete="off" />
           </div>
 
           <div class="controlGroup">
             <label class="controlLabel" for="k">
               Breach multiple
-              <span class="info" title="Breach = |realized move| > k × |implied move|">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Breach multiple help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Breach multiple (k)</div>
+                  <div class="tipBody">
+                    <p><b>Breach</b> means \(|realized| &gt; k \\times |implied|\) for the earnings gap (close→open).</p>
+                    <ul>
+                      <li><b>k=1.0×</b>: “did it beat the market’s implied move?”</li>
+                      <li><b>k=1.5× / 2.0×</b>: focuses on true tail events (rarer but more damaging).</li>
+                      <li><b>Desk view</b>: raising k reduces breach frequency but isolates the events that stress short IC wings the most.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </label>
             <select id="k" name="k" class="controlSelect">
               <option value="1.0" selected>1.0×</option>
@@ -49,7 +77,19 @@
           <div class="controlGroup">
             <label class="controlLabel" for="mcToggle">
               Simulated Risk (MC)
-              <span class="info" title="Empirical Monte Carlo earnings gap simulation (close→open only).">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Monte Carlo help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Simulated Risk (MC)</div>
+                  <div class="tipBody">
+                    <p>Monte Carlo simulates the <b>earnings gap at open</b> by bootstrapping historical earnings shocks (no intraday path).</p>
+                    <ul>
+                      <li><b>What it’s for</b>: a trader-friendly “how bad can the open gap be?” view (probability + tail loss).</li>
+                      <li><b>Desk view</b>: use it to sanity-check wing distances and avoid over-sizing into names with heavy gap tails.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </label>
             <label class="toggleRow">
               <input id="mcToggle" type="checkbox" />
@@ -60,7 +100,20 @@
           <div class="controlGroup hidden" id="mcOverrideGroup">
             <label class="controlLabel" for="mcEventDate">
               Next earnings (override)
-              <span class="info" title="If ORATS next earnings is unavailable, provide the earnings date + timing. MC will still be anchored to latest ORATS EOD snapshot (as-of date shown in MC panel).">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Next earnings override help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Next earnings override</div>
+                  <div class="tipBody">
+                    <p>Use this only when the next earnings date/timing can’t be pulled reliably.</p>
+                    <ul>
+                      <li><b>Date</b>: the scheduled earnings date.</li>
+                      <li><b>Timing</b>: BMO (before open) vs AMC (after close). Auto tries to infer it.</li>
+                      <li><b>Desk view</b>: MC stays anchored to the latest ORATS EOD snapshot; this just fixes the event window selection.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </label>
             <div class="mcOverrideRow">
               <input id="mcEventDate" class="controlInput" type="date" />
@@ -86,14 +139,42 @@
           <div class="sectionHeader">
             <h2 class="sectionTitle">
               Summary
-              <span class="info" title="Summary computed over usable events only (must have implied + realized, and timing AMC/BMO).">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Summary help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Summary (how to interpret)</div>
+                  <div class="tipBody">
+                    <p>Computed over <b>usable</b> earnings events only (must have implied move, realized close→open move, and AMC/BMO timing).</p>
+                    <ul>
+                      <li><b>Breach rate</b>: frequency of outsized gaps vs implied (controlled by k).</li>
+                      <li><b>Overshoot</b>: conditional tail severity when breaches happen.</li>
+                      <li><b>Desk view</b>: high breach + high overshoot = widen, reduce size, or require better credit (risk-only tool).</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </h2>
             <div id="breachMeta" class="sectionMeta">—</div>
           </div>
 
           <div class="metricGrid">
             <div class="metricCard">
-              <div class="metricLabel">Breach Rate</div>
+              <div class="metricLabel">
+                Breach Rate
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="Breach rate help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">Breach rate</div>
+                    <div class="tipBody">
+                      <p>Percent of usable earnings events where \(|realized| &gt; k \\times |implied|\).</p>
+                      <ul>
+                        <li><b>What to look for</b>: persistently high breach rates indicate the market underprices this name’s earnings gap risk.</li>
+                        <li><b>Desk view</b>: higher breach rate → wider wings, smaller size, or avoid selling tight premium into earnings.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </span>
+              </div>
               <div id="breachRate" class="metricValue">—</div>
               <div class="metricCaption">Share of usable events that breached</div>
             </div>
@@ -101,7 +182,20 @@
             <div class="metricCard">
               <div class="metricLabel">
                 Avg Overshoot If Breached
-                <span class="info" title="Overshoot = (realized − implied) / implied, conditional on breach.">ⓘ</span>
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="Overshoot help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">Avg overshoot if breached</div>
+                    <div class="tipBody">
+                      <p>Conditional tail severity when a breach happens:</p>
+                      <p class="mono">overshoot = (|realized| − |implied|) / |implied|</p>
+                      <ul>
+                        <li><b>What to look for</b>: high overshoot means “when it breaks, it breaks big.”</li>
+                        <li><b>Desk view</b>: this is the risk behind “blown-out wings.” Consider wider geometry or asymmetric wings if tail is directional.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </span>
               </div>
               <div id="avgAbove" class="metricValue">—</div>
               <div class="metricCaption">Tail severity conditional on breach</div>
@@ -129,7 +223,20 @@
           <div class="sectionHeader">
             <h2 class="sectionTitle">
               Regime Overlay
-              <span class="info" title="Inputs: SPY 20D realized vol percentile, ticker 30D IV percentile, and SPY 5D move percentile. Combined into a tail multiplier (0.7–2.0×).">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Regime overlay help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Regime overlay (risk climate)</div>
+                  <div class="tipBody">
+                    <p>A risk-only overlay that turns current market + single-name stress into a <b>tail multiplier</b> used to scale wing guidance.</p>
+                    <ul>
+                      <li><b>Inputs</b>: SPY realized vol percentile, ticker IV30 percentile, SPY 5D move percentile.</li>
+                      <li><b>Output</b>: tail multiplier (roughly 0.7–2.0×) + a simple trade gate.</li>
+                      <li><b>Desk view</b>: treat this like a “conditions check” — elevated/stress regimes deserve wider wings or no-trade.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </h2>
             <div class="sectionMeta muted" id="regimeAsOf">—</div>
           </div>
@@ -217,7 +324,19 @@
           <div class="sectionHeader">
             <h2 class="sectionTitle">
               Event Risk (Benzinga)
-              <span class="info" title="Additive context (does not change breach history). Uses Benzinga: Economic Calendar, News/WIIM, Ratings, and Options Activity.">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Event risk help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Event risk (Benzinga)</div>
+                  <div class="tipBody">
+                    <p>Additive context around the earnings window. It does <b>not</b> change historical breach stats.</p>
+                    <ul>
+                      <li><b>Inputs</b>: macro calendar proximity, headlines/WIIM, analyst ratings clusters, unusual options activity.</li>
+                      <li><b>Desk view</b>: use as a guardrail — if event risk is high, require better structure/credit or avoid holding through the window.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </h2>
             <div class="sectionMeta muted" id="eventRiskMeta">—</div>
           </div>
@@ -355,7 +474,20 @@
           <div class="sectionHeader">
             <h2 class="sectionTitle">
               Simulated Earnings Risk (MC)
-              <span class="info" title="Monte Carlo uses empirical earnings shocks from historical events and simulates the close→open earnings gap only (no intraday path).">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Simulated earnings risk help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Simulated earnings risk (Monte Carlo)</div>
+                  <div class="tipBody">
+                    <p>Empirical simulation of the <b>earnings gap at open</b> (close→open only). No intraday path is modeled.</p>
+                    <ul>
+                      <li><b>Chance of breach</b>: probability the gap finishes beyond your short strikes.</li>
+                      <li><b>Expected loss / CVaR95</b>: expected and tail intrinsic loss at open (risk-only).</li>
+                      <li><b>Desk view</b>: treat this as “open-gap tail risk” — it’s the risk that blows through short IC wings before you can manage.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </h2>
             <div class="sectionMeta muted" id="mcMeta">—</div>
           </div>
@@ -408,7 +540,20 @@
           <div class="sectionHeader">
             <h2 class="sectionTitle">
               Quarter Seasonality
-              <span class="info" title="Seasonality compares each quarter vs baseline behavior using deltas in breach rate and ratios.">ⓘ</span>
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Quarter seasonality help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Quarter seasonality</div>
+                  <div class="tipBody">
+                    <p>Compares each quarter vs the ticker’s baseline earnings behavior (breach rate + realized/implied ratios).</p>
+                    <ul>
+                      <li><b>What to look for</b>: quarters with positive breach deltas and high max ratios are typically “wider wings” quarters.</li>
+                      <li><b>Desk view</b>: this is a simple calendar conditioning tool — useful for strike distance and sizing, not a directional signal.</li>
+                      <li><b>Sample size matters</b>: quarters with &lt;3 usable events should be treated as low confidence.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
             </h2>
             <div class="sectionMeta muted">Breach Δ shown in percentage points (pp)</div>
           </div>
@@ -423,7 +568,22 @@
 
         <section class="surface">
           <div class="sectionHeader">
-            <h2 class="sectionTitle">Earnings Events</h2>
+            <h2 class="sectionTitle">
+              Earnings Events
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Earnings events help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Earnings events table</div>
+                  <div class="tipBody">
+                    <p>Row-by-row history of implied vs realized earnings gaps and whether each event breached.</p>
+                    <ul>
+                      <li><b>near-breach</b>: highlighted rows are close to breach (realized/implied ≥ 0.90) — useful for “almost blew out” context.</li>
+                      <li><b>Desk view</b>: scan for clustering — repeated outsized gaps, or a directional tail bias, should influence wing asymmetry and sizing.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
             <div class="sectionMeta muted">
               <button id="earningsToggle" class="linkButton" type="button">Show earnings history</button>
               <span class="spacerDot">·</span>

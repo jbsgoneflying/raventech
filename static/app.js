@@ -81,6 +81,42 @@ function escapeHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
+function initTooltips() {
+  const wraps = Array.from(document.querySelectorAll(".tipWrap"));
+  const closeAll = () => {
+    wraps.forEach(w => {
+      w.classList.remove("isOpen");
+      const b = w.querySelector(".tipBtn");
+      if (b) b.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  wraps.forEach((w) => {
+    const btn = w.querySelector(".tipBtn");
+    if (!btn) return;
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const isOpen = w.classList.contains("isOpen");
+      closeAll();
+      if (!isOpen) {
+        w.classList.add("isOpen");
+        btn.setAttribute("aria-expanded", "true");
+      }
+    });
+  });
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest(".tipWrap")) return;
+    closeAll();
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeAll();
+  });
+}
+
 function pill(text, kind) {
   const cls = kind ? `pill ${kind}` : "pill";
   return `<span class="${cls}">${escapeHtml(text)}</span>`;
@@ -1304,6 +1340,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // AskRaven removed
+  initTooltips();
 });
 
 
