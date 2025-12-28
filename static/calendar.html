@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Earnings Calendar</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta
+      name="description"
+      content="Raven-Tech.co — Volatility-first calendar for event-driven premium selling."
+    />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="calHero">
+        <div class="calHeroLeft">
+          <img class="calHeroLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="calHeroText">
+            <div class="calHeroTitle">Raven-Tech.co</div>
+            <div class="calHeroSubtitle">
+              Volatility-first calendar for event-driven premium selling.
+            </div>
+          </div>
+        </div>
+        <div class="calHeroRight">
+          <a class="primaryButton" href="/breach" style="text-decoration:none;">Engine 1 · Breach Tool</a>
+          <a class="primaryButton" href="/spx" style="text-decoration:none;">Engine 2 · SPX IC</a>
+        </div>
+      </header>
+
+      <section class="calTopBar surface" aria-label="Calendar controls">
+        <div class="calTopBarRow">
+          <div class="calViewSeg segmented" role="group" aria-label="Calendar view">
+            <button id="viewMonth" class="segButton" type="button">Month</button>
+            <button id="viewWeek" class="segButton" type="button">Week</button>
+            <button id="viewDay" class="segButton" type="button">Day</button>
+          </div>
+
+          <div class="calNav">
+            <button id="prevBtn" class="primaryButton" type="button" aria-label="Previous">‹</button>
+            <button id="todayBtn" class="primaryButton" type="button">Today</button>
+            <button id="nextBtn" class="primaryButton" type="button" aria-label="Next">›</button>
+          </div>
+
+          <div class="calTitleWrap">
+            <div id="rangeTitle" class="calRangeTitle">—</div>
+            <div id="rangeSub" class="calRangeSub muted">—</div>
+          </div>
+
+          <div class="calActions">
+            <button id="settingsBtn" class="primaryButton" type="button">Settings</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="calGridWrap" aria-label="Calendar">
+        <div id="calGrid" class="calGrid"></div>
+      </section>
+
+      <div id="status" class="status" aria-live="polite"></div>
+    </main>
+
+    <!-- Settings modal -->
+    <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Earnings settings">
+      <div class="modalCard">
+        <div class="modalHead">
+          <div class="modalTitle">Calendar Settings</div>
+          <button id="settingsCloseX" class="iconBtn" type="button" aria-label="Close">×</button>
+        </div>
+
+        <div class="modalBody">
+          <div class="modalSection">
+            <div class="modalSectionTitle">Universe</div>
+            <label class="toggleRow">
+              <input id="engine1OnlyToggle" type="checkbox" checked />
+              <span class="toggleText">Engine‑1 eligible names only</span>
+            </label>
+          </div>
+
+          <div class="modalSection">
+            <div class="modalSectionTitle">Event Layers</div>
+            <div class="modalChecks">
+              <label class="checkRow"><input id="evHoliday" type="checkbox" checked /> <span>Holidays / Market Closed</span></label>
+              <label class="checkRow"><input id="evEarlyClose" type="checkbox" checked /> <span>Early Close / Abbreviated</span></label>
+              <label class="checkRow"><input id="evFed" type="checkbox" checked /> <span>Fed</span></label>
+              <label class="checkRow"><input id="evEcon" type="checkbox" checked /> <span>Economic</span></label>
+              <label class="checkRow"><input id="evTreasury" type="checkbox" checked /> <span>Treasury</span></label>
+              <label class="checkRow"><input id="evOpex" type="checkbox" checked /> <span>OpEx week marker</span></label>
+            </div>
+          </div>
+
+          <div class="modalSection">
+            <div class="modalSectionTitle">Notes</div>
+            <div class="finePrint muted">
+              Earnings tiles show Engine‑1 names with Benzinga earnings dates. Click a ticker for Iron Condor Rank and breach history.
+            </div>
+          </div>
+        </div>
+
+        <div class="modalFoot">
+          <button id="settingsCloseBtn" class="primaryButton" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ticker details popover -->
+    <div id="popover" class="popover hidden" role="dialog" aria-modal="false" aria-label="Ticker details">
+      <div class="popoverCard">
+        <div class="popoverHead">
+          <div class="popoverTitle" id="popTitle">—</div>
+          <button id="popClose" class="iconBtn" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="popBody" class="popoverBody">—</div>
+        <div class="popoverFoot">
+          <a id="popBreachLink" class="primaryButton" href="/breach" style="text-decoration:none;">Open Engine 1</a>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/calendar.js"></script>
+  </body>
+</html>
+
+

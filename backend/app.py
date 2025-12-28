@@ -27,6 +27,8 @@ from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
 from backend.spx_ic_engine import compute_engine2_spx_ic
 from backend.redis_store import get_store_optional
+from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
+from backend.condor_rank import compute_condor_rank
 
 
 try:
@@ -236,6 +238,15 @@ _breach_cache_lock = threading.Lock()
 _spx_ic_cache = TTLCache(maxsize=128, ttl=30 * 60)  # 30 minutes (interactive)
 _spx_ic_cache_lock = threading.Lock()
 
+_calendar_cache = TTLCache(maxsize=128, ttl=10 * 60)  # 10 minutes (calendar page)
+_calendar_cache_lock = threading.Lock()
+
+_engine1_elig_cache = TTLCache(maxsize=50_000, ttl=24 * 60 * 60)  # 24h
+_engine1_elig_cache_lock = threading.Lock()
+
+_condor_rank_cache = TTLCache(maxsize=1024, ttl=6 * 60 * 60)  # 6h
+_condor_rank_cache_lock = threading.Lock()
+
 def _truncate(s: str, n: int) -> str:
     t = str(s or "").replace("\n", " ").strip()
     return (t[:n] + "…") if len(t) > n else t
@@ -297,6 +308,14 @@ if STATIC_DIR.exists():
 
 @app.get("/")
 def index():
+    cal_path = STATIC_DIR / "calendar.html"
+    if not cal_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/calendar.html")
+    return FileResponse(str(cal_path))
+
+
+@app.get("/breach")
+def breach_page():
     index_path = STATIC_DIR / "index.html"
     if not index_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/index.html")
@@ -510,6 +529,100 @@ def breach(
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/calendar")
+def calendar(
+    view: str = Query("month", description="month|week|day"),
+    anchor: str = Query(None, description="YYYY-MM-DD (anchor date)"),
+    tz: str = Query("America/New_York"),
+    engine1Only: int = Query(1, ge=0, le=1),
+    includeEvents: int = Query(1, ge=0, le=1),
+    maxTickers: int = Query(2000, ge=100, le=5000),
+):
+    """
+    Earnings calendar endpoint for the front page.
+
+    Design goals:
+    - One response for the visible range (month/week/day)
+    - Macro events fetched once per range (Benzinga economics)
+    - Engine-1 eligibility evaluated via ORATS /cores snapshot with long TTL cache
+    """
+    try:
+        a = str(anchor or dt.date.today().isoformat())[:10]
+        v = str(view or "month").strip().lower()
+        e1 = bool(int(engine1Only))
+        inc = bool(int(includeEvents))
+
+        # Engine-1 universe thresholds (env configurable)
+        min_price = float(os.getenv("ENGINE1_MIN_PRICE") or 50.0)
+        min_mcap = float(os.getenv("ENGINE1_MIN_MARKET_CAP") or 10_000_000_000.0)
+        min_dvol = float(os.getenv("ENGINE1_MIN_AVG_DOLLAR_VOL_20D") or 200_000_000.0)
+        policy = Engine1UniversePolicy(min_price=min_price, min_market_cap=min_mcap, min_avg_dollar_vol_20d=min_dvol)
+
+        flags_fp = get_flags().cache_fingerprint()
+        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), flags_fp)
+        with _calendar_cache_lock:
+            cached = _calendar_cache.get(key)
+        if cached is not None:
+            return cached
+
+        with _engine1_elig_cache_lock:
+            elig_cache = _engine1_elig_cache  # TTLCache behaves like a dict
+
+        payload = build_calendar_payload(
+            view=v,
+            anchor=a,
+            tz=tz,
+            engine1_only=e1,
+            include_events=inc,
+            orats_client=_get_client(),
+            benzinga_client=_get_benzinga_client_optional(),
+            policy=policy,
+            eligibility_cache=elig_cache,
+            max_tickers_considered=int(maxTickers),
+        )
+
+        with _calendar_cache_lock:
+            _calendar_cache[key] = payload
+        return payload
+    except OratsError as e:
+        LOG.exception("ORATS failure (calendar)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (calendar)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/condor-rank")
+def condor_rank(
+    ticker: str = Query(..., description="US equity ticker"),
+    n: int = Query(20, ge=5, le=50),
+    years: int = Query(5, ge=1, le=10),
+):
+    """
+    Iron Condor Rank endpoint (lightweight, cached).
+    """
+    try:
+        t = str(ticker or "").strip().upper()
+        key = (t, int(n), int(years), get_flags().cache_fingerprint())
+        with _condor_rank_cache_lock:
+            cached = _condor_rank_cache.get(key)
+        if cached is not None:
+            return cached
+
+        payload = compute_condor_rank(_get_client(), ticker=t, n=int(n), years=int(years))
+        with _condor_rank_cache_lock:
+            _condor_rank_cache[key] = payload
+        return payload
+    except BreachInputError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except OratsError as e:
+        LOG.exception("ORATS failure (condor-rank)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (condor-rank)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
