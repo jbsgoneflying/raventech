@@ -1113,21 +1113,11 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   gap: 12px;
 }
 
-.calGrid--month { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .calGrid--week { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .calGrid--day { grid-template-columns: 1fr; }
-/* +weekday headers */
-.calGrid--month { grid-auto-rows: auto; }
 .calGrid--week { grid-auto-rows: auto; }
 
-@media (max-width: 1100px) {
-  .calGrid--month { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-
-@media (max-width: 760px) {
-  .calGrid--month { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .calGrid--week { grid-template-columns: 1fr; }
-}
+@media (max-width: 760px) { .calGrid--week { grid-template-columns: 1fr; } }
 
 .calCell {
   background: var(--surface);
@@ -1149,10 +1139,6 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   color: rgba(11,11,15,0.55);
   text-transform: uppercase;
   letter-spacing: 0.3px;
-}
-
-.calCell.isOutside {
-  opacity: 0.55;
 }
 
 .calCell.isWeekend {

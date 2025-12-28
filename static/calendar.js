@@ -66,7 +66,7 @@ async function fetchJson(url, { timeoutMs = 30000 } = {}) {
 }
 
 const state = {
-  view: "month",
+  view: "week",
   anchor: isoDate(new Date()),
   engine1Only: false,
   layers: { holiday: true, earlyClose: true, fed: true, econ: true, treasury: true, opex: true },
@@ -83,7 +83,7 @@ function setStatus(msg, isError = false) {
 
 function setView(view) {
   state.view = view;
-  ["month", "week", "day"].forEach((v) => {
+  ["week", "day"].forEach((v) => {
     const b = $(`view${v[0].toUpperCase()}${v.slice(1)}`);
     if (b) b.classList.toggle("isActive", v === view);
   });
@@ -140,8 +140,6 @@ function render(payload) {
   const start = parseIsoDate(payload?.range?.start) || new Date();
   const end = parseIsoDate(payload?.range?.end) || new Date();
   const anchorDt = parseIsoDate(state.anchor) || new Date();
-  const anchorMonth = anchorDt.getMonth();
-  const anchorYear = anchorDt.getFullYear();
 
   const title = $("rangeTitle");
   const sub = $("rangeSub");
@@ -172,7 +170,6 @@ function render(payload) {
   const headerCells = () => {
     const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     if (view === "week") return names.slice(0, 5);
-    if (view === "month") return names;
     return [];
   };
 
@@ -188,9 +185,6 @@ function render(payload) {
     const dow = dt ? dt.toLocaleDateString(undefined, { weekday: "short" }) : "";
     const dayNum = dt ? dt.getDate() : "";
     const isWeekend = dt ? (dt.getDay() === 0 || dt.getDay() === 6) : false;
-    const isOutsideMonth = (view === "month" && dt)
-      ? (dt.getMonth() !== anchorMonth || dt.getFullYear() !== anchorYear)
-      : false;
 
     const evs = (Array.isArray(d?.events) ? d.events : []).filter(shouldShowEvent);
     const earnings = d?.earnings || {};
@@ -198,8 +192,8 @@ function render(payload) {
     const amc = Array.isArray(earnings?.AMC) ? earnings.AMC : [];
     const unk = Array.isArray(earnings?.UNK) ? earnings.UNK : [];
 
-    const evShown = (view === "month" && evs.length > 2) ? evs.slice(0, 2) : evs;
-    const evMore = (view === "month" && evs.length > 2) ? (evs.length - 2) : 0;
+    const evShown = evs;
+    const evMore = 0;
     const evHtml = evs.length
       ? `<div class="calEvents">
           ${evShown.map((ev) => `<div class="${badgeForEvent(ev)}" title="${escapeHtml(ev?.title || "")}">${escapeHtml(ev?.short || ev?.title || "")}</div>`).join("")}
@@ -209,7 +203,7 @@ function render(payload) {
 
     const grp = (label, rows, cls) => {
       if (!rows.length) return "";
-      const max = view === "month" ? 8 : 14;
+      const max = 14;
       const shown = rows.slice(0, max);
       const rest = rows.length - shown.length;
       return `
@@ -223,7 +217,7 @@ function render(payload) {
       `;
     };
 
-    const cellCls = ["calCell", isWeekend ? "isWeekend" : "", isOutsideMonth ? "isOutside" : ""].filter(Boolean).join(" ");
+    const cellCls = ["calCell", isWeekend ? "isWeekend" : ""].filter(Boolean).join(" ");
 
     cells.push(`
       <div class="${cellCls}" data-date="${escapeHtml(date)}">
@@ -276,11 +270,7 @@ async function refresh() {
 
 function shiftAnchor(dir) {
   const a = parseIsoDate(state.anchor) || new Date();
-  if (state.view === "month") {
-    const dt = new Date(a);
-    dt.setMonth(dt.getMonth() + dir);
-    state.anchor = isoDate(dt);
-  } else if (state.view === "week") {
+  if (state.view === "week") {
     state.anchor = isoDate(addDays(a, 7 * dir));
   } else {
     state.anchor = isoDate(addDays(a, dir));
@@ -288,9 +278,8 @@ function shiftAnchor(dir) {
 }
 
 function init() {
-  setView("month");
+  setView("week");
 
-  $("viewMonth")?.addEventListener("click", () => { setView("month"); refresh(); });
   $("viewWeek")?.addEventListener("click", () => { setView("week"); refresh(); });
   $("viewDay")?.addEventListener("click", () => { setView("day"); refresh(); });
 

@@ -534,7 +534,7 @@ def breach(
 
 @app.get("/api/calendar")
 def calendar(
-    view: str = Query("month", description="month|week|day"),
+    view: str = Query("week", description="week|day"),
     anchor: str = Query(None, description="YYYY-MM-DD (anchor date)"),
     tz: str = Query("America/New_York"),
     engine1Only: int = Query(0, ge=0, le=1),
@@ -551,7 +551,9 @@ def calendar(
     """
     try:
         a = str(anchor or dt.date.today().isoformat())[:10]
-        v = str(view or "month").strip().lower()
+        v = str(view or "week").strip().lower()
+        if v not in ("week", "day"):
+            raise HTTPException(status_code=400, detail="Unsupported view. Allowed: week|day")
         e1 = bool(int(engine1Only))
         inc = bool(int(includeEvents))
 

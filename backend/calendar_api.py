@@ -222,18 +222,13 @@ def build_calendar_payload(
     eligibility_cache: Dict[str, Tuple[bool, Dict[str, Any]]],
     max_tickers_considered: int = 12000,
 ) -> Dict[str, Any]:
-    v = str(view or "month").lower().strip()
-    if v not in ("month", "week", "day"):
-        v = "month"
+    v = str(view or "week").lower().strip()
+    if v not in ("week", "day"):
+        # Hard remove month: keep API behavior explicit.
+        raise ValueError("Unsupported view. Allowed: week|day")
 
     a = _parse_date(anchor) or dt.date.today()
-    if v == "month":
-        m0 = _first_of_month(a)
-        m1 = _last_of_month(a)
-        # Pad to a full Mon..Sun grid so the month UI aligns to weekdays.
-        start = _start_of_week_monday(m0)
-        end = m1 + dt.timedelta(days=int(6 - m1.weekday()))
-    elif v == "week":
+    if v == "week":
         start = _start_of_week_monday(a)
         end = start + dt.timedelta(days=4)  # Mon..Fri (trading week)
     else:
