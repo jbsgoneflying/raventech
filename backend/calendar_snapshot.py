@@ -91,6 +91,24 @@ def _to_int(v: Any) -> Optional[int]:
         return None
 
 
+def _snap_to_weekday(d: dt.date) -> dt.date:
+    """If d falls on a weekend, snap forward to Monday."""
+    if d.weekday() == 5:  # Sat
+        return d + dt.timedelta(days=2)
+    if d.weekday() == 6:  # Sun
+        return d + dt.timedelta(days=1)
+    return d
+
+
+def _week_midpoint(d: dt.date) -> dt.date:
+    """
+    Return the Wednesday of the week containing date d (week starts Monday).
+    Useful for mapping an imprecise "weeks to event" into a stable mid-week anchor.
+    """
+    monday = d - dt.timedelta(days=int(d.weekday()))
+    return monday + dt.timedelta(days=2)  # Wed
+
+
 def _fetch_next_earnings_from_orats(
     client: OratsClient,
     *,
@@ -120,10 +138,16 @@ def _fetch_next_earnings_from_orats(
     # Fallback: approximate from days/weeks-to-earnings if date is missing on this ORATS plan.
     days = _to_int(row.get("daysToNextErn"))
     wks = _to_int(row.get("wksNextErn"))
-    if (days is None or days <= 0) and (wks is not None and wks > 0):
-        days = int(wks) * 7
     if days is not None and days > 0:
-        return today + dt.timedelta(days=int(days)), timing, True
+        # days-to-event can land on weekends; snap to a weekday for calendar usability.
+        return _snap_to_weekday(today + dt.timedelta(days=int(days))), timing, True
+
+    if wks is not None and wks > 0:
+        # "weeks-to-event" is imprecise. If we simply do today + wks*7, the weekday would
+        # always match today's weekday (e.g., Sunday -> Sunday). Instead, anchor to the
+        # mid-week (Wednesday) of the projected week.
+        projected = today + dt.timedelta(days=int(wks) * 7)
+        return _snap_to_weekday(_week_midpoint(projected)), timing, True
 
     return None, timing, False
 
@@ -184,6 +208,7 @@ def build_earnings_snapshot(
         "oratsCalls": int(calls),
         "rowsUsed": int(used),
         "estimatedDatesUsed": int(est_used),
+        "estimatedDatePolicy": "If ORATS nextErn is missing: use daysToNextErn (snap weekend->Mon) else wksNextErn (anchor to Wed of projected week).",
         "errors": int(errors),
         "horizonDays": int(horizon_days),
         "notes": notes,

@@ -30,6 +30,7 @@ from backend.redis_store import get_store_optional
 from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
 from backend.condor_rank import compute_condor_rank
 from backend.calendar_snapshot import load_earnings_snapshot
+from backend.fmp_snapshot import load_fmp_earnings_snapshot
 
 
 try:
@@ -562,9 +563,15 @@ def calendar(
         store = get_store_optional()
         if store is None:
             raise HTTPException(status_code=503, detail="Redis unavailable (missing REDIS_URL).")
-        snap = load_earnings_snapshot(store)
+        # Prefer FMP earnings snapshot for exact earnings dates.
+        snap = load_fmp_earnings_snapshot(store)
         snap_meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
         snap_et_date = str(snap_meta.get("etDate") or "")[:10]
+        if not snap:
+            # Fallback: legacy ORATS-based snapshot (kept as rollback path).
+            snap = load_earnings_snapshot(store)
+            snap_meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
+            snap_et_date = str(snap_meta.get("etDate") or "")[:10]
 
         flags_fp = get_flags().cache_fingerprint()
         key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), snap_et_date, flags_fp)

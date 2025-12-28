@@ -273,7 +273,13 @@ def build_calendar_payload(
 
     # Earnings (ORATS snapshot stored in Redis, passed in as `earnings_snapshot`)
     earnings_by_date: Dict[str, Dict[str, List[dict]]] = {k: {"BMO": [], "AMC": [], "UNK": []} for k in day_keys}
-    debug_counts: Dict[str, Any] = {"snapshotAvailable": False, "snapshotEtDate": None, "snapshotUniverseSize": None, "tickersInRange": 0}
+    debug_counts: Dict[str, Any] = {
+        "snapshotAvailable": False,
+        "snapshotEtDate": None,
+        "snapshotUniverseSize": None,
+        "snapshotSource": None,
+        "tickersInRange": 0,
+    }
 
     snap = earnings_snapshot if isinstance(earnings_snapshot, dict) else None
     meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
@@ -284,6 +290,7 @@ def build_calendar_payload(
         debug_counts["snapshotAvailable"] = True
         debug_counts["snapshotEtDate"] = str(meta.get("etDate") or "")[:10] if meta else None
         debug_counts["snapshotUniverseSize"] = meta.get("universeSize") if meta else None
+        debug_counts["snapshotSource"] = meta.get("source") if meta else None
         try:
             est_n = int(meta.get("estimatedDatesUsed") or 0)
         except Exception:
