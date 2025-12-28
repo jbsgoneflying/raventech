@@ -152,6 +152,21 @@ function render(payload) {
   if (!grid) return;
   grid.className = `calGrid calGrid--${view}`;
 
+  // Quick diagnostic: show a friendly hint if we got zero earnings.
+  const totalTickers = days.reduce((acc, d) => {
+    const e = d?.earnings || {};
+    const b = Array.isArray(e?.BMO) ? e.BMO.length : 0;
+    const a = Array.isArray(e?.AMC) ? e.AMC.length : 0;
+    const u = Array.isArray(e?.UNK) ? e.UNK.length : 0;
+    return acc + b + a + u;
+  }, 0);
+  if (totalTickers === 0) {
+    const notes = Array.isArray(payload?.meta?.notes) ? payload.meta.notes.filter(Boolean) : [];
+    setStatus(`No earnings names returned for this range. If this persists, open Settings and toggle off Engine‑1 filter to confirm data flow. ${notes.length ? `Notes: ${notes.slice(0, 2).join(" ")}` : ""}`, false);
+  } else {
+    setStatus("");
+  }
+
   const headerCells = () => {
     const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     if (view === "week") return names.slice(0, 5);

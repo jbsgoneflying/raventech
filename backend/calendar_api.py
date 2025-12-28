@@ -151,7 +151,6 @@ def _fetch_benzinga_earnings_range(
     end: dt.date,
     max_pages: int = 25,
     pagesize: int = 1000,
-    importance: int | None = 3,
 ) -> List[dict]:
     rows_all: List[dict] = []
     for page in range(int(max_pages)):
@@ -160,7 +159,6 @@ def _fetch_benzinga_earnings_range(
             date_to=_fmt_date(end),
             pagesize=int(pagesize),
             page=int(page),
-            importance=(int(importance) if importance is not None else None),
         )
         batch = resp.rows or []
         rows_all.extend([r for r in batch if isinstance(r, dict)])
@@ -277,7 +275,7 @@ def build_calendar_payload(
         notes.append("Benzinga unavailable or disabled; earnings calendar omitted.")
     else:
         try:
-            rows = _fetch_benzinga_earnings_range(benzinga_client, start=start, end=end, importance=3)
+            rows = _fetch_benzinga_earnings_range(benzinga_client, start=start, end=end)
             earn_sources.append("benzinga:/calendar/earnings")
         except Exception as e:
             rows = []
