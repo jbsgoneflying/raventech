@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY backend /app/backend
 COPY static /app/static
 COPY scripts /app/scripts
+COPY data /app/data
 COPY README.md /app/README.md
 COPY MC_AUDIT.md /app/MC_AUDIT.md
 

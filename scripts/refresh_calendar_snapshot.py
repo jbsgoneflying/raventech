@@ -27,6 +27,7 @@ from backend.calendar_snapshot import refresh_earnings_snapshot_if_needed
 
 
 def main() -> int:
+    force = "--force" in sys.argv
     store = get_store_optional()
     if store is None:
         print("Missing REDIS_URL; cannot refresh calendar snapshot.", file=sys.stderr)
@@ -36,7 +37,7 @@ def main() -> int:
         return 3
 
     client = OratsClient.from_env()
-    res = refresh_earnings_snapshot_if_needed(client, store)
+    res = refresh_earnings_snapshot_if_needed(client, store, force=force)
     # Print concise output suitable for cron logs.
     print(
         f"ok={res.ok} etDate={res.etDate} universe={res.universeSize} "

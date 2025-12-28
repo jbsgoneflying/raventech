@@ -161,6 +161,7 @@ def refresh_earnings_snapshot_if_needed(
     *,
     now_et: Optional[dt.datetime] = None,
     horizon_days: int = 180,
+    force: bool = False,
 ) -> RefreshResult:
     """
     Refresh once per ET day after 4am ET. Safe to run hourly.
@@ -170,7 +171,7 @@ def refresh_earnings_snapshot_if_needed(
     last = store.get_json(EARNINGS_LAST_REFRESH_ET_DATE_KEY)
     last_s = str(last)[:10] if last is not None else None
 
-    if not should_refresh_today_et(now_et=now, last_refresh_et_date=last_s):
+    if (not force) and (not should_refresh_today_et(now_et=now, last_refresh_et_date=last_s)):
         return RefreshResult(
             ok=True,
             etDate=et_date,
@@ -199,7 +200,10 @@ def refresh_earnings_snapshot_if_needed(
         rowsUsed=int(meta.get("rowsUsed") or 0),
         byDateSize=int(len(by_date)),
         errors=int(meta.get("errors") or 0),
-        notes=["Refreshed earnings snapshot."] if (ok1 and ok2) else ["Failed to write snapshot to Redis."],
+        notes=(
+            ["Refreshed earnings snapshot (forced)."] if (force and ok1 and ok2) else
+            (["Refreshed earnings snapshot."] if (ok1 and ok2) else ["Failed to write snapshot to Redis."])
+        ),
     )
 
 
