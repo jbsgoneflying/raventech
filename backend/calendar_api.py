@@ -139,7 +139,9 @@ def fetch_engine1_eligibility(
         rows = client.cores(ticker=str(ticker).upper(), fields=fields).rows or []
         row = rows[0] if rows else {}
     except Exception as e:
-        return False, {"reason": f"orats_error:{type(e).__name__}"}
+        # Be permissive: the calendar should still show names even if ORATS snapshot is unavailable.
+        # We'll label this in diagnostics and keep the name in the calendar.
+        return True, {"reason": f"orats_error_allow:{type(e).__name__}"}
     ok, diag = engine1_is_eligible_from_orats_row(row if isinstance(row, dict) else {}, policy=policy)
     return ok, diag
 
@@ -270,6 +272,7 @@ def build_calendar_payload(
     # Earnings (Benzinga calendar)
     earnings_by_date: Dict[str, Dict[str, List[dict]]] = {k: {"BMO": [], "AMC": [], "UNK": []} for k in day_keys}
     earn_sources: List[str] = []
+    debug_counts: Dict[str, Any] = {"earningsRowsFetched": 0, "earningsRowsInRange": 0, "tickersSeen": 0, "tickersEligible": 0}
 
     if benzinga_client is None:
         notes.append("Benzinga unavailable or disabled; earnings calendar omitted.")
@@ -277,6 +280,7 @@ def build_calendar_payload(
         try:
             rows = _fetch_benzinga_earnings_range(benzinga_client, start=start, end=end)
             earn_sources.append("benzinga:/calendar/earnings")
+            debug_counts["earningsRowsFetched"] = int(len(rows))
         except Exception as e:
             rows = []
             notes.append(f"earnings fetch failed: {type(e).__name__}: {e}")
@@ -296,6 +300,8 @@ def build_calendar_payload(
             if len(tickers) >= int(max_tickers_considered):
                 notes.append(f"ticker cap hit ({max_tickers_considered}); results may be incomplete.")
                 break
+        debug_counts["earningsRowsInRange"] = int(len(norm))
+        debug_counts["tickersSeen"] = int(len(tickers))
 
         eligible: Set[str] = set(tickers)
         eligibility_diags: Dict[str, Any] = {}
@@ -313,6 +319,7 @@ def build_calendar_payload(
                 # keep a small diagnostic sample
                 if len(eligibility_diags) < 12:
                     eligibility_diags[t] = diag
+        debug_counts["tickersEligible"] = int(len(eligible))
 
         # Populate per-day groups.
         for r in norm:
@@ -357,6 +364,7 @@ def build_calendar_payload(
             "generatedAt": _fmt_date(dt.date.today()),
             "engine1Only": bool(engine1_only),
             "sourcesUsed": sorted(list(dict.fromkeys([*sources, *earn_sources]))),
+            "counts": debug_counts,
             "notes": notes,
         },
     }

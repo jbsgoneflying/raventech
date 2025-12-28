@@ -162,7 +162,9 @@ function render(payload) {
   }, 0);
   if (totalTickers === 0) {
     const notes = Array.isArray(payload?.meta?.notes) ? payload.meta.notes.filter(Boolean) : [];
-    setStatus(`No earnings names returned for this range. If this persists, open Settings and toggle off Engine‑1 filter to confirm data flow. ${notes.length ? `Notes: ${notes.slice(0, 2).join(" ")}` : ""}`, false);
+    const c = payload?.meta?.counts || {};
+    const cnt = `rowsFetched=${c.earningsRowsFetched ?? "—"} inRange=${c.earningsRowsInRange ?? "—"} tickersSeen=${c.tickersSeen ?? "—"} eligible=${c.tickersEligible ?? "—"}`;
+    setStatus(`No earnings names returned for this range. Try toggling off Engine‑1 filter in Settings. Debug: ${cnt}. ${notes.length ? `Notes: ${notes.slice(0, 2).join(" ")}` : ""}`, false);
   } else {
     setStatus("");
   }

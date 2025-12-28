@@ -113,8 +113,10 @@ def macro_events_by_date(
                 date_to=_fmt_date(end),
                 pagesize=int(pagesize),
                 page=int(page),
-                importance=int(importance_min),
-                country=str(country),
+                # Be permissive on server-side filters; some plans/periods return sparse future data
+                # when strict filters are applied. We'll filter client-side for US + importance.
+                importance=None,
+                country=None,
             )
             sources.append("benzinga:/calendar/economics")
             batch = resp.rows or []
