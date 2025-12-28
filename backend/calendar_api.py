@@ -59,6 +59,7 @@ def _trading_weekdays(d0: dt.date, d1: dt.date) -> List[dt.date]:
 
 @dataclass(frozen=True)
 class Engine1UniversePolicy:
+    # Kept for backwards compatibility; no longer used by the calendar snapshot path.
     min_price: float = 50.0
     min_market_cap: float = 10_000_000_000.0
     min_avg_dollar_vol_20d: float = 200_000_000.0
@@ -216,19 +217,20 @@ def build_calendar_payload(
     tz: str,
     engine1_only: bool,
     include_events: bool,
-    orats_client: OratsClient,
     benzinga_client: Optional[BenzingaClient],
-    policy: Engine1UniversePolicy,
-    eligibility_cache: Dict[str, Tuple[bool, Dict[str, Any]]],
-    max_tickers_considered: int = 12000,
+    earnings_snapshot: Dict[str, Any] | None,
 ) -> Dict[str, Any]:
-    v = str(view or "week").lower().strip()
-    if v not in ("week", "day"):
-        # Hard remove month: keep API behavior explicit.
-        raise ValueError("Unsupported view. Allowed: week|day")
+    v = str(view or "month").lower().strip()
+    if v not in ("month", "week", "day"):
+        raise ValueError("Unsupported view. Allowed: month|week|day")
 
     a = _parse_date(anchor) or dt.date.today()
-    if v == "week":
+    if v == "month":
+        m0 = _first_of_month(a)
+        m1 = _last_of_month(a)
+        start = _start_of_week_monday(m0)
+        end = m1 + dt.timedelta(days=int(6 - m1.weekday()))
+    elif v == "week":
         start = _start_of_week_monday(a)
         end = start + dt.timedelta(days=4)  # Mon..Fri (trading week)
     else:
@@ -269,101 +271,44 @@ def build_calendar_payload(
     for k in list(events_by_date.keys()):
         events_by_date[k] = sorted([e for e in (events_by_date.get(k) or []) if isinstance(e, dict)], key=_event_sort_key)
 
-    # Earnings (Benzinga calendar)
+    # Earnings (ORATS snapshot stored in Redis, passed in as `earnings_snapshot`)
     earnings_by_date: Dict[str, Dict[str, List[dict]]] = {k: {"BMO": [], "AMC": [], "UNK": []} for k in day_keys}
-    earn_sources: List[str] = []
-    debug_counts: Dict[str, Any] = {
-        "earningsRowsFetched": 0,
-        "earningsRowsInRange": 0,
-        "tickersSeen": 0,
-        "tickersEligible": 0,
-        "earningsPaging": None,
-    }
+    debug_counts: Dict[str, Any] = {"snapshotAvailable": False, "snapshotEtDate": None, "snapshotUniverseSize": None, "tickersInRange": 0}
 
-    if benzinga_client is None:
-        notes.append("Benzinga unavailable or disabled; earnings calendar omitted.")
+    snap = earnings_snapshot if isinstance(earnings_snapshot, dict) else None
+    meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
+    by_date = snap.get("byDate") if isinstance(snap, dict) and isinstance(snap.get("byDate"), dict) else None
+    if not by_date:
+        notes.append("Earnings snapshot missing/unavailable. Run the 4am ET refresh job (Redis) to populate earnings.")
     else:
-        try:
-            rows, paging = _fetch_benzinga_earnings_range(benzinga_client, start=start, end=end)
-            earn_sources.append("benzinga:/calendar/earnings")
-            debug_counts["earningsRowsFetched"] = int(len(rows))
-            debug_counts["earningsPaging"] = paging
-            if isinstance(paging, dict) and paging.get("truncated") is True:
-                notes.append(f"Benzinga earnings paging truncated at maxPages={paging.get('maxPages')} pageSize={paging.get('pageSize')}. Increase maxPages or narrow range.")
-        except Exception as e:
-            rows = []
-            notes.append(f"earnings fetch failed: {type(e).__name__}: {e}")
-
-        # Normalize + pre-filter to our visible days.
-        norm: List[dict] = []
-        tickers: Set[str] = set()
-        for r in rows:
-            d0 = str(r.get("date") or r.get("earnings_date") or "")[:10]
-            if d0 not in day_keys:
+        debug_counts["snapshotAvailable"] = True
+        debug_counts["snapshotEtDate"] = str(meta.get("etDate") or "")[:10] if meta else None
+        debug_counts["snapshotUniverseSize"] = meta.get("universeSize") if meta else None
+        tickers_in_range = 0
+        for d0 in day_keys:
+            obj = by_date.get(d0) if isinstance(by_date, dict) else None
+            if not isinstance(obj, dict):
                 continue
-            t = str(r.get("ticker") or r.get("symbol") or "").strip().upper()
-            if not t:
-                continue
-            norm.append(r)
-            tickers.add(t)
-            # Guardrail: cap by rows processed (not unique tickers) to avoid runaway payload sizes
-            # during peak earnings season.
-            if len(norm) >= int(max_tickers_considered):
-                notes.append(f"earnings row cap hit ({max_tickers_considered}); results may be incomplete.")
-                break
-        debug_counts["earningsRowsInRange"] = int(len(norm))
-        debug_counts["tickersSeen"] = int(len(tickers))
-
-        eligible: Set[str] = set(tickers)
-        eligibility_diags: Dict[str, Any] = {}
-        if engine1_only and tickers:
-            eligible = set()
-            for t in sorted(tickers):
-                cached = eligibility_cache.get(t)
-                if cached is None:
-                    ok, diag = fetch_engine1_eligibility(orats_client, ticker=t, policy=policy)
-                    eligibility_cache[t] = (ok, diag)
-                else:
-                    ok, diag = cached
-                if ok:
-                    eligible.add(t)
-                # keep a small diagnostic sample
-                if len(eligibility_diags) < 12:
-                    eligibility_diags[t] = diag
-        debug_counts["tickersEligible"] = int(len(eligible))
-
-        # Populate per-day groups.
-        # Deduplicate Benzinga rows: same ticker/date/timing often appears multiple times.
-        seen_keys: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
-        for r in norm:
-            d0 = str(r.get("date") or r.get("earnings_date") or "")[:10]
-            t = str(r.get("ticker") or r.get("symbol") or "").strip().upper()
-            if not t or t not in eligible:
-                continue
-            timing = infer_timing_from_time_str(r.get("time"))
-            if timing not in ("AMC", "BMO"):
-                timing = "UNK"
-            key3 = (d0, t, timing)
-            tm = str(r.get("time") or "").strip()
-            # Prefer a row that has a non-empty time string.
-            prev = seen_keys.get(key3)
-            if prev is None or (not str(prev.get("time") or "").strip() and tm):
-                seen_keys[key3] = {"ticker": t, "time": tm}
-
-        for (d0, _t, timing), row in seen_keys.items():
-            if d0 in earnings_by_date:
-                earnings_by_date[d0][timing].append(row)
+            for k in ("BMO", "AMC", "UNK"):
+                xs = obj.get(k)
+                if not isinstance(xs, list):
+                    continue
+                # Snapshot stores tickers as strings; UI wants objects with ticker + time.
+                for t in xs:
+                    sym = str(t or "").strip().upper()
+                    if not sym:
+                        continue
+                    earnings_by_date[d0][k].append({"ticker": sym, "time": ""})
+                    tickers_in_range += 1
+        debug_counts["tickersInRange"] = int(tickers_in_range)
 
         # Stable sort per day by ticker.
         for d0 in earnings_by_date.keys():
             for k in ("BMO", "AMC", "UNK"):
-                earnings_by_date[d0][k] = sorted(earnings_by_date[d0][k], key=lambda x: str(x.get("ticker") or ""))
-
-        if engine1_only:
-            notes.append("Engine‑1 filter applied using ORATS /cores snapshot (cached).")
-            if eligibility_diags:
-                # Helpful for debugging in early rollout; keep small.
-                notes.append(f"eligibilitySample={eligibility_diags}")
+                earnings_by_date[d0][k] = sorted(
+                    earnings_by_date[d0][k],
+                    key=lambda x: str(x.get("ticker") or ""),
+                )
 
     out_days: List[Dict[str, Any]] = []
     for d in days:
@@ -385,7 +330,7 @@ def build_calendar_payload(
         "meta": {
             "generatedAt": _fmt_date(dt.date.today()),
             "engine1Only": bool(engine1_only),
-            "sourcesUsed": sorted(list(dict.fromkeys([*sources, *earn_sources]))),
+            "sourcesUsed": sorted(list(dict.fromkeys([*sources]))),
             "counts": debug_counts,
             "notes": notes,
         },

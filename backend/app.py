@@ -29,6 +29,7 @@ from backend.spx_ic_engine import compute_engine2_spx_ic
 from backend.redis_store import get_store_optional
 from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
 from backend.condor_rank import compute_condor_rank
+from backend.calendar_snapshot import load_earnings_snapshot
 
 
 try:
@@ -534,7 +535,7 @@ def breach(
 
 @app.get("/api/calendar")
 def calendar(
-    view: str = Query("week", description="week|day"),
+    view: str = Query("month", description="month|week|day"),
     anchor: str = Query(None, description="YYYY-MM-DD (anchor date)"),
     tz: str = Query("America/New_York"),
     engine1Only: int = Query(0, ge=0, le=1),
@@ -551,27 +552,26 @@ def calendar(
     """
     try:
         a = str(anchor or dt.date.today().isoformat())[:10]
-        v = str(view or "week").strip().lower()
-        if v not in ("week", "day"):
-            raise HTTPException(status_code=400, detail="Unsupported view. Allowed: week|day")
+        v = str(view or "month").strip().lower()
+        if v not in ("month", "week", "day"):
+            raise HTTPException(status_code=400, detail="Unsupported view. Allowed: month|week|day")
         e1 = bool(int(engine1Only))
         inc = bool(int(includeEvents))
 
-        # Engine-1 universe thresholds (env configurable)
-        min_price = float(os.getenv("ENGINE1_MIN_PRICE") or 50.0)
-        min_mcap = float(os.getenv("ENGINE1_MIN_MARKET_CAP") or 10_000_000_000.0)
-        min_dvol = float(os.getenv("ENGINE1_MIN_AVG_DOLLAR_VOL_20D") or 200_000_000.0)
-        policy = Engine1UniversePolicy(min_price=min_price, min_market_cap=min_mcap, min_avg_dollar_vol_20d=min_dvol)
+        # Earnings snapshot (Redis). Calendar should not call ORATS per-request.
+        store = get_store_optional()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Redis unavailable (missing REDIS_URL).")
+        snap = load_earnings_snapshot(store)
+        snap_meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
+        snap_et_date = str(snap_meta.get("etDate") or "")[:10]
 
         flags_fp = get_flags().cache_fingerprint()
-        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), flags_fp)
+        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), snap_et_date, flags_fp)
         with _calendar_cache_lock:
             cached = _calendar_cache.get(key)
         if cached is not None:
             return cached
-
-        with _engine1_elig_cache_lock:
-            elig_cache = _engine1_elig_cache  # TTLCache behaves like a dict
 
         payload = build_calendar_payload(
             view=v,
@@ -579,11 +579,8 @@ def calendar(
             tz=tz,
             engine1_only=e1,
             include_events=inc,
-            orats_client=_get_client(),
             benzinga_client=_get_benzinga_client_optional(),
-            policy=policy,
-            eligibility_cache=elig_cache,
-            max_tickers_considered=int(maxTickers),
+            earnings_snapshot=snap,
         )
 
         with _calendar_cache_lock:
