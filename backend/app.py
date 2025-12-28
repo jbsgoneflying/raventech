@@ -597,6 +597,82 @@ def calendar(
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
+@app.get("/api/calendar-debug-earnings")
+def calendar_debug_earnings(
+    ticker: str = Query("TSLA", description="Ticker to probe (optional)"),
+    date_from: str = Query(..., description="YYYY-MM-DD"),
+    date_to: str = Query(..., description="YYYY-MM-DD"),
+    max_rows: int = Query(2000, ge=1, le=20000),
+):
+    """
+    Debug helper to diagnose missing tickers in the calendar.
+
+    Returns a sanitized subset of Benzinga /calendar/earnings rows for the given date range,
+    optionally filtered to a specific ticker.
+    """
+    try:
+        bz = _get_benzinga_client_optional()
+        if bz is None:
+            raise HTTPException(status_code=503, detail="Benzinga unavailable or disabled.")
+
+        d0 = str(date_from)[:10]
+        d1 = str(date_to)[:10]
+        t = str(ticker or "").strip().upper()
+
+        pagesize = 1000
+        max_pages = 50
+        rows_all: list[dict] = []
+        for page in range(max_pages):
+            resp = bz.calendar_earnings(date_from=d0, date_to=d1, pagesize=pagesize, page=page)
+            batch = resp.rows or []
+            rows_all.extend([r for r in batch if isinstance(r, dict)])
+            if len(batch) < pagesize:
+                break
+
+        # Filter + sanitize
+        out_rows: list[dict] = []
+        for r in rows_all:
+            sym = str(r.get("ticker") or r.get("symbol") or "").strip().upper()
+            if t and sym != t:
+                continue
+            out_rows.append(
+                {
+                    "ticker": sym,
+                    "date": str(r.get("date") or r.get("earnings_date") or "")[:10],
+                    "time": str(r.get("time") or ""),
+                    "date_confirmed": r.get("date_confirmed"),
+                    "updated": r.get("updated") or r.get("updated_at") or r.get("updatedAt"),
+                }
+            )
+            if len(out_rows) >= int(max_rows):
+                break
+
+        # Simple per-day counts
+        by_day: dict[str, int] = {}
+        for r in out_rows:
+            dd = str(r.get("date") or "")[:10]
+            if dd:
+                by_day[dd] = int(by_day.get(dd, 0)) + 1
+
+        return {
+            "range": {"from": d0, "to": d1},
+            "tickerFilter": t or None,
+            "counts": {
+                "rowsFetchedAll": len(rows_all),
+                "rowsReturned": len(out_rows),
+                "pagesize": pagesize,
+                "maxPages": max_pages,
+            },
+            "byDay": {k: by_day[k] for k in sorted(by_day.keys())},
+            "rows": out_rows,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (calendar-debug-earnings)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
 @app.get("/api/condor-rank")
 def condor_rank(
     ticker: str = Query(..., description="US equity ticker"),
