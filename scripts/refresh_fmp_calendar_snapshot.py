@@ -24,6 +24,10 @@ from backend.redis_store import get_store_optional
 
 def main() -> int:
     force = "--force" in sys.argv
+    try:
+        horizon_days = int(float(os.getenv("FMP_EARNINGS_HORIZON_DAYS") or 180))
+    except Exception:
+        horizon_days = 180
     store = get_store_optional()
     if store is None:
         print("Missing REDIS_URL; cannot refresh FMP earnings snapshot.", file=sys.stderr)
@@ -33,9 +37,9 @@ def main() -> int:
         return 3
 
     client = FmpClient.from_env()
-    res = refresh_fmp_earnings_snapshot_if_needed(client, store, force=force, horizon_days=180)
+    res = refresh_fmp_earnings_snapshot_if_needed(client, store, force=force, horizon_days=int(horizon_days))
     print(
-        f"ok={res.ok} etDate={res.etDate} rowsUsed={res.rowsUsed} byDate={res.byDateSize} errors={res.errors} "
+        f"ok={res.ok} etDate={res.etDate} horizonDays={int(horizon_days)} rowsUsed={res.rowsUsed} byDate={res.byDateSize} errors={res.errors} "
         f"notes={' '.join(res.notes)}"
     )
     return 0 if res.ok else 1
