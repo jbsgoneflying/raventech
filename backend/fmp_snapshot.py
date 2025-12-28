@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from backend.earnings_logic import classify_timing
 from backend.fmp_client import FmpClient
 from backend.redis_store import RedisStore
+from backend.orats_client import OratsClient
 
 
 ET = ZoneInfo("America/New_York")
@@ -96,6 +97,52 @@ def _coerce_timing(row: dict) -> str:
     return "UNK"
 
 
+def _fmp_limit() -> int:
+    # FMP stable endpoints often apply a default limit. Use a high cap to reduce truncation.
+    return int(float(os.getenv("FMP_EARNINGS_CALENDAR_LIMIT") or 10000))
+
+
+def _fmp_window_days() -> int:
+    # Safety: fetch in smaller windows to reduce truncation risk even if FMP caps limit.
+    return int(float(os.getenv("FMP_EARNINGS_CALENDAR_WINDOW_DAYS") or 14))
+
+
+def _truthy(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return bool(default)
+    s = str(v).strip().lower()
+    return s in ("1", "true", "t", "yes", "y", "on")
+
+
+def _overlay_timing_from_orats(tickers: List[str]) -> Dict[str, str]:
+    """
+    Optional overlay for timing (BMO/AMC) using ORATS /cores nextErnTod.
+    This avoids relying on FMP providing time-of-day, and costs only during the daily snapshot refresh.
+    """
+    if not _truthy("FMP_EARNINGS_USE_ORATS_TOD", default=True):
+        return {}
+    if not os.getenv("ORATS_TOKEN"):
+        return {}
+    client = OratsClient.from_env()
+    out: Dict[str, str] = {}
+    for t in tickers:
+        sym = str(t or "").strip().upper()
+        if not sym:
+            continue
+        try:
+            rows = client.cores(ticker=sym, fields="ticker,nextErnTod").rows or []
+            row = rows[0] if rows else {}
+            if not isinstance(row, dict):
+                continue
+            tp = classify_timing(row.get("nextErnTod"))
+            if tp in ("AMC", "BMO"):
+                out[sym] = tp
+        except Exception:
+            continue
+    return out
+
+
 def build_fmp_earnings_snapshot(
     client: FmpClient,
     *,
@@ -108,13 +155,39 @@ def build_fmp_earnings_snapshot(
     rows_used = 0
     errors = 0
     by_date: Dict[str, Dict[str, List[str]]] = {}
+    rows_fetched = 0
+    windows = 0
 
-    try:
-        resp = client.earnings_calendar(date_from=_fmt_date(today), date_to=_fmt_date(end))
-        rows = resp.rows or []
-    except Exception:
-        rows = []
-        errors += 1
+    # Fetch in smaller windows to reduce the risk of truncation.
+    rows: List[dict] = []
+    step = max(1, int(_fmp_window_days()))
+    cur = today
+    limit = _fmp_limit()
+    while cur <= end:
+        w_end = min(end, cur + dt.timedelta(days=step - 1))
+        windows += 1
+        try:
+            resp = client.earnings_calendar(date_from=_fmt_date(cur), date_to=_fmt_date(w_end), limit=limit)
+            batch = resp.rows or []
+            rows.extend([r for r in batch if isinstance(r, dict)])
+            rows_fetched += int(len(batch))
+        except Exception:
+            errors += 1
+        cur = w_end + dt.timedelta(days=1)
+
+    # De-dupe rows defensively (ticker+date+timing).
+    uniq: Dict[Tuple[str, str, str], dict] = {}
+    for r in rows:
+        sym = _coerce_ticker(r)
+        d = _coerce_date(r)
+        if not sym or d is None:
+            continue
+        tm = _coerce_timing(r)
+        uniq[(sym, _fmt_date(d), tm)] = r
+    rows = list(uniq.values())
+
+    # Optional overlay of timing using ORATS nextErnTod (BMO/AMC).
+    timing_overlay = _overlay_timing_from_orats([_coerce_ticker(r) for r in rows])
 
     for r in rows:
         if not isinstance(r, dict):
@@ -125,7 +198,7 @@ def build_fmp_earnings_snapshot(
         d = _coerce_date(r)
         if d is None or d < today or d > end:
             continue
-        timing = _coerce_timing(r)
+        timing = timing_overlay.get(sym) or _coerce_timing(r)
         k = _fmt_date(d)
         if k not in by_date:
             by_date[k] = {"BMO": [], "AMC": [], "UNK": []}
@@ -142,6 +215,9 @@ def build_fmp_earnings_snapshot(
         "refreshedAtET": now_et.isoformat(),
         "etDate": _fmt_date(today),
         "horizonDays": int(horizon_days),
+        "rowsFetched": int(rows_fetched),
+        "windows": int(windows),
+        "limit": int(limit),
         "rowsUsed": int(rows_used),
         "errors": int(errors),
         "source": "fmp:earnings-calendar",
