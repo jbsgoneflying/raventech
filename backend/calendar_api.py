@@ -151,10 +151,12 @@ def _fetch_benzinga_earnings_range(
     *,
     start: dt.date,
     end: dt.date,
-    max_pages: int = 25,
+    max_pages: int = 250,
     pagesize: int = 1000,
-) -> List[dict]:
+) -> Tuple[List[dict], Dict[str, Any]]:
     rows_all: List[dict] = []
+    pages = 0
+    truncated = False
     for page in range(int(max_pages)):
         resp = bz.calendar_earnings(
             date_from=_fmt_date(start),
@@ -163,10 +165,13 @@ def _fetch_benzinga_earnings_range(
             page=int(page),
         )
         batch = resp.rows or []
+        pages += 1
         rows_all.extend([r for r in batch if isinstance(r, dict)])
         if len(batch) < int(pagesize):
             break
-    return rows_all
+        if page == int(max_pages) - 1 and len(batch) >= int(pagesize):
+            truncated = True
+    return rows_all, {"pagesFetched": int(pages), "maxPages": int(max_pages), "pageSize": int(pagesize), "truncated": bool(truncated)}
 
 
 def _build_day_skeleton(view: str, *, start: dt.date, end: dt.date) -> List[dt.date]:
@@ -272,15 +277,24 @@ def build_calendar_payload(
     # Earnings (Benzinga calendar)
     earnings_by_date: Dict[str, Dict[str, List[dict]]] = {k: {"BMO": [], "AMC": [], "UNK": []} for k in day_keys}
     earn_sources: List[str] = []
-    debug_counts: Dict[str, Any] = {"earningsRowsFetched": 0, "earningsRowsInRange": 0, "tickersSeen": 0, "tickersEligible": 0}
+    debug_counts: Dict[str, Any] = {
+        "earningsRowsFetched": 0,
+        "earningsRowsInRange": 0,
+        "tickersSeen": 0,
+        "tickersEligible": 0,
+        "earningsPaging": None,
+    }
 
     if benzinga_client is None:
         notes.append("Benzinga unavailable or disabled; earnings calendar omitted.")
     else:
         try:
-            rows = _fetch_benzinga_earnings_range(benzinga_client, start=start, end=end)
+            rows, paging = _fetch_benzinga_earnings_range(benzinga_client, start=start, end=end)
             earn_sources.append("benzinga:/calendar/earnings")
             debug_counts["earningsRowsFetched"] = int(len(rows))
+            debug_counts["earningsPaging"] = paging
+            if isinstance(paging, dict) and paging.get("truncated") is True:
+                notes.append(f"Benzinga earnings paging truncated at maxPages={paging.get('maxPages')} pageSize={paging.get('pageSize')}. Increase maxPages or narrow range.")
         except Exception as e:
             rows = []
             notes.append(f"earnings fetch failed: {type(e).__name__}: {e}")
