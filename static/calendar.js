@@ -68,7 +68,7 @@ async function fetchJson(url, { timeoutMs = 30000 } = {}) {
 const state = {
   view: "month",
   anchor: isoDate(new Date()),
-  engine1Only: true,
+  engine1Only: false,
   layers: { holiday: true, earlyClose: true, fed: true, econ: true, treasury: true, opex: true },
   lastPayload: null,
 };
@@ -258,48 +258,9 @@ async function openTickerPopover(ticker) {
   const popLink = $("popBreachLink");
 
   if (popTitle) popTitle.textContent = ticker;
-  if (popBody) popBody.innerHTML = `<div class="muted">Loading…</div>`;
+  if (popBody) popBody.innerHTML = `<div class="muted">Rank disabled for now. Open Engine 1 for full details.</div>`;
   if (popLink) popLink.href = `/breach?ticker=${encodeURIComponent(ticker)}`;
   openPopover(true);
-
-  try {
-    const url = `/api/condor-rank?ticker=${encodeURIComponent(ticker)}&n=20&years=5`;
-    const payload = await fetchJson(url, { timeoutMs: 90000 });
-
-    const em = Number.isFinite(Number(payload?.frontWeekEmPct)) ? Number(payload.frontWeekEmPct) : null;
-    const medMove = Number.isFinite(Number(payload?.medianGapPct)) ? Number(payload.medianGapPct) : null;
-    const p90 = Number.isFinite(Number(payload?.p90GapPct)) ? Number(payload.p90GapPct) : null;
-    const br15 = Number.isFinite(Number(payload?.breachRatePct?.k1_5)) ? Number(payload.breachRatePct.k1_5) : null;
-    const br20 = Number.isFinite(Number(payload?.breachRatePct?.k2_0)) ? Number(payload.breachRatePct.k2_0) : null;
-    const richness = Number.isFinite(Number(payload?.richness)) ? Number(payload.richness) : null;
-    const tailBuffer15 = Number.isFinite(Number(payload?.tailBuffer?.k1_5)) ? Number(payload.tailBuffer.k1_5) : null;
-    const score = Number.isFinite(Number(payload?.score100)) ? Number(payload.score100) : null;
-    const gradeRaw = String(payload?.grade || "—").toUpperCase();
-    const grade = ["A", "B", "C", "D", "F"].includes(gradeRaw) ? gradeRaw : "C";
-
-    const row = (k, v) => `<div class="popRow"><div class="popKey">${escapeHtml(k)}</div><div class="popVal mono">${escapeHtml(v)}</div></div>`;
-    const fmt = (v, suf = "") => (v === null || v === undefined || !Number.isFinite(Number(v)) ? "—" : `${Number(v).toFixed(2)}${suf}`);
-
-    if (popBody) {
-      popBody.innerHTML = `
-        <div class="popGrid">
-          ${row("Iron Condor Rank", `<span class="rankChip rankChip--${grade}">${grade}</span> <span class="muted">(${score === null ? "—" : score.toFixed(0)}/100)</span>`)}
-          ${row("Front-week EM", fmt(em, "%"))}
-          ${row("Median earnings gap", fmt(medMove, "%"))}
-          ${row("P90 earnings gap", fmt(p90, "%"))}
-          ${row("Breach rate @ 1.5×EM", fmt(br15, "%"))}
-          ${row("Breach rate @ 2.0×EM", fmt(br20, "%"))}
-          ${row("Richness (EM/median)", fmt(richness, "×"))}
-          ${row("Tail buffer (1.5×EM / P90)", fmt(tailBuffer15, "×"))}
-        </div>
-        <div class="finePrint muted" style="margin-top:10px;">
-          Rank is a lightweight pre-earnings screen for a same-day entry and next-session exit. Use Engine 1 for full history + structure.
-        </div>
-      `;
-    }
-  } catch (e) {
-    if (popBody) popBody.innerHTML = `<div class="muted">Could not load rank: ${escapeHtml(String(e?.message || e))}</div>`;
-  }
 }
 
 async function refresh() {

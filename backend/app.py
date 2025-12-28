@@ -537,9 +537,9 @@ def calendar(
     view: str = Query("month", description="month|week|day"),
     anchor: str = Query(None, description="YYYY-MM-DD (anchor date)"),
     tz: str = Query("America/New_York"),
-    engine1Only: int = Query(1, ge=0, le=1),
+    engine1Only: int = Query(0, ge=0, le=1),
     includeEvents: int = Query(1, ge=0, le=1),
-    maxTickers: int = Query(2000, ge=100, le=5000),
+    maxTickers: int = Query(12000, ge=200, le=50000),
 ):
     """
     Earnings calendar endpoint for the front page.

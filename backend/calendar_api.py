@@ -215,7 +215,7 @@ def build_calendar_payload(
     benzinga_client: Optional[BenzingaClient],
     policy: Engine1UniversePolicy,
     eligibility_cache: Dict[str, Tuple[bool, Dict[str, Any]]],
-    max_tickers_considered: int = 2000,
+    max_tickers_considered: int = 12000,
 ) -> Dict[str, Any]:
     v = str(view or "month").lower().strip()
     if v not in ("month", "week", "day"):
@@ -297,8 +297,10 @@ def build_calendar_payload(
                 continue
             norm.append(r)
             tickers.add(t)
-            if len(tickers) >= int(max_tickers_considered):
-                notes.append(f"ticker cap hit ({max_tickers_considered}); results may be incomplete.")
+            # Guardrail: cap by rows processed (not unique tickers) to avoid runaway payload sizes
+            # during peak earnings season.
+            if len(norm) >= int(max_tickers_considered):
+                notes.append(f"earnings row cap hit ({max_tickers_considered}); results may be incomplete.")
                 break
         debug_counts["earningsRowsInRange"] = int(len(norm))
         debug_counts["tickersSeen"] = int(len(tickers))
@@ -322,6 +324,8 @@ def build_calendar_payload(
         debug_counts["tickersEligible"] = int(len(eligible))
 
         # Populate per-day groups.
+        # Deduplicate Benzinga rows: same ticker/date/timing often appears multiple times.
+        seen_keys: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         for r in norm:
             d0 = str(r.get("date") or r.get("earnings_date") or "")[:10]
             t = str(r.get("ticker") or r.get("symbol") or "").strip().upper()
@@ -330,7 +334,16 @@ def build_calendar_payload(
             timing = infer_timing_from_time_str(r.get("time"))
             if timing not in ("AMC", "BMO"):
                 timing = "UNK"
-            earnings_by_date[d0][timing].append({"ticker": t, "time": str(r.get("time") or "")})
+            key3 = (d0, t, timing)
+            tm = str(r.get("time") or "").strip()
+            # Prefer a row that has a non-empty time string.
+            prev = seen_keys.get(key3)
+            if prev is None or (not str(prev.get("time") or "").strip() and tm):
+                seen_keys[key3] = {"ticker": t, "time": tm}
+
+        for (d0, _t, timing), row in seen_keys.items():
+            if d0 in earnings_by_date:
+                earnings_by_date[d0][timing].append(row)
 
         # Stable sort per day by ticker.
         for d0 in earnings_by_date.keys():
