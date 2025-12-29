@@ -1227,6 +1227,21 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   gap: 8px;
 }
 
+.calGrid--month .calTile {
+  /* Tighten spacing so the logo can be larger (better density in month view). */
+  padding: 6px 8px;
+  gap: 4px;
+}
+
+.calGrid--month .calTileLogo {
+  width: 58px;
+  height: 58px;
+}
+
+.calGrid--month .calTileTicker {
+  font-size: 10px;
+}
+
 .calTile {
   appearance: none;
   border: 1px solid var(--border);
