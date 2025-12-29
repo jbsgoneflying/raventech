@@ -125,9 +125,11 @@ def compute_condor_rank(
             continue
         usable_for_breach.append((abs(float(rea)), float(imp)))
     if usable_for_breach:
+        br10 = (sum(1 for r, imp in usable_for_breach if r > 1.0 * imp) / len(usable_for_breach)) * 100.0
         br15 = (sum(1 for r, imp in usable_for_breach if r > 1.5 * imp) / len(usable_for_breach)) * 100.0
         br20 = (sum(1 for r, imp in usable_for_breach if r > 2.0 * imp) / len(usable_for_breach)) * 100.0
     else:
+        br10 = None
         br15 = None
         br20 = None
 
@@ -176,7 +178,7 @@ def compute_condor_rank(
         "frontWeekEmPct": em,
         "medianGapPct": med_move,
         "p90GapPct": p90,
-        "breachRatePct": {"k1_5": br15, "k2_0": br20},
+        "breachRatePct": {"k1_0": br10, "k1_5": br15, "k2_0": br20},
         "richness": richness,
         "tailBuffer": {"k1_5": tail_buffer_15},
         "score100": round(float(score), 1),

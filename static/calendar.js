@@ -381,14 +381,19 @@ async function openTickerPopover(ticker, date = "") {
     const grade = r.grade || "—";
     const score = (r.score100 !== null && r.score100 !== undefined) ? Number(r.score100).toFixed(1) : "—";
     const em = (r.frontWeekEmPct !== null && r.frontWeekEmPct !== undefined) ? `${Number(r.frontWeekEmPct).toFixed(2)}%` : "—";
+    const br10 = r?.breachRatePct?.k1_0;
     const br15 = r?.breachRatePct?.k1_5;
     const br20 = r?.breachRatePct?.k2_0;
+    const eu = r?.eventsUsed;
+    const euTxt = (eu !== null && eu !== undefined) ? String(eu) : "—";
+    const br10Txt = (br10 !== null && br10 !== undefined) ? `${Number(br10).toFixed(1)}%` : "—";
     const br15Txt = (br15 !== null && br15 !== undefined) ? `${Number(br15).toFixed(1)}%` : "—";
     const br20Txt = (br20 !== null && br20 !== undefined) ? `${Number(br20).toFixed(1)}%` : "—";
     box.innerHTML = `
       <div class="k">Condor rank</div><div class="v"><span class="pill pill--mini neutral">${escapeHtml(String(grade))}</span> <span class="mono">${escapeHtml(String(score))}</span></div>
       <div class="k">Front-week EM</div><div class="v mono">${escapeHtml(em)}</div>
-      <div class="k">Breach rate</div><div class="v mono">k=1.5 ${escapeHtml(br15Txt)} · k=2.0 ${escapeHtml(br20Txt)}</div>
+      <div class="k">Breach rate</div><div class="v mono">k=1.0 ${escapeHtml(br10Txt)} · k=1.5 ${escapeHtml(br15Txt)} · k=2.0 ${escapeHtml(br20Txt)}</div>
+      <div class="k">Events used</div><div class="v mono">${escapeHtml(euTxt)}</div>
       <div class="k">As-of</div><div class="v mono">${escapeHtml(String(r.asOfDate || "—"))}</div>
     `;
   };
