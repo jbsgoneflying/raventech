@@ -124,6 +124,34 @@
       </div>
     </div>
 
+    <!-- Macro event popover -->
+    <div id="eventPopover" class="popover hidden" role="dialog" aria-modal="false" aria-label="Macro event details">
+      <div class="popoverCard">
+        <div class="popoverHead">
+          <div class="popoverTitleRow">
+            <div class="popoverTitle" id="evTitle">—</div>
+          </div>
+          <button id="evClose" class="iconBtn" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="popoverBody">
+          <div class="macroMeta" id="evMeta">—</div>
+          <div class="miniGrid" id="evNumbers"></div>
+          <div class="macroSection">
+            <div class="macroSectionTitle">Desk view</div>
+            <div class="macroBullets" id="evDesk"></div>
+          </div>
+          <div class="macroSection">
+            <div class="macroSectionTitle">Watch</div>
+            <div class="macroBullets" id="evWatch"></div>
+          </div>
+          <div class="macroSection">
+            <div class="macroSectionTitle">SPY reaction stats (risk-only)</div>
+            <div class="miniGrid" id="evStats"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="/static/calendar.js"></script>
   </body>
 </html>

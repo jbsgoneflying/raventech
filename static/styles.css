@@ -1305,6 +1305,46 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   border: 1px solid rgba(15, 23, 42, 0.10);
 }
 
+.calEventPill {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.calEventPill.pill {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+}
+
+.macroMeta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.macroSection {
+  margin-top: 12px;
+}
+
+.macroSectionTitle {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  margin-bottom: 6px;
+}
+
+.macroBullets ul {
+  margin: 0;
+  padding-left: 18px;
+  color: rgba(11,11,15,0.80);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.macroBullets li { margin: 6px 0; }
+
 .calTileMore {
   display: inline-flex;
   align-items: center;

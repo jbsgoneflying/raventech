@@ -84,6 +84,18 @@ async function gateNavLinks() {
   }
 }
 
+function openEventPopover(open) {
+  const p = $("eventPopover");
+  if (!p) return;
+  p.classList.toggle("hidden", !open);
+}
+
+function _li(lines) {
+  const xs = Array.isArray(lines) ? lines.filter(Boolean) : [];
+  if (!xs.length) return `<div class="muted">—</div>`;
+  return `<ul>${xs.map(x => `<li>${escapeHtml(String(x))}</li>`).join("")}</ul>`;
+}
+
 const state = {
   view: "month",
   anchor: isoDate(new Date()),
@@ -256,7 +268,14 @@ function render(payload) {
     const evMore = (view === "month" && evs.length > 2) ? (evs.length - 2) : 0;
     const evHtml = evs.length
       ? `<div class="calEvents">
-          ${evShown.map((ev) => `<div class="${badgeForEvent(ev)}" title="${escapeHtml(ev?.title || "")}">${escapeHtml(ev?.short || ev?.title || "")}</div>`).join("")}
+          ${evShown.map((ev) => {
+            const cls = badgeForEvent(ev);
+            const evJson = escapeHtml(JSON.stringify(ev || {}));
+            const label = escapeHtml(ev?.short || ev?.title || "");
+            const title = escapeHtml(ev?.title || "");
+            // Use a button so we can open a macro-event popover on click.
+            return `<button class="${cls} calEventPill" type="button" data-ev="${evJson}" title="${title}" aria-label="${title}">${label}</button>`;
+          }).join("")}
           ${evMore > 0 ? `<div class="pill pill--event neutral" title="${escapeHtml(evs.map(e => e?.title).filter(Boolean).join(" · "))}">+${evMore}</div>` : ""}
         </div>`
       : "";
@@ -322,6 +341,16 @@ function render(payload) {
       const date = String(btn.getAttribute("data-date") || "");
       if (!ticker) return;
       await openTickerPopover(ticker, date);
+    });
+  });
+
+  // Macro event click handler
+  grid.querySelectorAll(".calEventPill").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const raw = btn.getAttribute("data-ev") || "{}";
+      let ev = {};
+      try { ev = JSON.parse(String(raw)); } catch { ev = {}; }
+      await openMacroPopover(ev);
     });
   });
 }
@@ -430,6 +459,74 @@ async function openTickerPopover(ticker, date = "") {
   openPopover(true);
 }
 
+async function openMacroPopover(ev) {
+  const title = $("evTitle");
+  const meta = $("evMeta");
+  const nums = $("evNumbers");
+  const desk = $("evDesk");
+  const watch = $("evWatch");
+  const stats = $("evStats");
+
+  const t = String(ev?.title || ev?.short || "Macro event");
+  if (title) title.textContent = t;
+
+  const imp = ev?.importance;
+  const timeEt = ev?.timeEt;
+  const kind = String(ev?.kind || "—");
+  const key = String(ev?.key || "").toUpperCase();
+
+  if (meta) {
+    const impTxt = (imp !== null && imp !== undefined) ? `importance=${String(imp)}` : "importance=—";
+    const timeTxt = timeEt ? `time=${String(timeEt)}` : "time=—";
+    const keyTxt = key ? `key=${key}` : "key=—";
+    meta.textContent = `${kind} · ${keyTxt} · ${timeTxt} · ${impTxt}`;
+  }
+
+  const f = ev?.forecast;
+  const p = ev?.previous;
+  const a = ev?.actual;
+  const unit = ev?.unit ? String(ev.unit) : "";
+  const fmt = (x) => (x === null || x === undefined || Number.isNaN(Number(x))) ? "—" : `${Number(x)}${unit ? " " + unit : ""}`;
+  if (nums) {
+    nums.innerHTML = `
+      <div class="k">Forecast</div><div class="v mono">${escapeHtml(fmt(f))}</div>
+      <div class="k">Previous</div><div class="v mono">${escapeHtml(fmt(p))}</div>
+      <div class="k">Actual</div><div class="v mono">${escapeHtml(fmt(a))}</div>
+    `;
+  }
+
+  const pb = ev?.playbook || null;
+  if (desk) desk.innerHTML = _li(pb?.deskView);
+  if (watch) watch.innerHTML = _li(pb?.watch);
+
+  if (stats) stats.innerHTML = `<div class="muted">Loading…</div>`;
+  if (stats && key) {
+    try {
+      const s = await fetchJson(`/api/macro-event-stats?key=${encodeURIComponent(key)}`, { timeoutMs: 45000 });
+      if (!s?.enabled) {
+        stats.innerHTML = `<div class="muted">${escapeHtml((Array.isArray(s?.notes) && s.notes.length) ? s.notes[0] : "Stats unavailable.")}</div>`;
+      } else {
+        const ed = s?.spy?.eventDayCloseToClose || {};
+        const nd = s?.spy?.nextDayCloseToClose || {};
+        const pd = s?.spy?.priorDayCloseToClose || {};
+        const fmtPct = (x) => (x === null || x === undefined) ? "—" : `${Number(x).toFixed(2)}%`;
+        stats.innerHTML = `
+          <div class="k">Events used</div><div class="v mono">${escapeHtml(String(s.eventsUsed ?? "—"))}</div>
+          <div class="k">Event day |median|</div><div class="v mono">${escapeHtml(fmtPct(ed.medianAbsPct))}</div>
+          <div class="k">Event day p90 |abs|</div><div class="v mono">${escapeHtml(fmtPct(ed.p90AbsPct))}</div>
+          <div class="k">Next day |median|</div><div class="v mono">${escapeHtml(fmtPct(nd.medianAbsPct))}</div>
+          <div class="k">Next day p90 |abs|</div><div class="v mono">${escapeHtml(fmtPct(nd.p90AbsPct))}</div>
+          <div class="k">Prior day |median|</div><div class="v mono">${escapeHtml(fmtPct(pd.medianAbsPct))}</div>
+        `;
+      }
+    } catch (e) {
+      stats.innerHTML = `<div class="muted">Error: ${escapeHtml(String(e?.message || e))}</div>`;
+    }
+  }
+
+  openEventPopover(true);
+}
+
 async function refresh() {
   setStatus("Loading…");
   try {
@@ -496,16 +593,19 @@ function init() {
   bindLayer("evOpex", "opex");
 
   $("popClose")?.addEventListener("click", () => openPopover(false));
+  $("evClose")?.addEventListener("click", () => openEventPopover(false));
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") {
       openSettings(false);
       openPopover(false);
+      openEventPopover(false);
     }
   });
   document.addEventListener("click", (ev) => {
     const t = ev.target;
-    if (t && t.closest && (t.closest("#popover") || t.closest(".calTile"))) return;
+    if (t && t.closest && (t.closest("#popover") || t.closest("#eventPopover") || t.closest(".calTile") || t.closest(".calEventPill"))) return;
     openPopover(false);
+    openEventPopover(false);
   });
 
   refresh();

@@ -4,6 +4,7 @@ import datetime as dt
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.benzinga_client import BenzingaClient
+from backend.macro_playbook import get_playbook
 
 
 def _fmt_date(d: dt.date) -> str:
@@ -24,6 +25,74 @@ def _safe_int(v: Any) -> Optional[int]:
         return int(float(v))
     except Exception:
         return None
+
+
+def _to_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        x = float(v)
+        if x != x:
+            return None
+        return x
+    except Exception:
+        return None
+
+
+def _macro_key(name: str) -> Optional[str]:
+    """
+    Stable Top10-ish macro keys (used for playbook + stats lookups).
+    Keep this explainable and resilient to naming differences.
+    """
+    n = str(name or "").strip().lower()
+    if not n:
+        return None
+    if "cpi" in n:
+        return "CPI"
+    if "ppi" in n:
+        return "PPI"
+    if "retail" in n and "sales" in n:
+        return "RETAIL_SALES"
+    if "nonfarm" in n or "payroll" in n or "nfp" in n:
+        return "NFP"
+    if "jobless" in n or "claims" in n:
+        return "JOBLESS_CLAIMS"
+    if "pmi" in n or "ism" in n:
+        return "PMI_ISM"
+    if "fomc" in n and "minutes" in n:
+        return "FOMC_MINUTES"
+    if "fomc" in n or "interest rate decision" in n or "rate decision" in n:
+        return "FOMC_RATE_DECISION"
+    if "refunding" in n:
+        return "TREASURY_REFUNDING"
+    if "auction" in n or "treasury" in n or "t-bill" in n or "note auction" in n or "bond auction" in n:
+        return "TREASURY_AUCTION"
+    return None
+
+
+def _coerce_time_et(row: dict) -> Optional[str]:
+    """
+    Best-effort time-of-day extraction for display (ET).
+    Benzinga economics commonly includes time fields like 'time' or 'time_us'.
+    """
+    for k in ("time", "time_us", "timeET", "time_et", "timeOfDay"):
+        v = row.get(k)
+        if not v:
+            continue
+        s = str(v).strip()
+        # Normalize "HH:MM" if we got "HHMM"
+        if len(s) == 4 and s.isdigit():
+            return f"{s[:2]}:{s[2:]}"
+        return s
+    return None
+
+
+def _coerce_number(row: dict, keys: List[str]) -> Optional[float]:
+    for k in keys:
+        v = _to_float(row.get(k))
+        if v is not None:
+            return float(v)
+    return None
 
 
 def _classify_macro(name: str) -> str:
@@ -146,11 +215,31 @@ def macro_events_by_date(
             kind_out = "ECON" if kind == "ECON" else kind
             title = name
             short = _short_label(kind_out, name)
+            key = _macro_key(name)
+            time_et = _coerce_time_et(r)
+
+            # Forecast/actual/previous are optional and may not exist for all events.
+            forecast = _coerce_number(r, ["forecast", "consensus", "estimate"])
+            previous = _coerce_number(r, ["previous", "prior", "prev"])
+            actual = _coerce_number(r, ["actual"])
+            unit = str(r.get("unit") or r.get("units") or "").strip() or None
+            period = str(r.get("period") or r.get("time_period") or "").strip() or None
+            updated = r.get("updated") or r.get("updated_at") or r.get("updatedAt")
+
             ev = {
                 "kind": kind_out,
                 "title": title,
                 "short": short,
                 "importance": imp,
+                "key": (str(key).upper() if key else None),
+                "timeEt": time_et,
+                "forecast": forecast,
+                "previous": previous,
+                "actual": actual,
+                "unit": unit,
+                "period": period,
+                "updated": updated,
+                "playbook": (get_playbook(key=str(key)) if key else None),
                 "source": "benzinga",
             }
             out.setdefault(d0, []).append(ev)

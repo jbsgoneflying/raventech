@@ -31,6 +31,7 @@ from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
 from backend.condor_rank import compute_condor_rank
 from backend.calendar_snapshot import load_earnings_snapshot
 from backend.fmp_snapshot import load_fmp_earnings_snapshot
+from backend.macro_event_stats import compute_macro_event_stats
 
 
 try:
@@ -248,6 +249,9 @@ _engine1_elig_cache_lock = threading.Lock()
 
 _condor_rank_cache = TTLCache(maxsize=1024, ttl=6 * 60 * 60)  # 6h
 _condor_rank_cache_lock = threading.Lock()
+
+_macro_stats_cache = TTLCache(maxsize=256, ttl=6 * 60 * 60)  # 6h (on-demand)
+_macro_stats_cache_lock = threading.Lock()
 
 def _truncate(s: str, n: int) -> str:
     t = str(s or "").replace("\n", " ").strip()
@@ -716,6 +720,51 @@ def condor_rank(
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (condor-rank)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/macro-event-stats")
+def macro_event_stats(
+    key: str = Query(..., description="Macro event key (e.g., CPI, FOMC_RATE_DECISION, NFP)"),
+    lookback_years: int = Query(5, ge=1, le=10),
+    max_events: int = Query(60, ge=10, le=200),
+):
+    """
+    On-demand macro event reaction stats (risk-only).
+    Uses Benzinga economics history + SPY close-to-close returns.
+    Cached to avoid repeated computation.
+    """
+    try:
+        k = str(key or "").strip().upper()
+        if not k:
+            raise HTTPException(status_code=400, detail="Missing key.")
+        cache_key = (k, int(lookback_years), int(max_events))
+        with _macro_stats_cache_lock:
+            cached = _macro_stats_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        bz = _get_benzinga_client_optional()
+        if bz is None:
+            raise HTTPException(status_code=503, detail="Benzinga unavailable or disabled.")
+        client = _get_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
+
+        payload = compute_macro_event_stats(
+            key=k,
+            bz=bz,
+            orats=client,
+            lookback_years=int(lookback_years),
+            max_events=int(max_events),
+        )
+        with _macro_stats_cache_lock:
+            _macro_stats_cache[cache_key] = payload
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (macro-event-stats)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
