@@ -34,6 +34,14 @@ def _to_float(v: Any) -> Optional[float]:
 def _pct(x: Optional[float]) -> Optional[float]:
     return None if x is None else round(float(x) * 100.0, 3)
 
+def _pts(x: Optional[float], spot: Optional[float]) -> Optional[float]:
+    """
+    Convert a return (fraction, e.g. 0.0023) into SPY points using the provided spot close.
+    """
+    if x is None or spot is None or spot <= 0:
+        return None
+    return round(float(x) * float(spot), 2)
+
 
 def _median(xs: List[float]) -> Optional[float]:
     ys = [float(x) for x in xs if x is not None]
@@ -177,6 +185,8 @@ def compute_macro_event_stats(
     if d0 is None or d1 is None:
         return {"enabled": False, "key": k, "notes": ["Invalid event dates returned by Benzinga."]}
     closes = _fetch_spy_closes(orats, start=(d0 - dt.timedelta(days=10)), end=(d1 + dt.timedelta(days=10)))
+    trade_dates = sorted(closes.keys())
+    spy_spot_close = float(closes.get(trade_dates[-1])) if trade_dates else None
 
     # Compute returns for each event date where neighboring closes exist.
     # We use close-to-close (event day and next day) since it is robust and deterministic.
@@ -186,7 +196,6 @@ def compute_macro_event_stats(
     used_dates: List[str] = []
 
     # Build a sorted list of available trading dates to find prev/next close.
-    trade_dates = sorted(closes.keys())
     idx = {d: i for i, d in enumerate(trade_dates)}
 
     for d in dates:
@@ -218,14 +227,23 @@ def compute_macro_event_stats(
 
     def _summ(xs: List[float]) -> Dict[str, Any]:
         abs_xs = [abs(float(x)) for x in xs]
+        med = _median(xs)
+        p10 = _pctl(xs, 10)
+        p90 = _pctl(xs, 90)
+        med_abs = _median(abs_xs)
+        p90_abs = _pctl(abs_xs, 90)
         return {
             "n": int(len(xs)),
-            "medianPct": _pct(_median(xs)),
-            "p10Pct": _pct(_pctl(xs, 10)),
-            "p90Pct": _pct(_pctl(xs, 90)),
-            "medianAbsPct": _pct(_median(abs_xs)),
-            "p90AbsPct": _pct(_pctl(abs_xs, 90)),
+            "medianPct": _pct(med),
+            "p10Pct": _pct(p10),
+            "p90Pct": _pct(p90),
+            "medianAbsPct": _pct(med_abs),
+            "p90AbsPct": _pct(p90_abs),
+            "medianPts": _pts(med, spy_spot_close),
+            "medianAbsPts": _pts(med_abs, spy_spot_close),
+            "p90AbsPts": _pts(p90_abs, spy_spot_close),
             "stdevPct": _pct(statistics.stdev(xs)) if len(xs) >= 2 else None,
+            "stdevPts": _pts((statistics.stdev(xs) if len(xs) >= 2 else None), spy_spot_close),
         }
 
     return {
@@ -234,6 +252,7 @@ def compute_macro_event_stats(
         "lookbackYears": int(lookback_years),
         "eventsConsidered": int(len(dates)),
         "eventsUsed": int(n),
+        "spySpotClose": (None if spy_spot_close is None else round(float(spy_spot_close), 2)),
         "spy": {
             "eventDayCloseToClose": _summ(event_rets),
             "nextDayCloseToClose": _summ(next_rets),

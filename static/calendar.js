@@ -90,6 +90,42 @@ function openEventPopover(open) {
   p.classList.toggle("hidden", !open);
 }
 
+function initTooltips() {
+  const wraps = Array.from(document.querySelectorAll(".tipWrap"));
+  const closeAll = () => {
+    wraps.forEach(w => {
+      w.classList.remove("isOpen");
+      const b = w.querySelector(".tipBtn");
+      if (b) b.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  wraps.forEach((w) => {
+    const btn = w.querySelector(".tipBtn");
+    if (!btn) return;
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const isOpen = w.classList.contains("isOpen");
+      closeAll();
+      if (!isOpen) {
+        w.classList.add("isOpen");
+        btn.setAttribute("aria-expanded", "true");
+      }
+    });
+  });
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest(".tipWrap")) return;
+    closeAll();
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeAll();
+  });
+}
+
 function _li(lines) {
   const xs = Array.isArray(lines) ? lines.filter(Boolean) : [];
   if (!xs.length) return `<div class="muted">—</div>`;
@@ -509,14 +545,18 @@ async function openMacroPopover(ev) {
         const ed = s?.spy?.eventDayCloseToClose || {};
         const nd = s?.spy?.nextDayCloseToClose || {};
         const pd = s?.spy?.priorDayCloseToClose || {};
+        const spot = (s.spySpotClose !== null && s.spySpotClose !== undefined) ? Number(s.spySpotClose) : null;
         const fmtPct = (x) => (x === null || x === undefined) ? "—" : `${Number(x).toFixed(2)}%`;
+        const fmtPts = (x) => (x === null || x === undefined) ? "—" : `${Number(x).toFixed(2)} pts`;
+        const fmtBand = (pts, pct) => `${fmtPts(pts)} (${fmtPct(pct)})`;
         stats.innerHTML = `
+          <div class="k">SPY close used</div><div class="v mono">${escapeHtml(spot === null || Number.isNaN(spot) ? "—" : spot.toFixed(2))}</div>
           <div class="k">Events used</div><div class="v mono">${escapeHtml(String(s.eventsUsed ?? "—"))}</div>
-          <div class="k">Event day |median|</div><div class="v mono">${escapeHtml(fmtPct(ed.medianAbsPct))}</div>
-          <div class="k">Event day p90 |abs|</div><div class="v mono">${escapeHtml(fmtPct(ed.p90AbsPct))}</div>
-          <div class="k">Next day |median|</div><div class="v mono">${escapeHtml(fmtPct(nd.medianAbsPct))}</div>
-          <div class="k">Next day p90 |abs|</div><div class="v mono">${escapeHtml(fmtPct(nd.p90AbsPct))}</div>
-          <div class="k">Prior day |median|</div><div class="v mono">${escapeHtml(fmtPct(pd.medianAbsPct))}</div>
+          <div class="k">Event day |median|</div><div class="v mono">${escapeHtml(fmtBand(ed.medianAbsPts, ed.medianAbsPct))}</div>
+          <div class="k">Event day p90 |abs|</div><div class="v mono">${escapeHtml(fmtBand(ed.p90AbsPts, ed.p90AbsPct))}</div>
+          <div class="k">Next day |median|</div><div class="v mono">${escapeHtml(fmtBand(nd.medianAbsPts, nd.medianAbsPct))}</div>
+          <div class="k">Next day p90 |abs|</div><div class="v mono">${escapeHtml(fmtBand(nd.p90AbsPts, nd.p90AbsPct))}</div>
+          <div class="k">Prior day |median|</div><div class="v mono">${escapeHtml(fmtBand(pd.medianAbsPts, pd.medianAbsPct))}</div>
         `;
       }
     } catch (e) {
@@ -554,6 +594,7 @@ function shiftAnchor(dir) {
 function init() {
   // Non-blocking: just toggles Engine 2 nav visibility.
   gateNavLinks();
+  initTooltips();
 
   setView("month");
 
