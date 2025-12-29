@@ -224,6 +224,219 @@ def _live_chain_with_fallback(
     return None, [], warnings
 
 
+def _compute_gamma_flip_strike(
+    chain_rows: List[dict],
+    *,
+    spot: float,
+    band_pct: float,
+    weighting_mode: str,
+    contract_multiplier: int = 100,
+) -> Optional[float]:
+    """
+    Best-effort "gamma flip" proxy: find a strike where net gamma exposure changes sign.
+
+    We compute per-strike netGex ≈ gamma * (callWeight - putWeight) * multiplier
+    within a spot band and look for a sign change across adjacent strikes. If found,
+    return the flip closest to spot (linear interpolation).
+    """
+    try:
+        s0 = float(spot)
+    except Exception:
+        return None
+    if not math.isfinite(s0) or s0 <= 0:
+        return None
+
+    lo = s0 * (1.0 - float(band_pct))
+    hi = s0 * (1.0 + float(band_pct))
+
+    pts: List[Tuple[float, float]] = []
+    for r in chain_rows or []:
+        if not isinstance(r, dict):
+            continue
+        strike = _to_float(r.get("strike"))
+        gamma = _to_float(r.get("gamma"))
+        if strike is None or gamma is None:
+            continue
+        k = float(strike)
+        if not (lo <= k <= hi):
+            continue
+        if weighting_mode == "oi":
+            c = _to_float(r.get("callOpenInterest")) or 0.0
+            p = _to_float(r.get("putOpenInterest")) or 0.0
+        elif weighting_mode == "volume":
+            c = _to_float(r.get("callVolume")) or 0.0
+            p = _to_float(r.get("putVolume")) or 0.0
+        else:
+            c = 1.0
+            p = 1.0
+        c = max(0.0, float(c))
+        p = max(0.0, float(p))
+        net = float(gamma) * (c - p) * float(contract_multiplier)
+        if math.isfinite(net):
+            pts.append((k, float(net)))
+
+    if len(pts) < 2:
+        return None
+    pts.sort(key=lambda x: x[0])
+
+    best = None
+    best_dist = None
+    prev_k, prev_v = pts[0]
+    prev_sign = 0 if prev_v == 0 else (1 if prev_v > 0 else -1)
+    for k, v in pts[1:]:
+        sign = 0 if v == 0 else (1 if v > 0 else -1)
+        if sign == 0:
+            flip = float(k)
+        elif prev_sign == 0:
+            flip = float(prev_k)
+        elif sign != prev_sign:
+            # Linear interpolation between (prev_k, prev_v) and (k, v)
+            denom = (v - prev_v)
+            if denom == 0:
+                flip = float(k)
+            else:
+                t = (0.0 - prev_v) / denom
+                t = max(0.0, min(1.0, float(t)))
+                flip = float(prev_k) + t * (float(k) - float(prev_k))
+        else:
+            flip = None
+
+        if flip is not None and math.isfinite(flip):
+            dist = abs(float(flip) - s0)
+            if best is None or best_dist is None or dist < best_dist:
+                best = float(flip)
+                best_dist = float(dist)
+
+        prev_k, prev_v, prev_sign = float(k), float(v), sign
+
+    return best
+
+
+def compute_spx_live_levels(
+    client: OratsClient,
+    *,
+    view: str = "weekly",
+    now_dt: Optional[dt.datetime] = None,
+    band_pct: float = 0.05,
+    top_n: int = 5,
+    cluster_steps: int = 2,
+) -> Dict[str, Any]:
+    """
+    Compute SPX live dealer-gamma and OI wall/cluster levels (informational).
+
+    view:
+      - "weekly": prefer weekly Friday expiry
+      - "nearest": prefer nearest expiry / 0DTE
+    """
+    now_et = _now_et(now_dt)
+    today = now_et.date()
+
+    symbols = ("SPXW", "SPX", "SPY")  # prefer weeklies, then main, then proxy
+    fields0 = "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume,callMidIv,putMidIv"
+
+    exp_warn: List[str] = []
+    strikes_cache_by_symbol: Dict[str, List[dict]] = {}
+    exp_dates_by_symbol: Dict[str, List[str]] = {}
+
+    for sym in symbols:
+        exp_rows: List[dict] = []
+        exp_dates: List[str] = []
+        try:
+            exp_rows = client.live_expirations(ticker=sym).rows or []
+        except Exception as e:
+            exp_warn.append(f"Live expirations error for {sym}: {type(e).__name__}: {e}")
+            exp_rows = []
+
+        if exp_rows:
+            for r in exp_rows:
+                if not isinstance(r, dict):
+                    continue
+                d0 = str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or r.get("exp_date") or "")[:10]
+                if d0 and len(d0) >= 10:
+                    exp_dates.append(d0)
+        else:
+            # Fallback: infer expiries from full strikes payload (cached short-TTL in ORATS client).
+            try:
+                all_rows = client.live_strikes(ticker=sym, fields=fields0).rows or []
+                all_rows = [r for r in all_rows if isinstance(r, dict)]
+                strikes_cache_by_symbol[sym] = all_rows
+                exp_dates = _infer_live_expiries_from_strikes(all_rows)
+            except Exception as e:
+                exp_warn.append(f"Live strikes fallback error for {sym}: {type(e).__name__}: {e}")
+                exp_dates = []
+
+        exp_dates_by_symbol[sym] = exp_dates
+
+    def _pick_expiry_for_symbol(sym: str) -> Optional[str]:
+        ds = exp_dates_by_symbol.get(sym) or []
+        if str(view).lower().startswith("week"):
+            return _pick_weekly_close_expiry_date(ds, today=today, now_dt=now_dt)
+        return _pick_nearest_expiry_date(ds, today=today)
+
+    used_symbol = None
+    used_expiry = None
+    chain_rows: List[dict] = []
+    chain_warn: List[str] = []
+
+    for sym in symbols:
+        ex = _pick_expiry_for_symbol(sym)
+        if not ex:
+            continue
+        used_chain_sym, rows, warn = _live_chain_with_fallback(client, tickers=[sym], expiry=ex, fields=fields0)
+        if (not rows) and sym in strikes_cache_by_symbol:
+            rows = _filter_chain_by_expiry(strikes_cache_by_symbol.get(sym) or [], expiry=ex)
+            if rows:
+                warn = [*warn, "Live strikes-by-expiry empty; used full strikes filtered by expiry."]
+        if rows:
+            used_symbol = used_chain_sym or sym
+            used_expiry = ex
+            chain_rows = rows
+            chain_warn = warn
+            break
+
+    if not chain_rows:
+        return {
+            "enabled": False,
+            "view": "weekly" if str(view).lower().startswith("week") else "nearest",
+            "symbolUsed": None,
+            "expiry": None,
+            "spot": None,
+            "bandPct": float(band_pct),
+            "weightingMode": None,
+            "gammaFlipStrike": None,
+            "dealerGamma": None,
+            "oiClusters": None,
+            "warnings": exp_warn,
+            "notes": ["Live context unavailable (no usable chain rows)."],
+        }
+
+    dg = compute_dealer_gamma_context(chain_rows, expiry=used_expiry, contract_multiplier=100, band_pct=float(band_pct), top_n=int(top_n))
+    oi = compute_open_interest_clusters(chain_rows, expiry=used_expiry, band_pct=float(band_pct), top_n=int(top_n), cluster_steps=int(cluster_steps))
+    spot = dg.get("spot")
+    wmode = str(dg.get("weightingMode") or "oi")
+    flip = None
+    if spot is not None:
+        flip = _compute_gamma_flip_strike(chain_rows, spot=float(spot), band_pct=float(band_pct), weighting_mode=wmode, contract_multiplier=100)
+
+    return {
+        "enabled": True,
+        "view": "weekly" if str(view).lower().startswith("week") else "nearest",
+        "symbolUsed": used_symbol,
+        "expiry": str(used_expiry)[:10] if used_expiry else None,
+        "spot": dg.get("spot"),
+        "bandPct": float(band_pct),
+        "weightingMode": wmode,
+        "gammaFlipStrike": None if flip is None else round(float(flip), 2),
+        "dealerGamma": dg,
+        "oiClusters": oi,
+        "warnings": [*exp_warn, *list(chain_warn or []), *list(dg.get("warnings") or []), *list(oi.get("warnings") or [])],
+        "notes": [
+            "Live, informational only. Does not change backtest/odds.",
+            "SPXW/SPX may differ from SPY proxy intraday depending on entitlement and session.",
+        ],
+    }
+
+
 def _row_dte_days(row: dict, *, trade_date: dt.date) -> Optional[float]:
     """
     Prefer ORATS-provided dte; otherwise compute from expirDate - trade_date.

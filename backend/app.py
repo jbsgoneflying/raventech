@@ -25,7 +25,7 @@ from backend.earnings_logic import BreachInputError, compute_breach_stats, compu
 from backend.config import get_flags
 from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
-from backend.spx_ic_engine import compute_engine2_spx_ic
+from backend.spx_ic_engine import compute_engine2_spx_ic, compute_spx_live_levels, fetch_dailies_ohlc_range
 from backend.redis_store import get_store_optional
 from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
 from backend.condor_rank import compute_condor_rank
@@ -241,6 +241,9 @@ _breach_cache_lock = threading.Lock()
 _spx_ic_cache = TTLCache(maxsize=128, ttl=30 * 60)  # 30 minutes (interactive)
 _spx_ic_cache_lock = threading.Lock()
 
+_spx_levels_cache = TTLCache(maxsize=128, ttl=60)  # 60s (interactive hover chart)
+_spx_levels_cache_lock = threading.Lock()
+
 _calendar_cache = TTLCache(maxsize=128, ttl=10 * 60)  # 10 minutes (calendar page)
 _calendar_cache_lock = threading.Lock()
 
@@ -304,6 +307,11 @@ def _spx_ic_cache_key(params: dict, flags_fp: tuple) -> tuple:
     # stable primitives only
     items = tuple(sorted((k, str(v)) for k, v in (params or {}).items()))
     return ("spx_ic", items, flags_fp)
+
+
+def _spx_levels_cache_key(params: dict, flags_fp: tuple) -> tuple:
+    items = tuple(sorted((k, str(v)) for k, v in (params or {}).items()))
+    return ("spx_levels", items, flags_fp)
 
 
 # Static frontend
@@ -442,6 +450,63 @@ def spx_ic(
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (spx-ic)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/spx-levels")
+def spx_levels(
+    view: str = Query("weekly", description="weekly|nearest"),
+    window_days: int = Query(180, ge=30, le=800, description="Calendar days to scan back for SPX EOD closes (chart window)"),
+    points: int = Query(90, ge=30, le=260, description="Max trading-day points to return for charting"),
+):
+    """
+    Lightweight chart payload for Engine 2's dealer-gamma / OI wall visualization.
+    - Uses ORATS EOD daily closes (range fetch) for SPX price series.
+    - Uses ORATS LIVE strikes (short TTL) for OI walls/clusters and gamma peaks.
+    """
+    f = get_flags()
+    if not f.ENABLE_ENGINE2_SPX_IC:
+        raise HTTPException(status_code=404, detail="Engine 2 disabled (ENABLE_ENGINE2_SPX_IC=0).")
+
+    v = str(view or "weekly").strip().lower()
+    if v not in ("weekly", "nearest"):
+        raise HTTPException(status_code=400, detail="view must be weekly|nearest")
+
+    try:
+        params = {"view": v, "window_days": int(window_days), "points": int(points)}
+        key = _spx_levels_cache_key(params, f.cache_key_engine2())
+        with _spx_levels_cache_lock:
+            cached = _spx_levels_cache.get(key)
+        if cached is not None:
+            return cached
+
+        client = _get_client()
+
+        # --- Price series (EOD) ---
+        end = dt.date.today()
+        start = end - dt.timedelta(days=int(window_days))
+        bars = fetch_dailies_ohlc_range(client, ticker="SPX", start=start, end=end)
+        closes = [{"date": b.trade_date, "close": float(b.close)} for b in (bars or []) if getattr(b, "close", None)]
+        if int(points) > 0 and len(closes) > int(points):
+            closes = closes[-int(points) :]
+
+        # --- Live levels ---
+        levels = compute_spx_live_levels(client, view=v, band_pct=0.05, top_n=5, cluster_steps=2)
+
+        payload = {
+            "schemaVersion": 1,
+            "priceSeries": closes,
+            "levels": levels,
+        }
+
+        with _spx_levels_cache_lock:
+            _spx_levels_cache[key] = payload
+        return payload
+    except OratsError as e:
+        LOG.exception("ORATS failure (spx-levels)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (spx-levels)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

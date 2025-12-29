@@ -340,6 +340,46 @@
           </div>
         </section>
 
+        <section class="surface" id="gammaMap">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Dealer Gamma Map
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Dealer Gamma Map help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Dealer Gamma Map (clean hover view)</div>
+                  <div class="tipBody">
+                    <p>A simple SPX price chart with <b>live</b> “level overlays”: OI walls/clusters and gamma concentration near spot.</p>
+                    <ul>
+                      <li><b>Hover</b> lines to see details (strike / OI / expiry).</li>
+                      <li><b>Desk view</b>: use walls/clusters as a context overlay for where flows may “pin” or accelerate.</li>
+                    </ul>
+                    <p><b>Important</b>: informational only — does not change backtest/odds.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="gammaMeta">—</div>
+            <div class="tbInputs" style="justify-content:flex-end; gap:8px;">
+              <button id="gammaViewWeekly" class="chipToggle isOn" type="button" aria-pressed="true">Weekly Friday</button>
+              <button id="gammaViewNearest" class="chipToggle" type="button" aria-pressed="false">Nearest/0DTE</button>
+            </div>
+          </div>
+
+          <div class="chartCard">
+            <div id="gammaChart" class="gammaChart" aria-label="SPX price chart with OI/gamma overlays"></div>
+            <div id="gammaTooltip" class="chartTip hidden" role="tooltip"></div>
+            <div class="gammaLegend" aria-label="Overlay toggles">
+              <button class="chipToggle isOn" data-layer="putWall" type="button" aria-pressed="true">Put wall</button>
+              <button class="chipToggle isOn" data-layer="callWall" type="button" aria-pressed="true">Call wall</button>
+              <button class="chipToggle isOn" data-layer="clusters" type="button" aria-pressed="true">Clusters</button>
+              <button class="chipToggle isOn" data-layer="gammaPeaks" type="button" aria-pressed="true">Gamma peaks</button>
+              <button class="chipToggle isOn" data-layer="gammaFlip" type="button" aria-pressed="true">Gamma flip</button>
+            </div>
+            <div id="gammaNote" class="metricCaption muted">—</div>
+          </div>
+        </section>
+
         <!-- AskRaven removed -->
 
         <section class="surface">

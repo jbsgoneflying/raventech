@@ -1615,6 +1615,109 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 }
 .tipWrap--fixed .tipPanel:before { display: none; }
 
+/* --- Engine 2: Dealer Gamma Map (clean hover chart) --- */
+.chartCard {
+  position: relative;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255,255,255,0.78);
+  box-shadow: 0 12px 32px rgba(15, 20, 30, 0.10);
+  padding: 12px;
+  overflow: hidden;
+}
+
+.gammaChart {
+  width: 100%;
+  height: 260px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255,255,255,0.55);
+}
+
+.gammaSvg {
+  display: block;
+  width: 100%;
+  height: 260px;
+}
+
+.gammaBg { fill: rgba(255,255,255,0.55); }
+
+.gammaPrice {
+  fill: none;
+  stroke: rgba(15, 23, 42, 0.86);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gammaLine {
+  stroke-width: 1.4;
+  opacity: 0.55;
+  stroke-linecap: round;
+}
+.gammaLine.isHover { opacity: 0.95; stroke-width: 2.4; }
+
+.gammaLine--putWall { stroke: rgba(220, 38, 38, 0.95); stroke-dasharray: 6 6; }
+.gammaLine--callWall { stroke: rgba(22, 163, 74, 0.95); stroke-dasharray: 6 6; }
+.gammaLine--cluster { stroke: rgba(11, 11, 15, 0.44); stroke-dasharray: 3 6; }
+.gammaLine--gammaPeak { stroke: rgba(99, 102, 241, 0.92); stroke-dasharray: 2 7; }
+.gammaLine--gammaFlip { stroke: rgba(17, 24, 39, 0.72); stroke-dasharray: 10 6; }
+
+.gammaCross {
+  stroke: rgba(11, 11, 15, 0.20);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.gammaDot { fill: rgba(15, 23, 42, 0.85); }
+
+.gammaLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chipToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255,255,255,0.60);
+  color: rgba(11,11,15,0.72);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -0.1px;
+  cursor: pointer;
+  user-select: none;
+}
+.chipToggle:hover { background: rgba(255,255,255,0.78); }
+.chipToggle.isOn {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: rgba(11,11,15,0.92);
+}
+
+.chartTip {
+  position: absolute;
+  z-index: 40;
+  min-width: 220px;
+  max-width: 240px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow: 0 18px 50px rgba(15, 20, 30, 0.14);
+  pointer-events: none;
+}
+.chartTipTitle { font-size: 12px; font-weight: 900; letter-spacing: 0.1px; margin-bottom: 4px; }
+.chartTipBody { font-size: 12px; color: rgba(11,11,15,0.78); line-height: 1.35; }
+.chartTipDivider { height: 1px; background: rgba(15, 23, 42, 0.08); margin: 8px 0; }
+
 .tipPanel:before {
   content: "";
   position: absolute;

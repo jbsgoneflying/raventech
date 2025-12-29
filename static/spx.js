@@ -61,6 +61,11 @@ function _fmtClusterLine(c) {
 }
 
 let lastPayload = null;
+let lastGammaPayload = null;
+const gammaState = {
+  view: "weekly", // weekly|nearest
+  layers: { putWall: true, callWall: true, clusters: true, gammaPeaks: true, gammaFlip: true },
+};
 
 function setLoading(isLoading) {
   const btn = $("runBtn");
@@ -130,6 +135,322 @@ async function checkFlags() {
   } catch {
     return {};
   }
+}
+
+function clamp(x, lo, hi) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(Number(lo), Math.min(Number(hi), n));
+}
+
+function _fmtDateShort(iso) {
+  const s = String(iso || "").slice(0, 10);
+  if (!s) return "—";
+  return s;
+}
+
+function _fmtNum(x, d = 0) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(d);
+}
+
+function initGammaMapUI() {
+  const weeklyBtn = $("gammaViewWeekly");
+  const nearestBtn = $("gammaViewNearest");
+
+  const setView = (v) => {
+    gammaState.view = (v === "nearest") ? "nearest" : "weekly";
+    if (weeklyBtn) {
+      const on = gammaState.view === "weekly";
+      weeklyBtn.classList.toggle("isOn", on);
+      weeklyBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    if (nearestBtn) {
+      const on = gammaState.view === "nearest";
+      nearestBtn.classList.toggle("isOn", on);
+      nearestBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    // Re-fetch so expiry selection matches the view.
+    loadGammaMap();
+  };
+
+  if (weeklyBtn) weeklyBtn.addEventListener("click", () => setView("weekly"));
+  if (nearestBtn) nearestBtn.addEventListener("click", () => setView("nearest"));
+
+  const legend = document.querySelector(".gammaLegend");
+  if (legend) {
+    legend.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      const btn = t.closest("button[data-layer]");
+      if (!btn) return;
+      const k = String(btn.getAttribute("data-layer") || "");
+      if (!k) return;
+      const cur = !!gammaState.layers[k];
+      gammaState.layers[k] = !cur;
+      btn.classList.toggle("isOn", !cur);
+      btn.setAttribute("aria-pressed", (!cur) ? "true" : "false");
+      renderGammaMap(lastGammaPayload);
+    });
+  }
+
+  window.addEventListener("resize", () => {
+    // Cheap reflow: redraw using cached payload.
+    renderGammaMap(lastGammaPayload);
+  });
+}
+
+async function loadGammaMap() {
+  const meta = $("gammaMeta");
+  const note = $("gammaNote");
+  const chart = $("gammaChart");
+  if (!chart) return;
+
+  try {
+    if (meta) meta.textContent = "Loading…";
+    if (note) note.textContent = "—";
+    const v = gammaState.view;
+    const payload = await fetchJson(`/api/spx-levels?view=${encodeURIComponent(v)}&points=90&window_days=180`, { timeoutMs: 45000 });
+    lastGammaPayload = payload;
+    renderGammaMap(payload);
+  } catch (e) {
+    lastGammaPayload = null;
+    if (meta) meta.textContent = "Dealer Gamma Map unavailable";
+    if (note) note.textContent = String(e?.message || e || "Error");
+    chart.innerHTML = `<div class="muted" style="padding:14px;">${escapeHtml(String(e?.message || e || "Failed to load."))}</div>`;
+  }
+}
+
+function renderGammaMap(payload) {
+  const chart = $("gammaChart");
+  const tip = $("gammaTooltip");
+  const meta = $("gammaMeta");
+  const note = $("gammaNote");
+  if (!chart) return;
+
+  // Empty/initial state
+  if (!payload || typeof payload !== "object") {
+    chart.innerHTML = `<div class="muted" style="padding:14px;">Run Engine 2 to load the map.</div>`;
+    if (meta) meta.textContent = "—";
+    if (note) note.textContent = "—";
+    if (tip) tip.classList.add("hidden");
+    return;
+  }
+
+  const series = Array.isArray(payload?.priceSeries) ? payload.priceSeries : [];
+  const levels = payload?.levels || {};
+  const enabled = !!levels?.enabled;
+
+  const expiry = levels?.expiry ? String(levels.expiry).slice(0, 10) : "—";
+  const spot = Number(levels?.spot);
+  const sym = levels?.symbolUsed ? String(levels.symbolUsed) : "—";
+  const bandPct = Number(levels?.bandPct);
+
+  if (meta) {
+    const b = Number.isFinite(bandPct) ? `${Math.round(bandPct * 100)}%` : "—";
+    meta.textContent = `expiry=${expiry} · spot=${Number.isFinite(spot) ? _fmtNum(spot, 2) : "—"} · band=±${b} · src=${sym}`;
+  }
+
+  const notes = Array.isArray(levels?.notes) ? levels.notes.filter(Boolean) : [];
+  const warns = Array.isArray(levels?.warnings) ? levels.warnings.filter(Boolean) : [];
+  if (note) note.textContent = notes[0] || (warns[0] || "Live, informational only.");
+
+  if (!enabled || !series.length) {
+    const msg = !series.length ? "No SPX price series returned." : "Live levels unavailable (missing live chain).";
+    chart.innerHTML = `<div class="muted" style="padding:14px;">${escapeHtml(msg)}</div>`;
+    if (tip) tip.classList.add("hidden");
+    return;
+  }
+
+  // --- Build overlay items from backend payload ---
+  const oi = levels?.oiClusters || {};
+  const dg = levels?.dealerGamma || {};
+  const flip = Number(levels?.gammaFlipStrike);
+
+  const overlayLines = [];
+
+  const putWall = oi?.putWall;
+  const callWall = oi?.callWall;
+  if (gammaState.layers.putWall && putWall && Number.isFinite(Number(putWall?.peakStrike ?? putWall?.centerStrike))) {
+    const y = Number(putWall?.peakStrike ?? putWall?.centerStrike);
+    overlayLines.push({ kind: "putWall", y, title: "Put wall", detail: `strike ${_fmtNum(y, 0)} · totalOI ${_fmtNum(putWall?.totalOI, 0)} · range ${_fmtNum(putWall?.minStrike, 0)}–${_fmtNum(putWall?.maxStrike, 0)}` });
+  }
+  if (gammaState.layers.callWall && callWall && Number.isFinite(Number(callWall?.peakStrike ?? callWall?.centerStrike))) {
+    const y = Number(callWall?.peakStrike ?? callWall?.centerStrike);
+    overlayLines.push({ kind: "callWall", y, title: "Call wall", detail: `strike ${_fmtNum(y, 0)} · totalOI ${_fmtNum(callWall?.totalOI, 0)} · range ${_fmtNum(callWall?.minStrike, 0)}–${_fmtNum(callWall?.maxStrike, 0)}` });
+  }
+
+  if (gammaState.layers.clusters) {
+    const mk = (c, side) => {
+      const peak = Number(c?.peakStrike ?? c?.centerStrike);
+      const lo = Number(c?.minStrike);
+      const hi = Number(c?.maxStrike);
+      const total = Number(c?.totalOI);
+      const sideLabel = side === "P" ? "Put cluster" : "Call cluster";
+      const detail = `peak ${_fmtNum(peak, 0)} · totalOI ${_fmtNum(total, 0)} · band ${_fmtNum(lo, 0)}–${_fmtNum(hi, 0)} · n ${_fmtNum(c?.nStrikes, 0)}`;
+      // Represent as two lines (lo/hi) but same tooltip.
+      if (Number.isFinite(lo)) overlayLines.push({ kind: "cluster", y: lo, title: sideLabel, detail });
+      if (Number.isFinite(hi)) overlayLines.push({ kind: "cluster", y: hi, title: sideLabel, detail });
+    };
+    (Array.isArray(oi?.putClusters) ? oi.putClusters : []).slice(0, 3).forEach(c => mk(c, "P"));
+    (Array.isArray(oi?.callClusters) ? oi.callClusters : []).slice(0, 3).forEach(c => mk(c, "C"));
+  }
+
+  if (gammaState.layers.gammaPeaks) {
+    const tops = Array.isArray(dg?.topGammaStrikes) ? dg.topGammaStrikes : [];
+    tops.slice(0, 5).forEach((t) => {
+      const y = Number(t?.strike);
+      if (!Number.isFinite(y)) return;
+      const side = String(t?.side || "");
+      const title = "Gamma peak";
+      const detail = `strike ${_fmtNum(y, 0)} · side ${escapeHtml(side)} · gex ${_fmtNum(t?.gex, 0)}`;
+      overlayLines.push({ kind: "gammaPeak", y, title, detail });
+    });
+  }
+
+  if (gammaState.layers.gammaFlip && Number.isFinite(flip)) {
+    overlayLines.push({ kind: "gammaFlip", y: flip, title: "Gamma flip", detail: `~${_fmtNum(flip, 0)} (best-effort proxy)` });
+  }
+
+  // --- Render SVG chart ---
+  const w = Math.max(320, chart.clientWidth || 640);
+  const h = 260;
+  const pad = { l: 10, r: 10, t: 10, b: 10 };
+  const pw = w - pad.l - pad.r;
+  const ph = h - pad.t - pad.b;
+
+  const closes = series.map(p => Number(p?.close)).filter(Number.isFinite);
+  const lvlYs = overlayLines.map(o => Number(o?.y)).filter(Number.isFinite);
+  let yMin = Math.min(...closes, ...(lvlYs.length ? lvlYs : [Number.POSITIVE_INFINITY]));
+  let yMax = Math.max(...closes, ...(lvlYs.length ? lvlYs : [Number.NEGATIVE_INFINITY]));
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax) || yMin === yMax) {
+    yMin = (Number.isFinite(spot) ? spot * 0.98 : 4000);
+    yMax = (Number.isFinite(spot) ? spot * 1.02 : 5000);
+  }
+  const yPad = (yMax - yMin) * 0.06;
+  yMin -= yPad;
+  yMax += yPad;
+
+  const xForIdx = (i) => pad.l + (pw * (i / Math.max(1, series.length - 1)));
+  const yForVal = (v) => pad.t + (ph * (1 - ((v - yMin) / (yMax - yMin))));
+
+  const pts = series.map((p, i) => {
+    const y = yForVal(Number(p?.close));
+    return `${xForIdx(i)},${y}`;
+  }).join(" ");
+
+  chart.innerHTML = `
+    <svg class="gammaSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="SPX close chart">
+      <rect x="0" y="0" width="${w}" height="${h}" class="gammaBg"></rect>
+      <polyline points="${pts}" class="gammaPrice"></polyline>
+      ${overlayLines.map((o, idx) => {
+        const y = yForVal(Number(o.y));
+        return `<line x1="${pad.l}" x2="${w - pad.r}" y1="${y}" y2="${y}" class="gammaLine gammaLine--${escapeHtml(o.kind)}" data-idx="${idx}"></line>`;
+      }).join("")}
+      <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${h - pad.b}" class="gammaCross gammaCross--v hidden"></line>
+      <line x1="${pad.l}" x2="${w - pad.r}" y1="${pad.t}" y2="${pad.t}" class="gammaCross gammaCross--h hidden"></line>
+      <circle cx="${pad.l}" cy="${pad.t}" r="3" class="gammaDot hidden"></circle>
+    </svg>
+  `;
+
+  const svg = chart.querySelector("svg");
+  if (!svg) return;
+  const vLine = svg.querySelector(".gammaCross--v");
+  const hLine = svg.querySelector(".gammaCross--h");
+  const dot = svg.querySelector(".gammaDot");
+
+  const clearHover = () => {
+    const lines = Array.from(svg.querySelectorAll(".gammaLine"));
+    lines.forEach(l => l.classList.remove("isHover"));
+    if (tip) tip.classList.add("hidden");
+  };
+
+  const showTip = (html, x, y) => {
+    if (!tip) return;
+    tip.innerHTML = html;
+    tip.classList.remove("hidden");
+    const box = chart.getBoundingClientRect();
+    const left = clamp(x - box.left + 12, 8, box.width - 240);
+    const top = clamp(y - box.top + 12, 8, box.height - 120);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  };
+
+  svg.addEventListener("mouseleave", () => {
+    clearHover();
+    [vLine, hLine, dot].forEach(el => el && el.classList.add("hidden"));
+  });
+
+  svg.addEventListener("mousemove", (ev) => {
+    const box = svg.getBoundingClientRect();
+    const mx = ev.clientX - box.left;
+    const my = ev.clientY - box.top;
+    const inPlot = (mx >= pad.l && mx <= (w - pad.r) && my >= pad.t && my <= (h - pad.b));
+    if (!inPlot) {
+      clearHover();
+      [vLine, hLine, dot].forEach(el => el && el.classList.add("hidden"));
+      return;
+    }
+
+    // Crosshair / nearest point
+    const idx = Math.round(((mx - pad.l) / pw) * (series.length - 1));
+    const i = clamp(idx, 0, series.length - 1);
+    const pt = series[Number(i)] || {};
+    const px = xForIdx(Number(i));
+    const py = yForVal(Number(pt?.close));
+
+    if (vLine) {
+      vLine.setAttribute("x1", String(px));
+      vLine.setAttribute("x2", String(px));
+      vLine.classList.remove("hidden");
+    }
+    if (hLine) {
+      hLine.setAttribute("y1", String(py));
+      hLine.setAttribute("y2", String(py));
+      hLine.classList.remove("hidden");
+    }
+    if (dot) {
+      dot.setAttribute("cx", String(px));
+      dot.setAttribute("cy", String(py));
+      dot.classList.remove("hidden");
+    }
+
+    // Nearest overlay line by y-distance (pixels)
+    const lines = Array.from(svg.querySelectorAll(".gammaLine"));
+    lines.forEach(l => l.classList.remove("isHover"));
+
+    let bestIdx = null;
+    let bestDist = null;
+    overlayLines.forEach((o, j) => {
+      const yy = yForVal(Number(o.y));
+      const d = Math.abs(yy - my);
+      if (d <= 6 && (bestDist === null || d < bestDist)) {
+        bestDist = d;
+        bestIdx = j;
+      }
+    });
+
+    const priceHtml = `
+      <div class="chartTipTitle">SPX</div>
+      <div class="chartTipBody mono">${escapeHtml(_fmtDateShort(pt?.date))} · ${escapeHtml(_fmtNum(pt?.close, 2))}</div>
+    `;
+
+    if (bestIdx !== null) {
+      const o = overlayLines[bestIdx];
+      const lineEl = svg.querySelector(\`.gammaLine[data-idx=\"${bestIdx}\"]\`);
+      if (lineEl) lineEl.classList.add("isHover");
+      const html = `
+        ${priceHtml}
+        <div class="chartTipDivider"></div>
+        <div class="chartTipTitle">${escapeHtml(o.title)}</div>
+        <div class="chartTipBody">${escapeHtml(o.detail)}</div>
+      `;
+      showTip(html, ev.clientX, ev.clientY);
+    } else {
+      showTip(priceHtml, ev.clientX, ev.clientY);
+    }
+  });
 }
 
 function getMacroCap() {
@@ -287,6 +608,10 @@ function render(payload) {
         vwapNote.textContent = `bar=${String(bd)} · spot=${spotTxt} · ${distTxt} · ${modeLabel}`;
       }
     }
+
+  // Dealer Gamma Map (clean hover chart)
+  // Fetch after a successful run so the panel stays in sync with the user's session.
+  loadGammaMap();
   }
 
   const macro = payload?.current?.macro || {};
@@ -517,6 +842,7 @@ async function main() {
   }
 
   initTooltips();
+  initGammaMapUI();
   // AskRaven removed
 
   // Do NOT auto-run: user must review selections and click Run.
