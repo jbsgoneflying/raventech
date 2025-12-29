@@ -316,7 +316,8 @@ function render(payload) {
   const headerCells = () => {
     const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     if (view === "week") return names.slice(0, 5);
-    if (view === "month") return names;
+    // Month view: trading week only (hide weekend columns for more screen room).
+    if (view === "month") return names.slice(0, 5);
     return [];
   };
 
@@ -326,7 +327,16 @@ function render(payload) {
     cells.push(...headers.map((h) => `<div class="calHeadCell">${escapeHtml(h)}</div>`));
   }
 
-  days.forEach((d) => {
+  const daysToRender = (view === "month")
+    ? days.filter((d) => {
+      const dt = parseIsoDate(d?.date);
+      if (!dt) return true;
+      const wd = dt.getDay(); // Sun=0..Sat=6
+      return wd !== 0 && wd !== 6; // Mon-Fri only
+    })
+    : days;
+
+  daysToRender.forEach((d) => {
     const date = String(d?.date || "");
     const dt = parseIsoDate(date);
     const dow = dt ? dt.toLocaleDateString(undefined, { weekday: "short" }) : "";
