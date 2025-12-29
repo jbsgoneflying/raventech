@@ -159,7 +159,7 @@ def login_page(next: str | None = None):
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RavenTech — Access</title>
+    <title>Raven-Tech.co — Access</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <style>
       body {{ display:flex; align-items:center; justify-content:center; min-height:100vh; }}
@@ -177,9 +177,9 @@ def login_page(next: str | None = None):
   <body>
     <div class="loginCard">
       <div class="loginTop">
-        <img src="/static/RavenONLY.png" alt="RavenTech" />
+        <img src="/static/RavenONLY.png" alt="Raven-Tech.co" />
         <div>
-          <div class="loginTitle">RavenTech — Private Beta</div>
+          <div class="loginTitle">Raven-Tech.co — Private Beta</div>
           <div class="loginSub">Enter your invite code to continue.</div>
         </div>
       </div>

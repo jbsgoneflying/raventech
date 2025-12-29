@@ -65,6 +65,17 @@ async function fetchJson(url, { timeoutMs = 30000 } = {}) {
   }
 }
 
+async function gateNavLinks() {
+  // Feature-gated nav links (Engine 2).
+  try {
+    const flags = await fetchJson("/api/flags");
+    const link = $("engine2Link");
+    if (link) link.classList.toggle("hidden", !flags?.ENABLE_ENGINE2_SPX_IC);
+  } catch {
+    // If flags endpoint fails, keep the link hidden by default.
+  }
+}
+
 const state = {
   view: "month",
   anchor: isoDate(new Date()),
@@ -286,6 +297,9 @@ function shiftAnchor(dir) {
 }
 
 function init() {
+  // Non-blocking: just toggles Engine 2 nav visibility.
+  gateNavLinks();
+
   setView("month");
 
   $("viewMonth")?.addEventListener("click", () => { setView("month"); refresh(); });
