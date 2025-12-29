@@ -1232,6 +1232,12 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   cursor: pointer;
   box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
   transition: transform 80ms ease, background 140ms ease, border-color 140ms ease;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 66px;
 }
 
 .calTile:hover {
@@ -1240,6 +1246,56 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 }
 
 .calTile:active { transform: translateY(0.5px); }
+
+.calTileLogo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: 0 10px 26px rgba(15, 20, 30, 0.08);
+}
+
+.calTile--noLogo .calTileLogo { display: none; }
+
+.calTileTicker {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.25px;
+}
+
+.tickerInputRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tickerLogo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: 0 10px 18px rgba(15, 20, 30, 0.06);
+}
+
+.popoverTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.popoverLogo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+}
 
 .calTileMore {
   display: inline-flex;

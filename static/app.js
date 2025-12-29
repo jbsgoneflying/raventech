@@ -12,6 +12,29 @@ function fmtX(v) {
   return `${Number(v).toFixed(2)}×`;
 }
 
+function logoUrlForTicker(ticker) {
+  const t = String(ticker || "").trim().toUpperCase();
+  if (!t) return null;
+  // FMP serves ticker logos from a stable static URL. No API key required.
+  return `https://financialmodelingprep.com/image-stock/${encodeURIComponent(t)}.png`;
+}
+
+function setTickerLogo(ticker) {
+  const img = $("tickerLogo");
+  if (!img) return;
+  const src = logoUrlForTicker(ticker);
+  if (!src) {
+    img.classList.add("hidden");
+    img.removeAttribute("src");
+    img.removeAttribute("alt");
+    return;
+  }
+  img.src = src;
+  img.alt = `${String(ticker || "").toUpperCase()} logo`;
+  img.classList.remove("hidden");
+  img.onerror = () => img.classList.add("hidden");
+}
+
 function fmtNum(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   const n = Number(v);
@@ -1091,9 +1114,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const ticker = $("ticker");
   const kSel = $("k");
   ticker.value = (ticker.value || "AAPL").toUpperCase();
+  setTickerLogo(ticker.value);
 
   ticker.addEventListener("input", () => {
     ticker.value = ticker.value.toUpperCase();
+    setTickerLogo(ticker.value);
   });
 
   async function runCalculation(extraParams = null) {

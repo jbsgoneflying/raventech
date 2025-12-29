@@ -12,6 +12,14 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+function logoUrlForTicker(ticker) {
+  const t = String(ticker || "").trim().toUpperCase();
+  if (!t) return null;
+  // FMP serves ticker logos from a stable static URL. No API key required.
+  // Example: https://financialmodelingprep.com/image-stock/AAPL.png
+  return `https://financialmodelingprep.com/image-stock/${encodeURIComponent(t)}.png`;
+}
+
 function isoDate(d) {
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return null;
@@ -225,7 +233,17 @@ function render(payload) {
         <div class="calEGroup ${cls}">
           <div class="calEGroupHead">${escapeHtml(label)}</div>
           <div class="calTiles">
-            ${shown.map((r) => `<button class="calTile" type="button" data-ticker="${escapeHtml(r.ticker)}" data-date="${escapeHtml(date)}" title="${escapeHtml(r.ticker)}">${escapeHtml(r.ticker)}</button>`).join("")}
+            ${shown.map((r) => {
+              const tk = String(r?.ticker || "").toUpperCase();
+              const src = logoUrlForTicker(tk);
+              const img = src
+                ? `<img class="calTileLogo" src="${escapeHtml(src)}" alt="${escapeHtml(tk)} logo" loading="lazy" decoding="async" />`
+                : "";
+              return `<button class="calTile" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(date)}" title="${escapeHtml(tk)}" aria-label="${escapeHtml(tk)}">
+                ${img}
+                <div class="calTileTicker">${escapeHtml(tk)}</div>
+              </button>`;
+            }).join("")}
             ${rest > 0 ? `<div class="calTileMore">+${rest}</div>` : ""}
           </div>
         </div>
@@ -251,6 +269,15 @@ function render(payload) {
 
   grid.innerHTML = cells.join("");
 
+  // Hide broken logos (missing/404) cleanly.
+  grid.querySelectorAll(".calTileLogo").forEach((img) => {
+    img.addEventListener("error", () => {
+      img.classList.add("hidden");
+      const btn = img.closest && img.closest(".calTile");
+      if (btn) btn.classList.add("calTile--noLogo");
+    }, { once: true });
+  });
+
   // ticker click handler (delegated)
   grid.querySelectorAll(".calTile").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -265,8 +292,19 @@ async function openTickerPopover(ticker) {
   const popTitle = $("popTitle");
   const popBody = $("popBody");
   const popLink = $("popBreachLink");
+  const popLogo = $("popLogo");
 
   if (popTitle) popTitle.textContent = ticker;
+  if (popLogo) {
+    const src = logoUrlForTicker(ticker);
+    if (src) {
+      popLogo.src = src;
+      popLogo.classList.remove("hidden");
+      popLogo.onerror = () => popLogo.classList.add("hidden");
+    } else {
+      popLogo.classList.add("hidden");
+    }
+  }
   if (popBody) popBody.innerHTML = `<div class="muted">Rank disabled for now. Open Engine 1 for full details.</div>`;
   if (popLink) popLink.href = `/breach?ticker=${encodeURIComponent(ticker)}`;
   openPopover(true);
