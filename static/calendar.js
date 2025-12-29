@@ -344,25 +344,14 @@ async function openTickerPopover(ticker, date = "") {
     }
   }
   if (popBody) {
-    const src = state?.lastPayload?.meta?.counts?.snapshotSource || "—";
-    const et = state?.lastPayload?.meta?.counts?.snapshotEtDate || "—";
     popBody.innerHTML = `
-      <div class="muted" style="margin-bottom:10px;">
-        Earnings date: <span class="mono">${escapeHtml(String(date || "—").slice(0, 10))}</span>
-      </div>
-      <div class="muted" style="margin-bottom:10px;">
-        Source: <span class="mono">${escapeHtml(String(src || "—"))}</span> · snapshotET: <span class="mono">${escapeHtml(String(et || "—"))}</span>
-      </div>
-      <div class="muted" style="margin-bottom:10px;">
-        Optional: compute a lightweight “earnings IC rank” for this ticker (on-demand; cached).
+      <div class="finePrint muted" style="margin-bottom:10px;">
+        Quick score is on-demand (no per-ticker calendar calls).
       </div>
       <div id="popRankBox" class="miniGrid"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
         <button id="popRankBtn" class="primaryButton" type="button">Compute quick score</button>
         <button id="popRankClear" class="linkButton" type="button">Clear</button>
-      </div>
-      <div class="finePrint muted" style="margin-top:8px;">
-        This is a pre-screen only. Use Engine 1 for the full report (MC + trade builder).
       </div>
     `;
   }

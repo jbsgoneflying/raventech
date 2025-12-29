@@ -51,10 +51,25 @@ def _breach_rate_pct(*, realized_abs: List[float], em_pct: Optional[float], k: f
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(float(lo), min(float(hi), float(x)))
 
+def _clamp01(x: float) -> float:
+    return _clamp(float(x), 0.0, 1.0)
+
+def _safe01(x: Optional[float], lo: float, hi: float) -> Optional[float]:
+    """
+    Map x in [lo..hi] to [0..1] (clamped). Returns None if x is None.
+    """
+    if x is None:
+        return None
+    lo0 = float(lo)
+    hi0 = float(hi)
+    if hi0 <= lo0:
+        return None
+    return _clamp01((float(x) - lo0) / (hi0 - lo0))
+
 
 def _score_to_grade(score100: float) -> str:
     s = float(score100)
-    if s >= 80:
+    if s >= 85:
         return "A"
     if s >= 70:
         return "B"
@@ -101,29 +116,63 @@ def compute_condor_rank(
     med_move = _median(realized_abs)
     p90 = _pctl(realized_abs, 0.90)
 
-    br15 = _breach_rate_pct(realized_abs=realized_abs, em_pct=em, k=1.5)
-    br20 = _breach_rate_pct(realized_abs=realized_abs, em_pct=em, k=2.0)
+    # Breach rates should be Engine-1 consistent: compare realized vs each event's implied move.
+    usable_for_breach: list[tuple[float, float]] = []
+    for e in usable:
+        imp = _to_float(e.get("impliedMovePct"))
+        rea = _to_float(e.get("realizedMovePct"))
+        if imp is None or imp <= 0 or rea is None:
+            continue
+        usable_for_breach.append((abs(float(rea)), float(imp)))
+    if usable_for_breach:
+        br15 = (sum(1 for r, imp in usable_for_breach if r > 1.5 * imp) / len(usable_for_breach)) * 100.0
+        br20 = (sum(1 for r, imp in usable_for_breach if r > 2.0 * imp) / len(usable_for_breach)) * 100.0
+    else:
+        br15 = None
+        br20 = None
 
     richness = (em / med_move) if (em is not None and med_move is not None and med_move > 0) else None
     tail_buffer_15 = ((1.5 * em) / p90) if (em is not None and p90 is not None and p90 > 0) else None
 
-    # Simple, explainable score (0..100). Can be tuned without breaking schema.
-    score = 50.0
-    if br15 is not None:
-        score += _clamp((15.0 - float(br15)) * 1.4, -30.0, 30.0)
-    if br20 is not None:
-        score += _clamp((8.0 - float(br20)) * 1.6, -20.0, 20.0)
-    if richness is not None:
-        score += _clamp((float(richness) - 1.0) * 12.0, -15.0, 15.0)
-    if tail_buffer_15 is not None:
-        score += _clamp((float(tail_buffer_15) - 1.0) * 10.0, -10.0, 10.0)
-    score = _clamp(score, 0.0, 100.0)
+    # Score is a weighted blend of 0..1 components, then mapped to 0..100.
+    # This avoids saturating at 100 whenever breach rates are near zero.
+    #
+    # Interpretation: higher is "more favorable for short IC around earnings" (risk-only screen).
+    br15_01 = (None if br15 is None else _clamp01(1.0 - (float(br15) / 30.0)))  # 30%+ breaches => ~0
+    br20_01 = (None if br20 is None else _clamp01(1.0 - (float(br20) / 20.0)))  # 20%+ breaches => ~0
+    richness_01 = _safe01(richness, 0.70, 1.60)  # 0.7 (bad) .. 1.6 (good)
+    tailbuf_01 = _safe01(tail_buffer_15, 0.80, 1.60)  # 0.8 (bad) .. 1.6 (good)
+
+    comps: list[tuple[str, float, Optional[float]]] = [
+        ("br15", 0.40, br15_01),
+        ("br20", 0.25, br20_01),
+        ("richness", 0.20, richness_01),
+        ("tailBuffer15", 0.15, tailbuf_01),
+    ]
+    numer = 0.0
+    denom = 0.0
+    missing: list[str] = []
+    for name, w, v in comps:
+        if v is None:
+            missing.append(name)
+            continue
+        numer += float(w) * float(v)
+        denom += float(w)
+    # Neutral fallback if too many components are missing.
+    score01 = (numer / denom) if denom > 0 else 0.50
+
+    # Sample-size dampener: fewer usable implied events => reduce confidence and shrink toward neutral.
+    n_used = int(len(usable_for_breach))
+    damp = _clamp01(n_used / 12.0)  # full strength by ~12 events
+    score01 = 0.50 + (score01 - 0.50) * damp
+    score = _clamp(100.0 * score01, 0.0, 100.0)
 
     return {
         "ticker": t,
         "asOfDate": str(((base.get("current") or {}) if isinstance(base.get("current"), dict) else {}).get("asOfDate") or today)[:10],
         "n": int(n),
         "years": int(years),
+        "eventsUsed": int(len(usable_for_breach)),
         "frontWeekEmPct": em,
         "medianGapPct": med_move,
         "p90GapPct": p90,
@@ -135,6 +184,8 @@ def compute_condor_rank(
         "notes": [
             "Rank is a lightweight pre-earnings screen for same-day entry and next-session exit.",
             "Uses Engine-1 earnings gap history (close→open) and current implied move when available.",
+            ("Missing components: " + ", ".join(missing)) if missing else "All score components available.",
+            "Scores are dampened toward neutral when few usable implied events are available.",
         ],
     }
 
