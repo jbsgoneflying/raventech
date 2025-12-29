@@ -185,6 +185,28 @@
               <div id="underlying" class="metricValue mono">—</div>
               <div id="underlyingNote" class="metricCaption muted">—</div>
             </div>
+
+            <div class="metricCard" id="vwapCard">
+              <div class="metricLabel">
+                VWAP level (daily)
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="VWAP help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">VWAP level (daily, proxy)</div>
+                    <div class="tipBody">
+                      <p>This is a <b>daily VWAP level</b> surfaced from the same ORATS daily bars used by Engine 2.</p>
+                      <ul>
+                        <li><b>If available</b>: uses ORATS-provided daily VWAP.</li>
+                        <li><b>Fallback</b>: a rolling daily “VWAP proxy” using typical price × volume (20d window).</li>
+                      </ul>
+                      <p><b>Important</b>: this is not true intraday session VWAP.</p>
+                    </div>
+                  </div>
+                </span>
+              </div>
+              <div id="vwapMain" class="metricValue mono">—</div>
+              <div id="vwapNote" class="metricCaption muted">—</div>
+            </div>
             <div class="metricCard" id="macroWeekCard">
                 <div class="metricLabel">
                   Macro week (Benzinga)

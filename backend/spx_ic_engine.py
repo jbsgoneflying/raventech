@@ -2585,6 +2585,44 @@ def compute_engine2_spx_ic(
         ],
     }
 
+    # --- Actionable VWAP level (surface a single level for each Engine2 run) ---
+    vwap_level: Dict[str, Any] = {"enabled": False, "notes": []}
+    try:
+        vp = technicals.get("vwapProxy") if isinstance(technicals, dict) else None
+        if isinstance(vp, dict) and bool(vp.get("enabled")) and vp.get("value") is not None:
+            vwap_val = float(vp.get("value"))
+            if math.isfinite(vwap_val) and vwap_val > 0:
+                vwap_level = {
+                    "enabled": True,
+                    "value": round(vwap_val, 4),
+                    "mode": str(vp.get("mode") or ""),
+                    "window": (None if vp.get("window") is None else int(vp.get("window"))),
+                    "barDateUsed": technicals.get("barDateUsed"),
+                    "livePrice": technicals.get("livePrice"),
+                    "distance": None,
+                    "notes": (vp.get("notes") if isinstance(vp.get("notes"), list) else []),
+                }
+                dist = technicals.get("distances") if isinstance(technicals, dict) else None
+                lv = (dist.get("levels") if isinstance(dist, dict) else None) or {}
+                vwap_dist = lv.get("vwapProxy") if isinstance(lv, dict) else None
+                if isinstance(vwap_dist, dict):
+                    dp = vwap_dist.get("diffPts")
+                    dpc = vwap_dist.get("diffPct")
+                    side = None
+                    try:
+                        dp0 = float(dp)
+                        if math.isfinite(dp0):
+                            side = "above" if dp0 > 0 else "below" if dp0 < 0 else "at"
+                    except Exception:
+                        side = None
+                    vwap_level["distance"] = {
+                        "diffPts": dp,
+                        "diffPct": dpc,
+                        "side": side,
+                    }
+    except Exception:
+        vwap_level = {"enabled": False, "notes": ["VWAP level unavailable."]}
+
     telemetry["counts"]["backtest.rowsUsed"] = int(len(week_rows))
     mark("compute.total")
     LOG.info(
@@ -2609,7 +2647,7 @@ def compute_engine2_spx_ic(
             "deskLocked": True,
         },
         "underlying": {"symbol": underlying, "isProxy": (underlying != "SPX"), "notes": proxy_notes},
-        "current": {"regime": regime_now, "macro": macro_now},
+        "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
         "liveContext": live_context,
         "oddsLikeNow": {
             "regimeBucket": regime_bucket_now,

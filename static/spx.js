@@ -23,6 +23,11 @@ function fmt0(x) {
   return Number.isFinite(n) ? n.toFixed(0) : "—";
 }
 
+function fmt2(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
+
 function _pickMeaningfulClusters(sideClusters, spot, strikeStep) {
   const xs = Array.isArray(sideClusters) ? sideClusters : [];
   if (!xs.length) return [];
@@ -236,6 +241,53 @@ function render(payload) {
   const underlyingNote = $("underlyingNote");
   if (underlying) underlying.textContent = und.symbol || "—";
   if (underlyingNote) underlyingNote.textContent = (und.isProxy ? `Proxy used. ${Array.isArray(und.notes) ? und.notes.join(" ") : ""}` : "Direct") || "—";
+
+  // Actionable VWAP level (daily; proxy)
+  const vwap = payload?.current?.vwap || {};
+  const vwapMain = $("vwapMain");
+  const vwapNote = $("vwapNote");
+  if (vwapMain || vwapNote) {
+    const enabled = !!vwap?.enabled;
+    if (!enabled) {
+      if (vwapMain) vwapMain.textContent = "—";
+      if (vwapNote) {
+        const notes = Array.isArray(vwap?.notes) ? vwap.notes.filter(Boolean) : [];
+        vwapNote.textContent = notes[0] || "VWAP level unavailable.";
+      }
+    } else {
+      if (vwapMain) vwapMain.textContent = fmt2(vwap?.value);
+      if (vwapNote) {
+        const lp = vwap?.livePrice;
+        const bd = vwap?.barDateUsed || "—";
+        const mode = String(vwap?.mode || "");
+        const modeLabel = (mode === "orats_daily_vwap")
+          ? "ORATS daily VWAP"
+          : (mode === "rolling_daily_typical_price_vwap")
+            ? `Rolling VWAP proxy (window=${String(vwap?.window ?? "—")})`
+            : (mode === "daily_typical_price")
+              ? "Typical price (H+L+C)/3"
+              : (mode ? mode : "—");
+
+        const d = vwap?.distance || null;
+        const side = String(d?.side || "");
+        const dp = Number(d?.diffPts);
+        const dpc = Number(d?.diffPct);
+
+        const spotTxt = Number.isFinite(Number(lp)) ? Number(lp).toFixed(2) : "—";
+        let distTxt = "distance=—";
+        if (Number.isFinite(dp)) {
+          const absPts = Math.abs(dp).toFixed(2);
+          const pctTxt = Number.isFinite(dpc) ? `${Math.abs(dpc).toFixed(2)}%` : "—";
+          if (side === "above") distTxt = `spot above by ${absPts} pts (${pctTxt})`;
+          else if (side === "below") distTxt = `spot below by ${absPts} pts (${pctTxt})`;
+          else if (side === "at") distTxt = `spot ≈ VWAP`;
+          else distTxt = `Δ=${dp.toFixed(2)} pts`;
+        }
+
+        vwapNote.textContent = `bar=${String(bd)} · spot=${spotTxt} · ${distTxt} · ${modeLabel}`;
+      }
+    }
+  }
 
   const macro = payload?.current?.macro || {};
   const macroMain = $("macroMain");
