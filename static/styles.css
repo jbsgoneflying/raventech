@@ -119,34 +119,35 @@ body {
 
 /* Engine 2 (SPX) control bar: fit controls without horizontal overflow */
 .controlBarForm.controlBarForm--engine2 {
-  display: grid;
-  /* With desk-locked controls, just auto-fit the remaining fields */
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* Match Engine 1 look/spacing */
+  display: flex;
   gap: 12px;
-  align-items: end;
-  height: auto;
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 2px 0;
-}
-
-/* Engine 2: underlying badge row */
-.controlBarForm.controlBarForm--engine2 .tickerInputRow {
-  gap: 10px;
-}
-
-.controlBarForm.controlBarForm--engine2 .controlGroup {
-  min-width: 0; /* override base min-width to prevent overflow */
-}
-
-.controlBarForm.controlBarForm--engine2 .controlSpacer {
-  display: none;
+  align-items: center;
+  height: 56px;
 }
 
 .controlBarForm.controlBarForm--engine2 #runBtn {
-  grid-column: auto;
-  justify-self: end;
-  min-width: 110px;
+  min-width: 140px;
+}
+
+/* Engine 2: static "input-like" value box (for Underlying = SPX) */
+.controlStatic {
+  height: 36px;
+  background: var(--surfaceElev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 10px;
+  outline: none;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.80) inset;
+  display: inline-flex;
+  align-items: center;
+  min-width: 120px;
+}
+
+.tickerInputRow .controlStatic {
+  flex: 1;
+  min-width: 0;
 }
 
 .controlGroup {
@@ -380,13 +381,10 @@ body {
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controlBarForm { flex-wrap: wrap; height: auto; padding: 8px 0; }
   .controlSpacer { display: none; }
-  .controlBarForm.controlBarForm--engine2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .controlBarForm.controlBarForm--engine2 #runBtn { justify-self: stretch; }
 }
 
 @media (max-width: 640px) {
   .metricGrid.metricGrid--skewWingsTop { grid-template-columns: 1fr; }
-  .controlBarForm.controlBarForm--engine2 { grid-template-columns: 1fr; }
 }
 
 .metricGrid.metricGrid--skewWingsBottom {
