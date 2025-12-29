@@ -90,39 +90,85 @@ function openEventPopover(open) {
   p.classList.toggle("hidden", !open);
 }
 
-function initTooltips() {
-  const wraps = Array.from(document.querySelectorAll(".tipWrap"));
-  const closeAll = () => {
-    wraps.forEach(w => {
-      w.classList.remove("isOpen");
-      const b = w.querySelector(".tipBtn");
-      if (b) b.setAttribute("aria-expanded", "false");
-    });
-  };
+function closeAllTooltips() {
+  document.querySelectorAll(".tipWrap.isOpen").forEach((w) => {
+    w.classList.remove("isOpen");
+    const b = w.querySelector(".tipBtn");
+    if (b) b.setAttribute("aria-expanded", "false");
+    const p = w.querySelector(".tipPanel");
+    if (p) {
+      p.style.display = "none";
+      p.style.visibility = "";
+    }
+  });
+}
 
-  wraps.forEach((w) => {
-    const btn = w.querySelector(".tipBtn");
+function _placeFixedTooltip(wrap) {
+  if (!wrap || !wrap.classList || !wrap.classList.contains("tipWrap--fixed")) return;
+  const btn = wrap.querySelector(".tipBtn");
+  const panel = wrap.querySelector(".tipPanel");
+  if (!btn || !panel) return;
+
+  // Temporarily show to measure.
+  panel.style.visibility = "hidden";
+  panel.style.display = "block";
+
+  const br = btn.getBoundingClientRect();
+  const pr = panel.getBoundingClientRect();
+  const pad = 12;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  // Prefer below button; if it would clip bottom, place above.
+  let top = br.bottom + 10;
+  if (top + pr.height + pad > vh) top = br.top - pr.height - 10;
+  top = Math.max(pad, Math.min(top, vh - pr.height - pad));
+
+  // Center-align over the button, clamped to viewport.
+  let left = br.left + br.width / 2 - pr.width / 2;
+  left = Math.max(pad, Math.min(left, vw - pr.width - pad));
+
+  panel.style.top = `${Math.round(top)}px`;
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.visibility = "visible";
+  // Allow CSS to control visibility; we only keep fixed top/left.
+  panel.style.display = wrap.classList.contains("isOpen") ? "block" : "none";
+}
+
+function initTooltips() {
+  // Delegated tooltips so dynamically injected rows also work.
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!(t && t.closest)) return;
+    const btn = t.closest(".tipBtn");
     if (!btn) return;
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const isOpen = w.classList.contains("isOpen");
-      closeAll();
-      if (!isOpen) {
-        w.classList.add("isOpen");
-        btn.setAttribute("aria-expanded", "true");
-      }
-    });
+    const wrap = btn.closest(".tipWrap");
+    if (!wrap) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    const isOpen = wrap.classList.contains("isOpen");
+    closeAllTooltips();
+    if (!isOpen) {
+      wrap.classList.add("isOpen");
+      btn.setAttribute("aria-expanded", "true");
+      _placeFixedTooltip(wrap);
+    }
   });
 
   document.addEventListener("click", (ev) => {
     const t = ev.target;
     if (t && t.closest && t.closest(".tipWrap")) return;
-    closeAll();
+    closeAllTooltips();
+  });
+
+  window.addEventListener("resize", () => {
+    // Reposition any open fixed tooltips
+    document.querySelectorAll(".tipWrap--fixed.isOpen").forEach(_placeFixedTooltip);
   });
 
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") closeAll();
+    if (ev.key === "Escape") closeAllTooltips();
   });
 }
 
@@ -542,21 +588,43 @@ async function openMacroPopover(ev) {
       if (!s?.enabled) {
         stats.innerHTML = `<div class="muted">${escapeHtml((Array.isArray(s?.notes) && s.notes.length) ? s.notes[0] : "Stats unavailable.")}</div>`;
       } else {
-        const ed = s?.spy?.eventDayCloseToClose || {};
-        const nd = s?.spy?.nextDayCloseToClose || {};
-        const pd = s?.spy?.priorDayCloseToClose || {};
-        const spot = (s.spySpotClose !== null && s.spySpotClose !== undefined) ? Number(s.spySpotClose) : null;
+        const ed = s?.spx?.eventDayCloseToClose || {};
+        const nd = s?.spx?.nextDayCloseToClose || {};
+        const pd = s?.spx?.priorDayCloseToClose || {};
+        const spot = (s.spxSpotClose !== null && s.spxSpotClose !== undefined) ? Number(s.spxSpotClose) : null;
         const fmtPct = (x) => (x === null || x === undefined) ? "—" : `${Number(x).toFixed(2)}%`;
         const fmtPts = (x) => (x === null || x === undefined) ? "—" : `${Number(x).toFixed(2)} pts`;
         const fmtBand = (pts, pct) => `${fmtPts(pts)} (${fmtPct(pct)})`;
+        const tip = (label, text) => `
+          <span class="tipWrap tipWrap--fixed" style="margin-left:8px;">
+            <button class="tipBtn" type="button" aria-label="${escapeHtml(label)} help" aria-expanded="false">i</button>
+            <div class="tipPanel" role="tooltip">
+              <div class="tipTitle">${escapeHtml(label)}</div>
+              <div class="tipBody">${text}</div>
+            </div>
+          </span>
+        `;
         stats.innerHTML = `
-          <div class="k">SPY close used</div><div class="v mono">${escapeHtml(spot === null || Number.isNaN(spot) ? "—" : spot.toFixed(2))}</div>
-          <div class="k">Events used</div><div class="v mono">${escapeHtml(String(s.eventsUsed ?? "—"))}</div>
-          <div class="k">Event day |median|</div><div class="v mono">${escapeHtml(fmtBand(ed.medianAbsPts, ed.medianAbsPct))}</div>
-          <div class="k">Event day p90 |abs|</div><div class="v mono">${escapeHtml(fmtBand(ed.p90AbsPts, ed.p90AbsPct))}</div>
-          <div class="k">Next day |median|</div><div class="v mono">${escapeHtml(fmtBand(nd.medianAbsPts, nd.medianAbsPct))}</div>
-          <div class="k">Next day p90 |abs|</div><div class="v mono">${escapeHtml(fmtBand(nd.p90AbsPts, nd.p90AbsPct))}</div>
-          <div class="k">Prior day |median|</div><div class="v mono">${escapeHtml(fmtBand(pd.medianAbsPts, pd.medianAbsPct))}</div>
+          <div class="k">SPX close used${tip("SPX close used", "<p>This is the <b>SPX last close</b> used to convert % moves into <b>index points</b>.</p><p>Points = (abs% / 100) × spot close.</p>")}</div>
+          <div class="v mono">${escapeHtml(spot === null || Number.isNaN(spot) ? "—" : spot.toFixed(2))}</div>
+
+          <div class="k">Events used${tip("Events used", "<p>How many historical event occurrences were found and could be matched to valid SPX trading-day closes.</p><p><b>Higher n</b> = more stable stats. Small n can be noisy.</p>")}</div>
+          <div class="v mono">${escapeHtml(String(s.eventsUsed ?? "—"))}</div>
+
+          <div class="k">Event day |median|${tip("Event day |median|", "<p>Typical <b>absolute</b> SPX close→close move on the event day (vs prior trading day close).</p><p>Use as a baseline for expected movement risk.</p>")}</div>
+          <div class="v mono">${escapeHtml(fmtBand(ed.medianAbsPts, ed.medianAbsPct))}</div>
+
+          <div class="k">Event day p90 |abs|${tip("Event day p90 |abs|", "<p>A tail-ish reference: 90% of matched events had an <b>absolute</b> move at or below this level on event day.</p><p><b>Desk use</b>: sanity-check wing width / size so the structure survives an outsized move.</p>")}</div>
+          <div class="v mono">${escapeHtml(fmtBand(ed.p90AbsPts, ed.p90AbsPct))}</div>
+
+          <div class="k">Next day |median|${tip("Next day |median|", "<p>Typical <b>absolute</b> SPX close→close move on the day <b>after</b> the event (follow-through risk).</p><p>Helps gauge whether the event tends to extend or mean-revert.</p>")}</div>
+          <div class="v mono">${escapeHtml(fmtBand(nd.medianAbsPts, nd.medianAbsPct))}</div>
+
+          <div class="k">Next day p90 |abs|${tip("Next day p90 |abs|", "<p>90th percentile <b>absolute</b> follow-through move the day after.</p><p>Useful for risk planning if you intend to hold positions beyond the event day.</p>")}</div>
+          <div class="v mono">${escapeHtml(fmtBand(nd.p90AbsPts, nd.p90AbsPct))}</div>
+
+          <div class="k">Prior day |median|${tip("Prior day |median|", "<p>Typical <b>absolute</b> SPX close→close move on the day before the event (pre-positioning / drift proxy).</p><p>Not causal—just context.</p>")}</div>
+          <div class="v mono">${escapeHtml(fmtBand(pd.medianAbsPts, pd.medianAbsPct))}</div>
         `;
       }
     } catch (e) {

@@ -1478,6 +1478,12 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 .popoverBody { padding: 14px 16px 10px; }
 .popoverFoot { padding: 12px 16px 14px; border-top: 1px solid rgba(15, 23, 42, 0.08); }
 
+/* Allow popovers to work on smaller viewports (so bottom rows are reachable). */
+.popoverBody {
+  max-height: min(70vh, 640px);
+  overflow: auto;
+}
+
 .popGrid { display: grid; gap: 8px; }
 .popRow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .popKey { color: rgba(11,11,15,0.55); font-size: 12px; font-weight: 700; }
@@ -1530,13 +1536,24 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   -webkit-backdrop-filter: blur(18px) saturate(180%);
   color: rgba(11,11,15,0.88);
   display: none;
+  max-height: min(60vh, 520px);
+  overflow: auto;
 }
 
-.tipWrap.isOpen .tipPanel,
-.tipWrap:hover .tipPanel,
-.tipWrap:focus-within .tipPanel {
+.tipWrap.isOpen .tipPanel {
   display: block;
 }
+
+/* In popovers, make tooltips fixed-position + JS-positioned so they never get clipped. */
+.tipWrap--fixed .tipPanel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  transform: none;
+  width: min(440px, calc(100vw - 28px));
+  z-index: 9999;
+}
+.tipWrap--fixed .tipPanel:before { display: none; }
 
 .tipPanel:before {
   content: "";
