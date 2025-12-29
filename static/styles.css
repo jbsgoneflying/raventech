@@ -1227,6 +1227,15 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   gap: 8px;
 }
 
+.calGrid--week .calTiles,
+.calGrid--day .calTiles {
+  /* Match Month: 2-column tile grid. Use fixed tile widths so cards don't stretch wide. */
+  display: grid;
+  grid-template-columns: repeat(2, 112px);
+  gap: 8px;
+  justify-content: start; /* left-justify within the day cell */
+}
+
 .calGrid--month .calTile {
   /* Tighten spacing so the logo can be larger (better density in month view). */
   padding: 6px 8px;
@@ -1247,6 +1256,10 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   /* Match month view density for visual consistency across views. */
   padding: 6px 8px;
   gap: 4px;
+  width: auto;           /* override base 100% so it doesn't become a wide pill */
+  min-width: 0;
+  aspect-ratio: 1 / 1;   /* keep square shape (especially when only 1 ticker exists) */
+  justify-self: start;   /* left-justify a single tile in the grid */
 }
 
 .calGrid--week .calTileLogo,
@@ -1258,6 +1271,11 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 .calGrid--week .calTileTicker,
 .calGrid--day .calTileTicker {
   font-size: 10px;
+}
+
+.calGrid--week .calTileMore,
+.calGrid--day .calTileMore {
+  justify-self: start;
 }
 
 .calTile {
