@@ -103,6 +103,9 @@ class FeatureFlags:
     ENGINE2_ENTRY_DAYS: str = "mon,tue,wed"
     ENGINE2_EM_MULTS: str = "0.7,0.8,0.9,1.0,1.1,1.2"
     ENGINE2_WING_WIDTH_PTS: str = "5,10,15,20,25"
+    # If enabled, Engine 2 will only surface VWAP when ORATS provides a true daily VWAP field.
+    # Otherwise VWAP is marked unavailable (no proxy fallback).
+    ENGINE2_REQUIRE_ORATS_DAILY_VWAP: bool = False
 
     ENGINE2_MAX_WEEKS_RETURN: int = 120  # payload cap for recent weeks drilldown
     ENGINE2_LOOKBACK_YEARS_DEFAULT: int = 3
@@ -172,6 +175,7 @@ class FeatureFlags:
             ENGINE2_ENTRY_DAYS=os.getenv("ENGINE2_ENTRY_DAYS", "mon,tue,wed"),
             ENGINE2_EM_MULTS=os.getenv("ENGINE2_EM_MULTS", "0.7,0.8,0.9,1.0,1.1,1.2"),
             ENGINE2_WING_WIDTH_PTS=os.getenv("ENGINE2_WING_WIDTH_PTS", "5,10,15,20,25"),
+            ENGINE2_REQUIRE_ORATS_DAILY_VWAP=_get_bool("ENGINE2_REQUIRE_ORATS_DAILY_VWAP", False),
             ENGINE2_MAX_WEEKS_RETURN=_get_int("ENGINE2_MAX_WEEKS_RETURN", 120),
             ENGINE2_LOOKBACK_YEARS_DEFAULT=_get_int("ENGINE2_LOOKBACK_YEARS_DEFAULT", 3),
             ENGINE2_POLICY_MAX_BREACH_PCT=_get_float("ENGINE2_POLICY_MAX_BREACH_PCT", 25.0),
@@ -250,6 +254,7 @@ class FeatureFlags:
             ("ENGINE2_ENTRY_DAYS", str(self.ENGINE2_ENTRY_DAYS)),
             ("ENGINE2_EM_MULTS", str(self.ENGINE2_EM_MULTS)),
             ("ENGINE2_WING_WIDTH_PTS", str(self.ENGINE2_WING_WIDTH_PTS)),
+            ("ENGINE2_REQUIRE_ORATS_DAILY_VWAP", bool(self.ENGINE2_REQUIRE_ORATS_DAILY_VWAP)),
             ("ENGINE2_MAX_WEEKS_RETURN", int(self.ENGINE2_MAX_WEEKS_RETURN)),
             ("ENGINE2_LOOKBACK_YEARS_DEFAULT", int(self.ENGINE2_LOOKBACK_YEARS_DEFAULT)),
             ("ENGINE2_POLICY_MAX_BREACH_PCT", float(self.ENGINE2_POLICY_MAX_BREACH_PCT)),
