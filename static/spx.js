@@ -438,7 +438,7 @@ function renderGammaMap(payload) {
 
     if (bestIdx !== null) {
       const o = overlayLines[bestIdx];
-      const lineEl = svg.querySelector(\`.gammaLine[data-idx=\"${bestIdx}\"]\`);
+      const lineEl = svg.querySelector(`.gammaLine[data-idx="${bestIdx}"]`);
       if (lineEl) lineEl.classList.add("isHover");
       const html = `
         ${priceHtml}
@@ -608,11 +608,11 @@ function render(payload) {
         vwapNote.textContent = `bar=${String(bd)} · spot=${spotTxt} · ${distTxt} · ${modeLabel}`;
       }
     }
+  }
 
   // Dealer Gamma Map (clean hover chart)
   // Fetch after a successful run so the panel stays in sync with the user's session.
   loadGammaMap();
-  }
 
   const macro = payload?.current?.macro || {};
   const macroMain = $("macroMain");
