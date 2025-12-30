@@ -1173,7 +1173,7 @@ def compute_spx_live_levels(
     return compute_live_levels(
         client,
         underlying="SPX",
-        symbols=("SPXW", "SPX", "SPY"),
+        symbols=("SPXW", "SPX"),
         view=view,
         now_dt=now_dt,
         band_pct=band_pct,
@@ -2612,7 +2612,7 @@ def compute_engine2_spx_ic(
     client: OratsClient,
     benzinga_client: Optional[BenzingaClient],
     flags: FeatureFlags,
-    underlying_preference: str = "SPX",  # SPX|SPY
+    underlying_preference: str = "SPX",  # SPX|SPY|QQQ
     entry_day: str = "mon",
     years: int = 3,
     widths: Optional[List[float]] = None,
@@ -2666,24 +2666,18 @@ def compute_engine2_spx_ic(
     # - If preference=SPY: prefer SPY, fallback to SPX proxy if SPY dailies unavailable (explicitly noted).
     proxy_notes: List[str] = []
     pref = str(underlying_preference or "SPX").strip().upper()
-    if pref not in ("SPX", "SPY"):
+    if pref not in ("SPX", "SPY", "QQQ"):
         pref = "SPX"
         proxy_notes.append("Invalid underlying preference; defaulted to SPX.")
 
-    pref_primary = pref
-    pref_fallback = "SPY" if pref_primary == "SPX" else "SPX"
-    underlying = pref_primary
+    # Engine 2 policy (per user): no cross-ticker proxies for SPX/SPY/QQQ.
+    underlying = pref
 
     # Use range probe (fast + consistent) to detect availability.
     probe_rows = fetch_dailies_ohlc_range(client, ticker=underlying, start=now - dt.timedelta(days=7), end=now)
-    if not probe_rows:
-        underlying = pref_fallback
-        probe_rows = fetch_dailies_ohlc_range(client, ticker=underlying, start=now - dt.timedelta(days=7), end=now)
-        if pref_primary == "SPX":
-            proxy_notes.append("SPX unavailable in ORATS dailies; using SPY proxy for backtest.")
-        else:
-            proxy_notes.append("SPY unavailable in ORATS dailies; using SPX proxy for backtest.")
     telemetry["counts"]["orats.probe_rows"] = len(probe_rows or [])
+    if not probe_rows:
+        raise OratsError(f"{underlying} unavailable in ORATS dailies (no rows returned for probe window).")
 
     # Build OHLC history once (range pull; fast).
     start_hist = now - dt.timedelta(days=int(yrs) * 365 + 120)
@@ -3016,10 +3010,11 @@ def compute_engine2_spx_ic(
             strikes_cache_by_symbol: Dict[str, List[dict]] = {}
             exp_dates_by_symbol: Dict[str, List[str]] = {}
 
-            # Respect user's Engine2 underlying selection:
-            # - SPX: prefer SPXW->SPX->SPY fallbacks for robustness
-            # - SPY: SPY only (no index fallback)
-            symbols = ("SPY",) if pref_primary == "SPY" else ("SPXW", "SPX", "SPY")
+            # Respect user's Engine2 underlying selection (no cross-ticker proxy):
+            # - SPX: allow SPXW -> SPX (same family), but never SPY
+            # - SPY: SPY only
+            # - QQQ: QQQ only
+            symbols = ("SPXW", "SPX") if pref == "SPX" else (pref,)
             fields0 = "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,spotPrice,stockPrice,gamma,theta,vega,callOpenInterest,putOpenInterest,callVolume,putVolume,callMidIv,putMidIv"
 
             for sym in symbols:
@@ -3639,7 +3634,7 @@ def compute_engine2_spx_ic(
             "seasonalityMode": season_mode,
             "deskLocked": True,
         },
-        "underlying": {"symbol": underlying, "isProxy": (underlying != pref_primary), "notes": proxy_notes},
+        "underlying": {"symbol": underlying, "isProxy": False, "notes": proxy_notes},
         "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
         "liveContext": live_context,
         "oddsLikeNow": {

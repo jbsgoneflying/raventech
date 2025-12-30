@@ -165,7 +165,7 @@ function _loadUnderlyingPref() {
   try {
     const raw = window.localStorage?.getItem("engine2Underlying") || "";
     const v = String(raw).trim().toUpperCase();
-    if (v === "SPY" || v === "SPX") engine2UnderlyingState.symbol = v;
+    if (v === "SPY" || v === "SPX" || v === "QQQ") engine2UnderlyingState.symbol = v;
   } catch {
     // ignore
   }
@@ -182,6 +182,7 @@ function _persistUnderlyingPref() {
 function _applyUnderlyingUI() {
   const spxBtn = $("e2UnderlyingSPX");
   const spyBtn = $("e2UnderlyingSPY");
+  const qqqBtn = $("e2UnderlyingQQQ");
   const sym = String(engine2UnderlyingState.symbol || "SPX").toUpperCase();
 
   if (spxBtn) {
@@ -193,6 +194,11 @@ function _applyUnderlyingUI() {
     const on = sym === "SPY";
     spyBtn.classList.toggle("isActive", on);
     spyBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  if (qqqBtn) {
+    const on = sym === "QQQ";
+    qqqBtn.classList.toggle("isActive", on);
+    qqqBtn.setAttribute("aria-pressed", on ? "true" : "false");
   }
 
   // Header/title text
@@ -215,11 +221,13 @@ function initUnderlyingUI() {
 
   const spxBtn = $("e2UnderlyingSPX");
   const spyBtn = $("e2UnderlyingSPY");
+  const qqqBtn = $("e2UnderlyingQQQ");
   const status = $("status");
   const results = $("results");
 
   const setSym = (sym) => {
-    const next = String(sym || "").toUpperCase() === "SPY" ? "SPY" : "SPX";
+    const s = String(sym || "").toUpperCase();
+    const next = (s === "SPY" || s === "QQQ") ? s : "SPX";
     if (engine2UnderlyingState.symbol === next) return;
     engine2UnderlyingState.symbol = next;
     _persistUnderlyingPref();
@@ -238,6 +246,7 @@ function initUnderlyingUI() {
 
   if (spxBtn) spxBtn.addEventListener("click", () => setSym("SPX"));
   if (spyBtn) spyBtn.addEventListener("click", () => setSym("SPY"));
+  if (qqqBtn) qqqBtn.addEventListener("click", () => setSym("QQQ"));
 }
 
 function clamp(x, lo, hi) {

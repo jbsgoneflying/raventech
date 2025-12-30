@@ -375,7 +375,7 @@ def spx_page():
 
 @app.get("/api/spx-ic")
 def spx_ic(
-    underlying: str = Query("SPX", description="Underlying: SPX|SPY"),
+    underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),
     entry_day: str = Query("mon", description="Entry day: mon|tue|wed"),
     years: int = Query(3, ge=1, le=5),
     widths: str = Query("0.8,1.0,1.2", description="Comma-separated EM width multiples (e.g. 0.8,1.0,1.2)"),
@@ -391,8 +391,8 @@ def spx_ic(
 
     try:
         under = str(underlying or "SPX").strip().upper()
-        if under not in ("SPX", "SPY"):
-            raise HTTPException(status_code=400, detail="underlying must be SPX|SPY")
+        if under not in ("SPX", "SPY", "QQQ"):
+            raise HTTPException(status_code=400, detail="underlying must be SPX|SPY|QQQ")
         params = {
             "underlying": under,
             "entry_day": entry_day,
@@ -469,7 +469,7 @@ def spx_ic(
 
 @app.get("/api/spx-levels")
 def spx_levels(
-    underlying: str = Query("SPX", description="Underlying: SPX|SPY"),
+    underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),
     view: str = Query("weekly", description="weekly|nearest"),
     window_days: int = Query(180, ge=30, le=800, description="Calendar days to scan back for SPX EOD closes (chart window)"),
     points: int = Query(90, ge=30, le=260, description="Max trading-day points to return for charting"),
@@ -496,8 +496,8 @@ def spx_levels(
 
     try:
         under = str(underlying or "SPX").strip().upper()
-        if under not in ("SPX", "SPY"):
-            raise HTTPException(status_code=400, detail="underlying must be SPX|SPY")
+        if under not in ("SPX", "SPY", "QQQ"):
+            raise HTTPException(status_code=400, detail="underlying must be SPX|SPY|QQQ")
         params = {
             "underlying": under,
             "view": v,
@@ -523,6 +523,8 @@ def spx_levels(
         end = dt.date.today()
         start = end - dt.timedelta(days=int(window_days))
         bars = fetch_dailies_ohlc_range(client, ticker=under, start=start, end=end)
+        if not bars:
+            raise HTTPException(status_code=502, detail=f"{under} unavailable in ORATS dailies (no rows returned for requested window).")
         closes = [{"date": b.trade_date, "close": float(b.close)} for b in (bars or []) if getattr(b, "close", None)]
         if int(points) > 0 and len(closes) > int(points):
             closes = closes[-int(points) :]
@@ -546,8 +548,8 @@ def spx_levels(
         else:
             levels = compute_live_levels(
                 client,
-                underlying="SPY",
-                symbols=("SPY",),
+                underlying=under,
+                symbols=(under,),
                 view=v,
                 band_pct=0.05,
                 top_n=5,

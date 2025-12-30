@@ -35,7 +35,7 @@
               <span class="tipWrap">
                 <button class="tipBtn" type="button" aria-label="Underlying help" aria-expanded="false">i</button>
                 <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Underlying selector (SPX vs SPY)</div>
+                  <div class="tipTitle">Underlying selector (SPX vs SPY vs QQQ)</div>
                   <div class="tipBody">
                     <p><b>SPX</b> is the cash index; <b>SPY</b> is the ETF. They can diverge due to dividends, session/microstructure, and entitlement differences.</p>
                     <p><b>How it’s used</b>: this selection drives both the Engine 2 backtest/recommendation and the live dealer-gamma overlays.</p>
@@ -49,6 +49,9 @@
               </button>
               <button id="e2UnderlyingSPY" class="segButton segButton--logo" type="button" aria-pressed="false" aria-label="SPY">
                 <img class="underlyingLogo" src="/static/spy-mark.svg" alt="" aria-hidden="true" />
+              </button>
+              <button id="e2UnderlyingQQQ" class="segButton segButton--logo" type="button" aria-pressed="false" aria-label="QQQ">
+                <img class="underlyingLogo" src="/static/qqq-mark.svg" alt="" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -200,11 +203,11 @@
                   <span class="tipWrap">
                     <button class="tipBtn" type="button" aria-label="Underlying help" aria-expanded="false">i</button>
                     <div class="tipPanel" role="tooltip">
-                      <div class="tipTitle">Underlying (SPX vs SPY)</div>
+                      <div class="tipTitle">Underlying (SPX vs SPY vs QQQ)</div>
                       <div class="tipBody">
                         <p>You can run Engine 2 on <b>SPX</b> (cash index) or <b>SPY</b> (ETF). They can differ (dividends, session, microstructure).</p>
-                        <p><b>SPX mode</b>: prefers SPX; may fall back to SPY proxy if SPX dailies are unavailable in ORATS.</p>
-                        <p><b>SPY mode</b>: uses SPY; will only fall back if explicitly noted.</p>
+                        <p>You can also run on <b>QQQ</b> (Nasdaq-100 ETF).</p>
+                        <p><b>Important</b>: Engine 2 does not use cross-ticker proxies for SPX/SPY/QQQ. If the selected ticker is unavailable from the data provider, the UI will show an error.</p>
                       </div>
                     </div>
                   </span>
