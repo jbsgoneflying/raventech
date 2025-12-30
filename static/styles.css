@@ -585,6 +585,8 @@ body {
 .underlyingToggle {
   padding: 3px;
   gap: 4px;
+  justify-self: start;
+  width: max-content;
 }
 
 .segButton.segButton--logo {
