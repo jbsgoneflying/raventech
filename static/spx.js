@@ -81,7 +81,7 @@ const gammaState = {
 
 const gexState = {
   view: "composite", // composite|raw
-  mode: "net", // net|slope
+  mode: "slope", // net|slope
 };
 
 function setLoading(isLoading) {
@@ -223,6 +223,12 @@ function initGexHeatmapUI() {
   const btnRaw = $("gexViewRaw");
   const btnNet = $("gexModeNet");
   const btnSlope = $("gexModeSlope");
+
+  // Ensure initial UI matches state (HTML defaults should match too, but keep this robust)
+  if (btnComp) { btnComp.classList.toggle("isOn", gexState.view === "composite"); btnComp.setAttribute("aria-pressed", gexState.view === "composite" ? "true" : "false"); }
+  if (btnRaw) { btnRaw.classList.toggle("isOn", gexState.view === "raw"); btnRaw.setAttribute("aria-pressed", gexState.view === "raw" ? "true" : "false"); }
+  if (btnNet) { btnNet.classList.toggle("isOn", gexState.mode === "net"); btnNet.setAttribute("aria-pressed", gexState.mode === "net" ? "true" : "false"); }
+  if (btnSlope) { btnSlope.classList.toggle("isOn", gexState.mode === "slope"); btnSlope.setAttribute("aria-pressed", gexState.mode === "slope" ? "true" : "false"); }
 
   const setView = (v) => {
     gexState.view = (v === "raw") ? "raw" : "composite";
@@ -391,7 +397,7 @@ function renderGexHeatmap(payload) {
   const pad = { l: 74, r: 10, t: 10, b: 26 };
   const rows = yLabels.length;
   const cols = strikes.length;
-  const cellH = 16;
+  const cellH = (gexState.view === "composite") ? 64 : 16; // enlarge composite rows; keep raw unchanged
   const cellW = Math.max(6, Math.floor((w - pad.l - pad.r) / Math.max(1, cols)));
   const h = pad.t + pad.b + rows * cellH;
 
@@ -459,12 +465,15 @@ function renderGexHeatmap(payload) {
   };
   const xDown = xForStrike(downB);
   const xUp = xForStrike(upB);
+  const xSpot = xForStrike(spot);
 
   wrap.innerHTML = `
     <svg class="gexSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="SPX net $GEX heat map">
       <rect x="0" y="0" width="${w}" height="${h}" class="gexBg"></rect>
       ${yLabels.map((lab, r) => `<text x="${pad.l - 8}" y="${yForRow(r) + 12}" class="gexAxis gexAxis--y" text-anchor="end">${escapeHtml(lab)}</text>`).join("")}
       ${xTicks.map(t => `<text x="${xForCol(t.i) + 2}" y="${h - 10}" class="gexAxis gexAxis--x">${escapeHtml(fmt0(t.s))}</text>`).join("")}
+      ${xSpot === null ? "" : `<line x1="${xSpot}" x2="${xSpot}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexSpot"></line>
+        <text x="${xSpot + 6}" y="${pad.t + 34}" class="gexSpotLabel">Spot</text>`}
       ${xDown === null ? "" : `<line x1="${xDown}" x2="${xDown}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexBoundary gexBoundary--down"></line>
         <text x="${xDown + 6}" y="${pad.t + 10}" class="gexBoundaryLabel">Downside acceleration boundary</text>`}
       ${xUp === null ? "" : `<line x1="${xUp}" x2="${xUp}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexBoundary gexBoundary--up"></line>

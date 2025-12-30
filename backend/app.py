@@ -461,7 +461,7 @@ def spx_levels(
     include_heatmap: int = Query(1, ge=0, le=1, description="Include net $GEX heatmap matrix (0|1)"),
     heatmap_expiries: int = Query(30, ge=6, le=60, description="How many expiries to include in the raw heatmap grid"),
     heatmap_band_pct: float = Query(0.05, ge=0.01, le=0.20, description="Spot band for heatmap strikes (e.g. 0.05 = ±5%)"),
-    heatmap_mode: str = Query("net", description="Heatmap mode: net|slope"),
+    heatmap_mode: str = Query("slope", description="Heatmap mode: net|slope"),
     heatmap_view: str = Query("composite", description="Heatmap view: composite|raw"),
     slope_window: int = Query(5, ge=1, le=25, description="Slope smoothing window (strikes)"),
     flip_adjacent_n: int = Query(5, ge=2, le=20, description="Persistence requirement for acceleration boundary detection"),
