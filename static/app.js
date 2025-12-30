@@ -140,6 +140,617 @@ function initTooltips() {
   });
 }
 
+// --- Engine 1: Live Gamma Visuals (Dealer Gamma Map + Weekly Gamma Risk Heat-Map) ---
+let lastEngine1LevelsPayload = null;
+let lastEngine1Ticker = null;
+
+const engine1GammaState = {
+  view: "weekly", // weekly|nearest
+  layers: { putWall: true, callWall: true, clusters: true, gammaPeaks: true, gammaFlip: true },
+};
+
+const engine1GexState = {
+  view: "composite", // composite|raw
+  mode: "slope", // net|slope
+};
+
+function e1Clamp(x, lo, hi) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(Number(lo), Math.min(Number(hi), n));
+}
+
+function e1FmtDateShort(iso) {
+  const s = String(iso || "").slice(0, 10);
+  return s || "—";
+}
+
+function e1FmtNum(x, d = 2) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(d);
+}
+
+function e1Fmt2(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
+
+function e1FmtMoneyShort(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "—";
+  const s = n < 0 ? "-" : "+";
+  const a = Math.abs(n);
+  if (a >= 1e12) return `${s}$${(a / 1e12).toFixed(2)}T`;
+  if (a >= 1e9) return `${s}$${(a / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${s}$${(a / 1e6).toFixed(2)}M`;
+  if (a >= 1e3) return `${s}$${(a / 1e3).toFixed(2)}K`;
+  return `${s}$${a.toFixed(0)}`;
+}
+
+function initEngine1GammaVizUI() {
+  // Gamma map view toggles
+  const weeklyBtn = $("e1GammaViewWeekly");
+  const nearestBtn = $("e1GammaViewNearest");
+
+  const setGammaView = (v) => {
+    engine1GammaState.view = (v === "nearest") ? "nearest" : "weekly";
+    if (weeklyBtn) {
+      const on = engine1GammaState.view === "weekly";
+      weeklyBtn.classList.toggle("isOn", on);
+      weeklyBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    if (nearestBtn) {
+      const on = engine1GammaState.view === "nearest";
+      nearestBtn.classList.toggle("isOn", on);
+      nearestBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    loadEngine1Levels(lastEngine1Ticker);
+  };
+
+  if (weeklyBtn) weeklyBtn.addEventListener("click", () => setGammaView("weekly"));
+  if (nearestBtn) nearestBtn.addEventListener("click", () => setGammaView("nearest"));
+
+  // Gamma map overlay layer toggles
+  const legend = document.querySelector(".gammaLegend--e1");
+  if (legend) {
+    legend.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      const btn = t.closest("button[data-layer]");
+      if (!btn) return;
+      const k = String(btn.getAttribute("data-layer") || "");
+      if (!k) return;
+      const cur = !!engine1GammaState.layers[k];
+      engine1GammaState.layers[k] = !cur;
+      btn.classList.toggle("isOn", !cur);
+      btn.setAttribute("aria-pressed", (!cur) ? "true" : "false");
+      renderEngine1GammaMap(lastEngine1LevelsPayload);
+    });
+  }
+
+  // Heatmap toggles
+  const btnComp = $("e1GexViewComposite");
+  const btnRaw = $("e1GexViewRaw");
+  const btnNet = $("e1GexModeNet");
+  const btnSlope = $("e1GexModeSlope");
+
+  const syncHeatButtons = () => {
+    if (btnComp) { btnComp.classList.toggle("isOn", engine1GexState.view === "composite"); btnComp.setAttribute("aria-pressed", engine1GexState.view === "composite" ? "true" : "false"); }
+    if (btnRaw) { btnRaw.classList.toggle("isOn", engine1GexState.view === "raw"); btnRaw.setAttribute("aria-pressed", engine1GexState.view === "raw" ? "true" : "false"); }
+    if (btnNet) { btnNet.classList.toggle("isOn", engine1GexState.mode === "net"); btnNet.setAttribute("aria-pressed", engine1GexState.mode === "net" ? "true" : "false"); }
+    if (btnSlope) { btnSlope.classList.toggle("isOn", engine1GexState.mode === "slope"); btnSlope.setAttribute("aria-pressed", engine1GexState.mode === "slope" ? "true" : "false"); }
+  };
+  syncHeatButtons();
+
+  const setHeatView = (v) => { engine1GexState.view = (v === "raw") ? "raw" : "composite"; syncHeatButtons(); loadEngine1Levels(lastEngine1Ticker); };
+  const setHeatMode = (m) => { engine1GexState.mode = (m === "net") ? "net" : "slope"; syncHeatButtons(); loadEngine1Levels(lastEngine1Ticker); };
+
+  if (btnComp) btnComp.addEventListener("click", () => setHeatView("composite"));
+  if (btnRaw) btnRaw.addEventListener("click", () => setHeatView("raw"));
+  if (btnNet) btnNet.addEventListener("click", () => setHeatMode("net"));
+  if (btnSlope) btnSlope.addEventListener("click", () => setHeatMode("slope"));
+
+  window.addEventListener("resize", () => {
+    renderEngine1GammaMap(lastEngine1LevelsPayload);
+    renderEngine1GexHeatmap(lastEngine1LevelsPayload);
+  });
+}
+
+async function loadEngine1Levels(ticker) {
+  const t = String(ticker || $("ticker")?.value || "").trim().toUpperCase();
+  lastEngine1Ticker = t || null;
+  const chart = $("e1GammaChart");
+  const meta = $("e1GammaMeta");
+  const note = $("e1GammaNote");
+  if (!chart) return;
+
+  if (!t) {
+    renderEngine1GammaMap(null);
+    renderEngine1GexHeatmap(null);
+    return;
+  }
+
+  try {
+    if (meta) meta.textContent = "Loading…";
+    if (note) note.textContent = "—";
+    const v = engine1GammaState.view;
+    const url =
+      `/api/levels?ticker=${encodeURIComponent(t)}`
+      + `&view=${encodeURIComponent(v)}`
+      + `&points=90&window_days=180&include_heatmap=1`
+      + `&heatmap_view=${encodeURIComponent(engine1GexState.view)}`
+      + `&heatmap_mode=${encodeURIComponent(engine1GexState.mode)}`
+      + `&slope_window=5&flip_adjacent_n=5`;
+    const payload = await fetchJson(url);
+    lastEngine1LevelsPayload = payload;
+    renderEngine1GammaMap(payload);
+    renderEngine1GexHeatmap(payload);
+  } catch (e) {
+    lastEngine1LevelsPayload = null;
+    if (meta) meta.textContent = "Dealer Gamma Map unavailable";
+    if (note) note.textContent = String(e?.message || e || "Error");
+    chart.innerHTML = `<div class="muted" style="padding:14px;">${escapeHtml(String(e?.message || e || "Failed to load."))}</div>`;
+    renderEngine1GexHeatmap(null);
+  }
+}
+
+function renderEngine1GexHeatmap(payload) {
+  const wrap = $("e1GexHeatmap");
+  const meta = $("e1GexMeta");
+  const note = $("e1GexNote");
+  const tip = $("e1GexHeatTip");
+  const downPtsEl = $("e1GexDownPts");
+  const downEmEl = $("e1GexDownEm");
+  const upPtsEl = $("e1GexUpPts");
+  const upEmEl = $("e1GexUpEm");
+  const stabEl = $("e1GexStability");
+  if (!wrap) return;
+
+  const heat = payload?.levels?.gexHeatmap || null;
+  const enabled = !!heat?.enabled;
+  const spot = Number(heat?.spot);
+  const band = Number(heat?.bandPct);
+  const wmode = String(heat?.weightingMode || "");
+  const denom = Number(heat?.scaleDenom);
+  const ivUsed = Number(heat?.atmIvUsedPct);
+
+  // Metrics strip
+  const m = heat?.metrics || {};
+  if (downPtsEl) downPtsEl.textContent = Number.isFinite(Number(m?.downsideDistancePts)) ? e1Fmt2(m.downsideDistancePts) : "—";
+  if (upPtsEl) upPtsEl.textContent = Number.isFinite(Number(m?.upsideDistancePts)) ? e1Fmt2(m.upsideDistancePts) : "—";
+  if (downEmEl) downEmEl.textContent = Number.isFinite(Number(m?.downsideDistanceEm)) ? e1Fmt2(m.downsideDistanceEm) : "—";
+  if (upEmEl) upEmEl.textContent = Number.isFinite(Number(m?.upsideDistanceEm)) ? e1Fmt2(m.upsideDistanceEm) : "—";
+  const st = heat?.stability || {};
+  if (stabEl) {
+    const lab = String(st?.label || "—");
+    stabEl.textContent = lab;
+    stabEl.classList.toggle("isStable", lab === "Stable");
+    stabEl.classList.toggle("isAsym", lab === "Asymmetric");
+    stabEl.classList.toggle("isFragile", lab === "Fragile");
+    const rs = Array.isArray(st?.reasons) ? st.reasons.filter(Boolean) : [];
+    stabEl.title = rs.join("\n");
+  }
+
+  const hideTip = () => { if (tip) tip.classList.add("hidden"); };
+  const showTip = (html, x, y) => {
+    if (!tip) return;
+    tip.innerHTML = html;
+    tip.classList.remove("hidden");
+    const box = wrap.getBoundingClientRect();
+    const left = e1Clamp(x - box.left + 12, 8, box.width - 260);
+    const top = e1Clamp(y - box.top + 12, 8, box.height - 140);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  };
+
+  // Determine which dataset to render
+  let yLabels = [];
+  let strikes = [];
+  let mat = [];
+  let rowMeta = [];
+
+  const raw = heat?.raw || {};
+  const comp = heat?.composite || {};
+  if (engine1GexState.view === "raw") {
+    const expiries = Array.isArray(raw?.expiries) ? raw.expiries : [];
+    strikes = Array.isArray(raw?.strikes) ? raw.strikes : [];
+    const net = Array.isArray(raw?.netDollarGex) ? raw.netDollarGex : [];
+    const slope = Array.isArray(raw?.slopeNetDollarGex) ? raw.slopeNetDollarGex : [];
+    mat = (engine1GexState.mode === "slope") ? slope : net;
+    yLabels = expiries.map((e) => String(e).slice(5));
+    rowMeta = expiries.map((e) => ({ expiry: String(e) }));
+  } else {
+    const buckets = Array.isArray(comp?.buckets) ? comp.buckets : [];
+    strikes = Array.isArray(comp?.strikes) ? comp.strikes : [];
+    yLabels = buckets.map((b) => String(b?.label || b?.key || "—"));
+    rowMeta = buckets.map((b) => ({ key: b?.key, effectiveDte: b?.effectiveDte, expectedMovePts: b?.expectedMovePts }));
+    mat = buckets.map((b) => (engine1GexState.mode === "slope") ? (b?.slopeNetDollarGex || []) : (b?.netDollarGex || []));
+  }
+
+  if (!payload || !enabled || !yLabels.length || !strikes.length || !mat.length) {
+    wrap.innerHTML = `<div class="muted" style="padding:14px;">Run Engine 1 to load the heat map.</div>`;
+    if (meta) meta.textContent = "—";
+    if (note) {
+      const err = heat?.error ? `Heatmap unavailable (${String(heat.error)}).` : "—";
+      note.textContent = payload && !enabled ? err : "—";
+    }
+    hideTip();
+    return;
+  }
+
+  // Compute max abs for scaling (ignore nulls)
+  let maxAbs = 0;
+  for (let i = 0; i < mat.length; i++) {
+    const row = Array.isArray(mat[i]) ? mat[i] : [];
+    for (let j = 0; j < row.length; j++) {
+      const v0 = Number(row[j]);
+      if (!Number.isFinite(v0)) continue;
+      const v = (Number.isFinite(denom) && denom > 0) ? (v0 / denom) : v0; // normalization is render-only
+      maxAbs = Math.max(maxAbs, Math.abs(v));
+    }
+  }
+  if (!Number.isFinite(maxAbs) || maxAbs <= 0) maxAbs = 1;
+
+  const w = Math.max(320, wrap.clientWidth || 640);
+  const pad = { l: 74, r: 10, t: 10, b: 26 };
+  const rows = yLabels.length;
+  const cols = strikes.length;
+  const cellH = (engine1GexState.view === "composite") ? 64 : 16;
+  const cellW = Math.max(6, Math.floor((w - pad.l - pad.r) / Math.max(1, cols)));
+  const h = pad.t + pad.b + rows * cellH;
+
+  const xForCol = (c) => pad.l + c * cellW;
+  const yForRow = (r) => pad.t + r * cellH;
+
+  const scale = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 0;
+    const nn = (Number.isFinite(denom) && denom > 0) ? (n / denom) : n;
+    const a = Math.abs(nn);
+    const t = Math.log10(1 + a / 1e6);
+    const tMax = Math.log10(1 + maxAbs / 1e6);
+    const u = tMax > 0 ? (t / tMax) : 0;
+    return (nn < 0 ? -u : u);
+  };
+
+  const colorFor = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "rgba(120,120,130,0.10)";
+    const t = scale(n);
+    const a = Math.min(1, Math.abs(t));
+    const hue = (t < 0) ? 210 : 20;
+    const sat = 72;
+    const light = 82 - (a * 34);
+    const alpha = 0.95;
+    return `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+  };
+
+  if (meta) {
+    const b = Number.isFinite(band) ? `${Math.round(band * 100)}%` : "—";
+    const ivTxt = Number.isFinite(ivUsed) ? `${ivUsed.toFixed(2)}%` : "—";
+    meta.textContent = `spot=${Number.isFinite(spot) ? e1FmtNum(spot, 2) : "—"} · band=±${b} · iv=${ivTxt} · mode=${wmode || "—"} · rows=${rows} · cols=${cols}`;
+  }
+  if (note) {
+    const warns = Array.isArray(heat?.warnings) ? heat.warnings.filter(Boolean) : [];
+    const notes = Array.isArray(heat?.notes) ? heat.notes.filter(Boolean) : [];
+    note.textContent = warns[0] || notes[0] || "Live, informational only.";
+  }
+
+  const tickEvery = Math.max(1, Math.round(cols / 6));
+  const xTicks = strikes.map((s, i) => ({ s: Number(s), i })).filter(t => (t.i % tickEvery) === 0);
+
+  const bnds = heat?.boundaries || {};
+  const downB = Number(bnds?.downsideAccelerationBoundaryStrike);
+  const upB = Number(bnds?.upsideAccelerationBoundaryStrike);
+  const xForStrike = (k) => {
+    const kk = Number(k);
+    if (!Number.isFinite(kk)) return null;
+    let best = null;
+    let bestD = null;
+    for (let i = 0; i < strikes.length; i++) {
+      const s = Number(strikes[i]);
+      if (!Number.isFinite(s)) continue;
+      const d = Math.abs(s - kk);
+      if (best === null || bestD === null || d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    }
+    return best === null ? null : (xForCol(best) + (cellW / 2));
+  };
+  const xDown = xForStrike(downB);
+  const xUp = xForStrike(upB);
+  const xSpot = xForStrike(spot);
+
+  wrap.innerHTML = `
+    <svg class="gexSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Weekly gamma risk heat map">
+      <rect x="0" y="0" width="${w}" height="${h}" class="gexBg"></rect>
+      ${yLabels.map((lab, r) => `<text x="${pad.l - 8}" y="${yForRow(r) + 12}" class="gexAxis gexAxis--y" text-anchor="end">${escapeHtml(lab)}</text>`).join("")}
+      ${xTicks.map(t => `<text x="${xForCol(t.i) + 2}" y="${h - 10}" class="gexAxis gexAxis--x">${escapeHtml(fmt0(t.s))}</text>`).join("")}
+      ${xSpot === null ? "" : `<line x1="${xSpot}" x2="${xSpot}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexSpot"></line>
+        <text x="${xSpot + 6}" y="${pad.t + 34}" class="gexSpotLabel">Spot</text>`}
+      ${xDown === null ? "" : `<line x1="${xDown}" x2="${xDown}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexBoundary gexBoundary--down"></line>
+        <text x="${xDown + 6}" y="${pad.t + 10}" class="gexBoundaryLabel">Downside acceleration boundary</text>`}
+      ${xUp === null ? "" : `<line x1="${xUp}" x2="${xUp}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexBoundary gexBoundary--up"></line>
+        <text x="${xUp + 6}" y="${pad.t + 22}" class="gexBoundaryLabel">Upside acceleration boundary</text>`}
+      ${mat.map((row, r) => {
+        const rr = Array.isArray(row) ? row : [];
+        return rr.map((v, c) => {
+          const x = xForCol(c);
+          const y = yForRow(r);
+          const fill = colorFor(v);
+          return `<rect class="gexCell" data-r="${r}" data-c="${c}" x="${x}" y="${y}" width="${cellW}" height="${cellH - 1}" rx="2" ry="2" fill="${fill}"></rect>`;
+        }).join("");
+      }).join("")}
+    </svg>
+  `;
+
+  const svg = wrap.querySelector("svg");
+  if (!svg) return;
+
+  svg.addEventListener("mouseleave", () => hideTip());
+  svg.addEventListener("mousemove", (ev) => {
+    const box = svg.getBoundingClientRect();
+    const mx = ev.clientX - box.left;
+    const my = ev.clientY - box.top;
+    const col = Math.floor((mx - pad.l) / cellW);
+    const row = Math.floor((my - pad.t) / cellH);
+    if (row < 0 || row >= rows || col < 0 || col >= cols) {
+      hideTip();
+      return;
+    }
+    const rowInfo = rowMeta[row] || {};
+    const rowLabel = yLabels[row];
+    const strike = strikes[col];
+    const v = (Array.isArray(mat[row]) ? mat[row][col] : null);
+    const vNum = Number(v);
+    const valTxt = Number.isFinite(vNum) ? e1FmtMoneyShort(vNum) : "—";
+    const eff = rowInfo?.effectiveDte;
+    const emPts = rowInfo?.expectedMovePts;
+    const extra = (eff !== undefined && eff !== null) ? `effectiveDTE=${escapeHtml(String(eff))} · EM=${escapeHtml(String(emPts ?? "—"))} pts` : "";
+    const html = `
+      <div class="chartTipTitle">${escapeHtml(engine1GexState.mode === "slope" ? "GEX slope (Δ per strike)" : "Net $GEX")}</div>
+      <div class="chartTipBody mono">${escapeHtml(String(rowLabel))} · strike ${escapeHtml(fmt0(strike))}</div>
+      <div class="chartTipDivider"></div>
+      <div class="chartTipBody mono">${escapeHtml(valTxt)}</div>
+      ${extra ? `<div class="chartTipBody muted">${extra}</div>` : ""}
+      <div class="chartTipBody muted">spot=${escapeHtml(Number.isFinite(spot) ? e1FmtNum(spot, 2) : "—")} · band=±${escapeHtml(Number.isFinite(band) ? String(Math.round(band * 100)) : "—")}% · normalization=${Number.isFinite(denom) && denom > 0 ? "on (render-only)" : "off"}</div>
+    `;
+    showTip(html, ev.clientX, ev.clientY);
+  });
+}
+
+function renderEngine1GammaMap(payload) {
+  const chart = $("e1GammaChart");
+  const tip = $("e1GammaTooltip");
+  const meta = $("e1GammaMeta");
+  const note = $("e1GammaNote");
+  if (!chart) return;
+
+  const tkr = String(payload?.ticker || lastEngine1Ticker || "").trim().toUpperCase() || "—";
+
+  // Empty/initial state
+  if (!payload || typeof payload !== "object") {
+    chart.innerHTML = `<div class="muted" style="padding:14px;">Run Engine 1 to load the map.</div>`;
+    if (meta) meta.textContent = "—";
+    if (note) note.textContent = "—";
+    if (tip) tip.classList.add("hidden");
+    return;
+  }
+
+  const series = Array.isArray(payload?.priceSeries) ? payload.priceSeries : [];
+  const levels = payload?.levels || {};
+  const enabled = !!levels?.enabled;
+
+  const expiry = levels?.expiry ? String(levels.expiry).slice(0, 10) : "—";
+  const spot = Number(levels?.spot);
+  const sym = levels?.symbolUsed ? String(levels.symbolUsed) : "—";
+  const bandPct = Number(levels?.bandPct);
+
+  if (meta) {
+    const b = Number.isFinite(bandPct) ? `${Math.round(bandPct * 100)}%` : "—";
+    meta.textContent = `expiry=${expiry} · spot=${Number.isFinite(spot) ? e1FmtNum(spot, 2) : "—"} · band=±${b} · src=${sym}`;
+  }
+
+  const notes = Array.isArray(levels?.notes) ? levels.notes.filter(Boolean) : [];
+  const warns = Array.isArray(levels?.warnings) ? levels.warnings.filter(Boolean) : [];
+  if (note) note.textContent = notes[0] || (warns[0] || "Live, informational only.");
+
+  if (!enabled || !series.length) {
+    const msg = !series.length ? "No price series returned." : "Live levels unavailable (missing live chain).";
+    chart.innerHTML = `<div class="muted" style="padding:14px;">${escapeHtml(msg)}</div>`;
+    if (tip) tip.classList.add("hidden");
+    return;
+  }
+
+  // --- Build overlay items from backend payload ---
+  const oi = levels?.oiClusters || {};
+  const dg = levels?.dealerGamma || {};
+  const flip = Number(levels?.gammaFlipStrike);
+
+  const overlayLines = [];
+
+  const putWall = oi?.putWall;
+  const callWall = oi?.callWall;
+  if (engine1GammaState.layers.putWall && putWall && Number.isFinite(Number(putWall?.peakStrike ?? putWall?.centerStrike))) {
+    const y = Number(putWall?.peakStrike ?? putWall?.centerStrike);
+    overlayLines.push({ kind: "putWall", y, title: "Put wall", detail: `strike ${fmt0(y)} · totalOI ${fmt0(putWall?.totalOI)} · range ${fmt0(putWall?.minStrike)}–${fmt0(putWall?.maxStrike)}` });
+  }
+  if (engine1GammaState.layers.callWall && callWall && Number.isFinite(Number(callWall?.peakStrike ?? callWall?.centerStrike))) {
+    const y = Number(callWall?.peakStrike ?? callWall?.centerStrike);
+    overlayLines.push({ kind: "callWall", y, title: "Call wall", detail: `strike ${fmt0(y)} · totalOI ${fmt0(callWall?.totalOI)} · range ${fmt0(callWall?.minStrike)}–${fmt0(callWall?.maxStrike)}` });
+  }
+
+  if (engine1GammaState.layers.clusters) {
+    const mk = (c, side) => {
+      const peak = Number(c?.peakStrike ?? c?.centerStrike);
+      const lo = Number(c?.minStrike);
+      const hi = Number(c?.maxStrike);
+      const total = Number(c?.totalOI);
+      const sideLabel = side === "P" ? "Put cluster" : "Call cluster";
+      const detail = `peak ${fmt0(peak)} · totalOI ${fmt0(total)} · band ${fmt0(lo)}–${fmt0(hi)} · n ${fmt0(c?.nStrikes)}`;
+      if (Number.isFinite(lo)) overlayLines.push({ kind: "cluster", y: lo, title: sideLabel, detail });
+      if (Number.isFinite(hi)) overlayLines.push({ kind: "cluster", y: hi, title: sideLabel, detail });
+    };
+    (Array.isArray(oi?.putClusters) ? oi.putClusters : []).slice(0, 3).forEach(c => mk(c, "P"));
+    (Array.isArray(oi?.callClusters) ? oi.callClusters : []).slice(0, 3).forEach(c => mk(c, "C"));
+  }
+
+  if (engine1GammaState.layers.gammaPeaks) {
+    const tops = Array.isArray(dg?.topGammaStrikes) ? dg.topGammaStrikes : [];
+    tops.slice(0, 5).forEach((tt) => {
+      const y = Number(tt?.strike);
+      if (!Number.isFinite(y)) return;
+      const side = String(tt?.side || "");
+      const title = "Gamma peak";
+      const detail = `strike ${fmt0(y)} · side ${escapeHtml(side)} · gex ${fmt0(tt?.gex)}`;
+      overlayLines.push({ kind: "gammaPeak", y, title, detail });
+    });
+  }
+
+  if (engine1GammaState.layers.gammaFlip && Number.isFinite(flip)) {
+    overlayLines.push({ kind: "gammaFlip", y: flip, title: "Gamma flip", detail: `~${fmt0(flip)} (best-effort proxy)` });
+  }
+
+  // --- Render SVG chart ---
+  const w = Math.max(320, chart.clientWidth || 640);
+  const h = 260;
+  const pad = { l: 10, r: 10, t: 10, b: 10 };
+  const pw = w - pad.l - pad.r;
+  const ph = h - pad.t - pad.b;
+
+  const closes = series.map(p => Number(p?.close)).filter(Number.isFinite);
+  const lvlYs = overlayLines.map(o => Number(o?.y)).filter(Number.isFinite);
+  let yMin = Math.min(...closes, ...(lvlYs.length ? lvlYs : [Number.POSITIVE_INFINITY]));
+  let yMax = Math.max(...closes, ...(lvlYs.length ? lvlYs : [Number.NEGATIVE_INFINITY]));
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax) || yMin === yMax) {
+    yMin = (Number.isFinite(spot) ? spot * 0.98 : 0);
+    yMax = (Number.isFinite(spot) ? spot * 1.02 : 1);
+  }
+  const yPad = (yMax - yMin) * 0.06;
+  yMin -= yPad;
+  yMax += yPad;
+
+  const xForIdx = (i) => pad.l + (pw * (i / Math.max(1, series.length - 1)));
+  const yForVal = (v) => pad.t + (ph * (1 - ((v - yMin) / (yMax - yMin))));
+
+  const pts = series.map((p, i) => {
+    const y = yForVal(Number(p?.close));
+    return `${xForIdx(i)},${y}`;
+  }).join(" ");
+
+  chart.innerHTML = `
+    <svg class="gammaSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Close chart">
+      <rect x="0" y="0" width="${w}" height="${h}" class="gammaBg"></rect>
+      <polyline points="${pts}" class="gammaPrice"></polyline>
+      ${overlayLines.map((o, idx) => {
+        const y = yForVal(Number(o.y));
+        return `<line x1="${pad.l}" x2="${w - pad.r}" y1="${y}" y2="${y}" class="gammaLine gammaLine--${escapeHtml(o.kind)}" data-idx="${idx}"></line>`;
+      }).join("")}
+      <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${h - pad.b}" class="gammaCross gammaCross--v hidden"></line>
+      <line x1="${pad.l}" x2="${w - pad.r}" y1="${pad.t}" y2="${pad.t}" class="gammaCross gammaCross--h hidden"></line>
+      <circle cx="${pad.l}" cy="${pad.t}" r="3" class="gammaDot hidden"></circle>
+    </svg>
+  `;
+
+  const svg = chart.querySelector("svg");
+  if (!svg) return;
+  const vLine = svg.querySelector(".gammaCross--v");
+  const hLine = svg.querySelector(".gammaCross--h");
+  const dot = svg.querySelector(".gammaDot");
+
+  const clearHover = () => {
+    const lines = Array.from(svg.querySelectorAll(".gammaLine"));
+    lines.forEach(l => l.classList.remove("isHover"));
+    if (tip) tip.classList.add("hidden");
+  };
+
+  const showTip = (html, x, y) => {
+    if (!tip) return;
+    tip.innerHTML = html;
+    tip.classList.remove("hidden");
+    const box = chart.getBoundingClientRect();
+    const left = e1Clamp(x - box.left + 12, 8, box.width - 240);
+    const top = e1Clamp(y - box.top + 12, 8, box.height - 120);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  };
+
+  svg.addEventListener("mouseleave", () => {
+    clearHover();
+    [vLine, hLine, dot].forEach(el => el && el.classList.add("hidden"));
+  });
+
+  svg.addEventListener("mousemove", (ev) => {
+    const box = svg.getBoundingClientRect();
+    const mx = ev.clientX - box.left;
+    const my = ev.clientY - box.top;
+    const inPlot = (mx >= pad.l && mx <= (w - pad.r) && my >= pad.t && my <= (h - pad.b));
+    if (!inPlot) {
+      clearHover();
+      [vLine, hLine, dot].forEach(el => el && el.classList.add("hidden"));
+      return;
+    }
+
+    const idx = Math.round(((mx - pad.l) / pw) * (series.length - 1));
+    const i = e1Clamp(idx, 0, series.length - 1);
+    const pt = series[Number(i)] || {};
+    const px = xForIdx(Number(i));
+    const py = yForVal(Number(pt?.close));
+
+    if (vLine) {
+      vLine.setAttribute("x1", String(px));
+      vLine.setAttribute("x2", String(px));
+      vLine.classList.remove("hidden");
+    }
+    if (hLine) {
+      hLine.setAttribute("y1", String(py));
+      hLine.setAttribute("y2", String(py));
+      hLine.classList.remove("hidden");
+    }
+    if (dot) {
+      dot.setAttribute("cx", String(px));
+      dot.setAttribute("cy", String(py));
+      dot.classList.remove("hidden");
+    }
+
+    const lines = Array.from(svg.querySelectorAll(".gammaLine"));
+    lines.forEach(l => l.classList.remove("isHover"));
+
+    let bestIdx = null;
+    let bestDist = null;
+    overlayLines.forEach((o, j) => {
+      const yy = yForVal(Number(o.y));
+      const d = Math.abs(yy - my);
+      if (d <= 6 && (bestDist === null || d < bestDist)) {
+        bestDist = d;
+        bestIdx = j;
+      }
+    });
+
+    const priceHtml = `
+      <div class="chartTipTitle">${escapeHtml(tkr)}</div>
+      <div class="chartTipBody mono">${escapeHtml(e1FmtDateShort(pt?.date))} · ${escapeHtml(e1FmtNum(pt?.close, 2))}</div>
+    `;
+
+    if (bestIdx !== null) {
+      const o = overlayLines[bestIdx];
+      const lineEl = svg.querySelector(`.gammaLine[data-idx="${bestIdx}"]`);
+      if (lineEl) lineEl.classList.add("isHover");
+      const html = `
+        ${priceHtml}
+        <div class="chartTipDivider"></div>
+        <div class="chartTipTitle">${escapeHtml(o.title)}</div>
+        <div class="chartTipBody">${escapeHtml(o.detail)}</div>
+      `;
+      showTip(html, ev.clientX, ev.clientY);
+    } else {
+      showTip(priceHtml, ev.clientX, ev.clientY);
+    }
+  });
+}
+
 function pill(text, kind) {
   const cls = kind ? `pill ${kind}` : "pill";
   return `<span class="${cls}">${escapeHtml(text)}</span>`;
@@ -1156,6 +1767,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       const payload = await fetchJson(url);
       render(payload);
+      // Async live gamma visuals (do not block Engine 1 RUN completion)
+      loadEngine1Levels(t);
       setStatus("");
     } catch (e) {
       setStatus(e?.message || "Error", true);
@@ -1379,6 +1992,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // AskRaven removed
   initTooltips();
+  initEngine1GammaVizUI();
 
   // Optional auto-run for calendar deep-links: /breach?ticker=...&mc=1&autorun=1
   if (qsAutorun === "1" || qsAutorun === "true" || qsAutorun === "yes" || qsAutorun === "on") {

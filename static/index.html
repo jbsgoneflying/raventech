@@ -323,6 +323,63 @@
               <div id="bufferTargetSubtext" class="metricCaption muted">Multiply by EM to target short strikes.</div>
             </div>
           </div>
+
+          <!-- Engine 1: Dealer Gamma Map (selected ticker) -->
+          <div class="chartCard" id="e1GammaMapCard" style="margin-top:14px;">
+            <div class="sectionHeader" style="padding:0 0 10px 0;">
+              <h3 class="sectionTitle" style="margin:0;">
+                Dealer Gamma Map (Live)
+                <span class="info" title="Single-name dealer gamma context for the selected ticker (live chain near spot). Informational only — does not change historical breach stats. Hover for level labels.">ⓘ</span>
+              </h3>
+              <div class="tbInputs" style="justify-content:flex-end; gap:8px;">
+                <button id="e1GammaViewWeekly" class="chipToggle isOn" type="button" aria-pressed="true">Weekly</button>
+                <button id="e1GammaViewNearest" class="chipToggle" type="button" aria-pressed="false">Nearest</button>
+              </div>
+            </div>
+            <div id="e1GammaMeta" class="metricCaption muted">—</div>
+            <div id="e1GammaChart" class="gammaChart" aria-label="Dealer Gamma Map"></div>
+            <div id="e1GammaTooltip" class="chartTip hidden" role="tooltip"></div>
+            <div class="gammaLegend gammaLegend--e1" aria-label="Overlay layers">
+              <button class="chipToggle isOn" type="button" aria-pressed="true" data-layer="putWall">Put wall</button>
+              <button class="chipToggle isOn" type="button" aria-pressed="true" data-layer="callWall">Call wall</button>
+              <button class="chipToggle isOn" type="button" aria-pressed="true" data-layer="clusters">OI clusters</button>
+              <button class="chipToggle isOn" type="button" aria-pressed="true" data-layer="gammaPeaks">Gamma peaks</button>
+              <button class="chipToggle isOn" type="button" aria-pressed="true" data-layer="gammaFlip">Gamma flip</button>
+            </div>
+            <div id="e1GammaNote" class="metricCaption muted">—</div>
+          </div>
+
+          <!-- Engine 1: Weekly Gamma Risk Heat-Map (selected ticker) -->
+          <div class="chartCard" id="e1GexHeatMapCard" style="margin-top:12px;">
+            <div class="sectionHeader" style="padding:0 0 10px 0;">
+              <h3 class="sectionTitle" style="margin:0;">Weekly Gamma Risk Heat-Map</h3>
+              <div class="tbInputs" style="justify-content:flex-end; gap:8px;">
+                <button id="e1GexViewComposite" class="chipToggle isOn" type="button" aria-pressed="true">Composite</button>
+                <button id="e1GexViewRaw" class="chipToggle" type="button" aria-pressed="false">Raw grid</button>
+                <span class="spacerDot">·</span>
+                <button id="e1GexModeNet" class="chipToggle" type="button" aria-pressed="false">Net</button>
+                <button id="e1GexModeSlope" class="chipToggle isOn" type="button" aria-pressed="true">Slope</button>
+              </div>
+            </div>
+            <div id="e1GexMeta" class="metricCaption muted">—</div>
+            <div class="gexMetrics" aria-label="Distance-to-failure and stability metrics">
+              <div class="gexMetric">
+                <div class="gexMetricK">Downside gamma-flip</div>
+                <div class="gexMetricV mono"><span id="e1GexDownPts">—</span> pts <span class="muted">(<span id="e1GexDownEm">—</span>× EM)</span></div>
+              </div>
+              <div class="gexMetric">
+                <div class="gexMetricK">Upside gamma-flip</div>
+                <div class="gexMetricV mono"><span id="e1GexUpPts">—</span> pts <span class="muted">(<span id="e1GexUpEm">—</span>× EM)</span></div>
+              </div>
+              <div class="gexMetric">
+                <div class="gexMetricK">Weekly stability</div>
+                <div class="gexMetricV"><span id="e1GexStability" class="gexStabilityChip">—</span></div>
+              </div>
+            </div>
+            <div id="e1GexHeatmap" class="gexHeatmap" aria-label="Weekly Gamma Risk Heat-Map"></div>
+            <div id="e1GexHeatTip" class="chartTip hidden" role="tooltip"></div>
+            <div id="e1GexNote" class="metricCaption muted">—</div>
+          </div>
         </section>
 
         <section class="surface hidden" id="eventRiskSection">

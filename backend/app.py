@@ -25,7 +25,7 @@ from backend.earnings_logic import BreachInputError, compute_breach_stats, compu
 from backend.config import get_flags
 from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
-from backend.spx_ic_engine import compute_engine2_spx_ic, compute_spx_live_levels, fetch_dailies_ohlc_range
+from backend.spx_ic_engine import compute_engine2_spx_ic, compute_spx_live_levels, compute_live_levels, fetch_dailies_ohlc_range
 from backend.redis_store import get_store_optional
 from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
 from backend.condor_rank import compute_condor_rank
@@ -244,6 +244,9 @@ _spx_ic_cache_lock = threading.Lock()
 _spx_levels_cache = TTLCache(maxsize=128, ttl=60)  # 60s (interactive hover chart)
 _spx_levels_cache_lock = threading.Lock()
 
+_levels_cache = TTLCache(maxsize=256, ttl=60)  # 60s (interactive hover chart; per-ticker)
+_levels_cache_lock = threading.Lock()
+
 _calendar_cache = TTLCache(maxsize=128, ttl=10 * 60)  # 10 minutes (calendar page)
 _calendar_cache_lock = threading.Lock()
 
@@ -312,6 +315,11 @@ def _spx_ic_cache_key(params: dict, flags_fp: tuple) -> tuple:
 def _spx_levels_cache_key(params: dict, flags_fp: tuple) -> tuple:
     items = tuple(sorted((k, str(v)) for k, v in (params or {}).items()))
     return ("spx_levels", items, flags_fp)
+
+
+def _levels_cache_key(ticker: str, params: dict, flags_fp: tuple) -> tuple:
+    items = tuple(sorted((k, str(v)) for k, v in (params or {}).items()))
+    return ("levels", str(ticker or "").strip().upper(), items, flags_fp)
 
 
 # Static frontend
@@ -538,6 +546,100 @@ def spx_levels(
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (spx-levels)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/levels")
+def levels(
+    ticker: str = Query(..., description="Underlying ticker (e.g. AAPL, TSLA, SPX)"),
+    view: str = Query("weekly", description="weekly|nearest"),
+    window_days: int = Query(180, ge=30, le=800, description="Calendar days to scan back for EOD closes (chart window)"),
+    points: int = Query(90, ge=30, le=260, description="Max trading-day points to return for charting"),
+    include_heatmap: int = Query(1, ge=0, le=1, description="Include net $GEX heatmap matrix (0|1)"),
+    heatmap_expiries: int = Query(30, ge=6, le=60, description="How many expiries to include in the raw heatmap grid"),
+    heatmap_band_pct: float = Query(0.05, ge=0.01, le=0.20, description="Spot band for heatmap strikes (e.g. 0.05 = ±5%)"),
+    heatmap_mode: str = Query("slope", description="Heatmap mode: net|slope"),
+    heatmap_view: str = Query("composite", description="Heatmap view: composite|raw"),
+    slope_window: int = Query(5, ge=1, le=25, description="Slope smoothing window (strikes)"),
+    flip_adjacent_n: int = Query(5, ge=2, le=20, description="Persistence requirement for acceleration boundary detection"),
+):
+    """
+    Lightweight chart payload for Dealer Gamma Map + Weekly Gamma Risk Heat-Map (per underlying).
+    Used by Engine 1 (single-name) and can be used by Engine 2 (SPX) as well.
+    """
+    f = get_flags()
+
+    t = str(ticker or "").strip().upper()
+    if not t:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    v = str(view or "weekly").strip().lower()
+    if v not in ("weekly", "nearest"):
+        raise HTTPException(status_code=400, detail="view must be weekly|nearest")
+
+    try:
+        params = {
+            "ticker": t,
+            "view": v,
+            "window_days": int(window_days),
+            "points": int(points),
+            "include_heatmap": int(include_heatmap),
+            "heatmap_expiries": int(heatmap_expiries),
+            "heatmap_band_pct": float(heatmap_band_pct),
+            "heatmap_mode": str(heatmap_mode or "net"),
+            "heatmap_view": str(heatmap_view or "composite"),
+            "slope_window": int(slope_window),
+            "flip_adjacent_n": int(flip_adjacent_n),
+        }
+        key = _levels_cache_key(t, params, f.cache_key_engine2())
+        with _levels_cache_lock:
+            cached = _levels_cache.get(key)
+        if cached is not None:
+            return cached
+
+        client = _get_client()
+
+        # --- Price series (EOD) ---
+        end = dt.date.today()
+        start = end - dt.timedelta(days=int(window_days))
+        bars = fetch_dailies_ohlc_range(client, ticker=t, start=start, end=end)
+        closes = [{"date": b.trade_date, "close": float(b.close)} for b in (bars or []) if getattr(b, "close", None)]
+        if int(points) > 0 and len(closes) > int(points):
+            closes = closes[-int(points) :]
+
+        # --- Live levels ---
+        levels_obj = compute_live_levels(
+            client,
+            underlying=t,
+            symbols=(("SPXW", "SPX", "SPY") if t == "SPX" else (t,)),
+            view=v,
+            band_pct=0.05,
+            top_n=5,
+            cluster_steps=2,
+            include_heatmap=bool(int(include_heatmap)),
+            heatmap_expiries=int(heatmap_expiries),
+            heatmap_band_pct=float(heatmap_band_pct),
+            heatmap_mode=str(heatmap_mode or "net"),
+            heatmap_view=str(heatmap_view or "composite"),
+            slope_window=int(slope_window),
+            flip_adjacent_n=int(flip_adjacent_n),
+        )
+
+        payload = {
+            "schemaVersion": 3,
+            "ticker": t,
+            "priceSeries": closes,
+            "levels": levels_obj,
+        }
+
+        with _levels_cache_lock:
+            _levels_cache[key] = payload
+        return payload
+    except OratsError as e:
+        LOG.exception("ORATS failure (levels)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (levels)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

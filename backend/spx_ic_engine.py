@@ -788,9 +788,11 @@ def _compute_gamma_flip_strike(
     return best
 
 
-def compute_spx_live_levels(
+def compute_live_levels(
     client: OratsClient,
     *,
+    underlying: str,
+    symbols: Optional[Tuple[str, ...]] = None,
     view: str = "weekly",
     now_dt: Optional[dt.datetime] = None,
     band_pct: float = 0.05,
@@ -805,7 +807,7 @@ def compute_spx_live_levels(
     flip_adjacent_n: int = 5,
 ) -> Dict[str, Any]:
     """
-    Compute SPX live dealer-gamma and OI wall/cluster levels (informational).
+    Compute LIVE dealer-gamma and OI wall/cluster levels (informational).
 
     view:
       - "weekly": prefer weekly Friday expiry
@@ -814,14 +816,40 @@ def compute_spx_live_levels(
     now_et = _now_et(now_dt)
     today = now_et.date()
 
-    symbols = ("SPXW", "SPX", "SPY")  # prefer weeklies, then main, then proxy
+    under = str(underlying or "").strip().upper()
+    if not under:
+        return {
+            "enabled": False,
+            "view": "weekly" if str(view).lower().startswith("week") else "nearest",
+            "symbolUsed": None,
+            "expiry": None,
+            "spot": None,
+            "bandPct": float(band_pct),
+            "weightingMode": None,
+            "gammaFlipStrike": None,
+            "dealerGamma": None,
+            "oiClusters": None,
+            "warnings": ["Missing underlying."],
+            "notes": ["Live context unavailable (missing underlying)."],
+        }
+
+    # Symbol selection:
+    # - SPX keeps SPXW->SPX->SPY fallbacks for robustness.
+    # - Equities use only the single-name symbol (no proxies).
+    symbols0 = tuple(
+        str(s).strip().upper()
+        for s in (symbols or (("SPXW", "SPX", "SPY") if under == "SPX" else (under,)))
+        if str(s).strip()
+    )
+    if not symbols0:
+        symbols0 = (under,)
     fields0 = "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume,callMidIv,putMidIv"
 
     exp_warn: List[str] = []
     strikes_cache_by_symbol: Dict[str, List[dict]] = {}
     exp_dates_by_symbol: Dict[str, List[str]] = {}
 
-    for sym in symbols:
+    for sym in symbols0:
         exp_rows: List[dict] = []
         exp_dates: List[str] = []
         try:
@@ -862,7 +890,7 @@ def compute_spx_live_levels(
     chain_rows: List[dict] = []
     chain_warn: List[str] = []
 
-    for sym in symbols:
+    for sym in symbols0:
         ex = _pick_expiry_for_symbol(sym)
         if not ex:
             continue
@@ -940,10 +968,10 @@ def compute_spx_live_levels(
                 # --- Daily IV proxy for normalization + EM (prefer ORATS cores iv30) ---
                 iv_notes: List[str] = []
                 iv_used_pct = None
-                iv_trade = prior_trading_day(client, ticker="SPX", date=today) or today
+                iv_trade = prior_trading_day(client, ticker=under, date=today) or today
                 try:
                     fields_iv = "ticker,tradeDate,iv30,iv30d,iv30Day,iv"
-                    core_rows = fetch_hist_cores_range(client, ticker="SPX", start=iv_trade - dt.timedelta(days=30), end=iv_trade, fields=fields_iv)
+                    core_rows = fetch_hist_cores_range(client, ticker=under, start=iv_trade - dt.timedelta(days=30), end=iv_trade, fields=fields_iv)
                     core_rows = [r for r in core_rows if isinstance(r, dict)]
                     core_rows.sort(key=lambda r: str(r.get("tradeDate") or "")[:10])
                     best_iv = None
@@ -961,7 +989,7 @@ def compute_spx_live_levels(
                 if iv_used_pct is None:
                     # Fallback: monies implied vol50 around ~30DTE (still daily, but slower / entitlement-dependent)
                     try:
-                        iv_used_pct = fetch_atm_iv_pct(client, ticker="SPX", trade_date=iv_trade, dte_target=30)
+                        iv_used_pct = fetch_atm_iv_pct(client, ticker=under, trade_date=iv_trade, dte_target=30)
                         if iv_used_pct is not None:
                             iv_notes.append("ATM IV proxy fell back to monies-implied vol50 (30DTE).")
                     except Exception:
@@ -1099,6 +1127,13 @@ def compute_spx_live_levels(
                 "notes": ["Heatmap unavailable (best-effort)."],
             }
 
+    notes_out = [
+        "Live, informational only. Does not change backtest/odds.",
+        "Best-effort: depends on entitlement, session timing, and chain coverage.",
+    ]
+    if under == "SPX":
+        notes_out.append("SPXW/SPX may differ from SPY proxy intraday depending on entitlement and session.")
+
     return {
         "enabled": True,
         "view": "weekly" if str(view).lower().startswith("week") else "nearest",
@@ -1112,11 +1147,46 @@ def compute_spx_live_levels(
         "oiClusters": oi,
         "gexHeatmap": gex_heatmap,
         "warnings": [*exp_warn, *list(chain_warn or []), *list(dg.get("warnings") or []), *list(oi.get("warnings") or [])],
-        "notes": [
-            "Live, informational only. Does not change backtest/odds.",
-            "SPXW/SPX may differ from SPY proxy intraday depending on entitlement and session.",
-        ],
+        "notes": notes_out,
     }
+
+
+def compute_spx_live_levels(
+    client: OratsClient,
+    *,
+    view: str = "weekly",
+    now_dt: Optional[dt.datetime] = None,
+    band_pct: float = 0.05,
+    top_n: int = 5,
+    cluster_steps: int = 2,
+    include_heatmap: bool = True,
+    heatmap_expiries: int = 30,
+    heatmap_band_pct: Optional[float] = None,
+    heatmap_mode: str = "net",  # net|slope (display hint; payload contains both)
+    heatmap_view: str = "composite",  # composite|raw (display hint; payload contains both)
+    slope_window: int = 5,
+    flip_adjacent_n: int = 5,
+) -> Dict[str, Any]:
+    """
+    Back-compat wrapper for older callers.
+    """
+    return compute_live_levels(
+        client,
+        underlying="SPX",
+        symbols=("SPXW", "SPX", "SPY"),
+        view=view,
+        now_dt=now_dt,
+        band_pct=band_pct,
+        top_n=top_n,
+        cluster_steps=cluster_steps,
+        include_heatmap=include_heatmap,
+        heatmap_expiries=heatmap_expiries,
+        heatmap_band_pct=heatmap_band_pct,
+        heatmap_mode=heatmap_mode,
+        heatmap_view=heatmap_view,
+        slope_window=slope_window,
+        flip_adjacent_n=flip_adjacent_n,
+    )
 
 
 def _row_dte_days(row: dict, *, trade_date: dt.date) -> Optional[float]:
