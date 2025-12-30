@@ -156,6 +156,10 @@ body {
   min-width: 220px;
 }
 
+.controlGroup--underlying {
+  min-width: 140px;
+}
+
 .toggleRow {
   display: inline-flex;
   align-items: center;
@@ -576,6 +580,43 @@ body {
 .controlGroup .segmented {
   /* In control bars, the label + control are already vertically spaced by the grid gap. */
   margin-top: 0;
+}
+
+.underlyingToggle {
+  padding: 3px;
+  gap: 4px;
+}
+
+.segButton.segButton--logo {
+  padding: 2px;
+  border-radius: 10px;
+  line-height: 0;
+  background: rgba(11, 11, 15, 0.88);
+  border-color: rgba(15, 23, 42, 0.16);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.12) inset;
+}
+
+.segButton.segButton--logo.isActive {
+  /* Override the generic white active state for logo tiles */
+  background: rgba(11, 11, 15, 0.96);
+  border-color: rgba(10, 132, 255, 0.35);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18), 0 1px 0 rgba(255,255,255,0.14) inset;
+  color: rgba(255,255,255,0.92);
+}
+
+.segButton.segButton--logo:hover {
+  background: rgba(11, 11, 15, 0.92);
+}
+
+.segButton.segButton--logo:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--focus-ring), 0 1px 0 rgba(255,255,255,0.14) inset;
+}
+
+.underlyingLogo {
+  width: 34px;
+  height: 34px;
+  display: block;
 }
 
 .segButton {

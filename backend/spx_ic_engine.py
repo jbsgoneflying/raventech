@@ -2670,16 +2670,16 @@ def compute_engine2_spx_ic(
         pref = "SPX"
         proxy_notes.append("Invalid underlying preference; defaulted to SPX.")
 
-    primary = pref
-    fallback = "SPY" if primary == "SPX" else "SPX"
-    underlying = primary
+    pref_primary = pref
+    pref_fallback = "SPY" if pref_primary == "SPX" else "SPX"
+    underlying = pref_primary
 
     # Use range probe (fast + consistent) to detect availability.
     probe_rows = fetch_dailies_ohlc_range(client, ticker=underlying, start=now - dt.timedelta(days=7), end=now)
     if not probe_rows:
-        underlying = fallback
+        underlying = pref_fallback
         probe_rows = fetch_dailies_ohlc_range(client, ticker=underlying, start=now - dt.timedelta(days=7), end=now)
-        if primary == "SPX":
+        if pref_primary == "SPX":
             proxy_notes.append("SPX unavailable in ORATS dailies; using SPY proxy for backtest.")
         else:
             proxy_notes.append("SPY unavailable in ORATS dailies; using SPX proxy for backtest.")
@@ -3016,7 +3016,10 @@ def compute_engine2_spx_ic(
             strikes_cache_by_symbol: Dict[str, List[dict]] = {}
             exp_dates_by_symbol: Dict[str, List[str]] = {}
 
-            symbols = ("SPXW", "SPX", "SPY")  # prefer weeklies for trade management
+            # Respect user's Engine2 underlying selection:
+            # - SPX: prefer SPXW->SPX->SPY fallbacks for robustness
+            # - SPY: SPY only (no index fallback)
+            symbols = ("SPY",) if pref_primary == "SPY" else ("SPXW", "SPX", "SPY")
             fields0 = "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,spotPrice,stockPrice,gamma,theta,vega,callOpenInterest,putOpenInterest,callVolume,putVolume,callMidIv,putMidIv"
 
             for sym in symbols:
@@ -3185,21 +3188,21 @@ def compute_engine2_spx_ic(
             daily_view = _build_view(symbol=daily_sym, expiry=daily_expiry, label="nearestDaily")
 
             # Back-compat: expose a primary view at top-level (weekly preferred).
-            primary = weekly_view if weekly_view.get("enabled") else daily_view
+            primary_view = weekly_view if weekly_view.get("enabled") else daily_view
             any_enabled = bool(weekly_view.get("enabled") or daily_view.get("enabled"))
             live_context = {
                 "enabled": any_enabled,
-                "symbolUsed": primary.get("symbolUsed"),
-                "expiry": primary.get("expiry"),
-                "spot": primary.get("spot"),
+                "symbolUsed": primary_view.get("symbolUsed"),
+                "expiry": primary_view.get("expiry"),
+                "spot": primary_view.get("spot"),
                 "bandPct": 0.05,
-                "atmIvPct": primary.get("atmIvPct"),
-                "greeksAgg": primary.get("greeksAgg"),
-                "dealerGamma": primary.get("dealerGamma"),
-                "oiClusters": primary.get("oiClusters"),
+                "atmIvPct": primary_view.get("atmIvPct"),
+                "greeksAgg": primary_view.get("greeksAgg"),
+                "dealerGamma": primary_view.get("dealerGamma"),
+                "oiClusters": primary_view.get("oiClusters"),
                 "weeklyFriday": weekly_view,
                 "nearestDaily": daily_view,
-                "warnings": [*exp_warn, *(primary.get("warnings") or [])],
+                "warnings": [*exp_warn, *(primary_view.get("warnings") or [])],
                 "notes": [
                     "Live, informational only. Backtest/odds use ORATS EOD and are not affected by these live panels.",
                     "Weekly view targets the Friday weekly expiry (rolls after 4:15pm ET on Fridays).",
@@ -3636,7 +3639,7 @@ def compute_engine2_spx_ic(
             "seasonalityMode": season_mode,
             "deskLocked": True,
         },
-        "underlying": {"symbol": underlying, "isProxy": (underlying != primary), "notes": proxy_notes},
+        "underlying": {"symbol": underlying, "isProxy": (underlying != pref_primary), "notes": proxy_notes},
         "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
         "liveContext": live_context,
         "oddsLikeNow": {

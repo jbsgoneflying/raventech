@@ -402,6 +402,7 @@ function renderGexHeatmap(payload) {
   const wmode = String(heat?.weightingMode || "");
   const denom = Number(heat?.scaleDenom);
   const ivUsed = Number(heat?.atmIvUsedPct);
+  const underLabel = String(engine2UnderlyingState.symbol || "SPX");
 
   // Metrics strip
   const m = heat?.metrics || {};
@@ -555,7 +556,7 @@ function renderGexHeatmap(payload) {
   const xSpot = xForStrike(spot);
 
   wrap.innerHTML = `
-    <svg class="gexSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="SPX net $GEX heat map">
+    <svg class="gexSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${escapeHtml(underLabel)} net $GEX heat map">
       <rect x="0" y="0" width="${w}" height="${h}" class="gexBg"></rect>
       ${yLabels.map((lab, r) => `<text x="${pad.l - 8}" y="${yForRow(r) + 12}" class="gexAxis gexAxis--y" text-anchor="end">${escapeHtml(lab)}</text>`).join("")}
       ${xTicks.map(t => `<text x="${xForCol(t.i) + 2}" y="${h - 10}" class="gexAxis gexAxis--x">${escapeHtml(fmt0(t.s))}</text>`).join("")}
@@ -637,6 +638,7 @@ function renderGammaMap(payload) {
   const spot = Number(levels?.spot);
   const sym = levels?.symbolUsed ? String(levels.symbolUsed) : "—";
   const bandPct = Number(levels?.bandPct);
+  const underLabel = String(engine2UnderlyingState.symbol || sym || "SPX");
 
   if (meta) {
     const b = Number.isFinite(bandPct) ? `${Math.round(bandPct * 100)}%` : "—";
@@ -648,7 +650,7 @@ function renderGammaMap(payload) {
   if (note) note.textContent = notes[0] || (warns[0] || "Live, informational only.");
 
   if (!enabled || !series.length) {
-    const msg = !series.length ? "No SPX price series returned." : "Live levels unavailable (missing live chain).";
+    const msg = !series.length ? `No ${underLabel} price series returned.` : "Live levels unavailable (missing live chain).";
     chart.innerHTML = `<div class="muted" style="padding:14px;">${escapeHtml(msg)}</div>`;
     if (tip) tip.classList.add("hidden");
     return;
@@ -732,7 +734,7 @@ function renderGammaMap(payload) {
   }).join(" ");
 
   chart.innerHTML = `
-    <svg class="gammaSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="SPX close chart">
+    <svg class="gammaSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${escapeHtml(underLabel)} close chart">
       <rect x="0" y="0" width="${w}" height="${h}" class="gammaBg"></rect>
       <polyline points="${pts}" class="gammaPrice"></polyline>
       ${overlayLines.map((o, idx) => {
@@ -823,7 +825,7 @@ function renderGammaMap(payload) {
     });
 
     const priceHtml = `
-      <div class="chartTipTitle">SPX</div>
+      <div class="chartTipTitle">${escapeHtml(underLabel)}</div>
       <div class="chartTipBody mono">${escapeHtml(_fmtDateShort(pt?.date))} · ${escapeHtml(_fmtNum(pt?.close, 2))}</div>
     `;
 

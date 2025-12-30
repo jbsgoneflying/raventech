@@ -29,7 +29,7 @@
 
       <section class="controlBar" aria-label="Engine 2 Controls">
         <form id="spxForm" class="controlBarForm controlBarForm--engine2">
-          <div class="controlGroup">
+          <div class="controlGroup controlGroup--underlying">
             <div class="controlLabel">
               Underlying
               <span class="tipWrap">
@@ -43,9 +43,13 @@
                 </div>
               </span>
             </div>
-            <div class="segmented" role="group" aria-label="Underlying">
-              <button id="e2UnderlyingSPX" class="segButton isActive" type="button" aria-pressed="true">SPX</button>
-              <button id="e2UnderlyingSPY" class="segButton" type="button" aria-pressed="false">SPY</button>
+            <div class="segmented underlyingToggle" role="group" aria-label="Underlying">
+              <button id="e2UnderlyingSPX" class="segButton segButton--logo isActive" type="button" aria-pressed="true" aria-label="SPX">
+                <img class="underlyingLogo" src="/static/spx-mark.svg" alt="" aria-hidden="true" />
+              </button>
+              <button id="e2UnderlyingSPY" class="segButton segButton--logo" type="button" aria-pressed="false" aria-label="SPY">
+                <img class="underlyingLogo" src="/static/spy-mark.svg" alt="" aria-hidden="true" />
+              </button>
             </div>
           </div>
           <div class="controlGroup">
