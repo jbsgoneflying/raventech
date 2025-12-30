@@ -375,6 +375,7 @@ def spx_page():
 
 @app.get("/api/spx-ic")
 def spx_ic(
+    underlying: str = Query("SPX", description="Underlying: SPX|SPY"),
     entry_day: str = Query("mon", description="Entry day: mon|tue|wed"),
     years: int = Query(3, ge=1, le=5),
     widths: str = Query("0.8,1.0,1.2", description="Comma-separated EM width multiples (e.g. 0.8,1.0,1.2)"),
@@ -389,7 +390,11 @@ def spx_ic(
         raise HTTPException(status_code=404, detail="Engine 2 disabled (ENABLE_ENGINE2_SPX_IC=0).")
 
     try:
+        under = str(underlying or "SPX").strip().upper()
+        if under not in ("SPX", "SPY"):
+            raise HTTPException(status_code=400, detail="underlying must be SPX|SPY")
         params = {
+            "underlying": under,
             "entry_day": entry_day,
             "years": years,
             "widths": widths,
@@ -420,6 +425,7 @@ def spx_ic(
             client=_get_client(),
             benzinga_client=_get_benzinga_client_optional(),
             flags=f,
+            underlying_preference=under,
             entry_day=entry_day,
             years=years,
             widths=ws,
@@ -463,6 +469,7 @@ def spx_ic(
 
 @app.get("/api/spx-levels")
 def spx_levels(
+    underlying: str = Query("SPX", description="Underlying: SPX|SPY"),
     view: str = Query("weekly", description="weekly|nearest"),
     window_days: int = Query(180, ge=30, le=800, description="Calendar days to scan back for SPX EOD closes (chart window)"),
     points: int = Query(90, ge=30, le=260, description="Max trading-day points to return for charting"),
@@ -488,7 +495,11 @@ def spx_levels(
         raise HTTPException(status_code=400, detail="view must be weekly|nearest")
 
     try:
+        under = str(underlying or "SPX").strip().upper()
+        if under not in ("SPX", "SPY"):
+            raise HTTPException(status_code=400, detail="underlying must be SPX|SPY")
         params = {
+            "underlying": under,
             "view": v,
             "window_days": int(window_days),
             "points": int(points),
@@ -511,26 +522,44 @@ def spx_levels(
         # --- Price series (EOD) ---
         end = dt.date.today()
         start = end - dt.timedelta(days=int(window_days))
-        bars = fetch_dailies_ohlc_range(client, ticker="SPX", start=start, end=end)
+        bars = fetch_dailies_ohlc_range(client, ticker=under, start=start, end=end)
         closes = [{"date": b.trade_date, "close": float(b.close)} for b in (bars or []) if getattr(b, "close", None)]
         if int(points) > 0 and len(closes) > int(points):
             closes = closes[-int(points) :]
 
         # --- Live levels ---
-        levels = compute_spx_live_levels(
-            client,
-            view=v,
-            band_pct=0.05,
-            top_n=5,
-            cluster_steps=2,
-            include_heatmap=bool(int(include_heatmap)),
-            heatmap_expiries=int(heatmap_expiries),
-            heatmap_band_pct=float(heatmap_band_pct),
-            heatmap_mode=str(heatmap_mode or "net"),
-            heatmap_view=str(heatmap_view or "composite"),
-            slope_window=int(slope_window),
-            flip_adjacent_n=int(flip_adjacent_n),
-        )
+        if under == "SPX":
+            levels = compute_spx_live_levels(
+                client,
+                view=v,
+                band_pct=0.05,
+                top_n=5,
+                cluster_steps=2,
+                include_heatmap=bool(int(include_heatmap)),
+                heatmap_expiries=int(heatmap_expiries),
+                heatmap_band_pct=float(heatmap_band_pct),
+                heatmap_mode=str(heatmap_mode or "net"),
+                heatmap_view=str(heatmap_view or "composite"),
+                slope_window=int(slope_window),
+                flip_adjacent_n=int(flip_adjacent_n),
+            )
+        else:
+            levels = compute_live_levels(
+                client,
+                underlying="SPY",
+                symbols=("SPY",),
+                view=v,
+                band_pct=0.05,
+                top_n=5,
+                cluster_steps=2,
+                include_heatmap=bool(int(include_heatmap)),
+                heatmap_expiries=int(heatmap_expiries),
+                heatmap_band_pct=float(heatmap_band_pct),
+                heatmap_mode=str(heatmap_mode or "net"),
+                heatmap_view=str(heatmap_view or "composite"),
+                slope_window=int(slope_window),
+                flip_adjacent_n=int(flip_adjacent_n),
+            )
 
         payload = {
             "schemaVersion": 3,

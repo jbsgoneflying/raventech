@@ -2612,6 +2612,7 @@ def compute_engine2_spx_ic(
     client: OratsClient,
     benzinga_client: Optional[BenzingaClient],
     flags: FeatureFlags,
+    underlying_preference: str = "SPX",  # SPX|SPY
     entry_day: str = "mon",
     years: int = 3,
     widths: Optional[List[float]] = None,
@@ -2660,15 +2661,29 @@ def compute_engine2_spx_ic(
             return "OPEX" if _is_opex_week(d) else "NON_OPEX"
         return "ALL"
 
-    # Ticker selection: prefer SPX, fallback to SPY if no dailies close.
+    # Ticker selection:
+    # - If preference=SPX: prefer SPX, fallback to SPY proxy if SPX dailies unavailable.
+    # - If preference=SPY: prefer SPY, fallback to SPX proxy if SPY dailies unavailable (explicitly noted).
     proxy_notes: List[str] = []
-    underlying = "SPX"
-    # Use range probe (faster + consistent)
+    pref = str(underlying_preference or "SPX").strip().upper()
+    if pref not in ("SPX", "SPY"):
+        pref = "SPX"
+        proxy_notes.append("Invalid underlying preference; defaulted to SPX.")
+
+    primary = pref
+    fallback = "SPY" if primary == "SPX" else "SPX"
+    underlying = primary
+
+    # Use range probe (fast + consistent) to detect availability.
     probe_rows = fetch_dailies_ohlc_range(client, ticker=underlying, start=now - dt.timedelta(days=7), end=now)
     if not probe_rows:
-        underlying = "SPY"
-        proxy_notes.append("SPX unavailable in ORATS dailies; using SPY proxy for backtest.")
-    telemetry["counts"]["orats.probe_rows"] = len(probe_rows)
+        underlying = fallback
+        probe_rows = fetch_dailies_ohlc_range(client, ticker=underlying, start=now - dt.timedelta(days=7), end=now)
+        if primary == "SPX":
+            proxy_notes.append("SPX unavailable in ORATS dailies; using SPY proxy for backtest.")
+        else:
+            proxy_notes.append("SPY unavailable in ORATS dailies; using SPX proxy for backtest.")
+    telemetry["counts"]["orats.probe_rows"] = len(probe_rows or [])
 
     # Build OHLC history once (range pull; fast).
     start_hist = now - dt.timedelta(days=int(yrs) * 365 + 120)
@@ -3621,7 +3636,7 @@ def compute_engine2_spx_ic(
             "seasonalityMode": season_mode,
             "deskLocked": True,
         },
-        "underlying": {"symbol": underlying, "isProxy": (underlying != "SPX"), "notes": proxy_notes},
+        "underlying": {"symbol": underlying, "isProxy": (underlying != primary), "notes": proxy_notes},
         "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
         "liveContext": live_context,
         "oddsLikeNow": {

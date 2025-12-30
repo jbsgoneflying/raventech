@@ -84,6 +84,13 @@ const gexState = {
   mode: "slope", // net|slope
 };
 
+const engine2UnderlyingState = {
+  symbol: "SPX", // SPX|SPY
+};
+
+let _engine2TitleTemplate = null;
+let _engine2SubtitleTemplate = null;
+
 function setLoading(isLoading) {
   const btn = $("runBtn");
   if (!btn) return;
@@ -152,6 +159,85 @@ async function checkFlags() {
   } catch {
     return {};
   }
+}
+
+function _loadUnderlyingPref() {
+  try {
+    const raw = window.localStorage?.getItem("engine2Underlying") || "";
+    const v = String(raw).trim().toUpperCase();
+    if (v === "SPY" || v === "SPX") engine2UnderlyingState.symbol = v;
+  } catch {
+    // ignore
+  }
+}
+
+function _persistUnderlyingPref() {
+  try {
+    window.localStorage?.setItem("engine2Underlying", String(engine2UnderlyingState.symbol || "SPX"));
+  } catch {
+    // ignore
+  }
+}
+
+function _applyUnderlyingUI() {
+  const spxBtn = $("e2UnderlyingSPX");
+  const spyBtn = $("e2UnderlyingSPY");
+  const sym = String(engine2UnderlyingState.symbol || "SPX").toUpperCase();
+
+  if (spxBtn) {
+    const on = sym === "SPX";
+    spxBtn.classList.toggle("isActive", on);
+    spxBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  if (spyBtn) {
+    const on = sym === "SPY";
+    spyBtn.classList.toggle("isActive", on);
+    spyBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+
+  // Header/title text
+  const subEl = document.querySelector(".appSubtitle");
+  if (_engine2TitleTemplate) {
+    document.title = String(_engine2TitleTemplate).replace(/\bSPX\b/g, sym);
+  }
+  if (subEl && _engine2SubtitleTemplate) {
+    subEl.textContent = String(_engine2SubtitleTemplate).replace(/\bSPX\b/g, sym);
+  }
+}
+
+function initUnderlyingUI() {
+  _engine2TitleTemplate = document.title;
+  const subEl = document.querySelector(".appSubtitle");
+  _engine2SubtitleTemplate = subEl ? String(subEl.textContent || "") : null;
+
+  _loadUnderlyingPref();
+  _applyUnderlyingUI();
+
+  const spxBtn = $("e2UnderlyingSPX");
+  const spyBtn = $("e2UnderlyingSPY");
+  const status = $("status");
+  const results = $("results");
+
+  const setSym = (sym) => {
+    const next = String(sym || "").toUpperCase() === "SPY" ? "SPY" : "SPX";
+    if (engine2UnderlyingState.symbol === next) return;
+    engine2UnderlyingState.symbol = next;
+    _persistUnderlyingPref();
+    _applyUnderlyingUI();
+
+    // Keep outputs consistent: require explicit re-run.
+    if (results) results.classList.toggle("hidden", true);
+    lastPayload = null;
+    lastGammaPayload = null;
+    if (status) {
+      status.textContent = `Underlying set to ${next}. Click Run.`;
+      status.classList.remove("isError", "isRunning", "isOk");
+      status.classList.remove("hidden");
+    }
+  };
+
+  if (spxBtn) spxBtn.addEventListener("click", () => setSym("SPX"));
+  if (spyBtn) spyBtn.addEventListener("click", () => setSym("SPY"));
 }
 
 function clamp(x, lo, hi) {
@@ -277,8 +363,9 @@ async function loadGammaMap() {
     if (meta) meta.textContent = "Loading…";
     if (note) note.textContent = "—";
     const v = gammaState.view;
+    const under = encodeURIComponent(String(engine2UnderlyingState.symbol || "SPX"));
     const payload = await fetchJson(
-      `/api/spx-levels?view=${encodeURIComponent(v)}&points=90&window_days=180&include_heatmap=1`
+      `/api/spx-levels?underlying=${under}&view=${encodeURIComponent(v)}&points=90&window_days=180&include_heatmap=1`
       + `&heatmap_view=${encodeURIComponent(gexState.view)}`
       + `&heatmap_mode=${encodeURIComponent(gexState.mode)}`
       + `&slope_window=5&flip_adjacent_n=5`,
@@ -1092,6 +1179,7 @@ async function run() {
   const weeksLimit = "0";
 
   const qs = new URLSearchParams({
+    underlying: String(engine2UnderlyingState.symbol || "SPX"),
     entry_day: entryDay,
     years: String(years),
     widths: String(widths),
@@ -1145,6 +1233,7 @@ async function main() {
     });
   }
 
+  initUnderlyingUI();
   initTooltips();
   initGammaMapUI();
   initGexHeatmapUI();

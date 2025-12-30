@@ -573,6 +573,11 @@ body {
   background: rgba(2, 6, 23, 0.02);
 }
 
+.controlGroup .segmented {
+  /* In control bars, the label + control are already vertically spaced by the grid gap. */
+  margin-top: 0;
+}
+
 .segButton {
   border: 1px solid transparent;
   background: transparent;

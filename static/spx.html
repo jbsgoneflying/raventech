@@ -30,10 +30,22 @@
       <section class="controlBar" aria-label="Engine 2 Controls">
         <form id="spxForm" class="controlBarForm controlBarForm--engine2">
           <div class="controlGroup">
-            <div class="controlLabel">Underlying</div>
-            <div class="tickerInputRow" aria-label="Underlying SPX">
-              <img class="tickerLogo" src="/static/spx-mark.svg" alt="SPX" />
-              <div class="controlStatic mono" aria-label="SPX" style="font-weight:900; letter-spacing:0.2px;">SPX</div>
+            <div class="controlLabel">
+              Underlying
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Underlying help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Underlying selector (SPX vs SPY)</div>
+                  <div class="tipBody">
+                    <p><b>SPX</b> is the cash index; <b>SPY</b> is the ETF. They can diverge due to dividends, session/microstructure, and entitlement differences.</p>
+                    <p><b>How it’s used</b>: this selection drives both the Engine 2 backtest/recommendation and the live dealer-gamma overlays.</p>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <div class="segmented" role="group" aria-label="Underlying">
+              <button id="e2UnderlyingSPX" class="segButton isActive" type="button" aria-pressed="true">SPX</button>
+              <button id="e2UnderlyingSPY" class="segButton" type="button" aria-pressed="false">SPY</button>
             </div>
           </div>
           <div class="controlGroup">
@@ -184,10 +196,11 @@
                   <span class="tipWrap">
                     <button class="tipBtn" type="button" aria-label="Underlying help" aria-expanded="false">i</button>
                     <div class="tipPanel" role="tooltip">
-                      <div class="tipTitle">Underlying (SPX vs proxy)</div>
+                      <div class="tipTitle">Underlying (SPX vs SPY)</div>
                       <div class="tipBody">
-                        <p>The engine prefers <b>SPX</b> for historical OHLC and IV. If SPX OHLC is unavailable, it falls back to <b>SPY</b> as a proxy.</p>
-                        <p><b>Compliance note</b>: proxy use can change realized ranges and should be disclosed when interpreting results.</p>
+                        <p>You can run Engine 2 on <b>SPX</b> (cash index) or <b>SPY</b> (ETF). They can differ (dividends, session, microstructure).</p>
+                        <p><b>SPX mode</b>: prefers SPX; may fall back to SPY proxy if SPX dailies are unavailable in ORATS.</p>
+                        <p><b>SPY mode</b>: uses SPY; will only fall back if explicitly noted.</p>
                       </div>
                     </div>
                   </span>
