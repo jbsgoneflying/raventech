@@ -1,39 +1,475 @@
-## ORATS Earnings Implied-Move Breach Web App
+# Breach Algo — Desk‑First Risk Intelligence for Short Premium
 
-Small FastAPI + plain HTML app that:
-- Accepts a US equity ticker
-- Computes over the last 20 earnings (~5 years):
-  - **Breach rate (%)**
-  - **Average “above breach %”** (conditional on breach)
-- **V2**: **Quarter Seasonality** breakdown (Q1–Q4) with per-quarter breach/near-breach metrics + a recommendation label
-- **V2.1**: **Seasonality Score** per quarter (deltas vs baseline earnings behavior)
-- Displays a detailed per-earnings table with implied vs realized moves and breach flags
+This repo is a **risk-first trading system** for event-driven short premium.
 
-### Architecture
-- **Backend**: FastAPI
-  - `GET /api/breach?ticker=XYZ&n=20&years=5&k=1.0`
-  - Engine 2 (SPX weekly IC, separate): `GET /api/spx-ic?...` (feature-flagged)
-  - ORATS token is read from **env var `ORATS_TOKEN`** (never sent to the browser)
-  - Caching:
-    - ORATS raw responses cached in-memory (TTL 6h)
-    - `/api/breach` responses cached in-memory (TTL 6h)
-    - `/api/spx-ic` responses cached in-memory (TTL 30m)
-- **Frontend**: `static/index.html` + minimal JS/CSS, served by FastAPI
-  - Engine 2 page: `/spx` (served from `static/spx.html`)
+It is not a “predict returns” app. It is a **decisioning stack** that answers:
 
-### Setup
+- **Engine 1 (single name)**: “How often does this ticker’s earnings gap blow through implied, how bad is the tail when it breaches, and what is the safest wing geometry right now?”
+- **Calendar**: “What’s the trading-week schedule for earnings + macro, and what’s the deterministic desk playbook around those events?”
+- **Engine 2 (SPX)**: “Given regime/macro/seasonality, what weekly IC geometry is least dangerous — and where are the dealer‑gamma acceleration zones today?”
 
-1) Create a `.env` locally (this repo includes `env.example` as a template):
+This README is intentionally long. It’s written to be credible to:
+
+- A **trading desk** (how to use it; what is actionable; what is informational)
+- An **investor** (market, moat, defensibility, operating model)
+- An **engineer** (architecture, data contracts, caching, determinism, audit safety)
+
+**Sanitized**: provider names and environment variable names are OK; no tokens, no host paths, no hostnames, no container names.
+
+---
+
+## Table of contents
+
+- [Why this exists](#why-this-exists)
+- [Product overview (what’s built)](#product-overview-whats-built)
+- [How a desk uses it](#how-a-desk-uses-it)
+- [Data sources and how we normalize them](#data-sources-and-how-we-normalize-them)
+- [Core math and algorithms (with formulas)](#core-math-and-algorithms-with-formulas)
+- [Dealer Gamma Map + Weekly Gamma Risk Heat-Map](#dealer-gamma-map--weekly-gamma-risk-heat-map)
+- [System architecture](#system-architecture)
+- [Caching model](#caching-model)
+- [API reference](#api-reference)
+- [Setup / run](#setup--run)
+- [Deployment (sanitized)](#deployment-sanitized)
+- [Limitations and risk disclosures](#limitations-and-risk-disclosures)
+- [Supporting docs](#supporting-docs)
+- [Roadmap](#roadmap)
+
+---
+
+## Why this exists
+
+**The short-premium problem** isn’t finding entry signals — it’s surviving the tails.
+
+Most tools tell you:
+
+- “Implied move is X.”
+- “IV is high/low.”
+- “Skew is steep.”
+
+Desks need something tighter:
+
+1. **Event-aligned realized vs implied** over many cycles (earnings is a discontinuity, not a continuous process).
+2. **Conditioning** that’s honest about sample sizes (quarter/regime/gate can collapse pools).
+3. **Risk-first geometry guidance** that’s explainable and stable.
+4. **Live structural context** (dealer gamma shelves / acceleration zones) separated from backtest stats.
+
+This repo is built around one operating principle:
+
+> Make every number auditable and every “model” legible enough to trade size against.
+
+---
+
+## Product overview (what’s built)
+
+### Engine 1 — Earnings implied-move breach intelligence (single-name)
+
+Engine 1 is the single-stock earnings core. It computes:
+
+- **Breach stats** over the last \(n\) earnings events:
+  - breach rate (at a configurable multiple \(k\))
+  - “near breach” rates
+  - overshoot severity conditional on breach
+- **Quarter seasonality** (Q1–Q4) vs baseline behavior
+- **Regime overlay** (risk climate label + tail multiplier + trade gate)
+- **Wing recommendation** (Tail Asymmetry Score → asymmetric wing multipliers)
+- **Trade Builder** (optional): strike-based IC suggestions from chain snapshots
+- **Monte Carlo (additive, flag-gated)**: empirical earnings gap tail risk with determinism
+- **Live gamma overlays (async)**:
+  - Dealer Gamma Map (hover labels)
+  - Weekly Gamma Risk Heat‑Map (slope + composite DTE weighting + stability)
+
+### Calendar — Trading week dashboard (earnings + macro)
+
+The calendar is the “desk view”:
+
+- Month/week/day views
+- Earnings tiles (from snapshot-backed data so the UI doesn’t fan out ORATS calls)
+- Macro events (Benzinga economics) enriched with stable keys + playbook snippets
+- Click-through into Engine 1 and macro event popovers with SPX reaction stats
+
+### Engine 2 — SPX weekly IC risk engine
+
+Engine 2 is a **weekly risk map** for SPX condors:
+
+- Backtests weekly windows by a small set of widths and wings
+- Computes breach/outside/MAE tail metrics
+- Applies simple Bayesian smoothing for sparse bins (Beta-Binomial)
+- Adds live dealer gamma and heatmap overlays (informational)
+- Historical backtests prefer **SPX** daily bars; if unavailable from ORATS, the engine falls back to a **SPY proxy** for the backtest surface (explicitly labeled in notes).
+
+---
+
+## How a desk uses it
+
+### Engine 1 workflow (single name)
+
+1. Enter ticker (e.g. `AAPL`) and press **RUN**.
+2. Read in order:
+   - **Summary**: breach rate + overshoot (what’s the base tail?)
+   - **Quarter seasonality**: is this quarter structurally worse?
+   - **Regime overlay**: is the market/single-name stress environment elevated?
+   - **Wing recommendation + Trade Builder**: where should wings go, symmetric or asymmetric?
+   - **Live gamma visuals**: where are structural acceleration zones today?
+
+Operating stance:
+
+- Treat this as a **risk gate** and **geometry chooser**, not a predictor.
+- If regime says **NO_TRADE**, you can still view suggested geometry — but you treat it as “reference only.”
+
+### Calendar workflow
+
+1. Use the month/week/day view to plan the trading week.
+2. Click a ticker tile to deep-link into Engine 1.
+3. Click macro events to open the macro popover:
+   - deterministic desk playbook
+   - SPX reaction stats (points and percent)
+
+### Engine 2 workflow (SPX)
+
+1. Run Engine 2 to compute the weekly IC risk grid.
+2. Use the **Dealer Gamma Map** to see live walls/clusters/flip.
+3. Use the **Weekly Gamma Risk Heat‑Map** (default composite+slope) to identify:
+   - acceleration boundaries (where dealer hedging flips sign and remains)
+   - distance-to-failure in points and in multiples of expected move
+   - stability label: Stable / Asymmetric / Fragile (with reasons)
+
+---
+
+## Data sources and how we normalize them
+
+### ORATS (primary market data)
+
+Used for:
+
+- Earnings history (`/hist/earnings`)
+- Implied move anchoring (`impErnMv` from `/hist/cores`)
+- EOD bars (`/hist/dailies`) for realized windows
+- Chain snapshots (`/hist/strikes`) for strike-based trade building
+- Live strikes (`/datav2/live/*`) for dealer gamma & heatmap overlays
+
+**Critical**: tokens stay server-side (`ORATS_TOKEN` env var).
+
+ORATS client caching (defaults from `backend/orats_client.py`):
+
+- delayed endpoints cache TTL: **6 hours**
+- live endpoints cache TTL: **10 seconds**
+
+### Benzinga (macro calendar)
+
+Used for:
+
+- economics events (CPI/FOMC/NFP/etc)
+- macro history used for reaction stats (best-effort)
+
+### FMP (earnings calendar snapshot)
+
+Used to build a stable upcoming earnings snapshot at scale.
+
+### Redis (required for Calendar)
+
+The calendar endpoint is snapshot-backed and **requires** Redis (`REDIS_URL`). If Redis is unavailable, `/api/calendar` returns a 503.
+
+Redis is used to store earnings snapshot data so the UI doesn’t fan out ORATS calls across thousands of tickers.
+
+---
+
+## Core math and algorithms (with formulas)
+
+This section is designed to be audit-friendly.
+
+### Earnings timing alignment (AMC/BMO)
+
+Earnings are discontinuities. The tail lives in close→open.
+
+We classify ORATS `anncTod` into:
+
+- **AMC** (after close)
+- **BMO** (before open)
+- **UNK** (unknown)
+
+Then the realized window is:
+
+- AMC: close(earnDate) → open(next trading day)
+- BMO: close(prior trading day) → open(earnDate)
+
+### Implied move anchoring
+
+For each event we attach:
+
+- `pricingDateUsed`: the date used to price implied
+- `impErnMv` and `impliedMovePct` from ORATS cores as-of that date
+
+Because ORATS sometimes returns IV-like numbers as decimals vs percents, we normalize.
+
+### Breach, ratio, overshoot
+
+Let:
+
+- \(I = \text{impliedMovePct}\)
+- \(R = |\text{signedMovePct}|\) (absolute realized earnings gap percent)
+- \(k\) = breach multiple (default 1.0)
+
+Then:
+
+- **Breach**: \(R > kI\)
+- **Realized/Implied ratio**: \(\rho = R/I\)
+- **Overshoot** (conditional on breach): \(\text{overshoot} = \frac{R-kI}{kI}\)
+
+Why this is the right desk metric:
+
+- “Breach rate” tells you frequency.
+- “Overshoot” tells you severity when it fails (blown-out wings).
+
+### Quarter seasonality
+
+We compute per-quarter summary over the same usable event set and compare to baseline.
+
+This yields deltas like:
+
+- breach delta in percentage points
+- ratio delta
+- overshoot delta
+
+Low-sample handling is explicit so small quarters don’t pretend to be precise.
+
+### Regime overlay (risk climate)
+
+Regime is computed as-of a date using only data ≤ that date (no lookahead).
+
+Inputs (from `backend/regime_overlay.py`):
+
+- SPY RV20 percentile
+- ticker IV30 percentile
+- SPY absolute 5D move percentile
+
+Blend:
+
+\[
+\text{regimeScore} = 0.50\,MS + 0.35\,SN + 0.15\,CP
+\]
+
+\[
+\text{tailMultiplier} = \text{clamp}(0.7, 2.0, 0.8 + 1.2\cdot\text{regimeScore})
+\]
+
+Then label and trade gate:
+
+- Calm / Normal / Elevated / Stress
+- OK / CAUTION / NO_TRADE
+
+### Wing recommendation (Tail Asymmetry Score; TAS)
+
+Engine 1 generates a deterministic TAS in \([-1,+1]\):
+
+- negative → downside tail dominates
+- positive → upside tail dominates
+
+Components (from `backend/wing_recommendation.py`):
+
+- directional breach-rate asymmetry
+- overshoot asymmetry
+- regime amplifier in Elevated/Stress
+
+Then we transform TAS into asymmetric wing multipliers (widen the bad side, tighten the safe side).
+
+### Trade Builder (strike-based IC construction)
+
+When chain data exists (from `backend/trade_builder.py`):
+
+- Pick expiration near a target DTE using `/hist/monies/implied`
+- Pull strikes using `/hist/strikes`
+- Choose shorts by equal-delta or equal-premium (auto-mode can follow wing recommendation)
+- Choose longs by a fixed wing width (risk-defined)
+
+If chain is missing, Trade Builder returns a safe stub with notes.
+
+### Monte Carlo earnings gap risk (additive-only)
+
+The MC system is designed to be audit-safe and deterministic. See `MC_AUDIT.md`.
+
+Core variable (from `backend/mc_simulator.py`):
+
+\[
+S=\frac{\text{signedMovePct}}{\text{impliedMovePct}}
+\]
+
+We sample empirical shocks \(S\) (optionally conditioned) and evaluate IC intrinsic risk at open.
+
+Determinism:
+
+- stable seed derived from hashed inputs + a shock pool key
+- cached results (TTL aligned with `/api/breach`)
+
+---
+
+## Dealer Gamma Map + Weekly Gamma Risk Heat‑Map
+
+These are **live, informational overlays**. They are not used to change historical breach stats.
+
+### Dealer Gamma Map
+
+From ORATS live strikes we compute:
+
+- OI walls and clusters
+- gamma peaks
+- a best-effort gamma flip strike proxy
+
+The chart is rendered as a clean price-time overlay with hover-to-see labels.
+
+### Weekly Gamma Risk Heat‑Map (v2)
+
+We compute net dollar gamma per strike:
+
+\[
+\text{netDollarGex}(K)=\gamma(K)\cdot(OI_{call}(K)-OI_{put}(K))\cdot spot^2 \cdot 100
+\]
+
+Modes:
+
+- **Net**: netDollarGex
+- **Slope**: first difference across strikes \(\Delta(\text{netDollarGex})\), smoothed with a short rolling window
+
+Ordering is explicit:
+
+1) compute raw Net $GEX  
+2) compute slope on raw Net $GEX  
+3) normalize only for color scaling at render time using:
+
+\[
+\text{scaleDenom}=spot\cdot ATM\_IV
+\]
+
+Expiry weighting:
+
+- default view is **composite buckets** (0–5 / 6–10 / 20–40 DTE) using exponential decay weighting by DTE
+
+Acceleration boundaries:
+
+- computed **only** on the **0–5 DTE composite row** and shown globally
+- persistent boundary requires crossing and remaining on the new side for ≥ N adjacent strikes
+
+Distance-to-failure:
+
+- downside/upside distance in **points**
+- also expressed as multiples of expected move (bucket-weighted effective DTE)
+
+Weekly stability label (explicit priority):
+
+1) Fragile if negative gamma exists within ±0.75 EM of spot  
+2) Asymmetric if boundary distances differ by > 0.5 EM  
+3) Stable otherwise  
+
+Backend emits `reasons[]` strings exactly so the desk can audit why.
+
+---
+
+## System architecture
+
+Backend: FastAPI (`backend/app.py`)  
+Frontend: plain HTML/JS/CSS (`static/`)
+
+High-level request flow:
+
+```mermaid
+flowchart TD
+  user[User] --> ui[Browser_UI]
+  ui -->|GET_/api/breach| apiBreach[FastAPI_/api/breach]
+  ui -->|GET_/api/calendar| apiCal[FastAPI_/api/calendar]
+  ui -->|GET_/api/levels| apiLevels[FastAPI_/api/levels]
+  apiBreach --> orats[ORATS]
+  apiCal --> redis[Redis_snapshot_store]
+  apiCal --> benzinga[Benzinga]
+  apiLevels --> oratsLive[ORATS_Live]
+```
+
+Core routes:
+
+- UI:
+  - `GET /` (calendar)
+  - `GET /breach` (Engine 1)
+  - `GET /spx` (Engine 2)
+- API:
+  - `GET /api/breach`
+  - `GET /api/calendar`
+  - `GET /api/macro-event-stats`
+  - `GET /api/levels` (generic per ticker dealer gamma + heatmap)
+  - `GET /api/spx-ic` (Engine 2, feature-gated)
+  - `GET /api/spx-levels` (Engine 2 live overlays, feature-gated)
+  - `GET /api/condor-rank`
+
+---
+
+## Caching model
+
+There are two caching layers:
+
+1) **ORATS client caching** (`backend/orats_client.py`)
+   - delayed endpoints: 6 hours
+   - live endpoints: 10 seconds
+2) **API response caching** (`backend/app.py`)
+
+Current API TTLs (from `backend/app.py`):
+
+| Cache | Purpose | TTL |
+|---|---|---:|
+| `_breach_cache` | Engine 1 earnings payload | 6h |
+| `_condor_rank_cache` | Calendar rank helper | 6h |
+| `_macro_stats_cache` | Macro reaction stats | 6h |
+| `_calendar_cache` | Calendar payload | 10m |
+| `_spx_ic_cache` | Engine 2 SPX IC payload | 30m |
+| `_spx_levels_cache` | SPX live levels/heatmap | 60s |
+| `_levels_cache` | Per-ticker live levels/heatmap | 60s |
+| `_engine1_elig_cache` | Eligibility checks | 24h |
+
+This split is intentional:
+
+- Long TTL for expensive historical computations
+- Short TTL for live overlays
+
+---
+
+## API reference
+
+### Engine 1 — earnings breach
+
+`GET /api/breach?ticker=XYZ&n=20&years=5&k=1.0`
+
+Notable optional params (additive / optional):
+
+- Trade Builder knobs: `mode`, `symmetry`, `target_delta`, `target_premium`, `wing_width`, `dte_target`, `exp`
+- Monte Carlo toggles: `mc`, `mc_opt`, `mc_stability`, `mc_cond_quarter`, `mc_cond_regime`
+- Manual next earnings override: `mc_event_date`, `mc_event_timing`
+
+### Calendar
+
+`GET /api/calendar?view=month|week|day&anchor=YYYY-MM-DD&tz=America/New_York&engine1Only=0|1&includeEvents=0|1&maxTickers=12000`
+
+### Macro event stats (SPX)
+
+`GET /api/macro-event-stats?key=CPI`
+
+### Live levels (per ticker; used by Engine 1)
+
+`GET /api/levels?ticker=AAPL&view=weekly&include_heatmap=1&heatmap_view=composite&heatmap_mode=slope`
+
+### Engine 2 SPX IC (feature gated)
+
+`GET /api/spx-ic?entry_day=mon&seasonality_mode=quarter&risk_target_breach_pct=25`
+
+Note: Engine 2 is intentionally **desk-locked** in compute (2y lookback, widths 1.0/1.5/2.0, 5pt wings). The API accepts additional parameters for compatibility, but the engine keeps the risk surface consistent by design.
+
+---
+
+## Setup / run
+
+1) Create `.env` from `env.example`:
 
 ```bash
 cp env.example .env
 ```
 
-Edit `.env` and set:
-- `ORATS_TOKEN=...` (required)
-- `PORT=8000` (optional)
-
-2) Create a venv + install deps:
+2) Install deps:
 
 ```bash
 python3 -m venv .venv
@@ -41,7 +477,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-### Run
+3) Run:
 
 ```bash
 source .venv/bin/activate
@@ -49,185 +485,46 @@ PORT=${PORT:-8000}
 uvicorn backend.app:app --host 0.0.0.0 --port "$PORT" --reload
 ```
 
-Then open:
+Open:
+
 - `http://localhost:8000`
 
-## Deployment (DigitalOcean Droplet, public URL gated by invite code)
+---
 
-This app serves both the UI pages and the `/api/*` endpoints. For a public URL, you should **gate access** so your ORATS/Benzinga keys are not abused.
+## Deployment (sanitized)
 
-### Prereqs
+This app is designed to be exposed behind a reverse proxy with **gated access** so paid API keys cannot be abused.
 
-- DigitalOcean Droplet (Ubuntu)
-- Domain DNS A-record: `app.yourdomain.com -> <droplet_ip>`
-- Private GitHub repo access from the droplet (Deploy Key recommended)
+Recommended production concepts:
 
-### Server environment variables
+- `INVITE_CODE` gate + signed cookies (`AUTH_SECRET`)
+- reverse proxy + HTTPS
+- rate limiting at the proxy layer
+- scheduled snapshot refresh jobs (calendar)
 
-On the droplet (inside your repo folder), create `.env` (do not commit). Minimum:
+---
 
-- `ORATS_TOKEN=...`
-- `BENZINGA_API_KEY=...`
-- `ENABLE_BENZINGA=1`
-- `BENZINGA_ENABLE_EVENT_RISK=1`
-- `ENABLE_ENGINE2_SPX_IC=1`
-- `INVITE_CODE=RAVEN-BETA-2026` (choose your own)
-- `AUTH_SECRET=<long random string>` (required when INVITE_CODE is set)
-- `COOKIE_SECURE=1`
+## Limitations and risk disclosures
 
-Generate an `AUTH_SECRET`:
+- This is a **risk engine**, not a guarantee of outcomes.
+- Live gamma/GEX outputs are **best-effort** and depend on live data entitlements and chain completeness.
+- Earnings realized window is **close→open** by design; intraday path is not modeled unless explicitly enabled.
+- Small samples (quarter/regime conditioning) are handled conservatively to avoid false precision.
 
-```bash
-python3 - <<'PY'
-import secrets
-print(secrets.token_urlsafe(48))
-PY
-```
+---
 
-### Run with Docker (recommended)
+## Supporting docs
 
-Install docker on the droplet, then in the repo directory:
+- `MC_AUDIT.md` — audit-safe Monte Carlo design, determinism, and no-lookahead requirements.
 
-```bash
-docker compose up -d --build
-docker compose logs -f --tail=200
-```
+---
 
-The container binds the app to `127.0.0.1:8000` on the droplet (not public). You’ll expose it via nginx + HTTPS.
+## Roadmap
 
-### Nginx reverse proxy + HTTPS (Let’s Encrypt)
+High-value next steps that keep the system desk-credible:
 
-Install nginx + certbot:
-
-```bash
-sudo apt update
-sudo apt install -y nginx certbot python3-certbot-nginx
-```
-
-Rate limit zone (copy template):
-
-```bash
-sudo cp deploy/nginx/rate-limit.conf /etc/nginx/conf.d/rate-limit.conf
-```
-
-Site config:
-
-```bash
-sudo cp deploy/nginx/site-app.yourdomain.com.conf /etc/nginx/sites-available/app.yourdomain.com
-sudo ln -s /etc/nginx/sites-available/app.yourdomain.com /etc/nginx/sites-enabled/app.yourdomain.com
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-IMPORTANT: edit `/etc/nginx/sites-available/app.yourdomain.com` and replace `app.yourdomain.com` with your real domain.
-
-Then obtain TLS cert:
-
-```bash
-sudo certbot --nginx -d app.yourdomain.com
-```
-
-### Firewall
-
-For production, keep only 22/80/443 open:
-
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80
-sudo ufw allow 443
-sudo ufw delete allow 8000/tcp || true
-sudo ufw enable
-sudo ufw status
-```
-
-### Updates
-
-```bash
-cd /opt/breach-algo
-git pull
-docker compose up -d --build
-docker compose logs -f --tail=200
-```
-
-### Troubleshooting
-
-- **502 from nginx**: check docker logs and confirm `127.0.0.1:8000` is listening.\n+- **Can’t log in**: confirm `INVITE_CODE` and `AUTH_SECRET` are set in `.env`, then restart `docker compose`.\n+- **Rate limiting too aggressive**: adjust `deploy/nginx/rate-limit.conf` and reload nginx.
-
-### Engine 2: SPX Weekly Iron Condor (risk-only)
-Engine 2 is a separate “risk map” engine for weekly short SPX iron condors.
-
-It does **not** try to predict returns or optimize PnL. It answers:
-- “In this regime/macro/seasonality bucket, what IC geometry is least dangerous?”
-
-Data sources:
-- **ORATS**: EOD + daily OHLC for SPX (or SPY proxy) and sector ETFs
-- **Benzinga**: Economic Calendar proximity and event flags (CPI/FOMC/NFP/OpEx/etc)
-- **ORATS Live (optional, current-only)**: strike-level Greeks + dealer gamma context (informational only; does not change historical odds)
-
-Enable in `.env`:
-- `ENABLE_ENGINE2_SPX_IC=1`
- 
-Optional (current-only overlays):
-- ORATS Live outputs use a short TTL cache and are **informational only**.
-- Dealer gamma is computed from live strike gamma concentration near spot (±5%), weighted by OI when available.
-
-Open:
-- `http://localhost:8000/spx`
-
-Definitions:
-- **EM (1σ)**: Expected move from ORATS ATM implied vol for the holding horizon.
-- **Breach**: Expiry close outside the short strikes (risk-only).
-- **Outside wings**: Expiry close beyond the long strikes.
-- **MAE (pts)**: Max adverse excursion using daily high/low over the holding window.
-- **Bayesian smoothing**: probabilities use a Beta(1,1) prior for sparse bins.
-
-### API usage
-
-Example:
-
-```bash
-curl "http://localhost:8000/api/breach?ticker=AAPL&n=20&years=5&k=1.0"
-```
-
-Engine 2 example:
-
-```bash
-curl "http://localhost:8000/api/spx-ic?entry_day=mon&years=3&seasonality_mode=quarter&risk_target_breach_pct=25&weeks_limit=120"
-```
-
-The response matches the JSON contract in `ORATS_Earnings_EM_Breach_Spec.txt`.
-
-### Quarter Seasonality (V2)
-The `/api/breach` response now includes a top-level `quarters` object with keys `Q1..Q4`, computed from the same filtered event set.
-
-Per quarter we expose:
-- breach stats (at the request’s `k`)
-- near-breach rates at thresholds **0.8** and **0.9** based on \( \text{ratio} = \frac{\text{realizedMovePct}}{\text{impliedMovePct}} \)
-- a simple **recommendation** label: `Tight` / `Standard` / `Wide` / `Avoid`
-
-Note: recommendation uses a heuristic that evaluates **breach rate at k=1.0 internally** (so it stays comparable even if you change `k` in the request).
-
-### Seasonality Score (V2.1)
-The response also includes:
-- a top-level `baseline` object (computed over the same usable event set)
-- `quarters[Qx].seasonality` with deltas vs baseline:
-  - `breach_delta_pp`
-  - `ratio_delta`
-  - `overshoot_delta_pp`
-  - `z_breach`
-
-Low sample handling:
-- If `events_used < 3` for a quarter, `seasonality` fields are `null` and the recommendation is **`Avoid (low sample)`**.
-
-### Tests
-
-Tests are mocked (no ORATS calls) and cover:
-- trading-day probing helper
-- a small end-to-end breach + quarter aggregation calculation with mocked ORATS responses
-
-Run:
-
-```bash
-pytest -q
-```
-
+- Explicit “confidence + sample size” badges on more panels
+- Credit-aware structure optimization (only when credit is reliable and marked as such)
+- More robust live-chain fallbacks and clearer entitlement diagnostics
+- Exportable “trade ticket” summary for execution workflows
 
