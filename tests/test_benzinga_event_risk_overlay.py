@@ -89,7 +89,7 @@ def test_compute_breach_stats_includes_event_risk_only_when_enabled():
         news_rows=[{"id": 1, "title": "XYZ headline"}],
         wiim_rows=[{"id": 2, "title": "WIIM"}],
         ratings_rows=[{"date": "2025-02-28", "action_company": "Upgrade"}],
-        opt_rows=[{"date": "2025-02-28", "sentiment": "bullish"}],
+        # Unusual options is now sourced from an optional ORATS LIVE proxy, not Benzinga Signals.
     )
     flags_on = FeatureFlags(
         ENABLE_BENZINGA=True,

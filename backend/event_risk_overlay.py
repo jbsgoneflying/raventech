@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.benzinga_client import BenzingaClient
 from backend.earnings_calendar import benzinga_next_earnings
+from backend.orats_client import OratsClient, OratsError
 
 
 def _parse_date(s: str) -> Optional[dt.date]:
@@ -28,6 +29,18 @@ def _safe_int(v: Any) -> Optional[int]:
         if v is None:
             return None
         return int(float(v))
+    except Exception:
+        return None
+
+
+def _safe_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        x = float(v)
+        if x != x:
+            return None
+        return x
     except Exception:
         return None
 
@@ -68,6 +81,7 @@ def compute_event_risk_overlay(
     as_of_date: str,
     now: dt.date,
     earn_date_next: Optional[str] = None,
+    orats: Optional[OratsClient] = None,
 ) -> Dict[str, Any]:
     """
     Compute an additive event-risk overlay from Benzinga data.
@@ -173,25 +187,69 @@ def compute_event_risk_overlay(
 
     # ---- Options activity (Signals: option_activity) ----
     options_score = 0.0
-    options_count = 0
-    options_sentiment: List[str] = []
-    try:
-        oa = bz.signal_option_activity(
-            tickers=t,
-            date_from=_fmt_date(now - dt.timedelta(days=3)),
-            date_to=_fmt_date(now),
-            pagesize=1000,
-            page=0,
-        )
-        sources.append("benzinga:/signal/option_activity")
-        rows = oa.rows or []
-        options_count = len(rows)
-        options_sentiment = _uniq([str(r.get("sentiment") or "").strip() for r in rows if r.get("sentiment")][:5])
-        # Score: saturate at 5 signals in 3 days.
-        options_score = _clamp01(options_count / 5.0)
-    except Exception as e:
-        # Optional; not all keys include Signals. Make this diagnosable.
-        notes.append(f"optionsActivity unavailable: {type(e).__name__}: {e}")
+    options_activity: Dict[str, Any] = {"enabled": False, "mode": "orats_live_strikes_proxy", "score01": None}
+    # Replacement for Benzinga Signals: lightweight ORATS LIVE proxy computed from live strikes.
+    # This is current-only (not true 3d history) but provides a practical “unusual flow” hint
+    # without additional providers or many API calls.
+    if orats is not None and callable(getattr(orats, "live_strikes", None)):
+        try:
+            fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,callVolume,putVolume,callOpenInterest,putOpenInterest"
+            rows = orats.live_strikes(ticker=t, fields=fields).rows or []
+            rows = [r for r in rows if isinstance(r, dict)]
+            if rows:
+                total_call_vol = 0.0
+                total_put_vol = 0.0
+                total_call_oi = 0.0
+                total_put_oi = 0.0
+                vol_by_strike: Dict[str, float] = {}
+                for r in rows:
+                    cv = _safe_float(r.get("callVolume")) or 0.0
+                    pv = _safe_float(r.get("putVolume")) or 0.0
+                    co = _safe_float(r.get("callOpenInterest")) or 0.0
+                    po = _safe_float(r.get("putOpenInterest")) or 0.0
+                    total_call_vol += max(0.0, cv)
+                    total_put_vol += max(0.0, pv)
+                    total_call_oi += max(0.0, co)
+                    total_put_oi += max(0.0, po)
+                    k = str(r.get("strike") or "").strip()
+                    if k:
+                        vol_by_strike[k] = float(vol_by_strike.get(k, 0.0) + max(0.0, cv) + max(0.0, pv))
+
+                total_vol = total_call_vol + total_put_vol
+                total_oi = total_call_oi + total_put_oi
+                pc_vol = (total_put_vol / max(1e-9, total_call_vol)) if total_call_vol > 0 else None
+                vol_oi = (total_vol / max(1.0, total_oi)) if total_oi > 0 else None
+
+                top5 = sorted(vol_by_strike.items(), key=lambda kv: -float(kv[1]))[:5]
+                top5_conc = (sum(v for _, v in top5) / total_vol) if total_vol > 0 else None
+
+                # Score heuristics (explainable, bounded):
+                # - Higher if volume is large vs OI (turnover), and/or concentrated in few strikes.
+                # These are proxies for “unusual activity” without needing a dedicated signals feed.
+                s_voloi = 0.0 if vol_oi is None else _clamp01(float(vol_oi) / 0.20)  # 0.20 ~= “high turnover”
+                s_conc = 0.0 if top5_conc is None else _clamp01(float(top5_conc) / 0.60)  # 60% in top5 is very concentrated
+                options_score = _clamp01(0.60 * s_voloi + 0.40 * s_conc)
+
+                options_activity = {
+                    "enabled": True,
+                    "mode": "orats_live_strikes_proxy",
+                    "asOf": _fmt_date(now),
+                    "score01": round(float(options_score), 3),
+                    "totalVolume": int(round(total_vol)),
+                    "totalOI": int(round(total_oi)),
+                    "putCallVolRatio": None if pc_vol is None else round(float(pc_vol), 3),
+                    "volOverOi": None if vol_oi is None else round(float(vol_oi), 3),
+                    "top5VolConcentration": None if top5_conc is None else round(float(top5_conc), 3),
+                    "topStrikesByVol": [f"{k} ({int(round(v))})" for k, v in top5 if v is not None],
+                    "notes": [
+                        "Proxy computed from ORATS LIVE strikes (current-only), not Benzinga Signals.",
+                    ],
+                }
+        except OratsError:
+            # If ORATS live is not entitled for this ticker, omit the component entirely (UI will hide the line).
+            options_activity = {"enabled": False, "mode": "orats_live_strikes_proxy", "score01": None}
+        except Exception:
+            options_activity = {"enabled": False, "mode": "orats_live_strikes_proxy", "score01": None}
 
     # Weighted combination (simple + explainable).
     score01 = _clamp01(0.35 * macro_score + 0.25 * headline_score + 0.25 * ratings_score + 0.15 * options_score)
@@ -223,9 +281,7 @@ def compute_event_risk_overlay(
                 "actions": ratings_actions,
             },
             "optionsActivity": {
-                "score01": round(float(options_score), 3),
-                "signalsCount3d": int(options_count),
-                "sentiment": options_sentiment,
+                **options_activity,
             },
         },
         "sources": _uniq(sources),
@@ -240,6 +296,7 @@ def compute_event_risk_overlay_optional(
     as_of_date: str,
     now: dt.date,
     earn_date_next: Optional[str] = None,
+    orats: Optional[OratsClient] = None,
 ) -> Dict[str, Any]:
     if bz is None:
         return {
@@ -253,6 +310,6 @@ def compute_event_risk_overlay_optional(
             "sources": [],
             "notes": ["Benzinga unavailable (no client)."],
         }
-    return compute_event_risk_overlay(bz, ticker=ticker, as_of_date=as_of_date, now=now, earn_date_next=earn_date_next)
+    return compute_event_risk_overlay(bz, ticker=ticker, as_of_date=as_of_date, now=now, earn_date_next=earn_date_next, orats=orats)
 
 

@@ -1329,6 +1329,7 @@ def compute_breach_stats(
             as_of_date=str(current.get("asOfDate") or _fmt_date(now))[:10],
             now=now,
             earn_date_next=earn_date_next_for_risk,
+            orats=client,
         )
         if used_estimate_for_risk and isinstance(event_risk, dict):
             notes = event_risk.get("notes")

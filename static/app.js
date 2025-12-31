@@ -1235,13 +1235,22 @@ function renderEventRisk(payload) {
   const wiimN = head.wiimCount3d ?? "—";
   const ratN = rat.ratingsCount7d ?? "—";
   const ratActions = Array.isArray(rat.actions) ? rat.actions.filter(Boolean) : [];
-  const optN = opt.signalsCount3d ?? "—";
+  const optEnabled = (opt && opt.enabled === true);
+  const optMode = opt?.mode ? String(opt.mode) : "";
+  const optScore = (opt?.score01 === null || opt?.score01 === undefined) ? null : Number(opt.score01);
+  const optTop = Array.isArray(opt?.topStrikesByVol) ? opt.topStrikesByVol.filter(Boolean) : [];
 
   const driverItems = [];
   driverItems.push(`<li><strong>Macro</strong>: ${escapeHtml(String(macroN))} high-impact US events (importance ≥3) in window${macroTop.length ? `.<br/><span class="eventRiskMuted">${escapeHtml(macroTop.join(" · "))}</span>` : ""}</li>`);
   driverItems.push(`<li><strong>News</strong>: ${escapeHtml(String(newsN))} headlines (3d) · <strong>WIIM</strong>: ${escapeHtml(String(wiimN))} (3d)</li>`);
   driverItems.push(`<li><strong>Analyst ratings</strong>: ${escapeHtml(String(ratN))} (7d)${ratActions.length ? `.<br/><span class="eventRiskMuted">${escapeHtml(ratActions.join(" · "))}</span>` : ""}</li>`);
-  driverItems.push(`<li><strong>Unusual options</strong>: ${escapeHtml(String(optN))} signals (3d)</li>`);
+  // Unusual options is optional: show only if backend provided a usable signal/proxy.
+  if (optEnabled) {
+    const modeTxt = optMode ? ` (${optMode === "orats_live_strikes_proxy" ? "live proxy" : optMode})` : "";
+    const scoreTxt = (optScore !== null && Number.isFinite(optScore)) ? optScore.toFixed(3) : "—";
+    const extra = optTop.length ? `.<br/><span class="eventRiskMuted">${escapeHtml(optTop.join(" · "))}</span>` : "";
+    driverItems.push(`<li><strong>Unusual options</strong>${escapeHtml(modeTxt)}: score ${escapeHtml(scoreTxt)}${extra}</li>`);
+  }
   if (driversEl) driversEl.innerHTML = `<ul class="eventRiskList">${driverItems.join("")}</ul>`;
 
   const notes = [];
