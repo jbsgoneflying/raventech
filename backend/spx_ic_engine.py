@@ -2952,10 +2952,10 @@ def compute_engine2_spx_ic(
                 cell["lossPts"].append(float(loss_pts))
 
     # Current macro context (for recommendation)
-    # Rolling window (requested): today-3 .. today+7 (ET), not limited to Mon..Fri.
+    # Rolling window (requested): today .. today+7 (ET), not limited to Mon..Fri.
     macro_now = None
     if benzinga_client is not None:
-        d0 = now - dt.timedelta(days=3)
+        d0 = now
         exp0 = now + dt.timedelta(days=7)
         econ_rows_now: List[dict] = []
         d1 = d0

@@ -129,13 +129,13 @@ def _fetch_benzinga_history(
     return out
 
 
-def _fetch_spx_closes(orats: OratsClient, *, start: dt.date, end: dt.date) -> Dict[str, float]:
+def _fetch_spy_closes(orats: OratsClient, *, start: dt.date, end: dt.date) -> Dict[str, float]:
     """
-    Fetch SPX daily closes from ORATS once for a date range, keyed by YYYY-MM-DD.
+    Fetch SPY daily closes from ORATS once for a date range, keyed by YYYY-MM-DD.
     """
     fields = "ticker,tradeDate,clsPx,close"
     td = f"{_fmt_date(start)},{_fmt_date(end)}"
-    rows = orats.hist_dailies("SPX", td, fields=fields).rows or []
+    rows = orats.hist_dailies("SPY", td, fields=fields).rows or []
     out: Dict[str, float] = {}
     for r in rows:
         if not isinstance(r, dict):
@@ -158,7 +158,7 @@ def compute_macro_event_stats(
     """
     Compute simple reaction stats around a macro event type, using:
     - Benzinga economics history to get event dates
-    - ORATS SPX daily closes to compute close->close returns
+    - ORATS SPY daily closes to compute close->close returns
     """
     k = str(key or "").strip().upper()
     if not k:
@@ -179,14 +179,14 @@ def compute_macro_event_stats(
     if len(dates) < 3:
         return {"enabled": False, "key": k, "notes": ["Insufficient event history to compute stats."]}
 
-    # Pull SPX closes across the full range once.
+    # Pull SPY closes across the full range once.
     d0 = _parse_date(dates[0])
     d1 = _parse_date(dates[-1])
     if d0 is None or d1 is None:
         return {"enabled": False, "key": k, "notes": ["Invalid event dates returned by Benzinga."]}
-    closes = _fetch_spx_closes(orats, start=(d0 - dt.timedelta(days=10)), end=(d1 + dt.timedelta(days=10)))
+    closes = _fetch_spy_closes(orats, start=(d0 - dt.timedelta(days=10)), end=(d1 + dt.timedelta(days=10)))
     trade_dates = sorted(closes.keys())
-    spx_spot_close = float(closes.get(trade_dates[-1])) if trade_dates else None
+    spy_spot_close = float(closes.get(trade_dates[-1])) if trade_dates else None
 
     # Compute returns for each event date where neighboring closes exist.
     # We use close-to-close (event day and next day) since it is robust and deterministic.
@@ -239,11 +239,11 @@ def compute_macro_event_stats(
             "p90Pct": _pct(p90),
             "medianAbsPct": _pct(med_abs),
             "p90AbsPct": _pct(p90_abs),
-            "medianPts": _pts(med, spx_spot_close),
-            "medianAbsPts": _pts(med_abs, spx_spot_close),
-            "p90AbsPts": _pts(p90_abs, spx_spot_close),
+            "medianPts": _pts(med, spy_spot_close),
+            "medianAbsPts": _pts(med_abs, spy_spot_close),
+            "p90AbsPts": _pts(p90_abs, spy_spot_close),
             "stdevPct": _pct(statistics.stdev(xs)) if len(xs) >= 2 else None,
-            "stdevPts": _pts((statistics.stdev(xs) if len(xs) >= 2 else None), spx_spot_close),
+            "stdevPts": _pts((statistics.stdev(xs) if len(xs) >= 2 else None), spy_spot_close),
         }
 
     return {
@@ -252,14 +252,14 @@ def compute_macro_event_stats(
         "lookbackYears": int(lookback_years),
         "eventsConsidered": int(len(dates)),
         "eventsUsed": int(n),
-        "spxSpotClose": (None if spx_spot_close is None else round(float(spx_spot_close), 2)),
-        "spx": {
+        "spySpotClose": (None if spy_spot_close is None else round(float(spy_spot_close), 2)),
+        "spy": {
             "eventDayCloseToClose": _summ(event_rets),
             "nextDayCloseToClose": _summ(next_rets),
             "priorDayCloseToClose": _summ(prev_rets) if prev_rets else {"n": 0},
         },
         "notes": [
-            "Reaction stats are computed on SPX close-to-close returns (risk-only).",
+            "Reaction stats are computed on SPY close-to-close returns (risk-only).",
             "Use as context; not a prediction.",
         ],
     }

@@ -410,7 +410,7 @@ Core routes:
 - API:
   - `GET /api/breach`
   - `GET /api/calendar`
-  - `GET /api/macro-event-stats`
+  - `GET /api/macro-event-stats` (SPY reaction stats)
   - `GET /api/levels` (generic per ticker dealer gamma + heatmap)
   - `GET /api/spx-ic` (Engine 2, feature-gated)
   - `GET /api/spx-levels` (Engine 2 live overlays, feature-gated)
@@ -465,7 +465,7 @@ Notable optional params (additive / optional):
 
 ### Macro event stats (SPX)
 
-`GET /api/macro-event-stats?key=CPI`
+`GET /api/macro-event-stats?key=CPI` (computed using SPY close-to-close)
 
 ### Live levels (per ticker; used by Engine 1)
 

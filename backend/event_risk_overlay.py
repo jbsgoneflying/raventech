@@ -67,8 +67,8 @@ class _Window:
 
 
 def _build_window(*, now: dt.date, earn_date_next: Optional[str]) -> _Window:
-    # Rolling window (requested): today-3 .. today+7 (ET), regardless of earnings date.
-    start = now - dt.timedelta(days=3)
+    # Rolling window (requested): today .. today+7 (ET), regardless of earnings date.
+    start = now
     end = now + dt.timedelta(days=7)
     earn_anchor = _fmt_date(_parse_date(earn_date_next)) if earn_date_next and _parse_date(earn_date_next) else None
     return _Window(earn_anchor=earn_anchor, window_anchor=_fmt_date(now), start=_fmt_date(start), end=_fmt_date(end))
@@ -134,8 +134,8 @@ def compute_event_risk_overlay(
     try:
         news = bz.news(
             tickers=t,
-            date_from=_fmt_date(now - dt.timedelta(days=3)),
-            date_to=_fmt_date(now),
+            date_from=_fmt_date(now),
+            date_to=_fmt_date(now + dt.timedelta(days=7)),
             page_size=50,
             display_output="headline",
         )
@@ -148,8 +148,8 @@ def compute_event_risk_overlay(
     try:
         wiim = bz.news(
             tickers=t,
-            date_from=_fmt_date(now - dt.timedelta(days=3)),
-            date_to=_fmt_date(now),
+            date_from=_fmt_date(now),
+            date_to=_fmt_date(now + dt.timedelta(days=7)),
             channels="WIIM",
             page_size=50,
             display_output="headline",

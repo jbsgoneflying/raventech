@@ -614,10 +614,10 @@ async function openMacroPopover(ev) {
       if (!s?.enabled) {
         stats.innerHTML = `<div class="muted">${escapeHtml((Array.isArray(s?.notes) && s.notes.length) ? s.notes[0] : "Stats unavailable.")}</div>`;
       } else {
-        const ed = s?.spx?.eventDayCloseToClose || {};
-        const nd = s?.spx?.nextDayCloseToClose || {};
-        const pd = s?.spx?.priorDayCloseToClose || {};
-        const spot = (s.spxSpotClose !== null && s.spxSpotClose !== undefined) ? Number(s.spxSpotClose) : null;
+        const ed = s?.spy?.eventDayCloseToClose || {};
+        const nd = s?.spy?.nextDayCloseToClose || {};
+        const pd = s?.spy?.priorDayCloseToClose || {};
+        const spot = (s.spySpotClose !== null && s.spySpotClose !== undefined) ? Number(s.spySpotClose) : null;
         const fmtPct = (x) => (x === null || x === undefined) ? "—" : `${Number(x).toFixed(2)}%`;
         const fmtPts = (x) => (x === null || x === undefined) ? "—" : `${Number(x).toFixed(2)} pts`;
         const fmtBand = (pts, pct) => `${fmtPts(pts)} (${fmtPct(pct)})`;
@@ -631,25 +631,25 @@ async function openMacroPopover(ev) {
           </span>
         `;
         stats.innerHTML = `
-          <div class="k">SPX close used${tip("SPX close used", "<p>This is the <b>SPX last close</b> used to convert % moves into <b>index points</b>.</p><p>Points = (abs% / 100) × spot close.</p>")}</div>
+          <div class="k">SPY close used${tip("SPY close used", "<p>This is the <b>SPY last close</b> used to convert % moves into <b>price points</b>.</p><p>Points = (abs% / 100) × spot close.</p>")}</div>
           <div class="v mono">${escapeHtml(spot === null || Number.isNaN(spot) ? "—" : spot.toFixed(2))}</div>
 
-          <div class="k">Events used${tip("Events used", "<p>How many historical event occurrences were found and could be matched to valid SPX trading-day closes.</p><p><b>Higher n</b> = more stable stats. Small n can be noisy.</p>")}</div>
+          <div class="k">Events used${tip("Events used", "<p>How many historical event occurrences were found and could be matched to valid SPY trading-day closes.</p><p><b>Higher n</b> = more stable stats. Small n can be noisy.</p>")}</div>
           <div class="v mono">${escapeHtml(String(s.eventsUsed ?? "—"))}</div>
 
-          <div class="k">Event day |median|${tip("Event day |median|", "<p>Typical <b>absolute</b> SPX close→close move on the event day (vs prior trading day close).</p><p>Use as a baseline for expected movement risk.</p>")}</div>
+          <div class="k">Event day |median|${tip("Event day |median|", "<p>Typical <b>absolute</b> SPY close→close move on the event day (vs prior trading day close).</p><p>Use as a baseline for expected movement risk.</p>")}</div>
           <div class="v mono">${escapeHtml(fmtBand(ed.medianAbsPts, ed.medianAbsPct))}</div>
 
           <div class="k">Event day p90 |abs|${tip("Event day p90 |abs|", "<p>A tail-ish reference: 90% of matched events had an <b>absolute</b> move at or below this level on event day.</p><p><b>Desk use</b>: sanity-check wing width / size so the structure survives an outsized move.</p>")}</div>
           <div class="v mono">${escapeHtml(fmtBand(ed.p90AbsPts, ed.p90AbsPct))}</div>
 
-          <div class="k">Next day |median|${tip("Next day |median|", "<p>Typical <b>absolute</b> SPX close→close move on the day <b>after</b> the event (follow-through risk).</p><p>Helps gauge whether the event tends to extend or mean-revert.</p>")}</div>
+          <div class="k">Next day |median|${tip("Next day |median|", "<p>Typical <b>absolute</b> SPY close→close move on the day <b>after</b> the event (follow-through risk).</p><p>Helps gauge whether the event tends to extend or mean-revert.</p>")}</div>
           <div class="v mono">${escapeHtml(fmtBand(nd.medianAbsPts, nd.medianAbsPct))}</div>
 
           <div class="k">Next day p90 |abs|${tip("Next day p90 |abs|", "<p>90th percentile <b>absolute</b> follow-through move the day after.</p><p>Useful for risk planning if you intend to hold positions beyond the event day.</p>")}</div>
           <div class="v mono">${escapeHtml(fmtBand(nd.p90AbsPts, nd.p90AbsPct))}</div>
 
-          <div class="k">Prior day |median|${tip("Prior day |median|", "<p>Typical <b>absolute</b> SPX close→close move on the day before the event (pre-positioning / drift proxy).</p><p>Not causal—just context.</p>")}</div>
+          <div class="k">Prior day |median|${tip("Prior day |median|", "<p>Typical <b>absolute</b> SPY close→close move on the day before the event (pre-positioning / drift proxy).</p><p>Not causal—just context.</p>")}</div>
           <div class="v mono">${escapeHtml(fmtBand(pd.medianAbsPts, pd.medianAbsPct))}</div>
         `;
       }
