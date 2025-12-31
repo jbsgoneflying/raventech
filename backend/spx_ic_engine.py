@@ -2951,14 +2951,12 @@ def compute_engine2_spx_ic(
                 loss_pts = min(float(wp), loss_pts)
                 cell["lossPts"].append(float(loss_pts))
 
-    # Current week context (for recommendation)
-    # Use next Monday->Friday window from now (same as UI view).
+    # Current macro context (for recommendation)
+    # Rolling window (requested): today-3 .. today+7 (ET), not limited to Mon..Fri.
     macro_now = None
     if benzinga_client is not None:
-        d0 = now
-        while d0.weekday() != 0:
-            d0 += dt.timedelta(days=1)
-        exp0 = d0 + dt.timedelta(days=4)
+        d0 = now - dt.timedelta(days=3)
+        exp0 = now + dt.timedelta(days=7)
         econ_rows_now: List[dict] = []
         d1 = d0
         while d1 <= exp0:
@@ -2966,7 +2964,7 @@ def compute_engine2_spx_ic(
             d1 += dt.timedelta(days=1)
         macro_now = _macro_context(benzinga_client, start=d0, end=exp0, as_of=now, flags=flags, economics_rows=econ_rows_now)
     if macro_now is None:
-        macro_now = {"multiplier": 1.0, "flags": {"OPEX": bool(_is_opex_week(now))}, "highImpactUS": {"count": 0, "top": []}, "notes": ["Benzinga unavailable or disabled."]}
+        macro_now = {"multiplier": 1.0, "flags": {"OPEX": bool(_is_opex_week(now + dt.timedelta(days=7)))}, "highImpactUS": {"count": 0, "top": []}, "notes": ["Benzinga unavailable or disabled."]}
     macro_bucket_now = _macro_bucket(macro_now)
     regime_now = compute_regime_score_for_date(
         client,

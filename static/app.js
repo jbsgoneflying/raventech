@@ -1206,10 +1206,11 @@ function renderEventRisk(payload) {
   const explainEl = $("eventRiskExplain");
 
   const asOf = er?.asOfDate || "—";
-  const anchor = er?.earnDateNext || "—";
+  const windowAnchor = er?.windowAnchorDate || asOf || "—";
+  const earn = er?.earnDateNext || "—";
   const w = er?.window || null;
   const wTxt = w ? `${w.start || "—"}→${w.end || "—"}` : "—";
-  if (meta) meta.textContent = `asOf=${asOf} · anchor=${anchor} · window=${wTxt}`;
+  if (meta) meta.textContent = `asOf=${asOf} · today=${windowAnchor} · earn=${earn} · window=${wTxt}`;
 
   const s = (er?.score01 === null || er?.score01 === undefined) ? null : Number(er.score01);
   if (scoreEl) scoreEl.textContent = (s !== null && Number.isFinite(s)) ? `${s.toFixed(3)}` : "—";

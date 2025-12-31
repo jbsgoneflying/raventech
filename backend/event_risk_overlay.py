@@ -45,23 +45,20 @@ def _uniq(seq: List[str]) -> List[str]:
 
 @dataclass(frozen=True)
 class _Window:
-    anchor: Optional[str]
+    # Next earnings date (if known). Kept for display/context; NOT used to set window.
+    earn_anchor: Optional[str]
+    # Rolling window anchor (today, ET) used to set start/end.
+    window_anchor: str
     start: str
     end: str
 
 
 def _build_window(*, now: dt.date, earn_date_next: Optional[str]) -> _Window:
-    anchor_d = _parse_date(earn_date_next) if earn_date_next else None
-    if anchor_d is not None:
-        # Earnings-week context: include the day before and the day after.
-        start = anchor_d - dt.timedelta(days=3)
-        end = anchor_d + dt.timedelta(days=1)
-        return _Window(anchor=_fmt_date(anchor_d), start=_fmt_date(start), end=_fmt_date(end))
-
-    # No upcoming earnings date available: use "recent risk" window.
+    # Rolling window (requested): today-3 .. today+7 (ET), regardless of earnings date.
     start = now - dt.timedelta(days=3)
-    end = now
-    return _Window(anchor=None, start=_fmt_date(start), end=_fmt_date(end))
+    end = now + dt.timedelta(days=7)
+    earn_anchor = _fmt_date(_parse_date(earn_date_next)) if earn_date_next and _parse_date(earn_date_next) else None
+    return _Window(earn_anchor=earn_anchor, window_anchor=_fmt_date(now), start=_fmt_date(start), end=_fmt_date(end))
 
 
 def compute_event_risk_overlay(
@@ -203,7 +200,8 @@ def compute_event_risk_overlay(
     return {
         "enabled": True,
         "asOfDate": asof,
-        "earnDateNext": win.anchor,
+        "windowAnchorDate": win.window_anchor,
+        "earnDateNext": win.earn_anchor,
         "window": {"start": win.start, "end": win.end},
         "score01": round(float(score01), 3),
         "label": label,
