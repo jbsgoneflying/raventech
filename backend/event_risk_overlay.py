@@ -143,9 +143,9 @@ def compute_event_risk_overlay(
         sources.append("benzinga:/news?channels=WIIM")
         wiim_rows = wiim.rows or []
         wiim_count = len(wiim_rows)
-    except Exception:
-        # Not all plans may have WIIM; treat as optional.
-        pass
+    except Exception as e:
+        # Not all plans may have WIIM; treat as optional but make it diagnosable.
+        notes.append(f"headlineShock/wiim unavailable: {type(e).__name__}: {e}")
 
     # Score: 0.5 if any news, +0.5 if any WIIM, capped to 1.0.
     headline_score = _clamp01((0.5 if news_count > 0 else 0.0) + (0.5 if wiim_count > 0 else 0.0))
@@ -189,9 +189,9 @@ def compute_event_risk_overlay(
         options_sentiment = _uniq([str(r.get("sentiment") or "").strip() for r in rows if r.get("sentiment")][:5])
         # Score: saturate at 5 signals in 3 days.
         options_score = _clamp01(options_count / 5.0)
-    except Exception:
-        # Optional; not all keys include Signals.
-        pass
+    except Exception as e:
+        # Optional; not all keys include Signals. Make this diagnosable.
+        notes.append(f"optionsActivity unavailable: {type(e).__name__}: {e}")
 
     # Weighted combination (simple + explainable).
     score01 = _clamp01(0.35 * macro_score + 0.25 * headline_score + 0.25 * ratings_score + 0.15 * options_score)
