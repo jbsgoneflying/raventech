@@ -292,13 +292,15 @@ function render(payload) {
   if (title) title.textContent = fmtRangeTitle(view, start, end, anchorDt);
   if (sub) {
     const c = payload?.meta?.counts || {};
-    const snapKind = c?.earningsSnapshotKind ? String(c.earningsSnapshotKind) : "";
+    const source = c?.earningsSource ? String(c.earningsSource) : (c?.earningsSnapshotKind ? String(c.earningsSnapshotKind) : "");
     const snapDate = c?.snapshotEtDate ? String(c.snapshotEtDate) : "";
-    const uniMode = c?.snapshotUniverseMode ? String(c.snapshotUniverseMode) : "";
-    const uniSize = (c?.snapshotUniverseSize !== null && c?.snapshotUniverseSize !== undefined) ? String(c.snapshotUniverseSize) : "";
+    const uniMode = c?.universeMode ? String(c.universeMode) : (c?.snapshotUniverseMode ? String(c.snapshotUniverseMode) : "");
+    const uniSize = (c?.universeSize !== null && c?.universeSize !== undefined) ? String(c.universeSize) : (
+      (c?.snapshotUniverseSize !== null && c?.snapshotUniverseSize !== undefined) ? String(c.snapshotUniverseSize) : ""
+    );
     const fb = (c?.earningsFallbackUsed === true) ? "fallback" : "";
     const bits = [
-      snapKind ? `earnings=${snapKind}${fb ? `(${fb})` : ""}` : "",
+      source ? `earnings=${source}${fb ? `(${fb})` : ""}` : "",
       snapDate ? `etDate=${snapDate}` : "",
       (uniMode || uniSize) ? `universe=${uniMode || "—"}${uniSize ? `:${uniSize}` : ""}` : "",
     ].filter(Boolean);

@@ -32,6 +32,7 @@ from backend.condor_rank import compute_condor_rank
 from backend.calendar_snapshot import EARNINGS_SNAPSHOT_KEY, load_earnings_snapshot
 from backend.fmp_snapshot import FMP_EARNINGS_SNAPSHOT_KEY, load_fmp_earnings_snapshot
 from backend.macro_event_stats import compute_macro_event_stats
+from backend.fmp_client import FmpClient, FmpError
 
 
 try:
@@ -235,6 +236,9 @@ _client: OratsClient | None = None
 _bz_client_lock = threading.Lock()
 _bz_client: BenzingaClient | None = None
 
+_fmp_client_lock = threading.Lock()
+_fmp_client: FmpClient | None = None
+
 _breach_cache = TTLCache(maxsize=512, ttl=6 * 60 * 60)  # 6 hours
 _breach_cache_lock = threading.Lock()
 
@@ -247,7 +251,7 @@ _spx_levels_cache_lock = threading.Lock()
 _levels_cache = TTLCache(maxsize=256, ttl=60)  # 60s (interactive hover chart; per-ticker)
 _levels_cache_lock = threading.Lock()
 
-_calendar_cache = TTLCache(maxsize=128, ttl=10 * 60)  # 10 minutes (calendar page)
+_calendar_cache = TTLCache(maxsize=128, ttl=10 * 60)  # calendar cache (effective ttl controlled per-request by CALENDAR_CACHE_TTL_S)
 _calendar_cache_lock = threading.Lock()
 
 _engine1_elig_cache = TTLCache(maxsize=50_000, ttl=24 * 60 * 60)  # 24h
@@ -299,6 +303,26 @@ def _get_benzinga_client_optional() -> BenzingaClient | None:
         if _bz_client is None:
             _bz_client = BenzingaClient.from_env_optional()
     return _bz_client
+
+
+def _get_fmp_client_optional() -> FmpClient | None:
+    """
+    Optional FMP client (constructed if FMP_API_KEY is set).
+    Kept as a singleton to avoid re-reading env and for any internal connection reuse.
+    """
+    global _fmp_client
+    try:
+        if _fmp_client is not None:
+            return _fmp_client
+        with _fmp_client_lock:
+            if _fmp_client is None:
+                # Only construct if key is present.
+                if not (os.getenv("FMP_API_KEY") or "").strip():
+                    return None
+                _fmp_client = FmpClient.from_env()
+        return _fmp_client
+    except Exception:
+        return None
 
 
 def _breach_cache_key(ticker: str, n: int, years: int, k: float, flags_fp: tuple | None = None) -> tuple:
@@ -801,47 +825,18 @@ def calendar(
         e1 = bool(int(engine1Only))
         inc = bool(int(includeEvents))
 
-        # Earnings snapshot (Redis). Calendar should not call ORATS per-request.
-        store = get_store_optional()
-        if store is None:
-            raise HTTPException(status_code=503, detail="Redis unavailable (missing REDIS_URL).")
-
-        def _truthy_env(name: str) -> bool:
-            s = str(os.getenv(name) or "").strip().lower()
-            return s in ("1", "true", "t", "yes", "y", "on")
-
-        allow_orats_fallback = _truthy_env("CALENDAR_ALLOW_ORATS_EARNINGS_FALLBACK")
-
-        # Prefer FMP earnings snapshot for exact earnings dates (single point of truth).
-        snap = load_fmp_earnings_snapshot(store)
-        snap_kind = "fmp"
-        fallback_used = False
-        snap_meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
-        snap_et_date = str(snap_meta.get("etDate") or "")[:10]
-
-        if not snap:
-            if not allow_orats_fallback:
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        "FMP earnings snapshot missing/unavailable. "
-                        "Run `python3 scripts/refresh_fmp_calendar_snapshot.py --force` and ensure REDIS_URL + FMP_API_KEY are set. "
-                        "If you must temporarily fall back, set CALENDAR_ALLOW_ORATS_EARNINGS_FALLBACK=1."
-                    ),
-                )
-            # Emergency rollback path: legacy ORATS-based snapshot (estimates can anchor to Wednesday).
-            snap = load_earnings_snapshot(store)
-            snap_kind = "orats"
-            fallback_used = True
-            snap_meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
-            snap_et_date = str(snap_meta.get("etDate") or "")[:10]
-
         flags_fp = get_flags().cache_fingerprint()
-        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), snap_kind, snap_et_date, flags_fp)
-        with _calendar_cache_lock:
-            cached = _calendar_cache.get(key)
-        if cached is not None:
-            return cached
+        cache_ttl_s = int(float(os.getenv("CALENDAR_CACHE_TTL_S") or 0))
+        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), flags_fp)
+        if cache_ttl_s > 0:
+            with _calendar_cache_lock:
+                cached = _calendar_cache.get(key)
+            if cached is not None:
+                return cached
+
+        fmp = _get_fmp_client_optional()
+        if fmp is None:
+            raise HTTPException(status_code=503, detail="FMP unavailable (missing FMP_API_KEY).")
 
         payload = build_calendar_payload(
             view=v,
@@ -850,20 +845,12 @@ def calendar(
             engine1_only=e1,
             include_events=inc,
             benzinga_client=_get_benzinga_client_optional(),
-            earnings_snapshot=snap,
+            fmp_client=fmp,
+            max_tickers=int(maxTickers),
         )
-        # Make earnings source explicit without requiring DevTools.
-        try:
-            meta = payload.get("meta") if isinstance(payload, dict) else None
-            counts = meta.get("counts") if isinstance(meta, dict) else None
-            if isinstance(counts, dict):
-                counts["earningsSnapshotKind"] = snap_kind
-                counts["earningsFallbackUsed"] = bool(fallback_used)
-        except Exception:
-            pass
-
-        with _calendar_cache_lock:
-            _calendar_cache[key] = payload
+        if cache_ttl_s > 0:
+            with _calendar_cache_lock:
+                _calendar_cache[key] = payload
         return payload
     except HTTPException:
         raise

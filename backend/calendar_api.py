@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from backend.benzinga_client import BenzingaClient
+from backend.fmp_client import FmpClient, FmpError
 from backend.orats_client import OratsClient
 from backend.earnings_calendar import infer_timing_from_time_str
 from backend.market_calendar import market_structure_events_by_date, opex_events_by_date
 from backend.macro_events import macro_events_by_date
+from backend.universe import load_universe_sp500_and_nasdaq100
+from backend.earnings_logic import classify_timing
 
 
 def _parse_date(s: str) -> Optional[dt.date]:
@@ -218,7 +222,8 @@ def build_calendar_payload(
     engine1_only: bool,
     include_events: bool,
     benzinga_client: Optional[BenzingaClient],
-    earnings_snapshot: Dict[str, Any] | None,
+    fmp_client: Optional[FmpClient],
+    max_tickers: int,
 ) -> Dict[str, Any]:
     v = str(view or "month").lower().strip()
     if v not in ("month", "week", "day"):
@@ -271,70 +276,122 @@ def build_calendar_payload(
     for k in list(events_by_date.keys()):
         events_by_date[k] = sorted([e for e in (events_by_date.get(k) or []) if isinstance(e, dict)], key=_event_sort_key)
 
-    # Earnings (ORATS snapshot stored in Redis, passed in as `earnings_snapshot`)
+    # Earnings (LIVE: fetch from FMP each request for the visible range)
     earnings_by_date: Dict[str, Dict[str, List[dict]]] = {k: {"BMO": [], "AMC": [], "UNK": []} for k in day_keys}
     debug_counts: Dict[str, Any] = {
-        "snapshotAvailable": False,
-        "snapshotEtDate": None,
-        "snapshotUniverseSize": None,
-        "snapshotUniverseMode": None,
-        "snapshotSource": None,
-        "earningsSnapshotKind": None,
-        "earningsFallbackUsed": None,
+        "earningsSource": None,
+        "earningsRangeFrom": _fmt_date(start),
+        "earningsRangeTo": _fmt_date(end),
+        "universeMode": "sp500_nasdaq100",
+        "universeSize": None,
+        "earningsRowsFetched": 0,
+        "earningsRowsUsed": 0,
+        "earningsRowsDroppedUniverse": 0,
         "tickersInRange": 0,
     }
 
-    snap = earnings_snapshot if isinstance(earnings_snapshot, dict) else None
-    meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
-    by_date = snap.get("byDate") if isinstance(snap, dict) and isinstance(snap.get("byDate"), dict) else None
-    if not by_date:
-        notes.append("Earnings snapshot missing/unavailable. Run the 4am ET refresh job (Redis) to populate earnings.")
-    else:
-        debug_counts["snapshotAvailable"] = True
-        debug_counts["snapshotEtDate"] = str(meta.get("etDate") or "")[:10] if meta else None
-        debug_counts["snapshotUniverseSize"] = meta.get("universeSize") if meta else None
-        debug_counts["snapshotUniverseMode"] = meta.get("universeMode") if meta else None
-        debug_counts["snapshotSource"] = meta.get("source") if meta else None
-        # Best-effort inference; app layer may override with explicit kind/fallback.
-        src = str(meta.get("source") or "").lower() if meta else ""
-        if src.startswith("fmp"):
-            debug_counts["earningsSnapshotKind"] = "fmp"
-            debug_counts["earningsFallbackUsed"] = False
-        elif src:
-            debug_counts["earningsSnapshotKind"] = "orats"
-        try:
-            est_n = int(meta.get("estimatedDatesUsed") or 0)
-        except Exception:
-            est_n = 0
-        if est_n > 0:
-            notes.append(
-                f"Earnings dates are estimated for {est_n} tickers (ORATS returned no exact nextErn date; using weeks/days-to-earnings). Treat as approximate."
-            )
-        tickers_in_range = 0
-        for d0 in day_keys:
-            obj = by_date.get(d0) if isinstance(by_date, dict) else None
-            if not isinstance(obj, dict):
-                continue
-            for k in ("BMO", "AMC", "UNK"):
-                xs = obj.get(k)
-                if not isinstance(xs, list):
-                    continue
-                # Snapshot stores tickers as strings; UI wants objects with ticker + time.
-                for t in xs:
-                    sym = str(t or "").strip().upper()
-                    if not sym:
-                        continue
-                    earnings_by_date[d0][k].append({"ticker": sym, "time": ""})
-                    tickers_in_range += 1
-        debug_counts["tickersInRange"] = int(tickers_in_range)
+    # Universe filter (default: sp500+nasdaq100). Use env override if you want "all".
+    universe_mode = str(os.getenv("FMP_EARNINGS_UNIVERSE") or "sp500_nasdaq100").strip().lower()
+    if not universe_mode:
+        universe_mode = "sp500_nasdaq100"
+    debug_counts["universeMode"] = universe_mode
+    universe: Set[str] = set()
+    if universe_mode != "all":
+        universe = set(load_universe_sp500_and_nasdaq100())
+    debug_counts["universeSize"] = int(len(universe)) if universe else None
 
-        # Stable sort per day by ticker.
-        for d0 in earnings_by_date.keys():
-            for k in ("BMO", "AMC", "UNK"):
-                earnings_by_date[d0][k] = sorted(
-                    earnings_by_date[d0][k],
-                    key=lambda x: str(x.get("ticker") or ""),
-                )
+    def _normalize_symbol_to_universe(sym: str) -> str:
+        s = str(sym or "").strip().upper()
+        if not s or not universe:
+            return s
+        if s in universe:
+            return s
+        if "-" in s:
+            s2 = s.replace("-", ".")
+            if s2 in universe:
+                return s2
+        if "." in s:
+            s2 = s.replace(".", "-")
+            if s2 in universe:
+                return s2
+        return s
+
+    def _coerce_ticker_fmp(row: dict) -> str:
+        for k in ("symbol", "ticker", "Symbol", "Ticker"):
+            v = row.get(k)
+            if v:
+                return str(v).strip().upper()
+        return ""
+
+    def _coerce_date_fmp(row: dict) -> Optional[dt.date]:
+        for k in ("date", "earningDate", "earningsDate", "reportedDate", "Date"):
+            v = row.get(k)
+            d = _parse_date(v)
+            if d is not None:
+                return d
+        return None
+
+    def _coerce_timing_fmp(row: dict) -> str:
+        for k in ("time", "session", "when", "timing", "timeOfDay"):
+            v = row.get(k)
+            if v is None:
+                continue
+            t = classify_timing(v)
+            if t in ("AMC", "BMO"):
+                return t
+            s = str(v).strip().lower()
+            if "after" in s or "close" in s or s in ("amc", "afterclose", "post", "pm", "postmarket", "afterhours"):
+                return "AMC"
+            if "before" in s or "open" in s or s in ("bmo", "beforeopen", "pre", "am", "premarket"):
+                return "BMO"
+        return "UNK"
+
+    if fmp_client is None:
+        notes.append("FMP unavailable or disabled; earnings omitted.")
+    else:
+        try:
+            resp = fmp_client.earnings_calendar(date_from=_fmt_date(start), date_to=_fmt_date(end), limit=int(max_tickers))
+            rows = resp.rows or []
+            debug_counts["earningsRowsFetched"] = int(len(rows))
+            debug_counts["earningsSource"] = "fmp_live"
+
+            # De-dupe (ticker+date+timing) and apply universe filter.
+            uniq: Dict[Tuple[str, str, str], dict] = {}
+            dropped = 0
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                sym0 = _coerce_ticker_fmp(r)
+                sym = _normalize_symbol_to_universe(sym0)
+                d = _coerce_date_fmp(r)
+                if not sym or d is None:
+                    continue
+                if universe and sym not in universe:
+                    dropped += 1
+                    continue
+                tm = _coerce_timing_fmp(r)
+                uniq[(sym, _fmt_date(d), tm)] = r
+
+            debug_counts["earningsRowsDroppedUniverse"] = int(dropped)
+
+            tickers_in_range = 0
+            for (sym, d0, tm), _r in uniq.items():
+                if d0 not in day_keys:
+                    continue
+                earnings_by_date[d0][tm].append({"ticker": sym, "time": ""})
+                tickers_in_range += 1
+
+            debug_counts["tickersInRange"] = int(tickers_in_range)
+            debug_counts["earningsRowsUsed"] = int(tickers_in_range)
+
+            # Stable sort per day by ticker.
+            for d0 in earnings_by_date.keys():
+                for k in ("BMO", "AMC", "UNK"):
+                    earnings_by_date[d0][k] = sorted(earnings_by_date[d0][k], key=lambda x: str(x.get("ticker") or ""))
+        except FmpError as e:
+            notes.append(f"FMP earnings fetch failed: {str(e)[:180]}")
+        except Exception as e:
+            notes.append(f"FMP earnings fetch failed: {type(e).__name__}: {str(e)[:180]}")
 
     out_days: List[Dict[str, Any]] = []
     for d in days:
