@@ -277,7 +277,10 @@ def build_calendar_payload(
         "snapshotAvailable": False,
         "snapshotEtDate": None,
         "snapshotUniverseSize": None,
+        "snapshotUniverseMode": None,
         "snapshotSource": None,
+        "earningsSnapshotKind": None,
+        "earningsFallbackUsed": None,
         "tickersInRange": 0,
     }
 
@@ -290,7 +293,15 @@ def build_calendar_payload(
         debug_counts["snapshotAvailable"] = True
         debug_counts["snapshotEtDate"] = str(meta.get("etDate") or "")[:10] if meta else None
         debug_counts["snapshotUniverseSize"] = meta.get("universeSize") if meta else None
+        debug_counts["snapshotUniverseMode"] = meta.get("universeMode") if meta else None
         debug_counts["snapshotSource"] = meta.get("source") if meta else None
+        # Best-effort inference; app layer may override with explicit kind/fallback.
+        src = str(meta.get("source") or "").lower() if meta else ""
+        if src.startswith("fmp"):
+            debug_counts["earningsSnapshotKind"] = "fmp"
+            debug_counts["earningsFallbackUsed"] = False
+        elif src:
+            debug_counts["earningsSnapshotKind"] = "orats"
         try:
             est_n = int(meta.get("estimatedDatesUsed") or 0)
         except Exception:

@@ -166,6 +166,24 @@ Used for:
 
 Used to build a stable upcoming earnings snapshot at scale.
 
+Operational notes:
+
+- The calendar reads a **Redis-backed snapshot** (it does not fan out live provider calls).
+- Snapshot refresh script: `python3 scripts/refresh_fmp_calendar_snapshot.py --force`
+  - Intended to run **daily after ~4:00am ET** (same “gate” as the legacy snapshot job).
+  - Requires `REDIS_URL` and `FMP_API_KEY`.
+- Snapshot TTL: `CALENDAR_EARNINGS_SNAPSHOT_TTL_S` (default **48h**). If the job doesn’t run and the key expires, `/api/calendar` will return **503** by default.
+- Universe filter: `FMP_EARNINGS_UNIVERSE`
+  - `sp500_nasdaq100` (default): filter to `data/universe/sp500.txt` + `data/universe/nasdaq100.txt`
+  - `all`: keep all tickers returned by FMP (can be huge / noisy)
+- Emergency rollback only: `CALENDAR_ALLOW_ORATS_EARNINGS_FALLBACK=1`
+  - If enabled and FMP snapshot is missing, the app may fall back to the legacy ORATS snapshot.
+  - **Symptom**: “earnings are mostly/all on Wednesdays” can occur because the ORATS fallback estimates `wksNextErn` and anchors imprecise “weeks-to-event” to the **Wednesday** of the projected week.
+
+Fast diagnostics:
+
+- `GET /api/calendar-snapshot-status` shows whether Redis has the FMP snapshot key, the last refresh ET date, rows used, and whether the legacy snapshot is present.
+
 ### Redis (required for Calendar)
 
 The calendar endpoint is snapshot-backed and **requires** Redis (`REDIS_URL`). If Redis is unavailable, `/api/calendar` returns a 503.

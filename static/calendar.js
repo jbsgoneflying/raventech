@@ -290,7 +290,21 @@ function render(payload) {
   const title = $("rangeTitle");
   const sub = $("rangeSub");
   if (title) title.textContent = fmtRangeTitle(view, start, end, anchorDt);
-  if (sub) sub.textContent = `asOf ${payload?.meta?.generatedAt || "—"} · ${payload?.meta?.engine1Only ? "Engine‑1 eligible" : "All names"}`;
+  if (sub) {
+    const c = payload?.meta?.counts || {};
+    const snapKind = c?.earningsSnapshotKind ? String(c.earningsSnapshotKind) : "";
+    const snapDate = c?.snapshotEtDate ? String(c.snapshotEtDate) : "";
+    const uniMode = c?.snapshotUniverseMode ? String(c.snapshotUniverseMode) : "";
+    const uniSize = (c?.snapshotUniverseSize !== null && c?.snapshotUniverseSize !== undefined) ? String(c.snapshotUniverseSize) : "";
+    const fb = (c?.earningsFallbackUsed === true) ? "fallback" : "";
+    const bits = [
+      snapKind ? `earnings=${snapKind}${fb ? `(${fb})` : ""}` : "",
+      snapDate ? `etDate=${snapDate}` : "",
+      (uniMode || uniSize) ? `universe=${uniMode || "—"}${uniSize ? `:${uniSize}` : ""}` : "",
+    ].filter(Boolean);
+    const srcTxt = bits.length ? ` · ${bits.join(" · ")}` : "";
+    sub.textContent = `asOf ${payload?.meta?.generatedAt || "—"} · ${payload?.meta?.engine1Only ? "Engine‑1 eligible" : "All names"}${srcTxt}`;
+  }
 
   const grid = $("calGrid");
   if (!grid) return;

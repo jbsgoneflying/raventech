@@ -29,8 +29,8 @@ from backend.spx_ic_engine import compute_engine2_spx_ic, compute_spx_live_level
 from backend.redis_store import get_store_optional
 from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
 from backend.condor_rank import compute_condor_rank
-from backend.calendar_snapshot import load_earnings_snapshot
-from backend.fmp_snapshot import load_fmp_earnings_snapshot
+from backend.calendar_snapshot import EARNINGS_SNAPSHOT_KEY, load_earnings_snapshot
+from backend.fmp_snapshot import FMP_EARNINGS_SNAPSHOT_KEY, load_fmp_earnings_snapshot
 from backend.macro_event_stats import compute_macro_event_stats
 
 
@@ -797,18 +797,39 @@ def calendar(
         store = get_store_optional()
         if store is None:
             raise HTTPException(status_code=503, detail="Redis unavailable (missing REDIS_URL).")
-        # Prefer FMP earnings snapshot for exact earnings dates.
+
+        def _truthy_env(name: str) -> bool:
+            s = str(os.getenv(name) or "").strip().lower()
+            return s in ("1", "true", "t", "yes", "y", "on")
+
+        allow_orats_fallback = _truthy_env("CALENDAR_ALLOW_ORATS_EARNINGS_FALLBACK")
+
+        # Prefer FMP earnings snapshot for exact earnings dates (single point of truth).
         snap = load_fmp_earnings_snapshot(store)
+        snap_kind = "fmp"
+        fallback_used = False
         snap_meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
         snap_et_date = str(snap_meta.get("etDate") or "")[:10]
+
         if not snap:
-            # Fallback: legacy ORATS-based snapshot (kept as rollback path).
+            if not allow_orats_fallback:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "FMP earnings snapshot missing/unavailable. "
+                        "Run `python3 scripts/refresh_fmp_calendar_snapshot.py --force` and ensure REDIS_URL + FMP_API_KEY are set. "
+                        "If you must temporarily fall back, set CALENDAR_ALLOW_ORATS_EARNINGS_FALLBACK=1."
+                    ),
+                )
+            # Emergency rollback path: legacy ORATS-based snapshot (estimates can anchor to Wednesday).
             snap = load_earnings_snapshot(store)
+            snap_kind = "orats"
+            fallback_used = True
             snap_meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
             snap_et_date = str(snap_meta.get("etDate") or "")[:10]
 
         flags_fp = get_flags().cache_fingerprint()
-        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), snap_et_date, flags_fp)
+        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), snap_kind, snap_et_date, flags_fp)
         with _calendar_cache_lock:
             cached = _calendar_cache.get(key)
         if cached is not None:
@@ -823,6 +844,15 @@ def calendar(
             benzinga_client=_get_benzinga_client_optional(),
             earnings_snapshot=snap,
         )
+        # Make earnings source explicit without requiring DevTools.
+        try:
+            meta = payload.get("meta") if isinstance(payload, dict) else None
+            counts = meta.get("counts") if isinstance(meta, dict) else None
+            if isinstance(counts, dict):
+                counts["earningsSnapshotKind"] = snap_kind
+                counts["earningsFallbackUsed"] = bool(fallback_used)
+        except Exception:
+            pass
 
         with _calendar_cache_lock:
             _calendar_cache[key] = payload
@@ -833,6 +863,51 @@ def calendar(
     except Exception as e:
         LOG.exception("Unhandled failure (calendar)")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/calendar-snapshot-status")
+def calendar_snapshot_status():
+    """
+    Lightweight diagnostics for calendar earnings snapshots in Redis.
+
+    Purpose: quickly confirm whether the calendar is using the FMP snapshot
+    or falling back to the legacy ORATS snapshot (which can anchor estimates to Wednesday).
+    """
+    store = get_store_optional()
+    if store is None:
+        return {
+            "ok": False,
+            "redisAvailable": False,
+            "error": "Redis unavailable (missing REDIS_URL).",
+        }
+    if not store.ping():
+        return {
+            "ok": False,
+            "redisAvailable": False,
+            "error": "Redis ping failed.",
+        }
+
+    def _summarize(snap):
+        if not isinstance(snap, dict):
+            return {"present": False, "meta": None, "byDateSize": 0}
+        meta = snap.get("meta") if isinstance(snap.get("meta"), dict) else None
+        by_date = snap.get("byDate") if isinstance(snap.get("byDate"), dict) else {}
+        return {
+            "present": True,
+            "meta": meta,
+            "byDateSize": int(len(by_date)),
+        }
+
+    fmp = _summarize(load_fmp_earnings_snapshot(store))
+    orats = _summarize(load_earnings_snapshot(store))
+    return {
+        "ok": True,
+        "redisAvailable": True,
+        "keys": {
+            "fmp": {"key": FMP_EARNINGS_SNAPSHOT_KEY, **fmp},
+            "orats": {"key": EARNINGS_SNAPSHOT_KEY, **orats},
+        },
+    }
 
 
 @app.get("/api/calendar-debug-earnings")

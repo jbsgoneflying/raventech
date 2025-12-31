@@ -10,6 +10,7 @@ from backend.earnings_logic import classify_timing
 from backend.fmp_client import FmpClient
 from backend.redis_store import RedisStore
 from backend.orats_client import OratsClient
+from backend.universe import load_universe_sp500_and_nasdaq100
 
 
 ET = ZoneInfo("America/New_York")
@@ -115,6 +116,41 @@ def _truthy(name: str, default: bool = False) -> bool:
     return s in ("1", "true", "t", "yes", "y", "on")
 
 
+def _universe_mode() -> str:
+    """
+    Universe mode for the FMP snapshot.
+
+    - sp500_nasdaq100: filter to `data/universe/sp500.txt` + `data/universe/nasdaq100.txt` (default)
+    - all: keep all FMP rows (can be huge)
+    """
+    v = str(os.getenv("FMP_EARNINGS_UNIVERSE") or "sp500_nasdaq100").strip().lower()
+    return v or "sp500_nasdaq100"
+
+
+def _normalize_symbol_to_universe(sym: str, universe: set[str]) -> str:
+    """
+    Normalize common share-class punctuation so universe membership checks are robust.
+
+    Examples:
+    - FMP may return BRK-B while our files contain BRK.B
+    - Some feeds invert that convention
+    """
+    s = str(sym or "").strip().upper()
+    if not s or not universe:
+        return s
+    if s in universe:
+        return s
+    if "-" in s:
+        s2 = s.replace("-", ".")
+        if s2 in universe:
+            return s2
+    if "." in s:
+        s2 = s.replace(".", "-")
+        if s2 in universe:
+            return s2
+    return s
+
+
 def _overlay_timing_from_orats(tickers: List[str]) -> Dict[str, str]:
     """
     Optional overlay for timing (BMO/AMC) using ORATS /cores nextErnTod.
@@ -158,6 +194,11 @@ def build_fmp_earnings_snapshot(
     rows_fetched = 0
     windows = 0
 
+    mode = _universe_mode()
+    universe: set[str] = set()
+    if mode != "all":
+        universe = set(load_universe_sp500_and_nasdaq100())
+
     # Fetch in smaller windows to reduce the risk of truncation.
     rows: List[dict] = []
     step = max(1, int(_fmp_window_days()))
@@ -176,24 +217,32 @@ def build_fmp_earnings_snapshot(
         cur = w_end + dt.timedelta(days=1)
 
     # De-dupe rows defensively (ticker+date+timing).
+    rows_dropped_universe = 0
     uniq: Dict[Tuple[str, str, str], dict] = {}
     for r in rows:
-        sym = _coerce_ticker(r)
+        sym0 = _coerce_ticker(r)
+        sym = _normalize_symbol_to_universe(sym0, universe) if universe else sym0
         d = _coerce_date(r)
         if not sym or d is None:
+            continue
+        if universe and sym not in universe:
+            rows_dropped_universe += 1
             continue
         tm = _coerce_timing(r)
         uniq[(sym, _fmt_date(d), tm)] = r
     rows = list(uniq.values())
 
     # Optional overlay of timing using ORATS nextErnTod (BMO/AMC).
-    timing_overlay = _overlay_timing_from_orats([_coerce_ticker(r) for r in rows])
+    timing_overlay = _overlay_timing_from_orats([_normalize_symbol_to_universe(_coerce_ticker(r), universe) for r in rows])
 
     for r in rows:
         if not isinstance(r, dict):
             continue
-        sym = _coerce_ticker(r)
+        sym0 = _coerce_ticker(r)
+        sym = _normalize_symbol_to_universe(sym0, universe) if universe else sym0
         if not sym:
+            continue
+        if universe and sym not in universe:
             continue
         d = _coerce_date(r)
         if d is None or d < today or d > end:
@@ -218,6 +267,9 @@ def build_fmp_earnings_snapshot(
         "rowsFetched": int(rows_fetched),
         "windows": int(windows),
         "limit": int(limit),
+        "universeMode": mode,
+        "universeSize": int(len(universe)) if universe else None,
+        "rowsDroppedUniverse": int(rows_dropped_universe),
         "rowsUsed": int(rows_used),
         "errors": int(errors),
         "source": "fmp:earnings-calendar",
