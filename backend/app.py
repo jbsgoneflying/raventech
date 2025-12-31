@@ -459,6 +459,8 @@ def spx_ic(
         with _spx_ic_cache_lock:
             _spx_ic_cache[key] = payload
         return payload
+    except HTTPException:
+        raise
     except OratsError as e:
         LOG.exception("ORATS failure (spx-ic)")
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -572,6 +574,8 @@ def spx_levels(
         with _spx_levels_cache_lock:
             _spx_levels_cache[key] = payload
         return payload
+    except HTTPException:
+        raise
     except OratsError as e:
         LOG.exception("ORATS failure (spx-levels)")
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -666,6 +670,8 @@ def levels(
         with _levels_cache_lock:
             _levels_cache[key] = payload
         return payload
+    except HTTPException:
+        raise
     except OratsError as e:
         LOG.exception("ORATS failure (levels)")
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -760,6 +766,8 @@ def breach(
         return payload
     except BreachInputError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except HTTPException:
+        raise
     except OratsError as e:
         LOG.exception("ORATS failure")
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -857,6 +865,8 @@ def calendar(
         with _calendar_cache_lock:
             _calendar_cache[key] = payload
         return payload
+    except HTTPException:
+        raise
     except OratsError as e:
         LOG.exception("ORATS failure (calendar)")
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -1019,6 +1029,8 @@ def condor_rank(
         return payload
     except BreachInputError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except HTTPException:
+        raise
     except OratsError as e:
         LOG.exception("ORATS failure (condor-rank)")
         raise HTTPException(status_code=502, detail=str(e)) from e
