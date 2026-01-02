@@ -2541,13 +2541,16 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
    =========================== */
 
 body.landingPage {
-  background: var(--bg2);
+  background:
+    radial-gradient(1000px 700px at 18% -10%, rgba(0, 122, 255, 0.09), transparent 60%),
+    radial-gradient(900px 600px at 88% 10%, rgba(52, 199, 89, 0.06), transparent 62%),
+    var(--bg2);
 }
 
 .landingShell {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 26px 20px 56px;
+  padding: 22px 20px 56px;
 }
 
 .landingHeader {
@@ -2555,7 +2558,7 @@ body.landingPage {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid var(--border);
@@ -2571,6 +2574,8 @@ body.landingPage {
   min-width: 0;
 }
 
+.landingNav { display: inline-flex; align-items: center; gap: 10px; }
+
 .landingLogo {
   width: 46px;
   height: 46px;
@@ -2585,12 +2590,29 @@ body.landingPage {
 .landingBrandName { font-weight: 900; letter-spacing: -0.3px; font-size: 16px; }
 .landingBrandTagline { margin-top: 2px; font-size: 12px; color: var(--muted); font-weight: 650; }
 
+.landingPill {
+  margin-left: 6px;
+  height: 26px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.70);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+  color: rgba(11,11,15,0.72);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+}
+
 .landingHero {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: 1.05fr 1.25fr;
+  grid-template-columns: 0.95fr 1.35fr;
   gap: 18px;
-  align-items: center;
+  align-items: stretch;
 }
 
 .landingHeroCopy {
@@ -2601,11 +2623,14 @@ body.landingPage {
   box-shadow: var(--shadow-glass);
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .landingH1 {
   margin: 0;
-  font-size: 34px;
+  font-size: 36px;
   font-weight: 950;
   letter-spacing: -0.6px;
   line-height: 1.08;
@@ -2627,20 +2652,61 @@ body.landingPage {
   gap: 10px;
 }
 
+.landingBullets {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.landingBullets li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: rgba(11, 11, 15, 0.74);
+}
+
+.landingBullets li:before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.35em;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.18);
+  border: 1px solid rgba(0, 122, 255, 0.22);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.75) inset;
+}
+
 .landingHeroMedia {
   margin: 0;
-  padding: 14px;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.82);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--border);
   box-shadow: 0 18px 60px rgba(15, 20, 30, 0.10);
+  overflow: hidden;
+}
+
+.landingHeroFrame {
+  border-radius: 18px;
+  background:
+    radial-gradient(900px 600px at 12% 12%, rgba(0, 122, 255, 0.07), transparent 55%),
+    radial-gradient(900px 600px at 92% 18%, rgba(52, 199, 89, 0.05), transparent 58%),
+    rgba(255, 255, 255, 0.70);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 18px 18px 16px;
 }
 
 .landingHeroImage {
   width: 100%;
   height: auto;
   display: block;
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--bg2);
 }
 
@@ -2662,6 +2728,9 @@ body.landingPage {
 }
 
 .landingCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   border-radius: 18px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.70);
@@ -2671,14 +2740,35 @@ body.landingPage {
   -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
 
+.landingCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .landingCardTitle {
   font-size: 13px;
   font-weight: 900;
   letter-spacing: 0.1px;
 }
 
+.landingCardChip {
+  height: 24px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(15, 23, 42, 0.04);
+  color: rgba(11,11,15,0.74);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+}
+
 .landingCardBody {
-  margin-top: 8px;
   font-size: 13px;
   font-weight: 650;
   line-height: 1.35;
@@ -2706,5 +2796,6 @@ body.landingPage {
   .landingHero { grid-template-columns: 1fr; }
   .landingH1 { font-size: 30px; }
   .landingFeatureGrid { grid-template-columns: 1fr; }
+  .landingHeroFrame { padding: 14px 14px 12px; }
 }
 

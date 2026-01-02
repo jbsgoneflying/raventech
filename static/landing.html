@@ -22,6 +22,7 @@
             <div class="landingBrandName">Raven-Tech.co</div>
             <div class="landingBrandTagline">Scan-first trading desk tooling</div>
           </div>
+          <span class="landingPill" aria-label="Private beta">Private beta</span>
         </div>
         <nav class="landingNav" aria-label="Primary">
           <a class="primaryButton" href="https://app.raven-tech.co" style="text-decoration:none;">Launch Raven Tech</a>
@@ -35,6 +36,11 @@
             Calendar-first workflow for identifying events, verifying eligibility, and quickly getting desk-ready context
             across single-names and indices.
           </p>
+          <ul class="landingBullets" aria-label="Highlights">
+            <li>Decision headers + instrument cards designed for rapid scanning</li>
+            <li>Progressive disclosure so dense context stays usable</li>
+            <li>Consistent “glass” UI across Calendar, Engine 1, and Engine 2</li>
+          </ul>
           <div class="landingCtas">
             <a class="primaryButton" href="https://app.raven-tech.co" style="text-decoration:none;">Launch Raven Tech</a>
             <a class="linkButton" href="https://app.raven-tech.co/login" style="text-decoration:none;">Request access</a>
@@ -42,13 +48,15 @@
         </div>
 
         <figure class="landingHeroMedia" aria-label="App preview">
-          <img
-            class="landingHeroImage"
-            src="/static/landing-hero.png?v=1"
-            alt="Raven-Tech.co in action across desktop and mobile"
-            loading="eager"
-            onerror="this.onerror=null; this.src='/static/Breach-Ai.png';"
-          />
+          <div class="landingHeroFrame">
+            <img
+              class="landingHeroImage"
+              src="/static/landing-hero.png?v=1"
+              alt="Raven-Tech.co in action across desktop and mobile"
+              loading="eager"
+              onerror="this.onerror=null; this.src='/static/Breach-Ai.png';"
+            />
+          </div>
           <figcaption class="landingHeroCaption">Glass UI · Progressive disclosure · Trading-desk readability</figcaption>
         </figure>
       </section>
@@ -56,19 +64,28 @@
       <section class="landingFeatures" aria-label="Key features">
         <div class="landingFeatureGrid">
           <div class="landingCard">
-            <div class="landingCardTitle">Calendar</div>
+            <div class="landingCardTop">
+              <div class="landingCardTitle">Calendar</div>
+              <div class="landingCardChip">Scan</div>
+            </div>
             <div class="landingCardBody">
               Scan BMO/AMC, click for tooltips, expand dense days without breaking the grid.
             </div>
           </div>
           <div class="landingCard">
-            <div class="landingCardTitle">Engine 1</div>
+            <div class="landingCardTop">
+              <div class="landingCardTitle">Engine 1</div>
+              <div class="landingCardChip">Single-name</div>
+            </div>
             <div class="landingCardBody">
               Earnings breach analysis with desk-style decision headers, strike targets, and live context drawers.
             </div>
           </div>
           <div class="landingCard">
-            <div class="landingCardTitle">Engine 2</div>
+            <div class="landingCardTop">
+              <div class="landingCardTitle">Engine 2</div>
+              <div class="landingCardChip">Index</div>
+            </div>
             <div class="landingCardBody">
               Index regime + dealer gamma context designed for fast scanning and risk-aware positioning.
             </div>
