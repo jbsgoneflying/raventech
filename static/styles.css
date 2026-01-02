@@ -882,6 +882,21 @@ body {
   font-weight: 850;
 }
 
+/* Tooltip popover (card info 'i') */
+.taTipPop {
+  position: fixed;
+  z-index: 10000;
+  width: min(420px, 86vw);
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.taTipPopBody {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ta-text);
+}
+
 /* Micro-visual strokes */
 .taArcBase { stroke: var(--ta-divider); stroke-width: 6; stroke-linecap: round; }
 .taArc { stroke-width: 6; stroke-linecap: round; stroke-dasharray: 130; stroke-dashoffset: 0; opacity: 0.22; }

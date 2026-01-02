@@ -472,7 +472,13 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       <div class="taCard" role="button" tabindex="0" data-ta-card="${_taEscapeHtml(c.id)}">
         <div class="taCardTop">
           <div class="taCardTitle">${_taEscapeHtml(c.title)}</div>
-          <button class="taInfoBtn" type="button" title="${_taEscapeHtml(c.tooltip)}" aria-label="${_taEscapeHtml(c.title)} help">i</button>
+          <button
+            class="taInfoBtn"
+            type="button"
+            data-ta-tip="${_taEscapeHtml(c.tooltip)}"
+            aria-label="${_taEscapeHtml(c.title)} help"
+            aria-expanded="false"
+          >i</button>
         </div>
         <div class="taCardVis">${c.visual}</div>
         <div class="taCardState">${_taEscapeHtml(c.stateLabel)}</div>
@@ -622,6 +628,50 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       else if (kind === "narrative") await _taCopy(vm.summary || snapshotText);
     });
   });
+
+  // Tooltip popover for card info buttons (click-to-open, touch-friendly)
+  let tipEl = null;
+  const closeTip = () => {
+    if (tipEl && tipEl.parentNode) tipEl.parentNode.removeChild(tipEl);
+    tipEl = null;
+    root.querySelectorAll(".taInfoBtn[aria-expanded='true']").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  };
+  const openTip = (btn) => {
+    closeTip();
+    const txt = String(btn?.getAttribute("data-ta-tip") || "");
+    if (!txt) return;
+    btn.setAttribute("aria-expanded", "true");
+    tipEl = document.createElement("div");
+    tipEl.className = "taTipPop taGlass";
+    tipEl.setAttribute("role", "tooltip");
+    tipEl.innerHTML = `<div class="taTipPopBody">${_taEscapeHtml(txt)}</div>`;
+    document.body.appendChild(tipEl);
+    const r = btn.getBoundingClientRect();
+    const pad = 10;
+    const left = Math.max(pad, Math.min(window.innerWidth - pad, r.left + r.width / 2));
+    const top = Math.max(pad, r.bottom + 8);
+    tipEl.style.left = `${left}px`;
+    tipEl.style.top = `${top}px`;
+    tipEl.style.transform = "translateX(-50%)";
+  };
+
+  root.querySelectorAll(".taInfoBtn").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const isOpen = String(btn.getAttribute("aria-expanded") || "false") === "true";
+      if (isOpen) closeTip();
+      else openTip(btn);
+    });
+  });
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest(".taTipPop")) return;
+    if (t && t.closest && t.closest(".taInfoBtn")) return;
+    closeTip();
+  });
+  document.addEventListener("scroll", closeTip, { passive: true });
+  window.addEventListener("resize", closeTip);
 
   const expandBtn = root.querySelector("[data-ta-expand]");
   const collapseBtn = root.querySelector("[data-ta-collapse]");
