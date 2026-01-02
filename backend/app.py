@@ -110,6 +110,26 @@ def _auth_enabled() -> bool:
     return bool(INVITE_CODE)
 
 
+def _normalize_host(host: str | None) -> str:
+    """
+    Normalize host header into a bare hostname (strip port, lowercase).
+    Examples:
+      - "app.raven-tech.co" -> "app.raven-tech.co"
+      - "raven-tech.co:443" -> "raven-tech.co"
+    """
+    h = str(host or "").strip().lower()
+    if not h:
+        return ""
+    if ":" in h:
+        h = h.split(":", 1)[0].strip()
+    return h
+
+
+def _is_root_domain_host(host: str | None) -> bool:
+    h = _normalize_host(host)
+    return h in ("raven-tech.co", "www.raven-tech.co")
+
+
 def _path_is_public(path: str) -> bool:
     p = str(path or "")
     if p.startswith("/static/"):
@@ -135,6 +155,10 @@ async def invite_gate(request: Request, call_next):
             "<h3>Server misconfigured</h3><p>AUTH_SECRET is required when INVITE_CODE is set.</p>",
             status_code=500,
         )
+
+    # Root-domain landing page should remain public even in gated mode.
+    if request.url.path == "/" and _is_root_domain_host(request.headers.get("host")):
+        return await call_next(request)
 
     if _path_is_public(request.url.path):
         return await call_next(request)
@@ -353,7 +377,18 @@ if STATIC_DIR.exists():
 
 
 @app.get("/")
-def index():
+def index(request: Request):
+    """
+    Host-based routing:
+      - raven-tech.co / www.raven-tech.co -> marketing landing page
+      - all other hosts (e.g. app.raven-tech.co) -> app calendar
+    """
+    if _is_root_domain_host(request.headers.get("host")):
+        landing_path = STATIC_DIR / "landing.html"
+        if not landing_path.exists():
+            raise HTTPException(status_code=500, detail="Missing static/landing.html")
+        return FileResponse(str(landing_path))
+
     cal_path = STATIC_DIR / "calendar.html"
     if not cal_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/calendar.html")

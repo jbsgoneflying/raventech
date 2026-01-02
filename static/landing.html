@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Scan-first trading desk tools</title>
+    <meta name="theme-color" content="#ffffff" />
+    <meta
+      name="description"
+      content="Raven-Tech.co — a scan-first trading desk interface for earnings calendars, single-name breach risk, and index regime context."
+    />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="landingPage">
+    <main class="landingShell" role="main">
+      <header class="landingHeader" role="banner">
+        <div class="landingBrand" aria-label="Raven-Tech.co">
+          <img class="landingLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="landingBrandText">
+            <div class="landingBrandName">Raven-Tech.co</div>
+            <div class="landingBrandTagline">Scan-first trading desk tooling</div>
+          </div>
+        </div>
+        <nav class="landingNav" aria-label="Primary">
+          <a class="primaryButton" href="https://app.raven-tech.co" style="text-decoration:none;">Launch Raven Tech</a>
+        </nav>
+      </header>
+
+      <section class="landingHero" aria-label="Overview">
+        <div class="landingHeroCopy">
+          <h1 class="landingH1">A clean, scan-first way to run earnings risk.</h1>
+          <p class="landingLead">
+            Calendar-first workflow for identifying events, verifying eligibility, and quickly getting desk-ready context
+            across single-names and indices.
+          </p>
+          <div class="landingCtas">
+            <a class="primaryButton" href="https://app.raven-tech.co" style="text-decoration:none;">Launch Raven Tech</a>
+            <a class="linkButton" href="https://app.raven-tech.co/login" style="text-decoration:none;">Request access</a>
+          </div>
+        </div>
+
+        <figure class="landingHeroMedia" aria-label="App preview">
+          <img
+            class="landingHeroImage"
+            src="/static/Breach-Ai.png"
+            alt="Raven-Tech.co in action across desktop and mobile"
+            loading="eager"
+          />
+          <figcaption class="landingHeroCaption">Glass UI · Progressive disclosure · Trading-desk readability</figcaption>
+        </figure>
+      </section>
+
+      <section class="landingFeatures" aria-label="Key features">
+        <div class="landingFeatureGrid">
+          <div class="landingCard">
+            <div class="landingCardTitle">Calendar</div>
+            <div class="landingCardBody">
+              Scan BMO/AMC, click for tooltips, expand dense days without breaking the grid.
+            </div>
+          </div>
+          <div class="landingCard">
+            <div class="landingCardTitle">Engine 1</div>
+            <div class="landingCardBody">
+              Earnings breach analysis with desk-style decision headers, strike targets, and live context drawers.
+            </div>
+          </div>
+          <div class="landingCard">
+            <div class="landingCardTitle">Engine 2</div>
+            <div class="landingCardBody">
+              Index regime + dealer gamma context designed for fast scanning and risk-aware positioning.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="landingFooter" role="contentinfo">
+        <div class="landingFootLine">© <span id="landingYear"></span> Raven-Tech.co</div>
+        <div class="landingFootLine landingFootMuted">
+          Informational only. Not investment advice. Access may be limited due to paid market-data APIs.
+        </div>
+      </footer>
+    </main>
+
+    <script>
+      (function () {
+        var el = document.getElementById("landingYear");
+        if (el) el.textContent = String(new Date().getFullYear());
+      })();
+    </script>
+  </body>
+</html>
+
+
