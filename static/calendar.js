@@ -90,156 +90,102 @@ function openEventPopover(open) {
   p.classList.toggle("hidden", !open);
 }
 
-function openDayDrawer(open) {
-  const overlay = $("calDrawerOverlay");
-  const drawer = $("calDrawer");
-  if (overlay) {
-    overlay.classList.toggle("hidden", !open);
-    overlay.setAttribute("aria-hidden", open ? "false" : "true");
-  }
-  if (drawer) drawer.classList.toggle("hidden", !open);
-}
-
-function _fmtDateLong(iso) {
-  const dt = parseIsoDate(iso);
-  if (!dt) return String(iso || "—");
-  const d1 = dt.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  return d1;
-}
-
 function _dayFromPayload(dateIso) {
   const days = Array.isArray(state?.lastPayload?.days) ? state.lastPayload.days : [];
   const t = String(dateIso || "").slice(0, 10);
   return days.find((d) => String(d?.date || "").slice(0, 10) === t) || null;
 }
 
-function _renderTickerPills(tickers, dateIso) {
-  const xs = Array.isArray(tickers) ? tickers : [];
-  if (!xs.length) return `<div class="muted">—</div>`;
+function closeExpandPanels() {
+  document.querySelectorAll(".calExpandPanel").forEach((p) => p.remove());
+  document.querySelectorAll(".calTileMore.isOpen, .calEventMore.isOpen").forEach((b) => b.classList.remove("isOpen"));
+}
+
+function _renderExpandTickers(dateIso, groupKey) {
+  const d = _dayFromPayload(dateIso);
+  const earnings = d?.earnings || {};
+  const xs = Array.isArray(earnings?.[groupKey]) ? earnings[groupKey] : [];
+  const tickers = xs.map((r) => String(r?.ticker || r || "").toUpperCase()).filter(Boolean);
+  if (!tickers.length) return `<div class="muted">—</div>`;
   return `
-    <div class="calDrawerPills">
-      ${xs.map((r) => {
-        const tk = String(r?.ticker || r || "").toUpperCase();
-        if (!tk) return "";
-        return `<button class="calDrawerPill" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(String(dateIso || ""))}">${escapeHtml(tk)}</button>`;
-      }).join("")}
+    <div class="calExpandPills">
+      ${tickers.map((tk) => `<button class="calExpandTicker" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(String(dateIso || ""))}">${escapeHtml(tk)}</button>`).join("")}
     </div>
   `;
 }
 
-function _renderEventList(events) {
-  const xs = Array.isArray(events) ? events : [];
-  if (!xs.length) return `<div class="muted">—</div>`;
+function _renderExpandEvents(dateIso) {
+  const d = _dayFromPayload(dateIso);
+  const evs = (Array.isArray(d?.events) ? d.events : []).filter(shouldShowEvent);
+  if (!evs.length) return `<div class="muted">—</div>`;
   return `
-    <div class="calDrawerEvents">
-      ${xs.map((ev) => {
+    <div class="calExpandEvents">
+      ${evs.map((ev) => {
         const cls = badgeForEvent(ev);
         const evJson = escapeHtml(JSON.stringify(ev || {}));
+        const label = escapeHtml(String(ev?.short || ev?.title || "Event"));
         const title = escapeHtml(String(ev?.title || ev?.short || "Event"));
-        const timeEt = ev?.timeEt ? ` • ${escapeHtml(String(ev.timeEt))}` : "";
-        return `<button class="${cls} calDrawerEvent" type="button" data-ev="${evJson}" aria-label="${title}">${title}${timeEt}</button>`;
+        return `<button class="${cls} calExpandEvent" type="button" data-ev="${evJson}" title="${title}" aria-label="${title}">${label}</button>`;
       }).join("")}
     </div>
   `;
 }
 
-function renderDayDrawer(dateIso) {
-  const d = _dayFromPayload(dateIso);
-  const title = $("calDrawerTitle");
-  const sub = $("calDrawerSub");
-  const body = $("calDrawerBody");
+function openExpandPanel({ cell, dateIso, kind, groupKey }) {
+  if (!cell) return;
+  const existing = cell.querySelector(".calExpandPanel");
+  const isSame = existing && existing.getAttribute("data-kind") === String(kind || "") && existing.getAttribute("data-group") === String(groupKey || "");
+  closeExpandPanels();
+  if (isSame) return;
 
-  const date = String(dateIso || d?.date || "");
-  const dt = parseIsoDate(date);
-  const dow = dt ? dt.toLocaleDateString(undefined, { weekday: "short" }) : "—";
-  const dayNum = dt ? dt.getDate() : "—";
+  const title = (kind === "events")
+    ? "All events"
+    : (groupKey === "BMO") ? "Before Open (BMO)" : (groupKey === "AMC") ? "After Close (AMC)" : "Other (UNK)";
 
-  const evs = (Array.isArray(d?.events) ? d.events : []).filter(shouldShowEvent);
-  const earnings = d?.earnings || {};
-  const bmo = Array.isArray(earnings?.BMO) ? earnings.BMO : [];
-  const amc = Array.isArray(earnings?.AMC) ? earnings.AMC : [];
-  const unk = Array.isArray(earnings?.UNK) ? earnings.UNK : [];
+  const bodyHtml = (kind === "events")
+    ? _renderExpandEvents(dateIso)
+    : _renderExpandTickers(dateIso, groupKey);
 
-  const earnN = bmo.length + amc.length + unk.length;
-  const evN = evs.length;
+  const panel = document.createElement("div");
+  panel.className = "calExpandPanel";
+  panel.setAttribute("data-kind", String(kind || ""));
+  panel.setAttribute("data-group", String(groupKey || ""));
+  panel.innerHTML = `
+    <div class="calExpandTop">
+      <div class="calExpandTitle">${escapeHtml(title)}</div>
+      <button class="calExpandHide pill pill--event neutral" type="button">Hide</button>
+    </div>
+    <div class="calExpandBody">${bodyHtml}</div>
+  `;
+  cell.appendChild(panel);
 
-  if (title) title.textContent = `${dow} ${dayNum} — ${_fmtDateLong(date)}`;
-  if (sub) sub.textContent = `${earnN} earnings · ${evN} events`;
+  panel.querySelector(".calExpandHide")?.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeExpandPanels();
+  });
 
-  if (body) {
-    body.innerHTML = `
-      <div class="calDrawerSection">
-        <div class="calDrawerSectionTitle">Macro events</div>
-        ${_renderEventList(evs)}
-      </div>
-      <div class="calDrawerSection">
-        <div class="calDrawerSectionTitle">Earnings — Before Open (BMO)</div>
-        ${_renderTickerPills(bmo, date)}
-      </div>
-      <div class="calDrawerSection">
-        <div class="calDrawerSectionTitle">Earnings — After Close (AMC)</div>
-        ${_renderTickerPills(amc, date)}
-      </div>
-      <div class="calDrawerSection">
-        <div class="calDrawerSectionTitle">Earnings — Other</div>
-        ${_renderTickerPills(unk, date)}
-      </div>
-    `;
-  }
-
-  // Wire internal clicks (ticker/event drill-down)
-  body?.querySelectorAll?.(".calDrawerPill")?.forEach((btn) => {
-    btn.addEventListener("click", async () => {
+  panel.querySelectorAll(".calExpandTicker").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
       const tk = String(btn.getAttribute("data-ticker") || "").toUpperCase();
       const dIso = String(btn.getAttribute("data-date") || "");
       if (!tk) return;
       await openTickerPopover(tk, dIso);
     });
   });
-  body?.querySelectorAll?.(".calDrawerEvent")?.forEach((btn) => {
-    btn.addEventListener("click", async () => {
+
+  panel.querySelectorAll(".calExpandEvent").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
       const raw = btn.getAttribute("data-ev") || "{}";
-      let ev = {};
-      try { ev = JSON.parse(String(raw)); } catch { ev = {}; }
-      await openMacroPopover(ev);
+      let eobj = {};
+      try { eobj = JSON.parse(String(raw)); } catch { eobj = {}; }
+      await openMacroPopover(eobj);
     });
   });
-
-  // Actions
-  const copyBtn = $("calDrawerCopy");
-  if (copyBtn) {
-    copyBtn.onclick = async () => {
-      const lines = [];
-      lines.push(`Calendar — ${_fmtDateLong(date)}`);
-      if (evs.length) lines.push(`Events: ${evs.map(e => String(e?.short || e?.title || "").trim()).filter(Boolean).join(" · ")}`);
-      lines.push(`BMO: ${bmo.map(x => String(x?.ticker || x || "").toUpperCase()).filter(Boolean).join(", ") || "—"}`);
-      lines.push(`AMC: ${amc.map(x => String(x?.ticker || x || "").toUpperCase()).filter(Boolean).join(", ") || "—"}`);
-      lines.push(`Other: ${unk.map(x => String(x?.ticker || x || "").toUpperCase()).filter(Boolean).join(", ") || "—"}`);
-      const txt = lines.join("\n");
-      try {
-        if (window.RavenUI?.copyToClipboard) await window.RavenUI.copyToClipboard(txt);
-        else await navigator.clipboard.writeText(txt);
-      } catch {
-        // ignore
-      }
-    };
-  }
-
-  const jumpBtn = $("calDrawerJump");
-  if (jumpBtn) {
-    jumpBtn.onclick = () => {
-      state.anchor = isoDate(parseIsoDate(date) || new Date()) || state.anchor;
-      setView("day");
-      refresh();
-    };
-  }
-}
-
-function openDayDrawerForDate(dateIso) {
-  const d = _dayFromPayload(dateIso);
-  if (!d) return;
-  renderDayDrawer(String(d?.date || dateIso));
-  openDayDrawer(true);
 }
 
 function closeAllTooltips() {
@@ -485,7 +431,7 @@ function render(payload) {
           </div>
         </div>
 
-        <div class="taGrid" aria-label="Calendar instrument cards">
+        <div class="taGrid taGrid--4" aria-label="Calendar instrument cards">
           <div class="taCard">
             <div class="taCardTop">
               <div class="taCardTitle">
@@ -630,11 +576,11 @@ function render(payload) {
             // Use a button so we can open a macro-event popover on click.
             return `<button class="${cls} calEventPill" type="button" data-ev="${evJson}" title="${title}" aria-label="${title}">${label}</button>`;
           }).join("")}
-          ${evMore > 0 ? `<div class="pill pill--event neutral" title="${escapeHtml(evs.map(e => e?.title).filter(Boolean).join(" · "))}">+${evMore}</div>` : ""}
+          ${evMore > 0 ? `<button class="pill pill--event neutral calEventMore" type="button" data-date="${escapeHtml(date)}" title="Show all events">+${evMore}</button>` : ""}
         </div>`
       : "";
 
-    const grp = (label, rows, cls, cap0) => {
+    const grp = (label, key, rows, cls, cap0) => {
       if (!rows.length) return "";
       const max = Math.max(0, Number(cap0) || 0);
       const shown = rows.slice(0, max);
@@ -654,7 +600,7 @@ function render(payload) {
                 <div class="calTileTicker">${escapeHtml(tk)}</div>
               </button>`;
             }).join("")}
-            ${rest > 0 ? `<div class="calTileMore">+${rest}</div>` : ""}
+            ${rest > 0 ? `<button class="calTileMore" type="button" data-date="${escapeHtml(date)}" data-group="${escapeHtml(key)}" title="Show all tickers">+${rest}</button>` : ""}
           </div>
         </div>
       `;
@@ -669,9 +615,9 @@ function render(payload) {
         </div>
         ${evHtml}
         <div class="calEarnings">
-          ${grp("Before Open", bmo, "bmo", caps.BMO)}
-          ${grp("After Close", amc, "amc", caps.AMC)}
-          ${grp("Other", unk, "unk", caps.UNK)}
+          ${grp("Before Open", "BMO", bmo, "bmo", caps.BMO)}
+          ${grp("After Close", "AMC", amc, "amc", caps.AMC)}
+          ${grp("Other", "UNK", unk, "unk", caps.UNK)}
         </div>
       </div>
     `);
@@ -708,14 +654,30 @@ function render(payload) {
     });
   });
 
-  // Day cell click → open day details drawer (ignore clicks on tickers/events)
-  grid.querySelectorAll(".calCell").forEach((cell) => {
-    cell.addEventListener("click", (ev) => {
-      const t = ev.target;
-      if (t && t.closest && (t.closest(".calTile") || t.closest(".calEventPill") || t.closest(".calTileMore"))) return;
-      const date = String(cell.getAttribute("data-date") || "");
-      if (!date) return;
-      openDayDrawerForDate(date);
+  // +N (tickers) click → expand overlay within the day cell (keeps cell height fixed)
+  grid.querySelectorAll(".calTileMore").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const cell = btn.closest(".calCell");
+      const date = String(btn.getAttribute("data-date") || cell?.getAttribute("data-date") || "");
+      const groupKey = String(btn.getAttribute("data-group") || "");
+      if (!cell || !date || !groupKey) return;
+      btn.classList.add("isOpen");
+      openExpandPanel({ cell, dateIso: date, kind: "earnings", groupKey });
+    });
+  });
+
+  // +N (events) click → expand overlay within the day cell (keeps cell height fixed)
+  grid.querySelectorAll(".calEventMore").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const cell = btn.closest(".calCell");
+      const date = String(btn.getAttribute("data-date") || cell?.getAttribute("data-date") || "");
+      if (!cell || !date) return;
+      btn.classList.add("isOpen");
+      openExpandPanel({ cell, dateIso: date, kind: "events", groupKey: "" });
     });
   });
 }
@@ -995,21 +957,20 @@ function init() {
 
   $("popClose")?.addEventListener("click", () => openPopover(false));
   $("evClose")?.addEventListener("click", () => openEventPopover(false));
-  $("calDrawerClose")?.addEventListener("click", () => openDayDrawer(false));
-  $("calDrawerOverlay")?.addEventListener("click", () => openDayDrawer(false));
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") {
       openSettings(false);
       openPopover(false);
       openEventPopover(false);
-      openDayDrawer(false);
+      closeExpandPanels();
     }
   });
   document.addEventListener("click", (ev) => {
     const t = ev.target;
-    if (t && t.closest && (t.closest("#popover") || t.closest("#eventPopover") || t.closest("#calDrawer") || t.closest(".calTile") || t.closest(".calEventPill"))) return;
+    if (t && t.closest && (t.closest("#popover") || t.closest("#eventPopover") || t.closest(".calTile") || t.closest(".calEventPill") || t.closest(".calTileMore") || t.closest(".calEventMore") || t.closest(".calExpandPanel"))) return;
     openPopover(false);
     openEventPopover(false);
+    closeExpandPanels();
   });
 
   refresh();
