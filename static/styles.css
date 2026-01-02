@@ -445,33 +445,22 @@ body {
    Technicals (Daily) Panel — desk scan UI (glass tokens)
    ============================================================ */
 :root {
-  --ta-radius-lg: 16px;
-  --ta-radius-md: 12px;
-  --ta-blur: 20px;
-  --ta-glass-bg: rgba(255, 255, 255, 0.55);
-  --ta-glass-border: rgba(255, 255, 255, 0.16);
-  --ta-shadow: 0 18px 40px rgba(0, 0, 0, 0.10);
-  --ta-text: rgba(11, 11, 15, 0.92);
-  --ta-muted: rgba(11, 11, 15, 0.55);
-  --ta-divider: rgba(11, 11, 15, 0.10);
+  /* Bind TA panel tokens to global app tokens so the whole app feels cohesive. */
+  --ta-radius-lg: var(--radius-card);
+  --ta-radius-md: var(--radius-control);
+  --ta-blur: 18px;
+  --ta-glass-bg: var(--surface);
+  --ta-glass-border: var(--border);
+  --ta-shadow: var(--shadow);
+  --ta-text: var(--text);
+  --ta-muted: var(--muted);
+  --ta-divider: var(--line);
   --ta-pos: rgba(46, 204, 113, 0.14);
-  --ta-neu: rgba(120, 120, 140, 0.14);
+  --ta-neu: rgba(120, 140, 255, 0.12);
   --ta-neg: rgba(255, 77, 77, 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ta-glass-bg: rgba(255, 255, 255, 0.06);
-    --ta-glass-border: rgba(255, 255, 255, 0.14);
-    --ta-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
-    --ta-text: rgba(245, 245, 247, 0.92);
-    --ta-muted: rgba(245, 245, 247, 0.62);
-    --ta-divider: rgba(255, 255, 255, 0.10);
-    --ta-pos: rgba(46, 204, 113, 0.14);
-    --ta-neu: rgba(120, 140, 255, 0.12);
-    --ta-neg: rgba(255, 77, 77, 0.12);
-  }
-}
+/* Dark-mode handled by global tokens; TA panel inherits via the bindings above. */
 
 .taPanel {
   display: grid;

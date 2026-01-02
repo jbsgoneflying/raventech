@@ -895,6 +895,117 @@ function downloadText(filename, text) {
   URL.revokeObjectURL(url);
 }
 
+function renderEngine2DecisionPanel(payload) {
+  const host = $("e2DecisionSection");
+  if (!host) return;
+
+  const sym = String(payload?.underlying?.symbol || "—").toUpperCase();
+  const asOf = String(payload?.asOfDate || "—");
+
+  const reg = payload?.current?.regime || {};
+  const score = (reg?.score100 !== null && reg?.score100 !== undefined) ? Number(reg.score100) : null;
+  const bucket = String(reg?.bucket || "—");
+
+  const macro = payload?.current?.macro || {};
+  const multVal = (macro?.multiplier !== null && macro?.multiplier !== undefined) ? Number(macro.multiplier) : null;
+  const flags = macro?.flags || {};
+  const hi = ["CPI","FOMC","NFP"].some(k => flags && flags[k]);
+  const macroBucket = (Number.isFinite(multVal) && (multVal >= 1.25 || hi)) ? "MACRO" : "NORMAL";
+
+  const vwap = payload?.current?.vwap || {};
+  const vwapEnabled = !!vwap?.enabled;
+  const vwapVal = vwapEnabled ? Number(vwap?.value) : null;
+  const lp = Number(vwap?.livePrice);
+  const spot = Number.isFinite(lp) ? lp : Number(payload?.liveContext?.weeklyFriday?.dealerGamma?.spot);
+  const spotTxt = Number.isFinite(spot) ? spot.toFixed(2) : "—";
+  const d = vwap?.distance || null;
+  const dp = Number(d?.diffPts);
+  const dpc = Number(d?.diffPct);
+  const side = String(d?.side || "");
+  let vwapDist = "—";
+  if (Number.isFinite(dp)) {
+    const absPts = Math.abs(dp).toFixed(2);
+    const pctTxt = Number.isFinite(dpc) ? `${Math.abs(dpc).toFixed(2)}%` : "—";
+    if (side === "above") vwapDist = `spot above by ${absPts} (${pctTxt})`;
+    else if (side === "below") vwapDist = `spot below by ${absPts} (${pctTxt})`;
+    else if (side === "at") vwapDist = `spot ≈ VWAP`;
+    else vwapDist = `Δ=${dp.toFixed(2)}`;
+  }
+
+  const like = payload?.oddsLikeNow || {};
+  const rows = Array.isArray(like?.byWidth) ? like.byWidth : [];
+  const row10 = rows.find(r => Number(r?.w) === 1.0) || rows[0] || null;
+  const odds10 = (row10 && row10.breachEitherPct !== null && row10.breachEitherPct !== undefined) ? Number(row10.breachEitherPct) : null;
+  const n10 = row10 ? Number(row10?.n) : null;
+
+  const dots = Array.from({ length: 5 }).map((_, i) => `<span class="taDot ${i < 3 ? "isOn" : ""}"></span>`).join("");
+  const chips = [
+    `Regime: ${bucket}`,
+    `Macro: ${macroBucket}`,
+    (Number.isFinite(n10) ? `n=${n10}` : null),
+  ].filter(Boolean);
+  const chipHtml = chips.slice(0, 3).map((c) => `<span class="taChip">${escapeHtml(c)}</span>`).join("");
+
+  host.classList.toggle("hidden", !sym || sym === "—");
+  if (!sym || sym === "—") return;
+
+  const snap = `${sym} (Engine 2) | asOf ${asOf} | spot ${spotTxt} | regime ${Number.isFinite(score) ? score.toFixed(1) : "—"}/100 ${bucket} | macro ${Number.isFinite(multVal) ? multVal.toFixed(2) + "×" : "—"} ${macroBucket} | odds(1.0x) ${Number.isFinite(odds10) ? odds10.toFixed(2) + "%" : "—"} | VWAP ${Number.isFinite(vwapVal) ? vwapVal.toFixed(2) : "—"} (${vwapDist})`;
+
+  host.innerHTML = `
+    <div class="taPanel">
+      <div class="taHeader">
+        <div class="taHeaderRow">
+          <div class="taHeaderTitle">${escapeHtml(sym)} — Engine 2</div>
+          <div class="taHeaderMeta">asOf: ${escapeHtml(asOf)} • spot: <span class="mono">${escapeHtml(spotTxt)}</span></div>
+        </div>
+        <div class="taHeaderRow taHeaderRow--sub">
+          <div class="taBiasPill taBiasPill--neu">WEEKLY IC</div>
+          <div class="taConf" title="Confidence dots (heuristic)">${dots}</div>
+          <div class="taChips">${chipHtml}</div>
+          <div class="taHeaderActions">
+            <button class="taActionBtn" type="button" id="e2CopySnapshot">Copy snapshot</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="taGrid" aria-label="Engine 2 instrument cards">
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Regime score</div></div>
+          <div class="taCardState mono">${Number.isFinite(score) ? escapeHtml(score.toFixed(1)) + " / 100" : "—"}</div>
+          <div class="taCardInterp">Bucket: ${escapeHtml(bucket)}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Macro multiplier</div></div>
+          <div class="taCardState mono">${Number.isFinite(multVal) ? escapeHtml(multVal.toFixed(2)) + "×" : "—"}</div>
+          <div class="taCardInterp">Bucket: ${escapeHtml(macroBucket)}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Breach odds (1.0×)</div></div>
+          <div class="taCardState mono">${Number.isFinite(odds10) ? escapeHtml(odds10.toFixed(2)) + "%" : "—"}</div>
+          <div class="taCardInterp">${Number.isFinite(n10) ? `n=${escapeHtml(String(n10))}` : "—"}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">VWAP (daily)</div></div>
+          <div class="taCardState mono">${Number.isFinite(vwapVal) ? escapeHtml(vwapVal.toFixed(2)) : "—"}</div>
+          <div class="taCardInterp">${escapeHtml(vwapDist)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const btn = $("e2CopySnapshot");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      try {
+        if (window.RavenUI?.copyToClipboard) await window.RavenUI.copyToClipboard(snap);
+        else await navigator.clipboard.writeText(snap);
+      } catch {
+        // ignore
+      }
+    });
+  }
+}
+
 function render(payload) {
   lastPayload = payload;
   const status = $("status");
@@ -904,6 +1015,9 @@ function render(payload) {
 
   const meta = $("snapshotMeta");
   if (meta) meta.textContent = `asOf=${payload?.asOfDate || "—"} · entry=${payload?.params?.entryDay || "—"} · lookback=${payload?.params?.years || "—"}y · seasonality=${payload?.params?.seasonalityMode || "—"}`;
+
+  // Scan-first decision header (instrument panel style)
+  try { renderEngine2DecisionPanel(payload); } catch { /* ignore */ }
 
   const like = payload?.oddsLikeNow || {};
   const recMain = $("recMain");

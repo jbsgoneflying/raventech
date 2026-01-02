@@ -63,6 +63,93 @@ function fmt0(v) {
   return Number.isFinite(n) ? n.toFixed(0) : "—";
 }
 
+function renderEngine1DecisionPanel(payload) {
+  const host = $("e1DecisionSection");
+  if (!host) return;
+
+  const t = String(payload?.ticker || "").toUpperCase() || "—";
+  const tech = payload?.technicals || null;
+  const nar = tech?.narrative || null;
+  const barDate = String(tech?.barDateUsed || tech?.asOfDate || "").slice(0, 10);
+  const price = Number(nar?.priceUsed ?? tech?.livePrice ?? tech?.lastDailyClose);
+
+  const s = payload?.summary || {};
+  const br = Number(s?.breach_rate_pct);
+  const os = Number(s?.avg_above_breach_pct);
+
+  const rg = payload?.regime || {};
+  const gate = String(rg?.guidance?.tradeGate || "");
+  const gateTxt = gate === "NO_TRADE" ? "No Trade" : gate === "CAUTION" ? "Caution" : gate === "OK" ? "OK" : "—";
+  const label = String(rg?.label || "—");
+
+  const chips = [];
+  if (gateTxt !== "—") chips.push(`Gate: ${gateTxt}`);
+  if (label && label !== "—") chips.push(`Regime: ${label}`);
+  if (payload?.eventRisk?.label) chips.push(`Event risk: ${String(payload.eventRisk.label)}`);
+  const chipHtml = chips.slice(0, 3).map((c) => `<span class="taChip">${escapeHtml(c)}</span>`).join("");
+
+  const dots = Array.from({ length: 5 }).map((_, i) => `<span class="taDot ${i < 3 ? "isOn" : ""}"></span>`).join("");
+
+  host.classList.toggle("hidden", !t || t === "—");
+  if (!t || t === "—") return;
+
+  const pxTxt = Number.isFinite(price) ? price.toFixed(2) : "—";
+  host.innerHTML = `
+    <div class="taPanel">
+      <div class="taHeader">
+        <div class="taHeaderRow">
+          <div class="taHeaderTitle">${escapeHtml(t)} — Engine 1</div>
+          <div class="taHeaderMeta">EOD: ${escapeHtml(barDate || "—")} • Price: <span class="mono">${escapeHtml(pxTxt)}</span></div>
+        </div>
+        <div class="taHeaderRow taHeaderRow--sub">
+          <div class="taBiasPill taBiasPill--neu">RISK CHECK</div>
+          <div class="taConf" title="Confidence dots (heuristic)">${dots}</div>
+          <div class="taChips">${chipHtml}</div>
+          <div class="taHeaderActions">
+            <button class="taActionBtn" type="button" id="e1CopySnapshot">Copy snapshot</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="taGrid" aria-label="Engine 1 instrument cards">
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Breach rate</div></div>
+          <div class="taCardState mono">${Number.isFinite(br) ? escapeHtml(br.toFixed(2)) + "%" : "—"}</div>
+          <div class="taCardInterp">Share of usable events that breached (k-controlled).</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Avg overshoot if breached</div></div>
+          <div class="taCardState mono">${Number.isFinite(os) ? escapeHtml(os.toFixed(2)) + "%" : "—"}</div>
+          <div class="taCardInterp">Tail severity conditional on breach.</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Regime</div></div>
+          <div class="taCardState">${escapeHtml(label)}</div>
+          <div class="taCardInterp">Market + single-name stress overlay.</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Trade gate</div></div>
+          <div class="taCardState">${escapeHtml(gateTxt)}</div>
+          <div class="taCardInterp">OK / Caution / No trade (risk-first).</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const snap = `${t} (Engine 1) | EOD ${barDate || "—"} | Price ${pxTxt} | Breach ${Number.isFinite(br) ? br.toFixed(2) + "%" : "—"} | Overshoot ${Number.isFinite(os) ? os.toFixed(2) + "%" : "—"} | Gate ${gateTxt}`;
+  const btn = $("e1CopySnapshot");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      try {
+        if (window.RavenUI?.copyToClipboard) await window.RavenUI.copyToClipboard(snap);
+        else await navigator.clipboard.writeText(snap);
+      } catch {
+        // ignore
+      }
+    });
+  }
+}
+
 function _pickMeaningfulClusters(sideClusters, spot, strikeStep) {
   const xs = Array.isArray(sideClusters) ? sideClusters : [];
   if (!xs.length) return [];
@@ -1539,6 +1626,9 @@ function render(payload) {
   const b = payload.baseline || {};
   $("avgRatio").textContent = fmtX(b.avg_ratio_realized_to_implied);
   $("eventsUsed").textContent = `${s.events_used ?? "—"} / ${s.events_found ?? "—"}`;
+
+  // Scan-first decision header (instrument panel style)
+  try { renderEngine1DecisionPanel(payload); } catch { /* ignore */ }
 
   const rg = payload.regime || {};
   const asOf = $("regimeAsOf");

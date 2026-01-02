@@ -287,6 +287,100 @@ function render(payload) {
   const end = parseIsoDate(payload?.range?.end) || new Date();
   const anchorDt = parseIsoDate(state.anchor) || new Date();
 
+  // --- Scan panel (instrument-style summary, TA-cohesive) ---
+  const scan = $("calendarScanSection");
+  if (scan) {
+    const total = days.reduce((acc, d) => {
+      const e = d?.earnings || {};
+      const b = Array.isArray(e?.BMO) ? e.BMO.length : 0;
+      const a = Array.isArray(e?.AMC) ? e.AMC.length : 0;
+      const u = Array.isArray(e?.UNK) ? e.UNK.length : 0;
+      return { BMO: acc.BMO + b, AMC: acc.AMC + a, UNK: acc.UNK + u };
+    }, { BMO: 0, AMC: 0, UNK: 0 });
+    const earnTotal = total.BMO + total.AMC + total.UNK;
+
+    const evAll = days.flatMap((d) => Array.isArray(d?.events) ? d.events : []).filter(shouldShowEvent);
+    const evKinds = evAll.reduce((m, ev) => {
+      const k = String(ev?.kind || "").toUpperCase();
+      m[k] = (m[k] || 0) + 1;
+      return m;
+    }, {});
+    const hiMacro = (evKinds.FED || 0) + (evKinds.ECON || 0);
+    const holidayN = (evKinds.HOLIDAY || 0);
+    const earlyCloseN = (evKinds.EARLY_CLOSE || 0);
+    const opexN = (evKinds.OPEX || 0);
+
+    const chips = [];
+    chips.push(state.engine1Only ? "Engine‑1 eligible only" : "All names");
+    chips.push(view === "month" ? "Month view" : view === "week" ? "Week view" : "Day view");
+    if (hiMacro > 0) chips.push(`Macro events: ${hiMacro}`);
+    else chips.push("Macro: quiet");
+    const chipHtml = chips.slice(0, 3).map((c) => `<span class="taChip">${escapeHtml(c)}</span>`).join("");
+
+    const asOf = payload?.meta?.generatedAt || "—";
+    const range = `${isoDate(start) || "—"} → ${isoDate(end) || "—"}`;
+
+    scan.innerHTML = `
+      <div class="taPanel">
+        <div class="taHeader">
+          <div class="taHeaderRow">
+            <div class="taHeaderTitle">Calendar — Scan</div>
+            <div class="taHeaderMeta">Range: ${escapeHtml(range)} • asOf: ${escapeHtml(asOf)}</div>
+          </div>
+          <div class="taHeaderRow taHeaderRow--sub">
+            <div class="taBiasPill taBiasPill--neu">PLANNING VIEW</div>
+            <div class="taChips">${chipHtml}</div>
+          </div>
+        </div>
+
+        <div class="taGrid" aria-label="Calendar instrument cards">
+          <div class="taCard">
+            <div class="taCardTop">
+              <div class="taCardTitle">
+                Earnings in range
+                <span class="tipWrap">
+                  <button class="tipBtn" type="button" aria-label="Earnings count help" aria-expanded="false">i</button>
+                  <div class="tipPanel" role="tooltip">
+                    <div class="tipTitle">Earnings count (BMO/AMC/UNK)</div>
+                    <div class="tipBody">
+                      <p>Counts earnings in the currently visible range. Use BMO vs AMC split to plan event windows.</p>
+                    </div>
+                  </div>
+                </span>
+              </div>
+            </div>
+            <div class="taCardState mono">${escapeHtml(String(earnTotal))}</div>
+            <div class="taCardInterp">BMO ${escapeHtml(String(total.BMO))} · AMC ${escapeHtml(String(total.AMC))} · UNK ${escapeHtml(String(total.UNK))}</div>
+          </div>
+
+          <div class="taCard">
+            <div class="taCardTop">
+              <div class="taCardTitle">High-impact macro</div>
+            </div>
+            <div class="taCardState mono">${escapeHtml(String(hiMacro))}</div>
+            <div class="taCardInterp">FED ${escapeHtml(String(evKinds.FED || 0))} · ECON ${escapeHtml(String(evKinds.ECON || 0))}</div>
+          </div>
+
+          <div class="taCard">
+            <div class="taCardTop">
+              <div class="taCardTitle">Market structure</div>
+            </div>
+            <div class="taCardState mono">${escapeHtml(String(holidayN + earlyCloseN + opexN))}</div>
+            <div class="taCardInterp">Holiday ${escapeHtml(String(holidayN))} · Early close ${escapeHtml(String(earlyCloseN))} · OpEx ${escapeHtml(String(opexN))}</div>
+          </div>
+
+          <div class="taCard">
+            <div class="taCardTop">
+              <div class="taCardTitle">Universe filter</div>
+            </div>
+            <div class="taCardState">${state.engine1Only ? "Engine‑1 eligible" : "All names"}</div>
+            <div class="taCardInterp">Change in Settings; affects what appears on the grid.</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   const title = $("rangeTitle");
   const sub = $("rangeSub");
   if (title) title.textContent = fmtRangeTitle(view, start, end, anchorDt);

@@ -181,6 +181,13 @@ function _svgStackMini({ state = "neutral" } = {}) {
 function _taCopy(text) {
   const t = String(text ?? "");
   if (!t) return Promise.resolve(false);
+  if (window.RavenUI && typeof window.RavenUI.copyToClipboard === "function") {
+    try {
+      return Promise.resolve(window.RavenUI.copyToClipboard(t));
+    } catch {
+      // fall through
+    }
+  }
   if (navigator?.clipboard?.writeText) return navigator.clipboard.writeText(t).then(() => true).catch(() => false);
   // Fallback
   return new Promise((resolve) => {
@@ -681,7 +688,12 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       root.querySelector(".taAnalysisExpanded")?.classList.remove("hidden");
     });
     collapseBtn.addEventListener("click", () => {
-      if (_taGetMode() === "explain") return; // explain mode keeps expanded
+      // If user hits Collapse while in Explain, treat it as "go back to Scan mode" + collapse.
+      if (_taGetMode() === "explain") {
+        _taSetMode("scan");
+        renderTechnicalsDailyPanel(payload, { rootId, symbolOverride });
+        return;
+      }
       root.querySelector(".taAnalysisCollapsed")?.classList.remove("hidden");
       root.querySelector(".taAnalysisExpanded")?.classList.add("hidden");
     });

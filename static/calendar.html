@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Raven-Tech.co · Earnings Calendar</title>
+    <title>Raven-Tech.co · Calendar</title>
     <meta name="theme-color" content="#f5f5f7" />
     <meta
       name="description"
@@ -15,18 +15,16 @@
   </head>
   <body>
     <main class="container" role="main">
-      <header class="calHero">
-        <div class="calHeroLeft">
-          <img class="calHeroLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
-          <div class="calHeroText">
-            <div class="calHeroTitle">Raven-Tech.co</div>
-            <div class="calHeroSubtitle">
-              Volatility-first calendar for event-driven premium selling.
-            </div>
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Calendar · Volatility-first planning for event-driven premium selling</div>
           </div>
         </div>
-        <div class="calHeroRight">
-          <a class="primaryButton" href="/" style="text-decoration:none;">Earnings</a>
+        <div class="tbInputs topNav">
+          <a class="primaryButton" href="/" style="text-decoration:none;">Calendar</a>
           <a class="primaryButton" href="/breach" style="text-decoration:none;">Engine 1</a>
           <a id="engine2Link" class="primaryButton hidden" href="/spx" style="text-decoration:none;">Engine 2</a>
         </div>
@@ -57,6 +55,8 @@
         </div>
       </section>
 
+      <section id="calendarScanSection" class="surface" aria-label="Calendar scan panel"></section>
+
       <section class="calGridWrap" aria-label="Calendar">
         <div id="calGrid" class="calGrid"></div>
       </section>
@@ -65,7 +65,7 @@
     </main>
 
     <!-- Settings modal -->
-    <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Earnings settings">
+    <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Calendar settings">
       <div class="modalCard">
         <div class="modalHead">
           <div class="modalTitle">Calendar Settings</div>
@@ -96,7 +96,7 @@
           <div class="modalSection">
             <div class="modalSectionTitle">Notes</div>
             <div class="finePrint muted">
-              Earnings tiles show upcoming earnings from Benzinga. Click a ticker to open Engine 1 (rank/grade will be reintroduced later).
+              Calendar tiles show upcoming earnings from Benzinga. Click a ticker to open Engine 1 (rank/grade will be reintroduced later).
             </div>
           </div>
         </div>
@@ -170,6 +170,7 @@
       </div>
     </div>
 
+    <script src="/static/ui_kit.js"></script>
     <script src="/static/calendar.js"></script>
   </body>
 </html>
