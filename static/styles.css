@@ -1798,7 +1798,7 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
-  padding: 12px;
+  padding: 10px;
   min-height: 170px;
   position: relative;
   overflow: hidden;
@@ -1851,7 +1851,7 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .pill.pill--event {
@@ -1879,7 +1879,7 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   color: rgba(11,11,15,0.52);
   letter-spacing: 0.25px;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .calTiles {
@@ -1892,7 +1892,7 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   /* Month grid cells are narrow; use a consistent 2-column tile layout (≈4 rows max when capped). */
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .calGrid--week .calTiles,
@@ -1906,13 +1906,13 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 
 .calGrid--month .calTile {
   /* Tighten spacing so the logo can be larger (better density in month view). */
-  padding: 6px 8px;
-  gap: 4px;
+  padding: 4px 6px;
+  gap: 3px;
 }
 
 .calGrid--month .calTileLogo {
-  width: 52px;
-  height: 52px;
+  width: 58px;
+  height: 58px;
 }
 
 .calGrid--month .calTileTicker {
