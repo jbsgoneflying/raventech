@@ -2738,6 +2738,18 @@ body.landingPage {
   padding: 14px 14px;
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.landingCard:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset, 0 18px 55px rgba(15, 20, 30, 0.10);
+}
+
+.landingCard:active {
+  transform: translateY(0px);
 }
 
 .landingCardTop {
@@ -2747,10 +2759,37 @@ body.landingPage {
   gap: 10px;
 }
 
+.landingCardLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.landingCardIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.landingCardIcon img {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 .landingCardTitle {
   font-size: 13px;
   font-weight: 900;
   letter-spacing: 0.1px;
+  min-width: 0;
 }
 
 .landingCardChip {
@@ -2797,5 +2836,15 @@ body.landingPage {
   .landingH1 { font-size: 30px; }
   .landingFeatureGrid { grid-template-columns: 1fr; }
   .landingHeroFrame { padding: 14px 14px 12px; }
+}
+
+@media (max-width: 640px) {
+  .landingShell { padding: 18px 14px 46px; }
+  .landingHeader { padding: 10px 12px; flex-wrap: wrap; }
+  .landingPill { margin-left: 0; }
+  .landingH1 { font-size: 28px; }
+  .landingHeroCopy { padding: 16px; }
+  .landingHeroMedia { padding: 10px; }
+  .landingCtas { gap: 8px; }
 }
 
