@@ -867,7 +867,7 @@ body {
 
 /* Calendar: +N expand panel (keeps month cells uniform) */
 .calGrid--month .calCell {
-  height: 220px;
+  height: 240px;
 }
 
 .calExpandPanel {
@@ -1911,8 +1911,8 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 }
 
 .calGrid--month .calTileLogo {
-  width: 58px;
-  height: 58px;
+  width: 52px;
+  height: 52px;
 }
 
 .calGrid--month .calTileTicker {

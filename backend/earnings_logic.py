@@ -60,7 +60,8 @@ def classify_timing(annc_tod: Any) -> str:
     """Classify earnings announcement timing as AMC/BMO/UNK using ORATS anncTod."""
     if annc_tod is None:
         return "UNK"
-    s = str(annc_tod).strip().upper()
+    raw = str(annc_tod).strip()
+    s = raw.upper()
     if not s:
         return "UNK"
     if "AMC" in s or "AFTER" in s:
@@ -68,11 +69,35 @@ def classify_timing(annc_tod: Any) -> str:
     if "BMO" in s or "BEFORE" in s:
         return "BMO"
 
+    # Handle time-of-day strings like "06:30:00", "6:30 AM", "18:00", etc.
+    if ":" in raw:
+        try:
+            # normalize: keep first HH:MM, ignore seconds
+            parts = raw.strip().replace(".", ":").split(":")
+            hh = int(parts[0].strip())
+            mm = int(parts[1].strip()) if len(parts) > 1 else 0
+            # AM/PM detection (e.g. "6:30 PM")
+            up = raw.upper()
+            if "PM" in up and hh < 12:
+                hh += 12
+            if "AM" in up and hh == 12:
+                hh = 0
+            minutes = hh * 60 + mm
+            if minutes >= (16 * 60):
+                return "AMC"
+            if minutes <= (9 * 60 + 30):
+                return "BMO"
+        except Exception:
+            pass
+
     # numeric HHMM heuristic (e.g. 1630)
     digits = "".join(ch for ch in s if ch.isdigit())
-    if len(digits) in (3, 4):
+    if len(digits) in (3, 4, 6):
         try:
-            if len(digits) == 3:
+            if len(digits) == 6:
+                hh = int(digits[:2])
+                mm = int(digits[2:4])
+            elif len(digits) == 3:
                 hh = int(digits[0])
                 mm = int(digits[1:])
             else:
