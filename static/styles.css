@@ -377,6 +377,48 @@ body {
   -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
 
+/* Snapshot now uses TA panel structure; preserve the “odds” card spanning. */
+.snapshotPanel #recCard {
+  grid-column: 1 / -1;
+}
+
+.snapshotPanel .taHeaderTitle .tipWrap {
+  margin-left: 8px;
+}
+
+.snapshotPanel .taCardTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.snapshotPanel .tipBtn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--ta-divider);
+  background: transparent;
+  font-weight: 900;
+  color: var(--ta-muted);
+  cursor: pointer;
+}
+
+/* Engine 1: Summary + Regime overlay now use TA panel structure */
+.e1Panel .taHeaderTitle .tipWrap { margin-left: 8px; }
+.e1Panel .taCardTitle { display: inline-flex; align-items: center; gap: 8px; }
+.e1Panel .tipBtn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--ta-divider);
+  background: transparent;
+  font-weight: 900;
+  color: var(--ta-muted);
+  cursor: pointer;
+}
+
+.e1Panel #bufferTargetGrid.miniGrid { margin-top: 10px; }
+
 /* Regime overlay should match TA “instrument cards” (glass + depth). */
 .metricGrid.metricGrid--regime .metricCard {
   background: var(--surface);

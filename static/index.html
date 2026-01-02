@@ -142,187 +142,223 @@
       <section id="results" class="results hidden" aria-label="Results">
         <section class="surface hidden" id="e1DecisionSection" aria-label="Decision header"></section>
         <section class="surface">
-          <div class="sectionHeader">
-            <h2 class="sectionTitle">
-              Summary
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Summary help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Summary (how to interpret)</div>
-                  <div class="tipBody">
-                    <p>Computed over <b>usable</b> earnings events only (must have implied move, realized close→open move, and AMC/BMO timing).</p>
-                    <ul>
-                      <li><b>Breach rate</b>: frequency of outsized gaps vs implied (controlled by k).</li>
-                      <li><b>Overshoot</b>: conditional tail severity when breaches happen.</li>
-                      <li><b>Desk view</b>: high breach + high overshoot = widen, reduce size, or require better credit (risk-only tool).</li>
-                    </ul>
+          <div class="taPanel e1Panel">
+            <div class="taHeader">
+              <div class="taHeaderRow">
+                <div class="taHeaderTitle">
+                  Summary
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Summary help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Summary (how to interpret)</div>
+                      <div class="tipBody">
+                        <p>Computed over <b>usable</b> earnings events only (must have implied move, realized close→open move, and AMC/BMO timing).</p>
+                        <ul>
+                          <li><b>Breach rate</b>: frequency of outsized gaps vs implied (controlled by k).</li>
+                          <li><b>Overshoot</b>: conditional tail severity when breaches happen.</li>
+                          <li><b>Desk view</b>: high breach + high overshoot = widen, reduce size, or require better credit (risk-only tool).</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </span>
+                </div>
+                <div class="taHeaderMeta" id="breachMeta">—</div>
+              </div>
+              <div class="taHeaderRow taHeaderRow--sub">
+                <div class="taBiasPill taBiasPill--neu">EARNINGS RISK</div>
+                <div class="taChips">
+                  <span class="taChip">Breach</span>
+                  <span class="taChip">Tail</span>
+                  <span class="taChip">Baseline</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="taGrid" aria-label="Summary instruments">
+              <div class="taCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Breach Rate
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Breach rate help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Breach rate</div>
+                        <div class="tipBody">
+                          <p>Percent of usable earnings events where \(|realized| &gt; k \\times |implied|\).</p>
+                          <ul>
+                            <li><b>What to look for</b>: persistently high breach rates indicate the market underprices this name’s earnings gap risk.</li>
+                            <li><b>Desk view</b>: higher breach rate → wider wings, smaller size, or avoid selling tight premium into earnings.</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
                   </div>
                 </div>
-              </span>
-            </h2>
-            <div id="breachMeta" class="sectionMeta">—</div>
-          </div>
-
-          <div class="metricGrid">
-            <div class="metricCard">
-              <div class="metricLabel">
-                Breach Rate
-                <span class="tipWrap">
-                  <button class="tipBtn" type="button" aria-label="Breach rate help" aria-expanded="false">i</button>
-                  <div class="tipPanel" role="tooltip">
-                    <div class="tipTitle">Breach rate</div>
-                    <div class="tipBody">
-                      <p>Percent of usable earnings events where \(|realized| &gt; k \\times |implied|\).</p>
-                      <ul>
-                        <li><b>What to look for</b>: persistently high breach rates indicate the market underprices this name’s earnings gap risk.</li>
-                        <li><b>Desk view</b>: higher breach rate → wider wings, smaller size, or avoid selling tight premium into earnings.</li>
-                      </ul>
-                    </div>
-                  </div>
-                </span>
+                <div id="breachRate" class="taCardState">—</div>
+                <div class="taCardInterp muted">Share of usable events that breached</div>
               </div>
-              <div id="breachRate" class="metricValue">—</div>
-              <div class="metricCaption">Share of usable events that breached</div>
-            </div>
 
-            <div class="metricCard">
-              <div class="metricLabel">
-                Avg Overshoot If Breached
-                <span class="tipWrap">
-                  <button class="tipBtn" type="button" aria-label="Overshoot help" aria-expanded="false">i</button>
-                  <div class="tipPanel" role="tooltip">
-                    <div class="tipTitle">Avg overshoot if breached</div>
-                    <div class="tipBody">
-                      <p>Conditional tail severity when a breach happens:</p>
-                      <p class="mono">overshoot = (|realized| − |implied|) / |implied|</p>
-                      <ul>
-                        <li><b>What to look for</b>: high overshoot means “when it breaks, it breaks big.”</li>
-                        <li><b>Desk view</b>: this is the risk behind “blown-out wings.” Consider wider geometry or asymmetric wings if tail is directional.</li>
-                      </ul>
-                    </div>
+              <div class="taCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Avg Overshoot If Breached
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Overshoot help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Avg overshoot if breached</div>
+                        <div class="tipBody">
+                          <p>Conditional tail severity when a breach happens:</p>
+                          <p class="mono">overshoot = (|realized| − |implied|) / |implied|</p>
+                          <ul>
+                            <li><b>What to look for</b>: high overshoot means “when it breaks, it breaks big.”</li>
+                            <li><b>Desk view</b>: this is the risk behind “blown-out wings.” Consider wider geometry or asymmetric wings if tail is directional.</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
                   </div>
-                </span>
+                </div>
+                <div id="avgAbove" class="taCardState">—</div>
+                <div class="taCardInterp muted">Tail severity conditional on breach</div>
               </div>
-              <div id="avgAbove" class="metricValue">—</div>
-              <div class="metricCaption">Tail severity conditional on breach</div>
+
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Avg Realized / Implied</div></div>
+                <div id="avgRatio" class="taCardState mono">—</div>
+                <div class="taCardInterp muted">Baseline ratio across usable events</div>
+              </div>
+
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Events Used</div></div>
+                <div id="eventsUsed" class="taCardState mono">—</div>
+                <div class="taCardInterp muted">Usable / Found in lookback window</div>
+              </div>
             </div>
 
-            <div class="metricCard">
-              <div class="metricLabel">Avg Realized / Implied</div>
-              <div id="avgRatio" class="metricValue mono">—</div>
-              <div class="metricCaption">Baseline ratio across usable events</div>
-            </div>
-
-            <div class="metricCard">
-              <div class="metricLabel">Events Used</div>
-              <div id="eventsUsed" class="metricValue mono">—</div>
-              <div class="metricCaption">Usable / Found in lookback window</div>
-            </div>
+            <div id="actionSummary" class="taCardInterp muted" style="margin-top:10px;" aria-live="polite">—</div>
           </div>
-
-          <div id="actionSummary" class="actionSummary muted" aria-live="polite">—</div>
         </section>
 
         <!-- AskRaven removed -->
 
         <section class="surface">
-          <div class="sectionHeader">
-            <h2 class="sectionTitle">
-              Regime Overlay
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Regime overlay help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Regime overlay (risk climate)</div>
-                  <div class="tipBody">
-                    <p>A risk-only overlay that turns current market + single-name stress into a <b>tail multiplier</b> used to scale wing guidance.</p>
-                    <ul>
-                      <li><b>Inputs</b>: SPY realized vol percentile, ticker IV30 percentile, SPY 5D move percentile.</li>
-                      <li><b>Output</b>: tail multiplier (roughly 0.7–2.0×) + a simple trade gate.</li>
-                      <li><b>Desk view</b>: treat this like a “conditions check” — elevated/stress regimes deserve wider wings or no-trade.</li>
-                    </ul>
-                  </div>
+          <div class="taPanel e1Panel">
+            <div class="taHeader">
+              <div class="taHeaderRow">
+                <div class="taHeaderTitle">
+                  Regime Overlay
+                  <span class="tipWrap">
+                    <button class="tipBtn" type="button" aria-label="Regime overlay help" aria-expanded="false">i</button>
+                    <div class="tipPanel" role="tooltip">
+                      <div class="tipTitle">Regime overlay (risk climate)</div>
+                      <div class="tipBody">
+                        <p>A risk-only overlay that turns current market + single-name stress into a <b>tail multiplier</b> used to scale wing guidance.</p>
+                        <ul>
+                          <li><b>Inputs</b>: SPY realized vol percentile, ticker IV30 percentile, SPY 5D move percentile.</li>
+                          <li><b>Output</b>: tail multiplier (roughly 0.7–2.0×) + a simple trade gate.</li>
+                          <li><b>Desk view</b>: treat this like a “conditions check” — elevated/stress regimes deserve wider wings or no-trade.</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </span>
                 </div>
-              </span>
-            </h2>
-            <div class="sectionMeta muted" id="regimeAsOf">—</div>
-          </div>
+                <div class="taHeaderMeta" id="regimeAsOf">—</div>
+              </div>
+              <div class="taHeaderRow taHeaderRow--sub">
+                <div class="taBiasPill taBiasPill--neu">CONDITIONS</div>
+                <div class="taChips">
+                  <span class="taChip">Regime</span>
+                  <span class="taChip">Gamma</span>
+                  <span class="taChip">Targets</span>
+                </div>
+              </div>
+            </div>
 
-          <div class="metricGrid metricGrid--regime">
-            <div class="metricCard">
-              <div class="metricLabel">Regime</div>
-              <div id="regimeLabel" class="metricValue">—</div>
-              <div class="metricCaption">Market + single-name stress</div>
+          <div class="taGrid" aria-label="Regime overlay instruments">
+            <div class="taCard">
+              <div class="taCardTop"><div class="taCardTitle">Regime</div></div>
+              <div id="regimeLabel" class="taCardState">—</div>
+              <div class="taCardInterp muted">Market + single-name stress</div>
             </div>
-            <div class="metricCard">
-              <div class="metricLabel">Tail Multiplier</div>
-              <div id="tailMultiplier" class="metricValue mono">—</div>
-              <div class="metricCaption">Scales wing width guidance</div>
+            <div class="taCard">
+              <div class="taCardTop"><div class="taCardTitle">Tail Multiplier</div></div>
+              <div id="tailMultiplier" class="taCardState mono">—</div>
+              <div class="taCardInterp muted">Scales wing width guidance</div>
             </div>
-            <div class="metricCard" id="marketGammaCard">
-              <div class="metricLabel">
-                Market Dealer Gamma (SPX/SPY · Live)
-                <span class="info" title="Market backdrop only (NOT the selected ticker). Computed from ORATS Live strike-level gamma near spot on SPX/SPXW/SPY as available. Informational only — does not affect historical breach stats, probabilities, or regime training.&#10;&#10;Desk-style guardrail:&#10;Market gamma POSITIVE: OK to run “standard” wings/size if the single-name setup is clean.&#10;Market gamma NEGATIVE: Treat as elevated tail overlay → widen wings, cut size, or require better credit / higher EM.">ⓘ</span>
+            <div class="taCard" id="marketGammaCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">
+                  Market Dealer Gamma (SPX/SPY · Live)
+                  <span class="info" title="Market backdrop only (NOT the selected ticker). Computed from ORATS Live strike-level gamma near spot on SPX/SPXW/SPY as available. Informational only — does not affect historical breach stats, probabilities, or regime training.&#10;&#10;Desk-style guardrail:&#10;Market gamma POSITIVE: OK to run “standard” wings/size if the single-name setup is clean.&#10;Market gamma NEGATIVE: Treat as elevated tail overlay → widen wings, cut size, or require better credit / higher EM.">ⓘ</span>
+                </div>
               </div>
-              <div id="marketGammaMain" class="metricValue">—</div>
-              <div id="marketGammaNote" class="metricCaption muted">—</div>
-              <div id="marketOiNote" class="metricCaption muted">—</div>
+              <div id="marketGammaMain" class="taCardState">—</div>
+              <div id="marketGammaNote" class="taCardInterp muted">—</div>
+              <div id="marketOiNote" class="taCardInterp muted">—</div>
             </div>
-            <div class="metricCard" id="marketOiClustersCard">
-              <div class="metricLabel">
-                Market OI Clusters (Live)
-                <span class="info" title="Dominant open interest shelves near spot (same band as dealer gamma). Shows multiple clusters only when they’re meaningful. Informational only — does not change breach history.">ⓘ</span>
+            <div class="taCard" id="marketOiClustersCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">
+                  Market OI Clusters (Live)
+                  <span class="info" title="Dominant open interest shelves near spot (same band as dealer gamma). Shows multiple clusters only when they’re meaningful. Informational only — does not change breach history.">ⓘ</span>
+                </div>
               </div>
-              <div id="marketOiMeta" class="metricCaption muted">—</div>
-              <div id="marketOiPut" class="metricCaption muted">Put: —</div>
-              <div id="marketOiCall" class="metricCaption muted">Call: —</div>
+              <div id="marketOiMeta" class="taCardState mono">—</div>
+              <div id="marketOiPut" class="taCardInterp muted">Put: —</div>
+              <div id="marketOiCall" class="taCardInterp muted">Call: —</div>
             </div>
-            <div class="metricCard" id="tickerGammaCard">
-              <div class="metricLabel">
-                <span id="tickerGammaLabel">Ticker Dealer Gamma (Live)</span>
-                <span class="info" title="Single-name dealer gamma context for the selected ticker (live chain near spot). Expiry is targeted to the earnings window when possible. Band is sized to ±(1.0× EM) around spot (clamped). Informational only — does not affect historical breach stats, probabilities, or regime training.&#10;&#10;Desk-style guardrail:&#10;Market gamma POSITIVE: OK to run “standard” wings/size if the single-name setup is clean.&#10;Market gamma NEGATIVE: Treat as elevated tail overlay → widen wings, cut size, or require better credit / higher EM.">ⓘ</span>
+            <div class="taCard" id="tickerGammaCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">
+                  <span id="tickerGammaLabel">Ticker Dealer Gamma (Live)</span>
+                  <span class="info" title="Single-name dealer gamma context for the selected ticker (live chain near spot). Expiry is targeted to the earnings window when possible. Band is sized to ±(1.0× EM) around spot (clamped). Informational only — does not affect historical breach stats, probabilities, or regime training.&#10;&#10;Desk-style guardrail:&#10;Market gamma POSITIVE: OK to run “standard” wings/size if the single-name setup is clean.&#10;Market gamma NEGATIVE: Treat as elevated tail overlay → widen wings, cut size, or require better credit / higher EM.">ⓘ</span>
+                </div>
               </div>
-              <div id="tickerGammaMain" class="metricValue">—</div>
-              <div id="tickerGammaNote" class="metricCaption muted">—</div>
-              <div id="tickerOiNote" class="metricCaption muted">—</div>
+              <div id="tickerGammaMain" class="taCardState">—</div>
+              <div id="tickerGammaNote" class="taCardInterp muted">—</div>
+              <div id="tickerOiNote" class="taCardInterp muted">—</div>
             </div>
-            <div class="metricCard" id="tickerOiClustersCard">
-              <div class="metricLabel">
-                Ticker OI Clusters (Live)
-                <span class="info" title="Dominant open interest shelves near spot (same band as dealer gamma). Shows multiple clusters only when they’re meaningful. Informational only — does not change breach history.">ⓘ</span>
+            <div class="taCard" id="tickerOiClustersCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">
+                  Ticker OI Clusters (Live)
+                  <span class="info" title="Dominant open interest shelves near spot (same band as dealer gamma). Shows multiple clusters only when they’re meaningful. Informational only — does not change breach history.">ⓘ</span>
+                </div>
               </div>
-              <div id="tickerOiMeta" class="metricCaption muted">—</div>
-              <div id="tickerOiPut" class="metricCaption muted">Put: —</div>
-              <div id="tickerOiCall" class="metricCaption muted">Call: —</div>
+              <div id="tickerOiMeta" class="taCardState mono">—</div>
+              <div id="tickerOiPut" class="taCardInterp muted">Put: —</div>
+              <div id="tickerOiCall" class="taCardInterp muted">Call: —</div>
             </div>
-            <div class="metricCard">
-              <div class="metricLabel">Trade Gate</div>
-              <div id="tradeGate" class="metricValue">—</div>
-              <div class="metricCaption">OK / Caution / No Trade</div>
+            <div class="taCard">
+              <div class="taCardTop"><div class="taCardTitle">Trade Gate</div></div>
+              <div id="tradeGate" class="taCardState">—</div>
+              <div class="taCardInterp muted">OK / Caution / No Trade</div>
             </div>
-            <div class="metricCard">
-              <div class="metricLabel">
-                Suggested Adjustment
-                <span class="info" title="Adjustment derived from quarter seasonality baseline and current regime inputs (SPY realized volatility percentile + single-name IV expansion + correlation proxy).">ⓘ</span>
+            <div class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">
+                  Suggested Adjustment
+                  <span class="info" title="Adjustment derived from quarter seasonality baseline and current regime inputs (SPY realized volatility percentile + single-name IV expansion + correlation proxy).">ⓘ</span>
+                </div>
               </div>
-              <div id="regimeMessage" class="metricValue metricValue--message">—</div>
-              <div class="metricCaption">Based on quarter + regime</div>
+              <div id="regimeMessage" class="taCardState">—</div>
+              <div class="taCardInterp muted">Based on quarter + regime</div>
             </div>
-            <div id="bufferTargetCard" class="metricCard">
-              <div class="metricLabel">
-                Final EM Multipliers (Strike Targets)
-                <span
-                  class="info"
-                  title="Final wing multipliers to use for strike targeting. Multiply each by the event implied move (EM) to get your short-strike distance."
-                  >ⓘ</span
-                >
+            <div id="bufferTargetCard" class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">
+                  Final EM Multipliers (Strike Targets)
+                  <span class="info" title="Final wing multipliers to use for strike targeting. Multiply each by the event implied move (EM) to get your short-strike distance.">ⓘ</span>
+                </div>
               </div>
               <div class="segmented" role="group" aria-label="Buffer mode">
                 <button id="bufferModeSymmetric" class="segButton" type="button">Symmetric</button>
                 <button id="bufferModeAsymmetric" class="segButton" type="button">Asymmetric (TAS)</button>
               </div>
               <div id="bufferTargetGrid" class="miniGrid"></div>
-              <div id="bufferTargetSubtext" class="metricCaption muted">Multiply by EM to target short strikes.</div>
+              <div id="bufferTargetSubtext" class="taCardInterp muted">Multiply by EM to target short strikes.</div>
             </div>
+          </div>
           </div>
 
           <!-- Engine 1: Dealer Gamma Map (selected ticker) -->
