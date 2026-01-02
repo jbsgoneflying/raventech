@@ -791,6 +791,97 @@ body {
   color: var(--ta-muted);
 }
 
+/* Popover (card details) */
+.taPopoverOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.22);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  z-index: 9999;
+}
+
+@media (prefers-color-scheme: dark) {
+  .taPopoverOverlay { background: rgba(0, 0, 0, 0.45); }
+}
+
+.taPopover {
+  width: min(560px, 92vw);
+  max-height: min(78vh, 680px);
+  overflow: auto;
+  padding: 14px;
+}
+
+.taPopoverTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ta-divider);
+}
+
+.taPopoverTitle {
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.06px;
+}
+
+.taPopoverClose {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--ta-divider);
+  background: transparent;
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--ta-muted);
+  cursor: pointer;
+}
+
+.taPopoverBody {
+  padding-top: 10px;
+}
+
+.taPopoverValue {
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 0.04px;
+}
+
+.taPopoverDelta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ta-muted);
+}
+
+.taPopoverLevels {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ta-divider);
+  display: grid;
+  gap: 8px;
+}
+
+.taLevelRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.taLevelK {
+  font-size: 12px;
+  color: var(--ta-muted);
+  font-weight: 800;
+}
+
+.taLevelV {
+  font-size: 12px;
+  font-weight: 850;
+}
+
 /* Micro-visual strokes */
 .taArcBase { stroke: var(--ta-divider); stroke-width: 6; stroke-linecap: round; }
 .taArc { stroke-width: 6; stroke-linecap: round; stroke-dasharray: 130; stroke-dashoffset: 0; opacity: 0.22; }

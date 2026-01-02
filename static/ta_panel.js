@@ -324,6 +324,29 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       stateLabel: emaRegime === "bull" ? "Above EMA200" : emaRegime === "bear" ? "Below EMA200" : "Unknown",
       interp: "Primary swing regime divider.",
       tooltip: `EMA200 regime: price vs EMA200. Regime=${emaRegime || "—"}.`,
+      details: {
+        value: (() => {
+          const v = Number(vm.levels.EMA200);
+          return Number.isFinite(v) ? `EMA200 ${_taFmt2(v)}` : "EMA200 —";
+        })(),
+        delta: (() => {
+          const d = tech?.distances?.levels?.ema200 || null;
+          const dp = Number(d?.diffPts);
+          const pct = Number(d?.diffPct);
+          if (!Number.isFinite(dp)) return null;
+          const side = dp > 0 ? "above" : dp < 0 ? "below" : "at";
+          const ptxt = Number.isFinite(pct) ? `${Math.abs(pct).toFixed(2)}%` : "—";
+          return `Price is ${side} by ${Math.abs(dp).toFixed(2)} pts (${ptxt})`;
+        })(),
+        bullets: [
+          "EMA200 is the primary swing regime divider.",
+          "Above EMA200: pullbacks often behave like trend entries; below: rallies are lower-quality until repaired.",
+        ],
+        levels: [
+          { label: "Price", value: vm.priceText },
+          { label: "EMA200", value: Number.isFinite(Number(vm.levels.EMA200)) ? _taFmt2(vm.levels.EMA200) : "—" },
+        ],
+      },
     },
     {
       id: "emastack",
@@ -332,6 +355,19 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       stateLabel: emaStack === "bull" ? "Aligned ↑" : emaStack === "bear" ? "Aligned ↓" : "Mixed",
       interp: "Stack alignment frames pullback risk.",
       tooltip: `EMA stack: alignment of EMA21/50/200. Stack=${emaStack || "—"}.`,
+      details: {
+        value: `Stack: ${emaStack || "—"}`,
+        delta: null,
+        bullets: [
+          "Aligned (21>50>200) supports trend-follow swing continuation; mixed stacks increase chop risk.",
+          "Watch EMA21/EMA50 as the first lines that flip the short-term swing character.",
+        ],
+        levels: [
+          { label: "EMA21", value: Number.isFinite(Number(vm.levels.EMA21)) ? _taFmt2(vm.levels.EMA21) : "—" },
+          { label: "EMA50", value: Number.isFinite(Number(vm.levels.EMA50)) ? _taFmt2(vm.levels.EMA50) : "—" },
+          { label: "EMA200", value: Number.isFinite(Number(vm.levels.EMA200)) ? _taFmt2(vm.levels.EMA200) : "—" },
+        ],
+      },
     },
     {
       id: "rsi",
@@ -340,6 +376,15 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       stateLabel: Number.isFinite(rsiVal) ? `${_taFmt2(rsiVal)} ${rsiArrow}` : "—",
       interp: "Bull regimes often hold 40–50 on pullbacks.",
       tooltip: `RSI(14): momentum oscillator. Value=${Number.isFinite(rsiVal) ? _taFmt2(rsiVal) : "—"}; Δ1d=${Number.isFinite(rsiSlope) ? _taFmt2(rsiSlope) : "—"}.`,
+      details: {
+        value: Number.isFinite(rsiVal) ? `RSI(14) ${_taFmt2(rsiVal)}` : "RSI(14) —",
+        delta: Number.isFinite(rsiSlope) ? `Δ1d ${rsiSlope > 0 ? "+" : ""}${_taFmt2(rsiSlope)}` : null,
+        bullets: [
+          "RSI is a momentum gauge; treat it as context, not a standalone signal.",
+          "In bull regimes, RSI often holds ~40–50 on pullbacks; in bear regimes it often fails there.",
+        ],
+        levels: [],
+      },
     },
     {
       id: "macd",
@@ -348,6 +393,24 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       stateLabel: macdCross ? `${macdCross} cross` : (histTrend ? `hist ${histTrend}` : "No cross"),
       interp: "Acceleration check (cross + histogram).",
       tooltip: `MACD: cross=${macdCross || "none"}; histTrend=${histTrend || "—"}.`,
+      details: {
+        value: (() => {
+          const m = Number(tech?.macd?.macd);
+          const s = Number(tech?.macd?.signalLine);
+          const h = Number(tech?.macd?.hist);
+          const parts = [];
+          parts.push(`MACD ${Number.isFinite(m) ? m.toFixed(4) : "—"}`);
+          parts.push(`Signal ${Number.isFinite(s) ? s.toFixed(4) : "—"}`);
+          parts.push(`Hist ${Number.isFinite(h) ? h.toFixed(4) : "—"}`);
+          return parts.join(" · ");
+        })(),
+        delta: macdCross ? `Cross: ${macdCross}` : (histTrend ? `Histogram: ${histTrend}` : null),
+        bullets: [
+          "MACD cross is a regime inflection check; histogram trend is an acceleration/deceleration proxy.",
+          "Treat MACD as confirmation for swing entries/exits rather than a primary trigger by itself.",
+        ],
+        levels: [],
+      },
     },
     {
       id: "bb",
@@ -356,6 +419,26 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       stateLabel: bbSqueeze ? "Squeeze" : "Normal",
       interp: "Compression often precedes breakout; wait for follow-through.",
       tooltip: `Bollinger bandwidth%=${Number.isFinite(bbBw) ? _taFmt2(bbBw) : "—"}; squeeze=${bbSqueeze ? "yes" : "no"}.`,
+      details: {
+        value: (() => {
+          const bw = Number(tech?.bollinger?.bandwidthPct);
+          const pb = Number(tech?.bollinger?.percentB);
+          const st = String(tech?.bollinger?.state || "");
+          const bwTxt = Number.isFinite(bw) ? `${_taFmt2(bw)}%` : "—";
+          const pbTxt = Number.isFinite(pb) ? pb.toFixed(2) : "—";
+          return `Bandwidth ${bwTxt} · %B ${pbTxt} · State ${st || "—"}`;
+        })(),
+        delta: bbSqueeze ? "Squeeze: volatility compressed" : null,
+        bullets: [
+          "Bollinger bandwidth tracks volatility regime. Compression often precedes expansion.",
+          "Squeeze is an attention state; wait for directional confirmation/follow-through.",
+        ],
+        levels: [
+          { label: "BB mid", value: Number.isFinite(Number(vm.levels.BBmid)) ? _taFmt2(vm.levels.BBmid) : "—" },
+          { label: "BB upper", value: Number.isFinite(Number(vm.levels.BBupper)) ? _taFmt2(vm.levels.BBupper) : "—" },
+          { label: "BB lower", value: Number.isFinite(Number(vm.levels.BBlower)) ? _taFmt2(vm.levels.BBlower) : "—" },
+        ],
+      },
     },
     {
       id: "ichimoku",
@@ -364,6 +447,23 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
       stateLabel: ichState ? ichState.replaceAll("_", " ") : "—",
       interp: "Trend strength proxy; avoid cloud re-entry.",
       tooltip: `Ichimoku cloud state=${ichState || "—"}.`,
+      details: {
+        value: (() => {
+          const bias = String(tech?.ichimoku?.cloudNow?.cloudBias || "");
+          return `State ${ichState || "—"}${bias ? ` · Cloud bias ${bias}` : ""}`;
+        })(),
+        delta: null,
+        bullets: [
+          "Above cloud: trend-follow regime; inside cloud: chop/transition; below cloud: defensive regime.",
+          "Cloud re-entry is a common invalidation for trend-follow swing setups.",
+        ],
+        levels: [
+          { label: "Tenkan", value: Number.isFinite(Number(vm.levels.Tenkan)) ? _taFmt2(vm.levels.Tenkan) : "—" },
+          { label: "Kijun", value: Number.isFinite(Number(vm.levels.Kijun)) ? _taFmt2(vm.levels.Kijun) : "—" },
+          { label: "Cloud top", value: Number.isFinite(Number(vm.levels.CloudTop)) ? _taFmt2(vm.levels.CloudTop) : "—" },
+          { label: "Cloud bottom", value: Number.isFinite(Number(vm.levels.CloudBottom)) ? _taFmt2(vm.levels.CloudBottom) : "—" },
+        ],
+      },
     },
   ];
 
@@ -451,6 +551,58 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
     </div>
   `;
 
+  // --- Popover/details interaction (card click/tap) ---
+  const pop = document.createElement("div");
+  pop.className = "taPopoverOverlay hidden";
+  pop.innerHTML = `
+    <div class="taPopover taGlass" role="dialog" aria-modal="true" aria-label="Indicator details">
+      <div class="taPopoverTop">
+        <div class="taPopoverTitle">Details</div>
+        <button class="taPopoverClose" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="taPopoverBody"></div>
+    </div>
+  `;
+  root.appendChild(pop);
+
+  const popBody = pop.querySelector(".taPopoverBody");
+  const popTitle = pop.querySelector(".taPopoverTitle");
+  const popClose = pop.querySelector(".taPopoverClose");
+
+  const showCard = (cardId) => {
+    const card = cards.find((x) => String(x.id) === String(cardId));
+    if (!card || !popBody || !popTitle) return;
+    const d = card.details || {};
+    const lv = Array.isArray(d.levels) ? d.levels : [];
+    const bs = Array.isArray(d.bullets) ? d.bullets : [];
+    popTitle.textContent = card.title || "Details";
+    popBody.innerHTML = `
+      <div class="taPopoverValue">${_taEscapeHtml(String(d.value || "—"))}</div>
+      ${d.delta ? `<div class="taPopoverDelta">${_taEscapeHtml(String(d.delta))}</div>` : ""}
+      ${bs.length ? `<ul class="taList">${bs.map((b) => `<li>${_taEscapeHtml(String(b))}</li>`).join("")}</ul>` : ""}
+      ${lv.length ? `
+        <div class="taPopoverLevels">
+          ${lv.map((x) => `<div class="taLevelRow"><div class="taLevelK">${_taEscapeHtml(x.label)}</div><div class="taLevelV mono">${_taEscapeHtml(x.value)}</div></div>`).join("")}
+        </div>` : ""}
+    `;
+    pop.classList.remove("hidden");
+    try { popClose?.focus(); } catch { /* ignore */ }
+  };
+
+  const hidePop = () => {
+    pop.classList.add("hidden");
+  };
+
+  popClose?.addEventListener("click", hidePop);
+  pop.addEventListener("click", (ev) => {
+    const t = ev.target;
+    // clicking outside the dialog closes
+    if (t && t.classList && t.classList.contains("taPopoverOverlay")) hidePop();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") hidePop();
+  });
+
   // Wire interactions
   root.querySelectorAll("[data-ta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -487,6 +639,23 @@ function renderTechnicalsDailyPanel(payload, { rootId = "technicalsSection", sym
 
   // Refresh tooltips behavior if the hosting page uses tipWrap tooltips elsewhere.
   try { if (typeof initTooltips === "function") initTooltips(); } catch { /* ignore */ }
+
+  // Card click/tap to open details
+  root.querySelectorAll("[data-ta-card]").forEach((el) => {
+    const id = el.getAttribute("data-ta-card");
+    el.addEventListener("click", (ev) => {
+      const t = ev.target;
+      // clicking the small info button should not open the popover
+      if (t && t.closest && t.closest(".taInfoBtn")) return;
+      showCard(id);
+    });
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        showCard(id);
+      }
+    });
+  });
 }
 
 window.renderTechnicalsDailyPanel = renderTechnicalsDailyPanel;
