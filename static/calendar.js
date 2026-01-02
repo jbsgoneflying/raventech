@@ -791,6 +791,7 @@ function init() {
   // Non-blocking: just toggles Engine 2 nav visibility.
   gateNavLinks();
   initTooltips();
+  try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }
 
   setView("month");
 

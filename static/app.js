@@ -2099,6 +2099,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // AskRaven removed
   initTooltips();
+  try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }
   initEngine1GammaVizUI();
 
   // Optional auto-run for calendar deep-links: /breach?ticker=...&mc=1&autorun=1

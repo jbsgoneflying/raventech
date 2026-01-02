@@ -1033,23 +1033,17 @@ function render(payload) {
   if (recNote) {
     const rows = Array.isArray(like?.byWidth) ? like.byWidth : [];
     const notes = Array.isArray(like?.notes) ? like.notes.filter(Boolean) : [];
-    const oddsLine = (r) => {
+    const oddsItems = rows.map((r) => {
       const w = Number(r?.w);
-      const n = Number(r?.n);
+      const n = (r?.n !== null && r?.n !== undefined) ? String(r.n) : "—";
       const be = r?.breachEitherPct;
-      return `<span class="pill pill--mini neutral">${Number.isFinite(w) ? w.toFixed(2) : "—"}× EM</span><span class="mono">${be === null || be === undefined ? "—" : Number(be).toFixed(2)}%</span><span class="ref">n=${Number.isFinite(n) ? n : "—"}</span>`;
-    };
-    recNote.innerHTML = `
-      <div class="snapshotLines">
-        <div class="snapLine">
-          <div class="snapKey">Odds</div>
-          <div class="pillRow">
-            ${rows.length ? rows.map(r => `<span class="pillRow" style="gap:10px;">${oddsLine(r)}</span>`).join("<span class='spacerDot'>·</span>") : "—"}
-          </div>
-        </div>
-        ${notes.length ? `<details class="snapDetails"><summary>Details</summary><div class="snapDetailBody">${escapeHtml(notes.join(" "))}</div></details>` : ""}
-      </div>
-    `;
+      const wTxt = Number.isFinite(w) ? `${w.toFixed(2)}× EM` : "—";
+      const beTxt = (be === null || be === undefined) ? "—" : fmtPct(be, 2);
+      return `<li><span class="pill pill--mini neutral">${escapeHtml(wTxt)}</span> <span class="mono">${escapeHtml(beTxt)}</span> <span class="ref">n=${escapeHtml(n)}</span></li>`;
+    });
+    recNote.innerHTML = rows.length
+      ? `<ul class="taMiniList">${oddsItems.join("")}</ul>${notes.length ? `<details class="taDetails"><summary>Details</summary><div class="finePrint muted">${escapeHtml(notes.join(" "))}</div></details>` : ""}`
+      : "—";
   }
 
   const reg = payload?.current?.regime || {};
@@ -1369,6 +1363,7 @@ async function main() {
 
   initUnderlyingUI();
   initTooltips();
+  try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }
   initGammaMapUI();
   initGexHeatmapUI();
   // AskRaven removed

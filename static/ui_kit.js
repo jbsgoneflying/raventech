@@ -149,6 +149,70 @@ function initTooltips() {
   window.initTooltips = () => {};
 }
 
+function initInfoTips() {
+  // Click-to-open popover for legacy `.info` icons that only had a title attribute.
+  // Uses the same `.taTipPop` styling as the TA panel so behavior is consistent on touch devices.
+  if (window.__RavenInfoTipsInit) return;
+  window.__RavenInfoTipsInit = true;
+
+  let tipEl = null;
+  let lastAnchor = null;
+
+  const closeTip = () => {
+    if (tipEl && tipEl.parentNode) tipEl.parentNode.removeChild(tipEl);
+    tipEl = null;
+    lastAnchor = null;
+  };
+
+  const openTip = (anchor, text) => {
+    closeTip();
+    const msg = String(text || "").trim();
+    if (!msg) return;
+    lastAnchor = anchor;
+    tipEl = document.createElement("div");
+    tipEl.className = "taTipPop taGlass";
+    tipEl.setAttribute("role", "tooltip");
+    const body = document.createElement("div");
+    body.className = "taTipPopBody";
+    body.style.whiteSpace = "pre-wrap";
+    body.textContent = msg;
+    tipEl.appendChild(body);
+    document.body.appendChild(tipEl);
+
+    const r = anchor.getBoundingClientRect();
+    const pad = 10;
+    const left = Math.max(pad, Math.min(window.innerWidth - pad, r.left + r.width / 2));
+    const top = Math.max(pad, r.bottom + 8);
+    tipEl.style.left = `${left}px`;
+    tipEl.style.top = `${top}px`;
+    tipEl.style.transform = "translateX(-50%)";
+  };
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!(t && t.closest)) return;
+    if (t.closest(".taTipPop")) return;
+    const info = t.closest(".info");
+    if (!info) return;
+    const title = info.getAttribute("title") || info.getAttribute("data-tip") || "";
+    if (!title) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (lastAnchor === info && tipEl) closeTip();
+    else openTip(info, title);
+  });
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (t && t.closest && (t.closest(".taTipPop") || t.closest(".info"))) return;
+    closeTip();
+  });
+
+  document.addEventListener("scroll", closeTip, { passive: true });
+  window.addEventListener("resize", closeTip);
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeTip(); });
+}
+
 // Expose a single global namespace
 window.RavenUI = {
   $,
@@ -157,6 +221,7 @@ window.RavenUI = {
   fetchJson,
   copyToClipboard,
   initTooltips,
+  initInfoTips,
 };
 
 
