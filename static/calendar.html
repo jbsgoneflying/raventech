@@ -64,6 +64,23 @@
       <div id="status" class="status" aria-live="polite"></div>
     </main>
 
+    <!-- Day details drawer (scan → drill) -->
+    <div id="calDrawerOverlay" class="calDrawerOverlay hidden" role="presentation" aria-hidden="true"></div>
+    <aside id="calDrawer" class="calDrawer hidden" role="dialog" aria-modal="false" aria-label="Day details">
+      <div class="calDrawerHead">
+        <div class="calDrawerTitleWrap">
+          <div id="calDrawerTitle" class="calDrawerTitle">—</div>
+          <div id="calDrawerSub" class="calDrawerSub muted">—</div>
+        </div>
+        <div class="calDrawerActions">
+          <button id="calDrawerCopy" class="primaryButton" type="button">Copy day</button>
+          <button id="calDrawerJump" class="primaryButton" type="button">Day view</button>
+          <button id="calDrawerClose" class="iconBtn" type="button" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div id="calDrawerBody" class="calDrawerBody"></div>
+    </aside>
+
     <!-- Settings modal -->
     <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Calendar settings">
       <div class="modalCard">
