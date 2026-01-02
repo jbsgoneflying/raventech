@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from backend.benzinga_client import BenzingaClient
 from backend.config import FeatureFlags
-from backend.orats_client import OratsClient
+from backend.orats_client import OratsClient, OratsError
 
 LOG = logging.getLogger("spx_ic_engine")
 
@@ -2670,12 +2670,25 @@ def compute_engine2_spx_ic(
         pref = "SPX"
         proxy_notes.append("Invalid underlying preference; defaulted to SPX.")
 
-    # Engine 2 policy (per user): no cross-ticker proxies for SPX/SPY/QQQ.
+    # Underlying selection policy:
+    # - Prefer the requested underlying.
+    # - For SPX<->SPY only: allow a proxy fallback if the preferred ticker is unavailable in ORATS dailies.
+    # - For QQQ: do not proxy.
     underlying = pref
+    is_proxy = False
 
     # Use range probe (fast + consistent) to detect availability.
     probe_rows = fetch_dailies_ohlc_range(client, ticker=underlying, start=now - dt.timedelta(days=7), end=now)
     telemetry["counts"]["orats.probe_rows"] = len(probe_rows or [])
+    if not probe_rows and pref in ("SPX", "SPY"):
+        alt = "SPY" if pref == "SPX" else "SPX"
+        probe_rows_alt = fetch_dailies_ohlc_range(client, ticker=alt, start=now - dt.timedelta(days=7), end=now)
+        if probe_rows_alt:
+            underlying = alt
+            is_proxy = True
+            proxy_notes.append(f"{pref} unavailable in ORATS dailies; using {alt} as a proxy for this run.")
+            probe_rows = probe_rows_alt
+            telemetry["counts"]["orats.probe_rows"] = len(probe_rows or [])
     if not probe_rows:
         raise OratsError(f"{underlying} unavailable in ORATS dailies (no rows returned for probe window).")
 
@@ -3632,7 +3645,7 @@ def compute_engine2_spx_ic(
             "seasonalityMode": season_mode,
             "deskLocked": True,
         },
-        "underlying": {"symbol": underlying, "isProxy": False, "notes": proxy_notes},
+        "underlying": {"symbol": underlying, "isProxy": bool(is_proxy), "notes": proxy_notes},
         "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
         "liveContext": live_context,
         "oddsLikeNow": {

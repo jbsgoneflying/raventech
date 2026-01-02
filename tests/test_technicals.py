@@ -1,6 +1,15 @@
 import datetime as dt
 
-from backend.technicals import DailyBar, compute_ema_levels, compute_ichimoku_levels, compute_vwap_proxy
+from backend.technicals import (
+    DailyBar,
+    compute_bollinger_series,
+    compute_ema_levels,
+    compute_ichimoku_levels,
+    compute_macd_series,
+    compute_rsi_series,
+    compute_vwap_proxy,
+    detect_red_dog_reversal,
+)
 
 
 def test_compute_ema_levels_basic_monotonic():
@@ -47,4 +56,47 @@ def test_vwap_proxy_uses_volume_when_available():
     assert v["value"] is not None
     assert v["mode"] in ("rolling_daily_typical_price_vwap", "orats_daily_vwap")
 
+
+def test_rsi_series_monotonic_behaves_sensibly():
+    # Strictly increasing closes should produce high RSI once warmed up.
+    closes = [float(i) for i in range(1, 200)]
+    rsi = compute_rsi_series(closes, period=14)
+    assert rsi[-1] is not None
+    assert float(rsi[-1]) > 70.0
+
+    # Strictly decreasing closes should produce low RSI once warmed up.
+    closes2 = [float(200 - i) for i in range(200)]
+    rsi2 = compute_rsi_series(closes2, period=14)
+    assert rsi2[-1] is not None
+    assert float(rsi2[-1]) < 30.0
+
+
+def test_macd_series_monotonic_hist_directionality():
+    closes = [float(i) for i in range(1, 260)]
+    out = compute_macd_series(closes, fast=12, slow=26, signal=9)
+    hist = out["hist"]
+    # Should have a computed histogram by the end
+    assert hist[-1] is not None
+    assert isinstance(hist[-1], float)
+
+
+def test_bollinger_series_shapes():
+    closes = [100.0 + (i * 0.1) for i in range(120)]
+    out = compute_bollinger_series(closes, period=20, stdev=2.0)
+    assert out["mid"][-1] is not None
+    assert out["upper"][-1] is not None
+    assert out["lower"][-1] is not None
+    assert float(out["upper"][-1]) > float(out["mid"][-1]) > float(out["lower"][-1])
+
+
+def test_red_dog_bullish_pattern_flags():
+    # Construct a simple 2-day bullish Red Dog: lower low + close back above prior low.
+    bars = [
+        DailyBar(trade_date="2025-01-01", open=100, high=110, low=90, close=95, volume=None, vwap=None),
+        DailyBar(trade_date="2025-01-02", open=96, high=108, low=85, close=92, volume=None, vwap=None),
+    ]
+    rd = detect_red_dog_reversal(bars)
+    assert rd["enabled"] is True
+    assert rd["bullish"] is True
+    assert rd["bearish"] is False
 

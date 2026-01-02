@@ -895,6 +895,43 @@ function downloadText(filename, text) {
   URL.revokeObjectURL(url);
 }
 
+function renderTechnicalsNarrative(payload) {
+  const sec = $("technicalsSection");
+  const meta = $("technicalsMeta");
+  const summaryEl = $("technicalsSummary");
+  const bulletsEl = $("technicalsBullets");
+  const invEl = $("technicalsInvalidation");
+  const notesEl = $("technicalsNotes");
+  if (!sec || !meta || !summaryEl || !bulletsEl || !invEl || !notesEl) return;
+
+  const tech = payload?.technicals || null;
+  const nar = tech?.narrative || null;
+  const enabled = !!(tech && tech.enabled && nar && nar.enabled && nar.summary);
+  sec.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+
+  const barDate = String(tech?.barDateUsed || tech?.asOfDate || "").slice(0, 10);
+  const px = Number(nar?.priceUsed ?? tech?.livePrice ?? tech?.lastDailyClose);
+  meta.textContent = `EOD bar: ${barDate || "—"} · price used: ${Number.isFinite(px) ? px.toFixed(2) : "—"}`;
+
+  summaryEl.textContent = String(nar.summary || "—");
+
+  const bullets = Array.isArray(nar?.bullets) ? nar.bullets.filter(Boolean) : [];
+  bulletsEl.innerHTML = bullets.length
+    ? `<ul style="margin:6px 0 0 18px; padding:0; display:grid; gap:6px;">${bullets.map((b) => `<li>${escapeHtml(String(b))}</li>`).join("")}</ul>`
+    : "—";
+
+  const inv = Array.isArray(nar?.invalidation) ? nar.invalidation.filter(Boolean) : [];
+  invEl.innerHTML = inv.length
+    ? `<ul style="margin:6px 0 0 18px; padding:0; display:grid; gap:6px;">${inv.map((b) => `<li>${escapeHtml(String(b))}</li>`).join("")}</ul>`
+    : "—";
+
+  const notes = Array.isArray(nar?.notes) ? nar.notes.filter(Boolean) : [];
+  notesEl.innerHTML = notes.length
+    ? `<ul style="margin:6px 0 0 18px; padding:0; display:grid; gap:6px;">${notes.map((b) => `<li>${escapeHtml(String(b))}</li>`).join("")}</ul>`
+    : "—";
+}
+
 function render(payload) {
   lastPayload = payload;
   const status = $("status");
@@ -1011,6 +1048,8 @@ function render(payload) {
       }
     }
   }
+
+  renderTechnicalsNarrative(payload);
 
   // Dealer Gamma Map (clean hover chart)
   // Fetch after a successful run so the panel stays in sync with the user's session.
