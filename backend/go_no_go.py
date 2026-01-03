@@ -202,7 +202,8 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
         return {"enabled": False, "notes": ["Missing ticker."]}
     notes: List[str] = []
     source: Optional[str] = None
-    fields = "ticker,stockPrice,spotPrice,avgDollarVol20,avgDolVol20,avgDVol20,avgVolume20,avgVol20,marketCap"
+    # Include a few extra aggregate option fields when available (some ORATS plans expose these instead of stock volume).
+    fields = "ticker,stockPrice,spotPrice,price,last,avgDollarVol20,avgDolVol20,avgDVol20,avgDollarVol20d,avgDollarVolume20,avgVolume20,avgVol20,avgVolume,avgVol,marketCap,cVolu,pVolu"
     try:
         rows = client.cores(ticker=t, fields=fields).rows or []
         row = rows[0] if rows and isinstance(rows[0], dict) else {}
@@ -254,6 +255,8 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
         avg_dvol = float(px) * float(avg_vol)
         source = source or "cores_price_x_avgVolume20"
     mcap = _to_float(row.get("marketCap"))
+    cvolu = _to_float(row.get("cVolu") or row.get("cvolu"))
+    pvolu = _to_float(row.get("pVolu") or row.get("pvolu"))
 
     # If still missing, record why cores wasn't enough (even if /cores call succeeded).
     if avg_dvol is None:
@@ -308,7 +311,16 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
             notes.append(f"/hist/dailies probe failed: {type(e).__name__}: {e}")
 
     enabled = bool(row) or (avg_dvol is not None) or (px is not None)
-    return {"enabled": enabled, "price": px, "avgDollarVol20d": avg_dvol, "marketCap": mcap, "notes": notes, "source": source}
+    return {
+        "enabled": enabled,
+        "price": px,
+        "avgDollarVol20d": avg_dvol,
+        "marketCap": mcap,
+        "cVolu": cvolu,
+        "pVolu": pvolu,
+        "notes": notes,
+        "source": source,
+    }
 
 
 def _band_liquidity_agg(
@@ -1091,8 +1103,32 @@ def compute_go_no_go(
     else:
         opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Missing trade date for options chain."
 
+    # Decide final liquidity state:
+    # - Prefer the spec'd underlying $vol20 gate when available
+    # - If underlying $vol is unavailable (common on some ORATS plans), allow a strict options-liquidity proxy
+    #   to avoid permanent MISSING when we *do* have strong executable options liquidity.
     if avg_dvol is None:
-        liq_state, liq_code, liq_explain = "MISSING", "SN_LIQ_UNDERLYING_MISSING", "Underlying liquidity (avg $vol) unavailable."
+        # Proxy rule: if options liquidity is PASS and we have a spot, treat underlying as OK-by-proxy.
+        ok_by_proxy = False
+        proxy_reason = ""
+        if opt_state == "PASS" and under_px is not None and band_put and band_call:
+            oi_p = _to_float((band_put or {}).get("sumOI")) or 0.0
+            oi_c = _to_float((band_call or {}).get("sumOI")) or 0.0
+            vol_p = _to_float((band_put or {}).get("sumVol")) or 0.0
+            vol_c = _to_float((band_call or {}).get("sumVol")) or 0.0
+            # Require BOTH sides to meet at least one of the aggregate thresholds (same as the options gate itself).
+            def _side_ok(oi_sum: float, vol_sum: float) -> bool:
+                return (float(oi_sum) >= float(BAND_OI_SUM_MIN)) or (float(vol_sum) >= float(BAND_VOL_SUM_MIN))
+
+            if _side_ok(oi_p, vol_p) and _side_ok(oi_c, vol_c):
+                ok_by_proxy = True
+                proxy_reason = "Underlying $vol unavailable; passed using options-liquidity proxy."
+
+        if ok_by_proxy:
+            liq_state, liq_code, liq_explain = "PASS", None, proxy_reason
+            liq_notes.append(proxy_reason)
+        else:
+            liq_state, liq_code, liq_explain = "MISSING", "SN_LIQ_UNDERLYING_MISSING", "Underlying liquidity (avg $vol) unavailable."
     elif not underlying_ok:
         liq_state, liq_code, liq_explain = "FAIL", "SN_LIQ_UNDERLYING_TOO_LOW", f"avgDollarVol20d {float(avg_dvol):.0f} below {AVG_DVOL_MIN:.0f}."
     else:
@@ -1110,6 +1146,7 @@ def compute_go_no_go(
                 "avgDollarVol20d": avg_dvol,
                 "avgDollarVolOk": underlying_ok,
                 "underlyingSource": liq.get("source") if isinstance(liq, dict) else None,
+                "underlyingOptAgg": {"cVolu": (liq.get("cVolu") if isinstance(liq, dict) else None), "pVolu": (liq.get("pVolu") if isinstance(liq, dict) else None)},
                 "notes": liq_notes,
                 "expiry": opt_expiry,
                 "dteTarget": dte_target,
