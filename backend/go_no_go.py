@@ -220,6 +220,19 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
         source = source or "cores_price_x_avgVolume20"
     mcap = _to_float(row.get("marketCap"))
 
+    # If still missing, record why cores wasn't enough (even if /cores call succeeded).
+    if avg_dvol is None:
+        if not row:
+            notes.append("No /cores snapshot row returned.")
+        else:
+            has_dvol_field = any(row.get(k) is not None for k in ("avgDollarVol20", "avgDolVol20", "avgDVol20"))
+            if not has_dvol_field:
+                notes.append("Missing /cores avgDollarVol20* fields.")
+            if avg_vol is None:
+                notes.append("Missing /cores avgVolume20/avgVol20 fields.")
+            if px is None:
+                notes.append("Missing /cores spot/stock price fields.")
+
     # Fallback: derive avg $ volume from last ~20 trading days of dailies.
     # (This keeps GO/NO-GO resilient when /cores doesn't include volume fields.)
     if avg_dvol is None:
@@ -234,6 +247,8 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
                 avg_dvol = sum(c * v for (c, v) in tail) / float(len(tail))
                 notes.append("avgDollarVol20d derived from /hist/dailies (close*volume).")
                 source = "dailies_close_x_volume"
+            else:
+                notes.append(f"/hist/dailies insufficient volume rows (bars={len(bars)}, usable_close_x_vol={len(pairs)}).")
         except Exception:
             pass
 
