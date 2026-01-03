@@ -222,6 +222,152 @@ window.RavenUI = {
   copyToClipboard,
   initTooltips,
   initInfoTips,
+  installGlobalApiLoading,
 };
+
+// ---------------------------------------------------------------------------
+// Global API loading bar (desk usability): shows a subtle top progress bar for
+// in-flight `/api/*` calls. Centralized via fetch wrapper so all pages benefit.
+// ---------------------------------------------------------------------------
+
+function installGlobalApiLoading({
+  apiPrefix = "/api/",
+  showDelayMs = 150,
+} = {}) {
+  // Idempotent install.
+  if (window.__RavenApiLoadingInstalled) return;
+  window.__RavenApiLoadingInstalled = true;
+
+  const state = {
+    inflight: 0,
+    showTimer: null,
+    lastClickEl: null,
+  };
+
+  const ensureBar = () => {
+    if (document.getElementById("ravenTopLoader")) return;
+    if (!document.body) return;
+    const bar = document.createElement("div");
+    bar.id = "ravenTopLoader";
+    bar.setAttribute("aria-hidden", "true");
+    document.body.appendChild(bar);
+  };
+
+  const isApiUrl = (input) => {
+    try {
+      if (!input) return false;
+      // input can be Request | string | URL
+      const raw = (typeof input === "string") ? input : (input?.url || String(input));
+      const s = String(raw || "");
+      if (s.startsWith(apiPrefix)) return true;
+      if (s.startsWith("http://") || s.startsWith("https://")) {
+        const u = new URL(s, window.location.href);
+        // Only consider same-origin API calls.
+        if (u.origin !== window.location.origin) return false;
+        return u.pathname.startsWith(apiPrefix);
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  const setTempDisabled = (el, on) => {
+    if (!el || !el.classList) return;
+    const tag = String(el.tagName || "").toUpperCase();
+    if (tag === "BUTTON") {
+      if (on) {
+        if (!el.hasAttribute("data-raven-prev-disabled")) {
+          el.setAttribute("data-raven-prev-disabled", el.disabled ? "1" : "0");
+        }
+        el.disabled = true;
+      } else {
+        const prev = el.getAttribute("data-raven-prev-disabled");
+        if (prev !== null) {
+          el.disabled = prev === "1";
+          el.removeAttribute("data-raven-prev-disabled");
+        } else {
+          // If we didn't record, leave as-is.
+        }
+      }
+      return;
+    }
+    if (tag === "A") {
+      if (on) {
+        el.classList.add("ravenTempDisabled");
+        el.setAttribute("aria-disabled", "true");
+      } else {
+        el.classList.remove("ravenTempDisabled");
+        el.removeAttribute("aria-disabled");
+      }
+    }
+  };
+
+  const show = () => {
+    ensureBar();
+    document.documentElement.classList.add("isApiLoading");
+    setTempDisabled(state.lastClickEl, true);
+  };
+
+  const hide = () => {
+    document.documentElement.classList.remove("isApiLoading");
+    setTempDisabled(state.lastClickEl, false);
+  };
+
+  const inc = () => {
+    state.inflight += 1;
+    if (state.inflight === 1) {
+      // Avoid flicker for fast calls.
+      if (state.showTimer) clearTimeout(state.showTimer);
+      state.showTimer = setTimeout(() => {
+        state.showTimer = null;
+        if (state.inflight > 0) show();
+      }, Math.max(0, Number(showDelayMs) || 0));
+    }
+  };
+
+  const dec = () => {
+    state.inflight = Math.max(0, state.inflight - 1);
+    if (state.inflight === 0) {
+      if (state.showTimer) {
+        clearTimeout(state.showTimer);
+        state.showTimer = null;
+      }
+      hide();
+    }
+  };
+
+  // Track the most recently clicked button/link so we can temporarily disable it
+  // while API calls are running (prevents spam-clicking).
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!(t && t.closest)) return;
+    const el = t.closest("button, a");
+    if (!el) return;
+    state.lastClickEl = el;
+  }, { capture: true });
+
+  // Wrap fetch once and count `/api/*` in-flight calls.
+  if (!window.__RavenFetchWrapped && typeof window.fetch === "function") {
+    window.__RavenFetchWrapped = true;
+    const origFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const track = isApiUrl(input);
+      if (track) inc();
+      try {
+        return await origFetch(input, init);
+      } finally {
+        if (track) dec();
+      }
+    };
+  }
+
+  // Ensure bar exists once body is available.
+  if (document.body) ensureBar();
+  else document.addEventListener("DOMContentLoaded", ensureBar, { once: true });
+}
+
+// Auto-install so all pages get consistent loading UX.
+try { installGlobalApiLoading(); } catch { /* ignore */ }
 
 

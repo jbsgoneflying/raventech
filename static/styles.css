@@ -263,6 +263,72 @@ body {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ============================================================
+   Global API loading bar (subtle, glass-friendly)
+   ============================================================ */
+
+#ravenTopLoader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 20000;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+  background: rgba(255, 255, 255, 0.55);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.10);
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  overflow: hidden;
+}
+
+/* Animated "indeterminate" bar */
+#ravenTopLoader::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -40%;
+  height: 100%;
+  width: 38%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 122, 255, 0.00),
+    rgba(0, 122, 255, 0.60),
+    rgba(52, 199, 89, 0.42),
+    rgba(0, 122, 255, 0.00)
+  );
+  animation: ravenTopLoaderMove 1.05s ease-in-out infinite;
+}
+
+@keyframes ravenTopLoaderMove {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(360%); }
+}
+
+.isApiLoading #ravenTopLoader {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Small, consistent feedback while loading */
+.isApiLoading .primaryButton,
+.isApiLoading .linkButton,
+.isApiLoading .segButton,
+.isApiLoading .chipToggle {
+  cursor: progress;
+}
+
+/* Temporary click-guard for anchors (used by ui_kit.js) */
+a.ravenTempDisabled {
+  pointer-events: none;
+  opacity: 0.65;
+  cursor: progress;
+}
+
 .status {
   margin-top: 8px;
   min-height: 18px;
