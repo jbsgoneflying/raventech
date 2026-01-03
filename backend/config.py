@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import List, Tuple
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -34,6 +35,14 @@ def _get_int(name: str, default: int) -> int:
         return int(float(v))
     except (TypeError, ValueError):
         return int(default)
+
+
+def _get_csv_list(name: str, default: List[str]) -> List[str]:
+    v = os.getenv(name)
+    if v is None:
+        return list(default)
+    parts = [p.strip() for p in str(v).split(",")]
+    return [p for p in parts if p]
 
 
 @dataclass(frozen=True)
@@ -128,6 +137,40 @@ class FeatureFlags:
     ENGINE2_MACRO_BASE_OPEX: float = 0.4
     ENGINE2_MACRO_BASE_REFUNDING: float = 0.5
 
+    # --- Engine 1: GO / NO-GO decisioning (strict; additive UI) ---
+    GO_IVP_MIN: float = 0.80
+    GO_IV_SAMPLE_MIN: int = 20
+    GO_IV30_FLOOR: float = 0.30  # 0.30 == 30% (see backend/go_no_go.py)
+    GO_IV_Z_ENABLED: bool = True
+    GO_IV30_Z_MIN: float = 0.75
+
+    GO_MIN_EARNINGS_N: int = 6
+    GO_EM_RICHNESS_MULT: float = 1.05
+
+    GO_AVG_DOLLAR_VOL20D_MIN: float = 200_000_000.0
+    GO_OPT_DELTA_BAND_LO: float = 0.15
+    GO_OPT_DELTA_BAND_HI: float = 0.20
+    GO_OPT_SPREAD_MAX: float = 0.15
+    GO_OPT_MIN_MID: float = 0.20
+    GO_OPT_OI_MIN: float = 500.0
+    GO_OPT_VOL_MIN: float = 50.0
+
+    GO_RV5_JUMP_MAX: float = 1.15
+    GO_RV20_JUMP_MAX: float = 1.10
+    GO_RV5_ACCEL_TIGHTEN_TRIGGER: float = 1.05
+    GO_FLIP_CUTOFF_BASE: float = 2.0
+    GO_FLIP_CUTOFF_TIGHT: float = 2.5
+
+    GO_FORCED_FLOW_WINDOW_TRADING_DAYS: int = 4
+    GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN: int = 4
+    GO_FORCED_FLOW_IMPORTANCE_MED_MIN: int = 3
+    GO_FORCED_FLOW_MANUAL_RANGES: Tuple[str, ...] = ()
+
+    # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
+    LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
+    LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
+    LEGAL_REG_KEYWORDS: Tuple[str, ...] = ()
+
     @classmethod
     def from_env(cls) -> "FeatureFlags":
         return cls(
@@ -191,6 +234,38 @@ class FeatureFlags:
             ENGINE2_MACRO_BASE_NFP=_get_float("ENGINE2_MACRO_BASE_NFP", 0.7),
             ENGINE2_MACRO_BASE_OPEX=_get_float("ENGINE2_MACRO_BASE_OPEX", 0.4),
             ENGINE2_MACRO_BASE_REFUNDING=_get_float("ENGINE2_MACRO_BASE_REFUNDING", 0.5),
+
+            GO_IVP_MIN=_get_float("GO_IVP_MIN", 0.80),
+            GO_IV_SAMPLE_MIN=_get_int("GO_IV_SAMPLE_MIN", 20),
+            GO_IV30_FLOOR=_get_float("GO_IV30_FLOOR", 0.30),
+            GO_IV_Z_ENABLED=_get_bool("GO_IV_Z_ENABLED", True),
+            GO_IV30_Z_MIN=_get_float("GO_IV30_Z_MIN", 0.75),
+
+            GO_MIN_EARNINGS_N=_get_int("GO_MIN_EARNINGS_N", 6),
+            GO_EM_RICHNESS_MULT=_get_float("GO_EM_RICHNESS_MULT", 1.05),
+
+            GO_AVG_DOLLAR_VOL20D_MIN=_get_float("GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0),
+            GO_OPT_DELTA_BAND_LO=_get_float("GO_OPT_DELTA_BAND_LO", 0.15),
+            GO_OPT_DELTA_BAND_HI=_get_float("GO_OPT_DELTA_BAND_HI", 0.20),
+            GO_OPT_SPREAD_MAX=_get_float("GO_OPT_SPREAD_MAX", 0.15),
+            GO_OPT_MIN_MID=_get_float("GO_OPT_MIN_MID", 0.20),
+            GO_OPT_OI_MIN=_get_float("GO_OPT_OI_MIN", 500.0),
+            GO_OPT_VOL_MIN=_get_float("GO_OPT_VOL_MIN", 50.0),
+
+            GO_RV5_JUMP_MAX=_get_float("GO_RV5_JUMP_MAX", 1.15),
+            GO_RV20_JUMP_MAX=_get_float("GO_RV20_JUMP_MAX", 1.10),
+            GO_RV5_ACCEL_TIGHTEN_TRIGGER=_get_float("GO_RV5_ACCEL_TIGHTEN_TRIGGER", 1.05),
+            GO_FLIP_CUTOFF_BASE=_get_float("GO_FLIP_CUTOFF_BASE", 2.0),
+            GO_FLIP_CUTOFF_TIGHT=_get_float("GO_FLIP_CUTOFF_TIGHT", 2.5),
+
+            GO_FORCED_FLOW_WINDOW_TRADING_DAYS=_get_int("GO_FORCED_FLOW_WINDOW_TRADING_DAYS", 4),
+            GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN=_get_int("GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN", 4),
+            GO_FORCED_FLOW_IMPORTANCE_MED_MIN=_get_int("GO_FORCED_FLOW_IMPORTANCE_MED_MIN", 3),
+            GO_FORCED_FLOW_MANUAL_RANGES=tuple(_get_csv_list("GO_FORCED_FLOW_MANUAL_RANGES", [])),
+
+            LEGAL_REG_TICKER_DENYLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_DENYLIST", [])),
+            LEGAL_REG_TICKER_ALLOWLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_ALLOWLIST", [])),
+            LEGAL_REG_KEYWORDS=tuple(_get_csv_list("LEGAL_REG_KEYWORDS", [])),
         )
 
     def cache_key(self) -> tuple:

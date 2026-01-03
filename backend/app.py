@@ -22,6 +22,7 @@ import uuid
 import pathlib
 
 from backend.earnings_logic import BreachInputError, compute_breach_stats, compute_current_snapshot
+from backend.go_no_go import compute_go_no_go
 from backend.config import get_flags
 from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
@@ -802,7 +803,15 @@ def breach(
                 # This prevents stale assumed-price/EM issues in the Trade Builder UI.
                 try:
                     fresh = dict(cached)
-                    fresh["current"] = compute_current_snapshot(client=_get_client(), ticker=ticker.strip().upper())
+                    client0 = _get_client()
+                    fresh["current"] = compute_current_snapshot(client=client0, ticker=ticker.strip().upper())
+                    # Refresh GO/NO-GO as it depends on current snapshot + live/macro context.
+                    try:
+                        bz_for_go = _get_benzinga_client_optional() if bool(get_flags().ENABLE_BENZINGA) else None
+                        fresh["goNoGo"] = compute_go_no_go(client0, ticker=ticker.strip().upper(), payload=fresh, benzinga_client=bz_for_go)
+                    except Exception:
+                        # Non-fatal: keep cached response if GO/NO-GO refresh fails.
+                        pass
                     return fresh
                 except Exception:
                     return cached

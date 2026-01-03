@@ -63,6 +63,7 @@ function fmt0(v) {
   return Number.isFinite(n) ? n.toFixed(0) : "—";
 }
 
+let _tooltipsGlobalBound = false;
 function renderEngine1DecisionPanel(payload) {
   const host = $("e1DecisionSection");
   if (!host) return;
@@ -101,6 +102,13 @@ function renderEngine1DecisionPanel(payload) {
   host.classList.toggle("hidden", !t || t === "—");
   if (!t || t === "—") return;
 
+  const go = payload?.goNoGo || null;
+  const goStatus = String(go?.status || "").toUpperCase();
+  const goPassed = go?.passed === true && goStatus === "GO";
+  const goLabel = goPassed ? "GO" : "NO-GO";
+  const goCls = goPassed ? "isGo" : "isNo";
+  const goTip = renderGoNoGoTip(go);
+
   const pxTxt = Number.isFinite(price) ? price.toFixed(2) : "—";
   const metaRight = [
     `EOD: ${escapeHtml(barDate || "—")}`,
@@ -111,7 +119,13 @@ function renderEngine1DecisionPanel(payload) {
     <div class="taPanel">
       <div class="taHeader">
         <div class="taHeaderRow">
-          <div class="taHeaderTitle">${escapeHtml(t)} — Engine 1</div>
+          <div class="taHeaderTitle">
+            ${escapeHtml(t)} — Engine 1
+            <span class="tipWrap goWrap">
+              <button class="tipBtn goPill ${goCls}" type="button" aria-label="GO/NO-GO details" aria-expanded="false">${escapeHtml(goLabel)}</button>
+              <div class="tipPanel goPanel" role="tooltip">${goTip}</div>
+            </span>
+          </div>
           <div class="taHeaderMeta">${metaRight}</div>
         </div>
         <div class="taHeaderRow taHeaderRow--sub">
@@ -173,6 +187,126 @@ function renderEngine1DecisionPanel(payload) {
       }
     });
   }
+
+  // This section is rendered dynamically after RUN; rebind tooltip handlers safely.
+  try { initTooltips(); } catch { /* ignore */ }
+}
+
+function renderGoNoGoTip(go) {
+  const status = String(go?.status || "NO_GO").toUpperCase();
+  const passed = (go?.passed === true && status === "GO");
+  const checks = Array.isArray(go?.checks) ? go.checks : [];
+  const warns = Array.isArray(go?.warnings) ? go.warnings : [];
+
+  const header = `
+    <div class="goPanelTitle">
+      <div class="goPanelVerdict ${passed ? "isGo" : "isNo"}">${passed ? "GO" : "NO-GO"}</div>
+      <div class="goPanelSub muted">${escapeHtml(passed ? "All checks passed" : "One or more checks failed / missing")}</div>
+    </div>
+  `;
+
+  const lineFor = (c) => {
+    const st = String(c?.state || "MISSING").toUpperCase();
+    const code = c?.code ? String(c.code) : "";
+    const label = String(c?.label || c?.id || "—");
+    const expl = String(c?.explain || "");
+    const metrics = goMetricsLine(c);
+    const stCls = st === "PASS" ? "isPass" : st === "FAIL" ? "isFail" : "isMissing";
+    return `
+      <div class="goCheck">
+        <div class="goCheckTop">
+          <span class="goState ${stCls}">${escapeHtml(st)}</span>
+          <span class="goCheckLabel">${escapeHtml(label)}</span>
+        </div>
+        <div class="goCheckMeta">
+          ${code ? `<span class="mono goCode">${escapeHtml(code)}</span>` : ""}
+          ${metrics ? `<span class="mono goMetrics">${escapeHtml(metrics)}</span>` : ""}
+        </div>
+        ${expl ? `<div class="goExplain muted">${escapeHtml(expl)}</div>` : ""}
+      </div>
+    `;
+  };
+
+  const warnHtml = warns.length
+    ? `<div class="goWarn"><div class="goWarnTitle">Warnings</div>${warns.slice(0, 3).map(w => `<div class="goWarnLine muted">${escapeHtml(String(w?.label || w?.id || "warning"))}</div>`).join("")}</div>`
+    : "";
+
+  if (!checks.length) {
+    return header + `<div class="muted" style="margin-top:10px;">GO/NO-GO payload missing. Run Engine 1 again.</div>` + warnHtml;
+  }
+  return header + `<div class="goList">${checks.map(lineFor).join("")}</div>` + warnHtml;
+}
+
+function goMetricsLine(c) {
+  const id = String(c?.id || "");
+  const v = c?.value || {};
+  try {
+    if (id === "SN_IV_ELEVATED") {
+      const iv = Number(v?.currentIv30Pct);
+      const n = Number(v?.sampleN);
+      const p = Number(v?.percentile01);
+      const z = Number(v?.z);
+      const parts = [];
+      if (Number.isFinite(iv)) parts.push(`IV=${iv.toFixed(2)}%`);
+      if (Number.isFinite(p)) parts.push(`pctl=${p.toFixed(2)}`);
+      if (Number.isFinite(z)) parts.push(`z=${z.toFixed(2)}`);
+      if (Number.isFinite(n)) parts.push(`n=${n.toFixed(0)}`);
+      return parts.join(" · ");
+    }
+    if (id === "SN_EM_RICHNESS") {
+      const em = Number(v?.expectedMovePct);
+      const med = Number(v?.realizedMedianPct);
+      const n = Number(v?.nUsed);
+      const r = Number(v?.ratio);
+      const parts = [];
+      if (Number.isFinite(em)) parts.push(`EM=${em.toFixed(2)}%`);
+      if (Number.isFinite(med)) parts.push(`med=${med.toFixed(2)}%`);
+      if (Number.isFinite(r)) parts.push(`ratio=${r.toFixed(2)}×`);
+      if (Number.isFinite(n)) parts.push(`n=${n.toFixed(0)}`);
+      return parts.join(" · ");
+    }
+    if (id === "SN_LIQUIDITY") {
+      const dvol = Number(v?.avgDollarVol20d);
+      const rep = v?.rep || {};
+      const put = rep?.put || {};
+      const call = rep?.call || {};
+      const parts = [];
+      if (Number.isFinite(dvol)) parts.push(`$vol20=${Math.round(dvol/1e6)}M`);
+      if (rep?.expiry) parts.push(`exp=${String(rep.expiry).slice(5)}`);
+      if (Number.isFinite(Number(put?.strike))) parts.push(`P${Number(put.strike).toFixed(0)}`);
+      if (Number.isFinite(Number(call?.strike))) parts.push(`C${Number(call.strike).toFixed(0)}`);
+      return parts.join(" · ");
+    }
+    if (id === "MACRO_GAMMA") {
+      const sign = String(v?.netGammaSign || "—");
+      const b = String(v?.magnitudeBucket || "—");
+      const sym = String(v?.symbolUsed || "SPX");
+      return `${sym} · ${sign} · ${b}`;
+    }
+    if (id === "MACRO_RV_ACCEL") {
+      const r5 = Number(v?.rv5Jump);
+      const r20 = Number(v?.rv20Jump);
+      const parts = [];
+      if (Number.isFinite(r5)) parts.push(`rv5=${r5.toFixed(2)}×`);
+      if (Number.isFinite(r20)) parts.push(`rv20=${r20.toFixed(2)}×`);
+      return parts.join(" · ");
+    }
+    if (id === "MACRO_GAMMA_FLIP") {
+      const m = Number(v?.minFlipEm);
+      const cut = Number(v?.cutoffEm);
+      if (Number.isFinite(m) && Number.isFinite(cut)) return `minFlip=${m.toFixed(2)}×EM · cut=${cut.toFixed(2)}`;
+      if (Number.isFinite(m)) return `minFlip=${m.toFixed(2)}×EM`;
+    }
+    if (id === "MACRO_FORCED_FLOWS") {
+      const hi = Array.isArray(v?.high) ? v.high.length : 0;
+      const win = Array.isArray(v?.windowTradingDays) ? v.windowTradingDays.length : null;
+      if (win !== null) return `HIGH=${hi} · window=${win}d`;
+      return `HIGH=${hi}`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 function _pickMeaningfulClusters(sideClusters, spot, strikeStep) {
@@ -227,8 +361,10 @@ function initTooltips() {
   };
 
   wraps.forEach((w) => {
+    if (w && w.dataset && w.dataset.tipInit === "1") return;
     const btn = w.querySelector(".tipBtn");
     if (!btn) return;
+    if (w && w.dataset) w.dataset.tipInit = "1";
     btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -241,15 +377,18 @@ function initTooltips() {
     });
   });
 
-  document.addEventListener("click", (ev) => {
-    const t = ev.target;
-    if (t && t.closest && t.closest(".tipWrap")) return;
-    closeAll();
-  });
+  if (!_tooltipsGlobalBound) {
+    _tooltipsGlobalBound = true;
+    document.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (t && t.closest && t.closest(".tipWrap")) return;
+      closeAll();
+    });
 
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") closeAll();
-  });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeAll();
+    });
+  }
 }
 
 // --- Engine 1: Live Gamma Visuals (Dealer Gamma Map + Weekly Gamma Risk Heat-Map) ---

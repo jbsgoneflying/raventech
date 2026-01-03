@@ -1,0 +1,1029 @@
+from __future__ import annotations
+
+import datetime as dt
+import math
+import statistics
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
+from backend.benzinga_client import BenzingaClient
+from backend.config import get_flags
+from backend.market_calendar import market_structure_events_by_date, opex_events_by_date
+from backend.macro_events import macro_events_by_date
+from backend.spx_ic_engine import compute_live_levels, fetch_dailies_ohlc_range, fetch_hist_cores_range
+
+
+State = str  # PASS|FAIL|MISSING
+
+
+def _now_et_date() -> dt.date:
+    if ZoneInfo is None:
+        return dt.date.today()
+    try:
+        return dt.datetime.now(tz=ZoneInfo("America/New_York")).date()
+    except Exception:
+        return dt.date.today()
+
+
+def _to_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        x = float(v)
+        if not math.isfinite(x):
+            return None
+        return x
+    except Exception:
+        return None
+
+
+def _to_int(v: Any) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        return int(float(v))
+    except Exception:
+        return None
+
+
+def _pct_rank(x: float, xs: List[float]) -> Optional[float]:
+    vals = [float(v) for v in (xs or []) if v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))]
+    if not vals:
+        return None
+    c = sum(1 for v in vals if v <= float(x))
+    return c / len(vals)
+
+
+def _zscore(x: float, xs: List[float]) -> Optional[float]:
+    vals = [float(v) for v in (xs or []) if v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))]
+    if len(vals) < 2:
+        return None
+    try:
+        mu = statistics.mean(vals)
+        sd = statistics.stdev(vals)
+    except Exception:
+        return None
+    if not (math.isfinite(mu) and math.isfinite(sd)) or sd <= 1e-12:
+        return None
+    return (float(x) - float(mu)) / float(sd)
+
+
+def _median(xs: List[float]) -> Optional[float]:
+    vals = [float(v) for v in (xs or []) if v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))]
+    if not vals:
+        return None
+    try:
+        return float(statistics.median(vals))
+    except Exception:
+        return None
+
+
+def _mk_check(
+    *,
+    id: str,
+    label: str,
+    state: State,
+    code: Optional[str],
+    value: Dict[str, Any],
+    threshold: Dict[str, Any],
+    explain: str,
+) -> Dict[str, Any]:
+    st = str(state).upper()
+    if st not in ("PASS", "FAIL", "MISSING"):
+        st = "MISSING"
+    return {
+        "id": str(id),
+        "label": str(label),
+        "state": st,
+        "code": (str(code) if code else None),
+        "value": value or {},
+        "threshold": threshold or {},
+        "explain": str(explain or ""),
+    }
+
+
+def _bucket_from_ratio(r: Optional[float]) -> Optional[str]:
+    if r is None or not math.isfinite(float(r)):
+        return None
+    x = abs(float(r))
+    if x < 0.20:
+        return "low"
+    if x < 0.50:
+        return "medium"
+    return "high"
+
+
+def _is_trading_day(d: dt.date) -> bool:
+    if d.weekday() >= 5:
+        return False
+    evs = (market_structure_events_by_date(start=d, end=d) or {}).get(d.isoformat()) or []
+    return not any(str(e.get("kind") or "").upper() == "HOLIDAY" for e in evs if isinstance(e, dict))
+
+
+def _next_trading_days(start: dt.date, n: int) -> List[dt.date]:
+    out: List[dt.date] = []
+    d = start
+    while len(out) < int(n) and len(out) < 20:
+        if _is_trading_day(d):
+            out.append(d)
+        d = d + dt.timedelta(days=1)
+    return out
+
+
+def _fetch_iv_series_30d(client, *, ticker: str, asof: dt.date) -> Tuple[Optional[str], List[Tuple[str, float]]]:
+    """
+    Return (field_used, [(tradeDate, ivPct), ...]) for a ~30-trading-day window ending at asof.
+    """
+    t = str(ticker).strip().upper()
+    if not t:
+        return None, []
+    start = asof - dt.timedelta(days=60)  # buffer for ~30 trading days
+    fields = "ticker,tradeDate,iv30,iv30d,iv30Day,iv"
+    rows = fetch_hist_cores_range(client, ticker=t, start=start, end=asof, fields=fields) or []
+    rows = [r for r in rows if isinstance(r, dict)]
+    rows.sort(key=lambda r: str(r.get("tradeDate") or "")[:10])
+
+    candidates = ["iv30", "iv30d", "iv30Day", "iv"]
+    series_by: Dict[str, List[Tuple[str, float]]] = {k: [] for k in candidates}
+    for r in rows:
+        d0 = str(r.get("tradeDate") or "")[:10]
+        if not d0:
+            continue
+        for k in candidates:
+            v = _to_float(r.get(k))
+            if v is None:
+                continue
+            iv_pct = float(v) * 100.0 if float(v) <= 1.0 else float(v)
+            if iv_pct <= 0:
+                continue
+            series_by[k].append((d0, float(iv_pct)))
+
+    best = None
+    best_n = -1
+    for k in candidates:
+        npts = len(series_by.get(k) or [])
+        if npts > best_n:
+            best = k
+            best_n = npts
+    if len(series_by.get("iv30") or []) >= max(10, best_n):
+        best = "iv30"
+
+    series = series_by.get(best or "") or []
+    if len(series) > 40:
+        series = series[-40:]
+    return best, series
+
+
+def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
+    t = str(ticker).strip().upper()
+    if not t:
+        return {"enabled": False, "notes": ["Missing ticker."]}
+    fields = "ticker,stockPrice,spotPrice,avgDollarVol20,avgDolVol20,avgDVol20,avgVolume20,avgVol20,marketCap"
+    try:
+        rows = client.cores(ticker=t, fields=fields).rows or []
+        row = rows[0] if rows and isinstance(rows[0], dict) else {}
+    except Exception as e:
+        return {"enabled": False, "notes": [f"cores unavailable: {type(e).__name__}: {e}"]}
+
+    px = _to_float(row.get("spotPrice")) or _to_float(row.get("stockPrice"))
+    avg_dvol = _to_float(row.get("avgDollarVol20") or row.get("avgDolVol20") or row.get("avgDVol20"))
+    avg_vol = _to_float(row.get("avgVolume20") or row.get("avgVol20"))
+    if avg_dvol is None and px is not None and avg_vol is not None and px > 0 and avg_vol > 0:
+        avg_dvol = float(px) * float(avg_vol)
+    mcap = _to_float(row.get("marketCap"))
+    return {"enabled": True, "price": px, "avgDollarVol20d": avg_dvol, "marketCap": mcap, "notes": []}
+
+
+@dataclass(frozen=True)
+class _OptLegQuote:
+    side: str  # put|call
+    strike: Optional[float]
+    bid: Optional[float]
+    ask: Optional[float]
+    mid: Optional[float]
+    spread_ratio: Optional[float]
+    oi: Optional[float]
+    vol: Optional[float]
+    delta: Optional[float]
+
+
+def _pick_opt_leg_row(*, rows: List[dict], side: str, underlying: Optional[float], target_abs_delta: float) -> Optional[dict]:
+    s = str(side).lower()
+    if s not in ("put", "call"):
+        return None
+
+    def _strike(r: dict) -> Optional[float]:
+        return _to_float(r.get("strike"))
+
+    def _delta(r: dict) -> Optional[float]:
+        if s == "call":
+            v = _to_float(r.get("callDelta"))
+            if v is None:
+                d0 = _to_float(r.get("delta"))
+                v = d0 if d0 is not None and d0 > 0 else None
+            return v
+        v = _to_float(r.get("putDelta"))
+        if v is None:
+            d0 = _to_float(r.get("delta"))
+            v = d0 if d0 is not None and d0 < 0 else None
+        return v
+
+    use = [r for r in rows if isinstance(r, dict)]
+    if underlying is not None and underlying > 0:
+        eps = 1e-9
+        if s == "call":
+            otm = [r for r in use if _strike(r) is not None and _strike(r) > float(underlying) + eps]
+        else:
+            otm = [r for r in use if _strike(r) is not None and _strike(r) < float(underlying) - eps]
+        if otm:
+            use = otm
+
+    best = None
+    best_dist = None
+    for r in use:
+        d = _delta(r)
+        if d is None:
+            continue
+        dist = abs(abs(float(d)) - float(target_abs_delta))
+        if best is None or best_dist is None or dist < best_dist:
+            best = r
+            best_dist = dist
+    return best
+
+
+def _extract_leg_metrics(row: dict, *, side: str) -> _OptLegQuote:
+    s = str(side).lower()
+    strike = _to_float(row.get("strike"))
+    if s == "call":
+        bid = _to_float(row.get("callBidPrice"))
+        ask = _to_float(row.get("callAskPrice"))
+        oi = _to_float(row.get("callOpenInterest"))
+        vol = _to_float(row.get("callVolume"))
+        delta = _to_float(row.get("callDelta")) or (_to_float(row.get("delta")) if (_to_float(row.get("delta")) or 0) > 0 else None)
+    else:
+        bid = _to_float(row.get("putBidPrice"))
+        ask = _to_float(row.get("putAskPrice"))
+        oi = _to_float(row.get("putOpenInterest"))
+        vol = _to_float(row.get("putVolume"))
+        delta = _to_float(row.get("putDelta")) or (_to_float(row.get("delta")) if (_to_float(row.get("delta")) or 0) < 0 else None)
+
+    mid = None
+    spread_ratio = None
+    if bid is not None and ask is not None:
+        mid = 0.5 * (float(bid) + float(ask))
+        if mid is not None and mid > 1e-9:
+            spread_ratio = (float(ask) - float(bid)) / float(mid)
+
+    return _OptLegQuote(side=s, strike=strike, bid=bid, ask=ask, mid=mid, spread_ratio=spread_ratio, oi=oi, vol=vol, delta=delta)
+
+
+def _rv_annualized_from_closes(closes: List[float], window: int) -> Optional[float]:
+    if len(closes) < window + 1 or window < 2:
+        return None
+    rets: List[float] = []
+    for i in range(len(closes) - window, len(closes)):
+        a = float(closes[i - 1])
+        b = float(closes[i])
+        if a > 0 and b > 0:
+            rets.append(math.log(b / a))
+    if len(rets) < 2:
+        return None
+    try:
+        s = statistics.stdev(rets)
+    except Exception:
+        return None
+    if not math.isfinite(s):
+        return None
+    return float(s) * math.sqrt(252.0)
+
+
+def compute_go_no_go(
+    client,
+    *,
+    ticker: str,
+    payload: Dict[str, Any],
+    benzinga_client: Optional[BenzingaClient] = None,
+) -> Dict[str, Any]:
+    """
+    Compute strict GO/NO-GO with explainable PASS/FAIL/MISSING checks.
+    Missing data yields NO_GO but is distinct from FAIL.
+    """
+    f = get_flags()
+    t = str(ticker or "").strip().upper()
+    checks: List[dict] = []
+    warnings: List[dict] = []
+    notes: List[str] = []
+
+    # Thresholds (config-driven with safe defaults)
+    IVP_MIN = float(getattr(f, "GO_IVP_MIN", 0.80))
+    IV_SAMPLE_MIN = int(getattr(f, "GO_IV_SAMPLE_MIN", 20))
+    IV30_FLOOR = float(getattr(f, "GO_IV30_FLOOR", 0.30))
+    # IV values in this module are expressed in percent units (e.g., 30.0 = 30%).
+    # Accept user-friendly config like 0.30 to mean 30%.
+    if IV30_FLOOR <= 1.5:
+        IV30_FLOOR = IV30_FLOOR * 100.0
+    IV_Z_ENABLED = bool(getattr(f, "GO_IV_Z_ENABLED", True))
+    IV30_Z_MIN = float(getattr(f, "GO_IV30_Z_MIN", 0.75))
+
+    MIN_EARNINGS_N = int(getattr(f, "GO_MIN_EARNINGS_N", 6))
+    EM_RICHNESS_MULT = float(getattr(f, "GO_EM_RICHNESS_MULT", 1.05))
+
+    AVG_DVOL_MIN = float(getattr(f, "GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0))
+    DELTA_LO = float(getattr(f, "GO_OPT_DELTA_BAND_LO", 0.15))
+    DELTA_HI = float(getattr(f, "GO_OPT_DELTA_BAND_HI", 0.20))
+    SPREAD_MAX = float(getattr(f, "GO_OPT_SPREAD_MAX", 0.15))
+    MIN_MID = float(getattr(f, "GO_OPT_MIN_MID", 0.20))
+    OI_MIN = float(getattr(f, "GO_OPT_OI_MIN", 500.0))
+    VOL_MIN = float(getattr(f, "GO_OPT_VOL_MIN", 50.0))
+
+    RV5_JUMP_MAX = float(getattr(f, "GO_RV5_JUMP_MAX", 1.15))
+    RV20_JUMP_MAX = float(getattr(f, "GO_RV20_JUMP_MAX", 1.10))
+    RV5_ACCEL_TIGHTEN = float(getattr(f, "GO_RV5_ACCEL_TIGHTEN_TRIGGER", 1.05))
+    FLIP_CUTOFF_BASE = float(getattr(f, "GO_FLIP_CUTOFF_BASE", 2.0))
+    FLIP_CUTOFF_TIGHT = float(getattr(f, "GO_FLIP_CUTOFF_TIGHT", 2.5))
+
+    FLOW_WINDOW_TD = int(getattr(f, "GO_FORCED_FLOW_WINDOW_TRADING_DAYS", 4))
+    FLOW_IMPORTANCE_HIGH_MIN = int(getattr(f, "GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN", 4))
+    FLOW_IMPORTANCE_MED_MIN = int(getattr(f, "GO_FORCED_FLOW_IMPORTANCE_MED_MIN", 3))
+    FLOW_MANUAL_RANGES = list(getattr(f, "GO_FORCED_FLOW_MANUAL_RANGES", []) or [])
+
+    current = payload.get("current") if isinstance(payload.get("current"), dict) else {}
+    cur_asof = str(current.get("asOfDate") or "")[:10]
+    try:
+        asof_date = dt.date.fromisoformat(cur_asof) if cur_asof else _now_et_date()
+    except Exception:
+        asof_date = _now_et_date()
+
+    expected_move_pct = _to_float(current.get("impliedMovePct"))
+
+    # ===== A2) EM richness =====
+    events = payload.get("events") if isinstance(payload.get("events"), list) else []
+    realized_vals = [_to_float(e.get("realizedMovePct")) for e in events if isinstance(e, dict)]
+    realized_vals = [float(x) for x in realized_vals if x is not None]
+    realized_median = _median(realized_vals)
+    n_used = len(realized_vals)
+
+    if n_used < MIN_EARNINGS_N:
+        checks.append(
+            _mk_check(
+                id="SN_EM_RICHNESS",
+                label="Expected move rich vs realized median",
+                state="MISSING",
+                code="SN_EM_SAMPLE_TOO_SMALL",
+                value={"expectedMovePct": expected_move_pct, "realizedMedianPct": realized_median, "nUsed": n_used},
+                threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT},
+                explain=f"Insufficient usable earnings events (n={n_used} < {MIN_EARNINGS_N}).",
+            )
+        )
+    elif expected_move_pct is None or realized_median is None or realized_median <= 0:
+        checks.append(
+            _mk_check(
+                id="SN_EM_RICHNESS",
+                label="Expected move rich vs realized median",
+                state="MISSING",
+                code="SN_EM_DATA_MISSING",
+                value={"expectedMovePct": expected_move_pct, "realizedMedianPct": realized_median, "nUsed": n_used},
+                threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT},
+                explain="Missing expected move or realized median.",
+            )
+        )
+    else:
+        ratio = float(expected_move_pct) / float(realized_median) if realized_median > 0 else None
+        need = float(realized_median) * float(EM_RICHNESS_MULT)
+        passed = float(expected_move_pct) >= float(need)
+        checks.append(
+            _mk_check(
+                id="SN_EM_RICHNESS",
+                label="Expected move rich vs realized median",
+                state="PASS" if passed else "FAIL",
+                code=None if passed else "SN_EM_NOT_RICH_ENOUGH",
+                value={"expectedMovePct": expected_move_pct, "realizedMedianPct": realized_median, "nUsed": n_used, "ratio": None if ratio is None else round(float(ratio), 4)},
+                threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT, "requiredExpectedMovePct": round(float(need), 4)},
+                explain=(f"Expected/median ratio={ratio:.3f}× vs min {EM_RICHNESS_MULT:.2f}×." if ratio is not None else ("Pass" if passed else "Fail")),
+            )
+        )
+
+    # ===== A1) IV elevated =====
+    field_used, iv_series = _fetch_iv_series_30d(client, ticker=t, asof=asof_date)
+    iv_vals = [float(v) for _, v in iv_series]
+    current_iv = iv_vals[-1] if iv_vals else None
+    iv_sample_n = len(iv_vals)
+    iv_pctl = _pct_rank(float(current_iv), iv_vals) if current_iv is not None else None
+    iv_z = _zscore(float(current_iv), iv_vals) if current_iv is not None else None
+
+    if iv_sample_n < IV_SAMPLE_MIN:
+        checks.append(
+            _mk_check(
+                id="SN_IV_ELEVATED",
+                label="IV30 elevated vs own 30d history",
+                state="MISSING",
+                code="SN_IV_SAMPLE_INSUFFICIENT",
+                value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": iv_pctl, "z": iv_z},
+                threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
+                explain=f"Insufficient IV history (n={iv_sample_n} < {IV_SAMPLE_MIN}).",
+            )
+        )
+    elif current_iv is None or iv_pctl is None:
+        checks.append(
+            _mk_check(
+                id="SN_IV_ELEVATED",
+                label="IV30 elevated vs own 30d history",
+                state="MISSING",
+                code="SN_IV_DATA_MISSING",
+                value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": iv_pctl, "z": iv_z},
+                threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
+                explain="Missing IV series/percentile.",
+            )
+        )
+    elif float(current_iv) < float(IV30_FLOOR):
+        checks.append(
+            _mk_check(
+                id="SN_IV_ELEVATED",
+                label="IV30 elevated vs own 30d history",
+                state="FAIL",
+                code="SN_IV_TOO_LOW_ABSOLUTE",
+                value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": None if iv_z is None else round(float(iv_z), 4)},
+                threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
+                explain=f"IV30 {float(current_iv):.2f}% below absolute floor {IV30_FLOOR:.2f}.",
+            )
+        )
+    elif float(iv_pctl) < float(IVP_MIN):
+        checks.append(
+            _mk_check(
+                id="SN_IV_ELEVATED",
+                label="IV30 elevated vs own 30d history",
+                state="FAIL",
+                code="SN_IVP_TOO_LOW",
+                value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": None if iv_z is None else round(float(iv_z), 4)},
+                threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
+                explain=f"IV percentile {float(iv_pctl):.2f} below cutoff {IVP_MIN:.2f}.",
+            )
+        )
+    else:
+        if IV_Z_ENABLED:
+            if iv_z is None:
+                checks.append(
+                    _mk_check(
+                        id="SN_IV_ELEVATED",
+                        label="IV30 elevated vs own 30d history",
+                        state="MISSING",
+                        code="SN_IV_Z_UNAVAILABLE",
+                        value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": None},
+                        threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
+                        explain="Z-score unavailable (insufficient variance/history).",
+                    )
+                )
+            elif float(iv_z) < float(IV30_Z_MIN):
+                checks.append(
+                    _mk_check(
+                        id="SN_IV_ELEVATED",
+                        label="IV30 elevated vs own 30d history",
+                        state="FAIL",
+                        code="SN_IV_NOT_ELEVATED_Z",
+                        value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": round(float(iv_z), 4)},
+                        threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
+                        explain=f"IV z-score {float(iv_z):.2f} below cutoff {IV30_Z_MIN:.2f}.",
+                    )
+                )
+            else:
+                checks.append(
+                    _mk_check(
+                        id="SN_IV_ELEVATED",
+                        label="IV30 elevated vs own 30d history",
+                        state="PASS",
+                        code=None,
+                        value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": round(float(iv_z), 4)},
+                        threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
+                        explain="IV elevated (percentile + floor + z-score).",
+                    )
+                )
+        else:
+            checks.append(
+                _mk_check(
+                    id="SN_IV_ELEVATED",
+                    label="IV30 elevated vs own 30d history",
+                    state="PASS",
+                    code=None,
+                    value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": None if iv_z is None else round(float(iv_z), 4)},
+                    threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": False, "zMin": IV30_Z_MIN},
+                    explain="IV elevated (percentile + floor).",
+                )
+            )
+
+    # ===== A3) Legal/reg binary (hybrid) =====
+    deny = {str(x).strip().upper() for x in (getattr(f, "LEGAL_REG_TICKER_DENYLIST", []) or []) if str(x).strip()}
+    allow = {str(x).strip().upper() for x in (getattr(f, "LEGAL_REG_TICKER_ALLOWLIST", []) or []) if str(x).strip()}
+    kw = [str(x).strip().lower() for x in (getattr(f, "LEGAL_REG_KEYWORDS", []) or []) if str(x).strip()]
+    if not kw:
+        kw = ["sec", "doj", "ftc", "lawsuit", "probe", "investigation", "antitrust", "injunction", "ban", "regulator", "settlement"]
+
+    if t in deny:
+        checks.append(
+            _mk_check(
+                id="SN_LEGAL_REG",
+                label="No known legal / regulatory binary",
+                state="FAIL",
+                code="SN_LEGAL_REG_MANUAL_FLAG",
+                value={"ticker": t, "source": "manual_denylist"},
+                threshold={"keywordScanEnabled": benzinga_client is not None},
+                explain="Ticker is manually flagged for legal/regulatory binary risk.",
+            )
+        )
+    elif benzinga_client is None:
+        if t in allow:
+            checks.append(
+                _mk_check(
+                    id="SN_LEGAL_REG",
+                    label="No known legal / regulatory binary",
+                    state="PASS",
+                    code=None,
+                    value={"ticker": t, "source": "manual_allowlist"},
+                    threshold={"keywordScanEnabled": False},
+                    explain="Ticker is allowlisted (Benzinga disabled).",
+                )
+            )
+        else:
+            checks.append(
+                _mk_check(
+                    id="SN_LEGAL_REG",
+                    label="No known legal / regulatory binary",
+                    state="MISSING",
+                    code="SN_LEGAL_REG_DATA_MISSING",
+                    value={"ticker": t, "source": "benzinga_disabled"},
+                    threshold={"keywordScanEnabled": False},
+                    explain="Benzinga disabled and ticker not allowlisted.",
+                )
+            )
+    else:
+        hits: List[str] = []
+        headlines: List[str] = []
+        now = _now_et_date()
+        # news
+        try:
+            resp = benzinga_client.news(
+                tickers=t,
+                date_from=str(now)[:10],
+                date_to=str(now + dt.timedelta(days=7))[:10],
+                page_size=50,
+                display_output="headline",
+            )
+            for r in (resp.rows or []):
+                if isinstance(r, dict):
+                    h = str(r.get("title") or r.get("headline") or "").strip()
+                    if h:
+                        headlines.append(h)
+        except Exception:
+            pass
+        # WIIM
+        try:
+            resp = benzinga_client.news(
+                tickers=t,
+                date_from=str(now)[:10],
+                date_to=str(now + dt.timedelta(days=7))[:10],
+                channels="WIIM",
+                page_size=50,
+                display_output="headline",
+            )
+            for r in (resp.rows or []):
+                if isinstance(r, dict):
+                    h = str(r.get("title") or r.get("headline") or "").strip()
+                    if h:
+                        headlines.append(h)
+        except Exception:
+            pass
+
+        for h in headlines:
+            s = h.lower()
+            if any(k in s for k in kw):
+                hits.append(h)
+            if len(hits) >= 5:
+                break
+
+        if hits:
+            checks.append(
+                _mk_check(
+                    id="SN_LEGAL_REG",
+                    label="No known legal / regulatory binary",
+                    state="FAIL",
+                    code="SN_LEGAL_REG_HEADLINE_HIT",
+                    value={"ticker": t, "hits": hits[:5], "keywords": kw[:12]},
+                    threshold={"keywordScanEnabled": True, "windowDays": 7},
+                    explain=f"Found {len(hits)} legal/reg keyword headline hit(s).",
+                )
+            )
+        else:
+            checks.append(
+                _mk_check(
+                    id="SN_LEGAL_REG",
+                    label="No known legal / regulatory binary",
+                    state="PASS",
+                    code=None,
+                    value={"ticker": t, "hits": [], "keywords": kw[:12]},
+                    threshold={"keywordScanEnabled": True, "windowDays": 7},
+                    explain="No legal/reg headline hits detected.",
+                )
+            )
+
+    # ===== A4) Liquidity (underlying + options) =====
+    liq = _fetch_underlying_liquidity(client, ticker=t)
+    avg_dvol = _to_float(liq.get("avgDollarVol20d"))
+    underlying_ok = avg_dvol is not None and float(avg_dvol) >= float(AVG_DVOL_MIN)
+    liq_notes = list(liq.get("notes") or []) if isinstance(liq, dict) else []
+
+    # Representative options liquidity (both legs)
+    trade_date = str(current.get("asOfDate") or "")[:10] or None
+    dte_target = 2
+    target_abs_delta = 0.5 * (DELTA_LO + DELTA_HI)
+    tb_inputs = payload.get("tradeBuilderInputs") if isinstance(payload.get("tradeBuilderInputs"), dict) else {}
+    if isinstance(tb_inputs, dict):
+        td = _to_float(tb_inputs.get("target_delta"))
+        if td is not None and 0.02 < abs(float(td)) < 0.40:
+            target_abs_delta = abs(float(td))
+        dte_in = _to_int(tb_inputs.get("dte_target"))
+        if dte_in is not None and 1 <= int(dte_in) <= 60:
+            dte_target = int(dte_in)
+    opt_expiry = None
+    opt_put: Optional[_OptLegQuote] = None
+    opt_call: Optional[_OptLegQuote] = None
+
+    opt_state: State = "PASS"
+    opt_code: Optional[str] = None
+    opt_explain = ""
+
+    if trade_date:
+        try:
+            fields_m = "ticker,tradeDate,expirDate,dte,stockPrice,vol50,atmiv"
+            lo = max(1, int(dte_target) - 2)
+            hi = int(dte_target) + 10
+            mrows = client.hist_monies_implied(ticker=t, trade_date=trade_date, fields=fields_m, dte=f"{lo},{hi}").rows or []
+            mrows = [r for r in mrows if isinstance(r, dict)]
+            best = None
+            best_dist = None
+            for r in mrows:
+                dte_v = _to_float(r.get("dte"))
+                if dte_v is None:
+                    continue
+                dist = abs(float(dte_v) - float(dte_target))
+                if best is None or best_dist is None or dist < best_dist:
+                    best = r
+                    best_dist = dist
+            if best and best.get("expirDate"):
+                opt_expiry = str(best.get("expirDate"))[:10]
+        except Exception:
+            opt_expiry = None
+
+        if not opt_expiry:
+            opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Unable to determine expiration for representative strikes."
+        else:
+            fields_s = ",".join(
+                [
+                    "ticker",
+                    "tradeDate",
+                    "expirDate",
+                    "dte",
+                    "strike",
+                    "stockPrice",
+                    "callBidPrice",
+                    "callAskPrice",
+                    "putBidPrice",
+                    "putAskPrice",
+                    "callDelta",
+                    "putDelta",
+                    "delta",
+                    "callOpenInterest",
+                    "putOpenInterest",
+                    "callVolume",
+                    "putVolume",
+                ]
+            )
+            try:
+                rows = client.hist_strikes(ticker=t, trade_date=trade_date, fields=fields_s, dte=f"{max(1,dte_target-2)},{dte_target+10}").rows or []
+                rows = [r for r in rows if isinstance(r, dict) and str(r.get("expirDate") or "")[:10] == opt_expiry]
+            except Exception:
+                rows = []
+
+            if not rows:
+                opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Options chain unavailable for selected expiration."
+            else:
+                under_px = _to_float(rows[0].get("stockPrice")) or _to_float(liq.get("price"))
+                put_row = _pick_opt_leg_row(rows=rows, side="put", underlying=under_px, target_abs_delta=target_abs_delta)
+                call_row = _pick_opt_leg_row(rows=rows, side="call", underlying=under_px, target_abs_delta=target_abs_delta)
+                if not put_row or not call_row:
+                    opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Unable to select representative strikes (missing delta fields)."
+                else:
+                    opt_put = _extract_leg_metrics(put_row, side="put")
+                    opt_call = _extract_leg_metrics(call_row, side="call")
+
+                    for leg in (opt_put, opt_call):
+                        if leg.bid is None or leg.ask is None or leg.mid is None:
+                            opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", f"Missing quotes at representative {leg.side} strike."
+                            break
+                        if leg.mid is not None and float(leg.mid) < float(MIN_MID):
+                            opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_MID_TOO_SMALL", f"{leg.side} mid ${float(leg.mid):.2f} below ${MIN_MID:.2f}."
+                            break
+                        if leg.spread_ratio is None or float(leg.spread_ratio) > float(SPREAD_MAX):
+                            opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_SPREAD_TOO_WIDE", f"{leg.side} spread ratio {float(leg.spread_ratio or 0):.2f} above {SPREAD_MAX:.2f}."
+                            break
+                        # OI/vol sanity when available
+                        oi = leg.oi
+                        vol = leg.vol
+                        if (oi is not None and math.isfinite(float(oi))) or (vol is not None and math.isfinite(float(vol))):
+                            ok_liq = False
+                            if oi is not None and math.isfinite(float(oi)) and float(oi) >= float(OI_MIN):
+                                ok_liq = True
+                            if vol is not None and math.isfinite(float(vol)) and float(vol) >= float(VOL_MIN):
+                                ok_liq = True
+                            if not ok_liq:
+                                opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_OI_TOO_LOW", f"{leg.side} OI/vol below minimum (OI>={OI_MIN:.0f} or Vol>={VOL_MIN:.0f})."
+                                break
+    else:
+        opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Missing trade date for options chain."
+
+    if avg_dvol is None:
+        liq_state, liq_code, liq_explain = "MISSING", "SN_LIQ_UNDERLYING_MISSING", "Underlying liquidity (avg $vol) unavailable."
+    elif not underlying_ok:
+        liq_state, liq_code, liq_explain = "FAIL", "SN_LIQ_UNDERLYING_TOO_LOW", f"avgDollarVol20d {float(avg_dvol):.0f} below {AVG_DVOL_MIN:.0f}."
+    else:
+        liq_state, liq_code, liq_explain = opt_state, opt_code, (opt_explain or "Underlying and options liquidity checks passed.")
+        if liq_state == "PASS":
+            liq_code = None
+
+    checks.append(
+        _mk_check(
+            id="SN_LIQUIDITY",
+            label="Liquidity deep enough for clean exit",
+            state=liq_state,
+            code=liq_code,
+            value={
+                "avgDollarVol20d": avg_dvol,
+                "avgDollarVolOk": underlying_ok,
+                "notes": liq_notes,
+                "rep": {
+                    "expiry": opt_expiry,
+                    "targetAbsDelta": round(float(target_abs_delta), 3),
+                    "put": (opt_put.__dict__ if opt_put else None),
+                    "call": (opt_call.__dict__ if opt_call else None),
+                },
+            },
+            threshold={"avgDollarVol20dMin": AVG_DVOL_MIN, "deltaBand": [DELTA_LO, DELTA_HI], "targetAbsDelta": target_abs_delta, "dteTarget": dte_target, "minMid": MIN_MID, "spreadMax": SPREAD_MAX, "oiMin": OI_MIN, "volMin": VOL_MIN},
+            explain=liq_explain,
+        )
+    )
+
+    # ===== B1) Market/SPX dealer gamma =====
+    try:
+        spx_levels = compute_live_levels(
+            client,
+            underlying="SPX",
+            symbols=("SPXW", "SPX", "SPY"),
+            view="nearest",
+            include_heatmap=True,
+            heatmap_view="composite",
+            heatmap_mode="slope",
+        )
+    except Exception as e:
+        spx_levels = {"enabled": False, "notes": [f"compute_live_levels failed: {type(e).__name__}: {e}"]}
+
+    dg = spx_levels.get("dealerGamma") if isinstance(spx_levels, dict) and isinstance(spx_levels.get("dealerGamma"), dict) else None
+    if not dg or spx_levels.get("enabled") is False:
+        checks.append(
+            _mk_check(
+                id="MACRO_GAMMA",
+                label="SPX dealer gamma positive (not tiny)",
+                state="MISSING",
+                code="MACRO_GAMMA_DATA_MISSING",
+                value={"enabled": spx_levels.get("enabled"), "symbolUsed": spx_levels.get("symbolUsed"), "expiry": spx_levels.get("expiry"), "notes": spx_levels.get("notes")},
+                threshold={"requireSign": "positive", "minBucket": "medium"},
+                explain="Market dealer gamma unavailable.",
+            )
+        )
+    else:
+        sign = str(dg.get("netGammaSign") or "").lower()
+        mag_bucket = str(dg.get("magnitudeBucket") or "").lower() or _bucket_from_ratio(_to_float(dg.get("magnitudeRatio")))
+        if sign != "positive":
+            state, code, explain = "FAIL", "MACRO_GAMMA_NOT_POSITIVE", f"netGammaSign={sign or 'missing'}."
+        elif mag_bucket not in ("medium", "high"):
+            state, code, explain = "FAIL", "MACRO_GAMMA_TOO_SMALL", f"magnitudeBucket={mag_bucket or 'missing'} (needs >= medium)."
+        else:
+            state, code, explain = "PASS", None, "Positive market gamma with non-trivial magnitude."
+        checks.append(
+            _mk_check(
+                id="MACRO_GAMMA",
+                label="SPX dealer gamma positive (not tiny)",
+                state=state,
+                code=code,
+                value={
+                    "symbolUsed": spx_levels.get("symbolUsed"),
+                    "expiry": spx_levels.get("expiry"),
+                    "netGammaSign": sign,
+                    "magnitudeBucket": mag_bucket,
+                    "magnitudeRatio": dg.get("magnitudeRatio"),
+                },
+                threshold={"requireSign": "positive", "minBucket": "medium"},
+                explain=explain,
+            )
+        )
+
+    # ===== SPX dailies (for RV) with proxy fallback =====
+    today = _now_et_date()
+    bars = fetch_dailies_ohlc_range(client, ticker="SPX", start=today - dt.timedelta(days=90), end=today)
+    underlying_used = "SPX"
+    if not bars:
+        bars = fetch_dailies_ohlc_range(client, ticker="SPY", start=today - dt.timedelta(days=90), end=today)
+        if bars:
+            underlying_used = "SPY"
+            notes.append("SPX dailies unavailable; used SPY proxy for RV checks.")
+
+    closes = [float(b.close) for b in (bars or []) if getattr(b, "close", None) is not None]
+    rv5_now = _rv_annualized_from_closes(closes, 5) if closes else None
+    rv20_now = _rv_annualized_from_closes(closes, 20) if closes else None
+    rv5_prev = _rv_annualized_from_closes(closes[:-5], 5) if closes and len(closes) > 10 else None
+    rv20_prev = _rv_annualized_from_closes(closes[:-5], 20) if closes and len(closes) > 30 else None
+    rv5_jump = (rv5_now / rv5_prev) if (rv5_now is not None and rv5_prev is not None and rv5_prev > 1e-12) else None
+    rv20_jump = (rv20_now / rv20_prev) if (rv20_now is not None and rv20_prev is not None and rv20_prev > 1e-12) else None
+
+    # ===== B3) RV acceleration =====
+    if rv5_jump is None or rv20_jump is None:
+        checks.append(
+            _mk_check(
+                id="MACRO_RV_ACCEL",
+                label="Index RV not accelerating (RV5 + RV20)",
+                state="MISSING",
+                code="MACRO_RV_DATA_MISSING",
+                value={"underlyingUsed": underlying_used, "rv5Now": rv5_now, "rv5Prev5": rv5_prev, "rv5Jump": rv5_jump, "rv20Now": rv20_now, "rv20Prev5": rv20_prev, "rv20Jump": rv20_jump},
+                threshold={"rv5JumpMax": RV5_JUMP_MAX, "rv20JumpMax": RV20_JUMP_MAX},
+                explain="Insufficient index history to compute RV acceleration.",
+            )
+        )
+    else:
+        if float(rv5_jump) > float(RV5_JUMP_MAX):
+            state, code, explain = "FAIL", "MACRO_RV5_ACCELERATING", f"RV5 jump {rv5_jump:.2f} > {RV5_JUMP_MAX:.2f}."
+        elif float(rv20_jump) > float(RV20_JUMP_MAX):
+            state, code, explain = "FAIL", "MACRO_RV20_ACCELERATING", f"RV20 jump {rv20_jump:.2f} > {RV20_JUMP_MAX:.2f}."
+        else:
+            state, code, explain = "PASS", None, "RV5 and RV20 not accelerating."
+        checks.append(
+            _mk_check(
+                id="MACRO_RV_ACCEL",
+                label="Index RV not accelerating (RV5 + RV20)",
+                state=state,
+                code=code,
+                value={"underlyingUsed": underlying_used, "rv5Jump": round(float(rv5_jump), 4), "rv20Jump": round(float(rv20_jump), 4), "rv5Now": rv5_now, "rv20Now": rv20_now, "rv5Prev5": rv5_prev, "rv20Prev5": rv20_prev},
+                threshold={"rv5JumpMax": RV5_JUMP_MAX, "rv20JumpMax": RV20_JUMP_MAX},
+                explain=explain,
+            )
+        )
+
+    # ===== B2) Gamma flip distance in EM (dynamic cutoff) =====
+    flip_cutoff = float(FLIP_CUTOFF_TIGHT) if (rv5_jump is not None and float(rv5_jump) > float(RV5_ACCEL_TIGHTEN)) else float(FLIP_CUTOFF_BASE)
+    heat = spx_levels.get("gexHeatmap") if isinstance(spx_levels, dict) else None
+    enabled_heat = bool(heat.get("enabled")) if isinstance(heat, dict) else False
+    m = heat.get("metrics") if isinstance(heat, dict) and isinstance(heat.get("metrics"), dict) else {}
+    down_em = _to_float(m.get("downsideDistanceEm"))
+    up_em = _to_float(m.get("upsideDistanceEm"))
+    min_flip = None
+    if down_em is not None and up_em is not None:
+        min_flip = min(float(down_em), float(up_em))
+    elif down_em is not None:
+        min_flip = float(down_em)
+    elif up_em is not None:
+        min_flip = float(up_em)
+
+    if not enabled_heat or min_flip is None:
+        checks.append(
+            _mk_check(
+                id="MACRO_GAMMA_FLIP",
+                label="No SPX gamma flip within cutoff",
+                state="MISSING",
+                code="MACRO_GAMMA_FLIP_MISSING",
+                value={"enabled": enabled_heat, "downsideEm": down_em, "upsideEm": up_em, "notes": list(heat.get("notes") or []) if isinstance(heat, dict) else []},
+                threshold={"flipCutoffEm": flip_cutoff, "rv5AccelTightenTrigger": RV5_ACCEL_TIGHTEN, "tightCutoffEm": FLIP_CUTOFF_TIGHT, "baseCutoffEm": FLIP_CUTOFF_BASE},
+                explain="Gamma flip distance unavailable (heatmap missing/disabled).",
+            )
+        )
+    else:
+        passed = float(min_flip) >= float(flip_cutoff)
+        checks.append(
+            _mk_check(
+                id="MACRO_GAMMA_FLIP",
+                label="No SPX gamma flip within cutoff",
+                state="PASS" if passed else "FAIL",
+                code=None if passed else "MACRO_TOO_CLOSE_TO_GAMMA_FLIP",
+                value={"minFlipEm": round(float(min_flip), 4), "downsideEm": down_em, "upsideEm": up_em, "cutoffEm": flip_cutoff, "symbolUsed": spx_levels.get("symbolUsed") if isinstance(spx_levels, dict) else None},
+                threshold={"flipCutoffEm": flip_cutoff},
+                explain=("Flip distance OK." if passed else "Too close to gamma flip given current volatility regime."),
+            )
+        )
+
+    # ===== B4) Forced flows (today + next 3 trading days, severity) =====
+    wdays = _next_trading_days(_now_et_date(), FLOW_WINDOW_TD)
+    if not wdays:
+        checks.append(
+            _mk_check(
+                id="MACRO_FORCED_FLOWS",
+                label="No index-level forced flows imminent",
+                state="MISSING",
+                code="MACRO_FORCED_FLOW_WINDOW_EMPTY",
+                value={"windowTradingDays": [], "high": [], "med": []},
+                threshold={"windowTradingDays": FLOW_WINDOW_TD},
+                explain="Unable to build trading-day window.",
+            )
+        )
+    else:
+        start = wdays[0]
+        end = wdays[-1]
+        window_set = {d.isoformat() for d in wdays}
+
+        local: List[dict] = []
+        for d0, evs in (market_structure_events_by_date(start=start, end=end) or {}).items():
+            if d0 in window_set:
+                for e in (evs or []):
+                    if isinstance(e, dict):
+                        local.append({**e, "date": d0})
+        for d0, evs in (opex_events_by_date(start=start, end=end) or {}).items():
+            if d0 in window_set:
+                for e in (evs or []):
+                    if isinstance(e, dict):
+                        local.append({**e, "date": d0})
+
+        macro: Dict[str, List[dict]] = {}
+        macro_notes: List[str] = []
+        if benzinga_client is not None:
+            try:
+                macro, _, macro_notes = macro_events_by_date(bz=benzinga_client, start=start, end=end, importance_min=FLOW_IMPORTANCE_MED_MIN)
+            except Exception as e:
+                macro, macro_notes = {}, [f"macro_events_by_date failed: {type(e).__name__}: {e}"]
+
+        high: List[dict] = []
+        med: List[dict] = []
+
+        # Manual overrides (always treated as HIGH severity).
+        for s in FLOW_MANUAL_RANGES:
+            s0 = str(s or "").strip()
+            if not s0:
+                continue
+            try:
+                if ":" in s0:
+                    a, b = s0.split(":", 1)
+                    d1 = dt.date.fromisoformat(a[:10])
+                    d2 = dt.date.fromisoformat(b[:10])
+                else:
+                    d1 = dt.date.fromisoformat(s0[:10])
+                    d2 = d1
+            except Exception:
+                continue
+            cur = min(d1, d2)
+            end0 = max(d1, d2)
+            while cur <= end0:
+                if cur.isoformat() in window_set:
+                    high.append({"date": cur.isoformat(), "kind": "MANUAL", "title": "Manual forced-flow block", "source": "manual", "severity": "HIGH"})
+                cur = cur + dt.timedelta(days=1)
+
+        for e in local:
+            kind = str(e.get("kind") or "").upper()
+            sev = "HIGH" if kind in ("HOLIDAY", "EARLY_CLOSE", "OPEX") else "MED"
+            rec = {"date": str(e.get("date") or "")[:10] or None, "kind": kind, "title": e.get("title"), "source": e.get("source") or "local", "severity": sev}
+            (high if sev == "HIGH" else med).append(rec)
+
+        for d0, evs in (macro or {}).items():
+            if d0 not in window_set:
+                continue
+            for e in (evs or []):
+                if not isinstance(e, dict):
+                    continue
+                imp = _to_int(e.get("importance")) or 0
+                sev = "HIGH" if imp >= FLOW_IMPORTANCE_HIGH_MIN else "MED"
+                rec = {"date": d0, "kind": str(e.get("kind") or "ECON"), "title": e.get("title"), "source": e.get("source") or "benzinga", "severity": sev, "importance": imp, "key": e.get("key")}
+                (high if sev == "HIGH" else med).append(rec)
+
+        if benzinga_client is None:
+            state, code, explain = "MISSING", "MACRO_FORCED_FLOWS_DATA_MISSING", "Benzinga macro calendar unavailable."
+        elif high:
+            state, code, explain = "FAIL", "MACRO_FORCED_FLOWS_HIGH", f"{len(high)} HIGH-severity forced-flow event(s) in window."
+        else:
+            state, code, explain = "PASS", None, "No HIGH-severity forced flows in window."
+
+        if med:
+            warnings.append({"id": "MACRO_FORCED_FLOWS_MED", "label": "Forced flows (MED)", "events": med[:10]})
+
+        checks.append(
+            _mk_check(
+                id="MACRO_FORCED_FLOWS",
+                label="No index-level forced flows imminent",
+                state=state,
+                code=code,
+                value={"windowTradingDays": [d.isoformat() for d in wdays], "high": high[:10], "med": med[:10], "notes": macro_notes},
+                threshold={"windowTradingDays": FLOW_WINDOW_TD, "importanceHighMin": FLOW_IMPORTANCE_HIGH_MIN, "importanceMedMin": FLOW_IMPORTANCE_MED_MIN},
+                explain=explain,
+            )
+        )
+
+    passed_all = all(str(c.get("state") or "").upper() == "PASS" for c in checks)
+    return {"status": "GO" if passed_all else "NO_GO", "passed": bool(passed_all), "checks": checks, "warnings": warnings, "notes": notes}
+
+

@@ -9,6 +9,7 @@ from backend.benzinga_client import BenzingaClient
 from backend.config import get_flags
 from backend.earnings_calendar import benzinga_next_earnings
 from backend.event_risk_overlay import compute_event_risk_overlay_optional
+from backend.go_no_go import compute_go_no_go
 from backend.dealer_gamma_context import compute_dealer_gamma_context
 from backend.oi_clusters import compute_open_interest_clusters
 from backend.orats_client import OratsClient, OratsError
@@ -1974,6 +1975,29 @@ def compute_breach_stats(
                 )
             except Exception as e:
                 out["monteCarloOptimization"] = {"mode": "RISK_ONLY", "notes": [f"Optimization failed: {type(e).__name__}: {e}"]}
+
+    # --- GO / NO-GO decision (strict, additive; does not affect core stats) ---
+    try:
+        bz_for_go = benzinga_client if bool(flags.ENABLE_BENZINGA) else None
+        out["goNoGo"] = compute_go_no_go(client, ticker=t, payload=out, benzinga_client=bz_for_go)
+    except Exception as e:
+        out["goNoGo"] = {
+            "status": "NO_GO",
+            "passed": False,
+            "checks": [
+                {
+                    "id": "GO_NO_GO_INTERNAL_ERROR",
+                    "label": "GO/NO-GO computation",
+                    "state": "MISSING",
+                    "code": "GO_NO_GO_INTERNAL_ERROR",
+                    "value": {"error": f"{type(e).__name__}: {e}"},
+                    "threshold": {},
+                    "explain": "GO/NO-GO unavailable (internal error).",
+                }
+            ],
+            "warnings": [],
+            "notes": [f"GO/NO-GO failed: {type(e).__name__}: {e}"],
+        }
 
     return out
 

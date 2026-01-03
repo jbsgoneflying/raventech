@@ -479,6 +479,63 @@ a.ravenTempDisabled {
   cursor: pointer;
 }
 
+/* Engine 1: GO / NO-GO pill + explain panel (uses tooltip mechanics) */
+.e1Panel .goWrap { margin-left: 10px; }
+.e1Panel .goPill {
+  width: auto;
+  min-width: 56px;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  line-height: 22px;
+  text-transform: uppercase;
+}
+.e1Panel .goPill.isGo {
+  color: rgba(46, 204, 113, 1);
+  border-color: rgba(46, 204, 113, 0.35);
+  background: rgba(46, 204, 113, 0.12);
+}
+.e1Panel .goPill.isNo {
+  color: rgba(231, 76, 60, 1);
+  border-color: rgba(231, 76, 60, 0.35);
+  background: rgba(231, 76, 60, 0.12);
+}
+.e1Panel .goPanel {
+  width: 420px;
+  max-width: min(92vw, 440px);
+}
+.e1Panel .goPanelTitle { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.e1Panel .goPanelVerdict { font-weight: 900; letter-spacing: 0.06em; }
+.e1Panel .goPanelVerdict.isGo { color: rgba(46, 204, 113, 1); }
+.e1Panel .goPanelVerdict.isNo { color: rgba(231, 76, 60, 1); }
+.e1Panel .goList { display: flex; flex-direction: column; gap: 10px; }
+.e1Panel .goCheck { padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
+.e1Panel .goCheckTop { display: flex; align-items: center; gap: 8px; }
+.e1Panel .goState {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--ta-divider);
+}
+.e1Panel .goState.isPass { color: rgba(46, 204, 113, 1); border-color: rgba(46, 204, 113, 0.35); background: rgba(46, 204, 113, 0.10); }
+.e1Panel .goState.isFail { color: rgba(231, 76, 60, 1); border-color: rgba(231, 76, 60, 0.35); background: rgba(231, 76, 60, 0.10); }
+.e1Panel .goState.isMissing { color: var(--ta-muted); }
+.e1Panel .goCheckLabel { font-weight: 700; }
+.e1Panel .goCheckMeta { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+.e1Panel .goExplain { margin-top: 4px; }
+.e1Panel .goWarn { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); }
+.e1Panel .goWarnTitle { font-weight: 800; margin-bottom: 6px; }
+.e1Panel .goWarnLine { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .e1Panel #bufferTargetGrid.miniGrid { margin-top: 10px; }
 
 /* Engine 1 Conditions: keep scan cards compact, push verbosity into Live details */
