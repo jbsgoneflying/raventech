@@ -107,7 +107,6 @@ function renderEngine1DecisionPanel(payload) {
   const goPassed = go?.passed === true && goStatus === "GO";
   const goLabel = goPassed ? "GO" : "NO-GO";
   const goCls = goPassed ? "isGo" : "isNo";
-  const goTip = renderGoNoGoTip(go);
 
   const pxTxt = Number.isFinite(price) ? price.toFixed(2) : "—";
   const metaRight = [
@@ -121,10 +120,7 @@ function renderEngine1DecisionPanel(payload) {
         <div class="taHeaderRow">
           <div class="taHeaderTitle">
             ${escapeHtml(t)} — Engine 1
-            <span class="tipWrap goWrap">
-              <button class="tipBtn goPill ${goCls}" type="button" aria-label="GO/NO-GO details" aria-expanded="false">${escapeHtml(goLabel)}</button>
-              <div class="tipPanel goPanel" role="tooltip">${goTip}</div>
-            </span>
+            <button class="goPill ${goCls}" type="button" id="e1GoNoGoBtn" aria-label="GO/NO-GO details" aria-haspopup="dialog">${escapeHtml(goLabel)}</button>
           </div>
           <div class="taHeaderMeta">${metaRight}</div>
         </div>
@@ -188,55 +184,128 @@ function renderEngine1DecisionPanel(payload) {
     });
   }
 
-  // This section is rendered dynamically after RUN; rebind tooltip handlers safely.
-  try { initTooltips(); } catch { /* ignore */ }
+  // GO/NO-GO modal (centered)
+  const goBtn = $("e1GoNoGoBtn");
+  if (goBtn) {
+    goBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openGoNoGoModal(go);
+    });
+  }
 }
 
-function renderGoNoGoTip(go) {
+// --- GO/NO-GO Modal (centered) ---
+let _goModalBound = false;
+function ensureGoNoGoModal() {
+  let overlay = document.getElementById("goNoGoOverlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "goNoGoOverlay";
+  overlay.className = "goModalOverlay hidden";
+  overlay.innerHTML = `
+    <div class="goModal" role="dialog" aria-modal="true" aria-label="GO/NO-GO details">
+      <button class="goModalClose" type="button" aria-label="Close">×</button>
+      <div class="goModalHead">
+        <div class="goModalTitle">GO/NO-GO</div>
+        <div class="goModalVerdict" id="goNoGoVerdict">—</div>
+      </div>
+      <div class="goModalSub muted" id="goNoGoSub">—</div>
+      <div class="goCols" id="goNoGoCols"></div>
+      <div class="goModalFoot" id="goNoGoFoot"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  if (!_goModalBound) {
+    _goModalBound = true;
+    overlay.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (!t) return;
+      if (t === overlay) closeGoNoGoModal();
+      if (t.closest && t.closest(".goModalClose")) closeGoNoGoModal();
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeGoNoGoModal();
+    });
+  }
+  return overlay;
+}
+
+function closeGoNoGoModal() {
+  const overlay = document.getElementById("goNoGoOverlay");
+  if (!overlay) return;
+  overlay.classList.add("hidden");
+}
+
+function openGoNoGoModal(go) {
+  const overlay = ensureGoNoGoModal();
   const status = String(go?.status || "NO_GO").toUpperCase();
   const passed = (go?.passed === true && status === "GO");
   const checks = Array.isArray(go?.checks) ? go.checks : [];
   const warns = Array.isArray(go?.warnings) ? go.warnings : [];
 
-  const header = `
-    <div class="goPanelTitle">
-      <div class="goPanelVerdict ${passed ? "isGo" : "isNo"}">${passed ? "GO" : "NO-GO"}</div>
-      <div class="goPanelSub muted">${escapeHtml(passed ? "All checks passed" : "One or more checks failed / missing")}</div>
-    </div>
-  `;
+  const verdictEl = document.getElementById("goNoGoVerdict");
+  const subEl = document.getElementById("goNoGoSub");
+  const colsEl = document.getElementById("goNoGoCols");
+  const footEl = document.getElementById("goNoGoFoot");
+  if (!verdictEl || !subEl || !colsEl || !footEl) return;
 
-  const lineFor = (c) => {
+  verdictEl.textContent = passed ? "GO" : "NO-GO";
+  verdictEl.classList.toggle("isGo", passed);
+  verdictEl.classList.toggle("isNo", !passed);
+  subEl.textContent = passed ? "All checks passed" : "One or more checks failed / missing";
+
+  const by = { FAIL: [], MISSING: [], PASS: [] };
+  for (const c of checks) {
     const st = String(c?.state || "MISSING").toUpperCase();
-    const code = c?.code ? String(c.code) : "";
-    const label = String(c?.label || c?.id || "—");
-    const expl = String(c?.explain || "");
-    const metrics = goMetricsLine(c);
-    const stCls = st === "PASS" ? "isPass" : st === "FAIL" ? "isFail" : "isMissing";
+    const k = (st === "PASS" || st === "FAIL") ? st : "MISSING";
+    by[k].push(c);
+  }
+
+  const renderCol = (title, st) => {
+    const items = by[st] || [];
     const icon = st === "PASS" ? "✅" : st === "FAIL" ? "❌" : "⚠️";
+    const cls = st === "PASS" ? "isPass" : st === "FAIL" ? "isFail" : "isMissing";
+    const rows = items.map((c) => {
+      const label = String(c?.label || c?.id || "—");
+      const code = c?.code ? String(c.code) : "";
+      const metrics = goMetricsLine(c);
+      return `
+        <div class="goRow">
+          <div class="goRowTop">
+            <span class="goRowLabel">${escapeHtml(label)}</span>
+          </div>
+          <div class="goRowMeta">
+            ${code ? `<span class="mono goRowCode">${escapeHtml(code)}</span>` : ""}
+            ${metrics ? `<span class="mono goRowMetrics">${escapeHtml(metrics)}</span>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
     return `
-      <div class="goCheck">
-        <div class="goCheckTop">
-          <span class="goIcon" aria-hidden="true">${icon}</span>
-          <span class="goState ${stCls}">${escapeHtml(st)}</span>
-          <span class="goCheckLabel">${escapeHtml(label)}</span>
+      <div class="goCol ${cls}">
+        <div class="goColHead">
+          <span class="goColIcon" aria-hidden="true">${icon}</span>
+          <span class="goColTitle">${escapeHtml(title)}</span>
+          <span class="goColCount mono">${items.length}</span>
         </div>
-        <div class="goCheckMeta">
-          ${code ? `<span class="mono goCode">${escapeHtml(code)}</span>` : ""}
-          ${metrics ? `<span class="mono goMetrics">${escapeHtml(metrics)}</span>` : ""}
-        </div>
-        ${expl ? `<div class="goExplain muted">${escapeHtml(expl)}</div>` : ""}
+        <div class="goColBody">${rows || `<div class="muted">—</div>`}</div>
       </div>
     `;
   };
 
-  const warnHtml = warns.length
-    ? `<div class="goWarn"><div class="goWarnTitle">Warnings</div>${warns.slice(0, 3).map(w => `<div class="goWarnLine muted">${escapeHtml(String(w?.label || w?.id || "warning"))}</div>`).join("")}</div>`
-    : "";
+  colsEl.innerHTML = [
+    renderCol("Fail", "FAIL"),
+    renderCol("Missing", "MISSING"),
+    renderCol("Pass", "PASS"),
+  ].join("");
 
-  if (!checks.length) {
-    return header + `<div class="muted" style="margin-top:10px;">GO/NO-GO payload missing. Run Engine 1 again.</div>` + warnHtml;
-  }
-  return header + `<div class="goList">${checks.map(lineFor).join("")}</div>` + warnHtml;
+  footEl.innerHTML = warns.length
+    ? `<div class="goWarnTitle">Warnings</div>${warns.slice(0, 5).map(w => `<div class="goWarnLine muted">${escapeHtml(String(w?.label || w?.id || "warning"))}</div>`).join("")}`
+    : `<div class="muted">—</div>`;
+
+  overlay.classList.remove("hidden");
 }
 
 function goMetricsLine(c) {

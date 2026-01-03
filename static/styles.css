@@ -499,6 +499,7 @@ a.ravenTempDisabled {
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
+.e1Panel .taHeaderTitle .goPill { margin-left: 10px; }
 .e1Panel .goPill.isGo {
   color: rgba(12, 70, 38, 0.96);
   border-color: rgba(46, 204, 113, 0.40);
@@ -513,41 +514,129 @@ a.ravenTempDisabled {
 }
 .e1Panel .goPill.isGo:hover { border-color: rgba(46, 204, 113, 0.55); }
 .e1Panel .goPill.isNo:hover { border-color: rgba(231, 76, 60, 0.55); }
-.e1Panel .goPanel {
-  width: 420px;
-  max-width: min(92vw, 440px);
-}
-.e1Panel .goPanelTitle { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-.e1Panel .goPanelVerdict { font-weight: 900; letter-spacing: 0.06em; }
-.e1Panel .goPanelVerdict.isGo { color: rgba(46, 204, 113, 1); }
-.e1Panel .goPanelVerdict.isNo { color: rgba(231, 76, 60, 1); }
-.e1Panel .goList { display: flex; flex-direction: column; gap: 10px; }
-.e1Panel .goCheck { padding-top: 10px; border-top: 1px solid rgba(15, 23, 42, 0.10); }
-.e1Panel .goCheckTop { display: flex; align-items: center; gap: 8px; }
-.e1Panel .goIcon { font-size: 14px; line-height: 1; }
-.e1Panel .goState {
-  display: inline-flex;
+/* GO/NO-GO Modal (centered, 3 columns) */
+.goModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
   align-items: center;
   justify-content: center;
-  height: 18px;
-  padding: 0 7px;
+  padding: 22px;
+  background: rgba(10, 14, 22, 0.20);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+}
+.goModalOverlay.hidden { display: none; }
+
+.goModal {
+  width: min(980px, 94vw);
+  max-height: min(82vh, 860px);
+  overflow: auto;
+  border-radius: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255,255,255,0.88);
+  box-shadow: 0 18px 50px rgba(15, 20, 30, 0.18);
+  padding: 16px 16px 14px;
+  position: relative;
+}
+
+.goModalClose {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255,255,255,0.70);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(11,11,15,0.70);
+}
+.goModalClose:hover { background: rgba(255,255,255,0.82); }
+
+.goModalHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 44px; /* room for close button */
+}
+.goModalTitle {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08px;
+  color: rgba(11,11,15,0.70);
+}
+.goModalVerdict {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  padding: 6px 12px;
   border-radius: 999px;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
   border: 1px solid var(--ta-divider);
 }
-.e1Panel .goState.isPass { color: rgba(46, 204, 113, 1); border-color: rgba(46, 204, 113, 0.35); background: rgba(46, 204, 113, 0.10); }
-.e1Panel .goState.isFail { color: rgba(231, 76, 60, 1); border-color: rgba(231, 76, 60, 0.35); background: rgba(231, 76, 60, 0.10); }
-.e1Panel .goState.isMissing { color: rgba(11,11,15,0.62); border-color: rgba(15,23,42,0.14); background: rgba(11,11,15,0.04); }
-.e1Panel .goCheckLabel { font-weight: 700; }
-.e1Panel .goCheckMeta { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
-.e1Panel .goCode { opacity: 0.90; }
-.e1Panel .goMetrics { opacity: 0.78; }
-.e1Panel .goExplain { margin-top: 4px; }
-.e1Panel .goWarn { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); }
-.e1Panel .goWarnTitle { font-weight: 800; margin-bottom: 6px; }
-.e1Panel .goWarnLine { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.goModalVerdict.isGo {
+  color: rgba(12, 70, 38, 0.96);
+  border-color: rgba(46, 204, 113, 0.40);
+  background: rgba(46, 204, 113, 0.14);
+}
+.goModalVerdict.isNo {
+  color: rgba(86, 17, 12, 0.96);
+  border-color: rgba(231, 76, 60, 0.40);
+  background: rgba(231, 76, 60, 0.14);
+}
+.goModalSub { margin-top: 6px; margin-bottom: 12px; }
+
+.goCols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .goCols { grid-template-columns: 1fr; }
+}
+
+.goCol {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255,255,255,0.72);
+  box-shadow: 0 10px 24px rgba(15, 20, 30, 0.08);
+  padding: 12px;
+}
+.goColHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+.goColIcon { font-size: 14px; line-height: 1; }
+.goColTitle { font-size: 12px; font-weight: 700; letter-spacing: 0.08px; color: rgba(11,11,15,0.72); text-transform: uppercase; }
+.goColCount { font-size: 12px; color: rgba(11,11,15,0.55); }
+
+.goColBody { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.goRow { padding-bottom: 10px; border-bottom: 1px solid rgba(15, 23, 42, 0.06); }
+.goRow:last-child { padding-bottom: 0; border-bottom: none; }
+.goRowLabel { font-size: 13px; font-weight: 600; color: rgba(11,11,15,0.82); }
+.goRowMeta { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+.goRowCode { opacity: 0.88; }
+.goRowMetrics { opacity: 0.70; }
+
+.goCol.isFail { border-color: rgba(231, 76, 60, 0.22); }
+.goCol.isMissing { border-color: rgba(15, 23, 42, 0.12); }
+.goCol.isPass { border-color: rgba(46, 204, 113, 0.22); }
+
+.goModalFoot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+.goWarnTitle { font-size: 12px; font-weight: 700; letter-spacing: 0.08px; color: rgba(11,11,15,0.70); text-transform: uppercase; margin-bottom: 6px; }
+.goWarnLine { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .e1Panel #bufferTargetGrid.miniGrid { margin-top: 10px; }
 
