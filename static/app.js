@@ -274,10 +274,15 @@ function openGoNoGoModal(go) {
       const explain = (c?.explain !== null && c?.explain !== undefined) ? String(c.explain) : "";
       const notes = Array.isArray(c?.value?.notes) ? c.value.notes : [];
       const isLiq = String(c?.id || "") === "SN_LIQUIDITY";
-      const noteLines = notes
-        .slice(0, isLiq ? 6 : 3)
-        .map((x) => String(x ?? "").trim())
-        .filter(Boolean);
+      const clean = (xs) => xs.map((x) => String(x ?? "").trim()).filter(Boolean);
+      let noteLines = clean(notes.slice(0, isLiq ? 4 : 3));
+      if (isLiq && notes.length > 4) {
+        const tail = clean(notes.slice(-4));
+        // Merge unique while preserving order.
+        for (const t of tail) {
+          if (!noteLines.includes(t)) noteLines.push(t);
+        }
+      }
       const showExplain = (!metrics || !metrics.trim()) || (String(c?.state || "").toUpperCase() !== "PASS");
       return `
         <div class="goRow">

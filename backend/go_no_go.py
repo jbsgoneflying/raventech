@@ -347,12 +347,16 @@ def _band_liquidity_agg(
             v = _to_float(r.get("callDelta"))
             if v is None:
                 d0 = _to_float(r.get("delta"))
-                v = d0 if d0 is not None and d0 > 0 else None
+                # Some ORATS plans expose only a generic `delta` that can be unsigned.
+                # Treat it as side-signed for robustness.
+                v = None if d0 is None else abs(float(d0))
             return v
         v = _to_float(r.get("putDelta"))
         if v is None:
             d0 = _to_float(r.get("delta"))
-            v = d0 if d0 is not None and d0 < 0 else None
+            # Some ORATS plans expose only a generic `delta` that can be unsigned.
+            # Treat it as side-signed for robustness.
+            v = None if d0 is None else -abs(float(d0))
         return v
 
     bid_key = "callBidPrice" if s == "call" else "putBidPrice"
@@ -454,12 +458,12 @@ def _pick_opt_leg_row(*, rows: List[dict], side: str, underlying: Optional[float
             v = _to_float(r.get("callDelta"))
             if v is None:
                 d0 = _to_float(r.get("delta"))
-                v = d0 if d0 is not None and d0 > 0 else None
+                v = None if d0 is None else abs(float(d0))
             return v
         v = _to_float(r.get("putDelta"))
         if v is None:
             d0 = _to_float(r.get("delta"))
-            v = d0 if d0 is not None and d0 < 0 else None
+            v = None if d0 is None else -abs(float(d0))
         return v
 
     use = [r for r in rows if isinstance(r, dict)]
