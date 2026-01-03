@@ -1255,6 +1255,45 @@ def _first_row(rows: Any) -> Optional[dict]:
     return None
 
 
+def _sniff_daily_volume(row: dict) -> Optional[float]:
+    """
+    ORATS /hist/dailies volume field names can vary by entitlement/plan.
+    Try common keys first, then sniff any plausible *share volume* key.
+    """
+    if not isinstance(row, dict):
+        return None
+
+    # Common aliases.
+    v = _to_float(row.get("volume") or row.get("vol") or row.get("totalVolume") or row.get("total_volume") or row.get("shareVolume") or row.get("shares") or row.get("sharesTraded"))
+    if v is not None and math.isfinite(float(v)) and float(v) > 0:
+        return float(v)
+
+    # Sniff keys: prefer large positive numbers (volume tends to be orders of magnitude bigger than vols/IVs).
+    keys = list(row.keys())
+    candidates: List[Tuple[float, str]] = []
+    for k in keys:
+        kk = str(k).lower()
+        if "vol" not in kk and "share" not in kk:
+            continue
+        # Exclude volatility-ish fields.
+        if any(bad in kk for bad in ("iv", "implied", "vwap", "volatility", "rv", "var", "volga")):
+            continue
+        x = _to_float(row.get(k))
+        if x is None or not math.isfinite(float(x)) or float(x) <= 0:
+            continue
+        candidates.append((float(x), str(k)))
+
+    if not candidates:
+        return None
+
+    # Use the largest candidate; if all are tiny (<~100), treat as not-volume (likely a volatility number).
+    candidates.sort(key=lambda t: t[0], reverse=True)
+    best_val, _best_key = candidates[0]
+    if best_val < 100.0:
+        return None
+    return float(best_val)
+
+
 def fetch_daily_ohlc(client: OratsClient, *, ticker: str, date: dt.date) -> Optional[DailyOHLC]:
     """
     Best-effort OHLC fetch for a trade date.
@@ -1281,7 +1320,7 @@ def fetch_daily_ohlc(client: OratsClient, *, ticker: str, date: dt.date) -> Opti
     h = _to_float(row.get("hiPx") or row.get("high") or row.get("hi") or row.get("hPx"))
     l = _to_float(row.get("loPx") or row.get("low") or row.get("lo") or row.get("lPx"))
     c = _to_float(row.get("clsPx") or row.get("close") or row.get("cls_px"))
-    vol = _to_float(row.get("volume") or row.get("vol") or row.get("totalVolume"))
+    vol = _sniff_daily_volume(row)
     vwap = _to_float(row.get("vwap"))
     out = DailyOHLC(trade_date=td, open=o, high=h, low=l, close=c, volume=vol, vwap=vwap)
     _cache_set(_ohlc_cache, _ohlc_lock, key, out)
@@ -2044,7 +2083,7 @@ def fetch_dailies_ohlc_range(
         c = _to_float(r.get("clsPx") or r.get("close") or r.get("cls_px"))
         if c is None or c <= 0:
             continue
-        vol = _to_float(r.get("volume") or r.get("vol") or r.get("totalVolume"))
+        vol = _sniff_daily_volume(r)
         vwap = _to_float(r.get("vwap"))
         out.append(DailyOHLC(trade_date=td0, open=o, high=h, low=l, close=c, volume=vol, vwap=vwap))
     out.sort(key=lambda b: b.trade_date)
