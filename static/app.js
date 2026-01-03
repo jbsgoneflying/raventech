@@ -212,9 +212,11 @@ function renderGoNoGoTip(go) {
     const expl = String(c?.explain || "");
     const metrics = goMetricsLine(c);
     const stCls = st === "PASS" ? "isPass" : st === "FAIL" ? "isFail" : "isMissing";
+    const icon = st === "PASS" ? "✅" : st === "FAIL" ? "❌" : "⚠️";
     return `
       <div class="goCheck">
         <div class="goCheckTop">
+          <span class="goIcon" aria-hidden="true">${icon}</span>
           <span class="goState ${stCls}">${escapeHtml(st)}</span>
           <span class="goCheckLabel">${escapeHtml(label)}</span>
         </div>

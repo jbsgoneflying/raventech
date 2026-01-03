@@ -483,26 +483,36 @@ a.ravenTempDisabled {
 .e1Panel .goWrap { margin-left: 10px; }
 .e1Panel .goPill {
   width: auto;
-  min-width: 56px;
-  height: 22px;
-  padding: 0 10px;
+  min-width: 62px;
+  height: 24px;
+  padding: 0 12px;
   border-radius: 999px;
   font-weight: 900;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   font-size: 11px;
-  line-height: 22px;
+  line-height: 24px;
   text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
 .e1Panel .goPill.isGo {
-  color: rgba(46, 204, 113, 1);
-  border-color: rgba(46, 204, 113, 0.35);
-  background: rgba(46, 204, 113, 0.12);
+  color: rgba(12, 70, 38, 0.96);
+  border-color: rgba(46, 204, 113, 0.40);
+  background: rgba(46, 204, 113, 0.16);
+  box-shadow: 0 10px 24px rgba(46, 204, 113, 0.10), 0 1px 0 rgba(255,255,255,0.70) inset;
 }
 .e1Panel .goPill.isNo {
-  color: rgba(231, 76, 60, 1);
-  border-color: rgba(231, 76, 60, 0.35);
-  background: rgba(231, 76, 60, 0.12);
+  color: rgba(86, 17, 12, 0.96);
+  border-color: rgba(231, 76, 60, 0.40);
+  background: rgba(231, 76, 60, 0.16);
+  box-shadow: 0 10px 24px rgba(231, 76, 60, 0.10), 0 1px 0 rgba(255,255,255,0.70) inset;
 }
+.e1Panel .goPill.isGo:hover { border-color: rgba(46, 204, 113, 0.55); }
+.e1Panel .goPill.isNo:hover { border-color: rgba(231, 76, 60, 0.55); }
 .e1Panel .goPanel {
   width: 420px;
   max-width: min(92vw, 440px);
@@ -512,8 +522,9 @@ a.ravenTempDisabled {
 .e1Panel .goPanelVerdict.isGo { color: rgba(46, 204, 113, 1); }
 .e1Panel .goPanelVerdict.isNo { color: rgba(231, 76, 60, 1); }
 .e1Panel .goList { display: flex; flex-direction: column; gap: 10px; }
-.e1Panel .goCheck { padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
+.e1Panel .goCheck { padding-top: 10px; border-top: 1px solid rgba(15, 23, 42, 0.10); }
 .e1Panel .goCheckTop { display: flex; align-items: center; gap: 8px; }
+.e1Panel .goIcon { font-size: 14px; line-height: 1; }
 .e1Panel .goState {
   display: inline-flex;
   align-items: center;
@@ -528,9 +539,11 @@ a.ravenTempDisabled {
 }
 .e1Panel .goState.isPass { color: rgba(46, 204, 113, 1); border-color: rgba(46, 204, 113, 0.35); background: rgba(46, 204, 113, 0.10); }
 .e1Panel .goState.isFail { color: rgba(231, 76, 60, 1); border-color: rgba(231, 76, 60, 0.35); background: rgba(231, 76, 60, 0.10); }
-.e1Panel .goState.isMissing { color: var(--ta-muted); }
+.e1Panel .goState.isMissing { color: rgba(11,11,15,0.62); border-color: rgba(15,23,42,0.14); background: rgba(11,11,15,0.04); }
 .e1Panel .goCheckLabel { font-weight: 700; }
 .e1Panel .goCheckMeta { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+.e1Panel .goCode { opacity: 0.90; }
+.e1Panel .goMetrics { opacity: 0.78; }
 .e1Panel .goExplain { margin-top: 4px; }
 .e1Panel .goWarn { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); }
 .e1Panel .goWarnTitle { font-weight: 800; margin-bottom: 6px; }
