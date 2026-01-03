@@ -687,6 +687,9 @@ a.ravenTempDisabled {
   border: 1px solid var(--ta-glass-border);
   box-shadow: var(--ta-shadow);
   backdrop-filter: blur(var(--ta-blur));
+  /* Ensure header tooltips render above the grid cards below (cards create stacking contexts too). */
+  position: relative;
+  z-index: 20;
 }
 
 .taHeaderRow {
@@ -828,6 +831,8 @@ a.ravenTempDisabled {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  position: relative;
+  z-index: 0;
 }
 
 @media (min-width: 920px) {
