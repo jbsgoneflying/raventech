@@ -265,6 +265,18 @@ function goMetricsLine(c) {
       if (Number.isFinite(n)) parts.push(`n=${n.toFixed(0)}`);
       return parts.join(" · ");
     }
+    if (id === "SN_TAIL_P90_RICHNESS") {
+      const em = Number(v?.expectedMovePct);
+      const p90 = Number(v?.p90RealizedPct);
+      const n = Number(v?.nUsed);
+      const r = Number(v?.ratio);
+      const parts = [];
+      if (Number.isFinite(em)) parts.push(`EM=${em.toFixed(2)}%`);
+      if (Number.isFinite(p90)) parts.push(`p90=${p90.toFixed(2)}%`);
+      if (Number.isFinite(r)) parts.push(`ratio=${r.toFixed(2)}×`);
+      if (Number.isFinite(n)) parts.push(`n=${n.toFixed(0)}`);
+      return parts.join(" · ");
+    }
     if (id === "SN_LIQUIDITY") {
       const dvol = Number(v?.avgDollarVol20d);
       const rep = v?.rep || {};
@@ -282,6 +294,16 @@ function goMetricsLine(c) {
       const b = String(v?.magnitudeBucket || "—");
       const sym = String(v?.symbolUsed || "SPX");
       return `${sym} · ${sign} · ${b}`;
+    }
+    if (id === "SN_INDEX_SENSITIVITY") {
+      const c20 = Number(v?.corr20);
+      const b20 = Number(v?.beta20);
+      const sens = v?.sensitive === true;
+      const parts = [];
+      if (Number.isFinite(c20)) parts.push(`corr20=${c20.toFixed(2)}`);
+      if (Number.isFinite(b20)) parts.push(`beta20=${b20.toFixed(2)}`);
+      if (sens) parts.push("tighten");
+      return parts.join(" · ");
     }
     if (id === "MACRO_RV_ACCEL") {
       const r5 = Number(v?.rv5Jump);

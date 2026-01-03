@@ -83,6 +83,23 @@ def _median(xs: List[float]) -> Optional[float]:
         return None
 
 
+def _percentile(xs: List[float], p: float) -> Optional[float]:
+    vals = [float(v) for v in (xs or []) if v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))]
+    if not vals:
+        return None
+    q = max(0.0, min(1.0, float(p)))
+    vals.sort()
+    if len(vals) == 1:
+        return float(vals[0])
+    idx = q * (len(vals) - 1)
+    lo = int(math.floor(idx))
+    hi = int(math.ceil(idx))
+    if lo == hi:
+        return float(vals[lo])
+    w = idx - lo
+    return float(vals[lo]) * (1.0 - w) + float(vals[hi]) * w
+
+
 def _mk_check(
     *,
     id: str,
@@ -302,6 +319,57 @@ def _rv_annualized_from_closes(closes: List[float], window: int) -> Optional[flo
     return float(s) * math.sqrt(252.0)
 
 
+def _corr_beta_from_close_maps(
+    *,
+    a_by_date: Dict[str, float],
+    b_by_date: Dict[str, float],
+    lookback_days: int,
+) -> Tuple[Optional[float], Optional[float], int]:
+    """
+    Compute correlation and beta between two close series using aligned daily log returns.
+    Returns (corr, beta, n_returns).
+    """
+    dates = sorted(set(a_by_date.keys()).intersection(set(b_by_date.keys())))
+    if len(dates) < lookback_days + 1:
+        return None, None, 0
+    dates = dates[-(lookback_days + 1) :]
+    ra: List[float] = []
+    rb: List[float] = []
+    for i in range(1, len(dates)):
+        d0 = dates[i - 1]
+        d1 = dates[i]
+        a0 = float(a_by_date.get(d0) or 0.0)
+        a1 = float(a_by_date.get(d1) or 0.0)
+        b0 = float(b_by_date.get(d0) or 0.0)
+        b1 = float(b_by_date.get(d1) or 0.0)
+        if a0 <= 0 or a1 <= 0 or b0 <= 0 or b1 <= 0:
+            continue
+        ra.append(math.log(a1 / a0))
+        rb.append(math.log(b1 / b0))
+    n = min(len(ra), len(rb))
+    if n < max(10, lookback_days // 2):
+        return None, None, n
+    ra = ra[-n:]
+    rb = rb[-n:]
+    try:
+        ma = statistics.mean(ra)
+        mb = statistics.mean(rb)
+        va = statistics.pvariance(ra)
+        vb = statistics.pvariance(rb)
+    except Exception:
+        return None, None, n
+    if not (math.isfinite(va) and math.isfinite(vb)) or vb <= 1e-18:
+        return None, None, n
+    cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb)) / max(1, n)
+    beta = cov / vb
+    corr = None if va <= 1e-18 else cov / (math.sqrt(va) * math.sqrt(vb))
+    if corr is not None and not math.isfinite(corr):
+        corr = None
+    if beta is not None and not math.isfinite(beta):
+        beta = None
+    return corr, beta, n
+
+
 def compute_go_no_go(
     client,
     *,
@@ -332,6 +400,12 @@ def compute_go_no_go(
 
     MIN_EARNINGS_N = int(getattr(f, "GO_MIN_EARNINGS_N", 6))
     EM_RICHNESS_MULT = float(getattr(f, "GO_EM_RICHNESS_MULT", 1.05))
+
+    TAIL_SAMPLE_MIN = int(getattr(f, "GO_TAIL_SAMPLE_MIN", 8))
+    TAIL_P90_MULT = float(getattr(f, "GO_TAIL_P90_MULT", 0.80))
+
+    CORR20_HIGH = float(getattr(f, "GO_CORR20_HIGH", 0.70))
+    BETA20_HIGH = float(getattr(f, "GO_BETA20_HIGH", 1.20))
 
     AVG_DVOL_MIN = float(getattr(f, "GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0))
     DELTA_LO = float(getattr(f, "GO_OPT_DELTA_BAND_LO", 0.15))
@@ -405,6 +479,53 @@ def compute_go_no_go(
                 value={"expectedMovePct": expected_move_pct, "realizedMedianPct": realized_median, "nUsed": n_used, "ratio": None if ratio is None else round(float(ratio), 4)},
                 threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT, "requiredExpectedMovePct": round(float(need), 4)},
                 explain=(f"Expected/median ratio={ratio:.3f}× vs min {EM_RICHNESS_MULT:.2f}×." if ratio is not None else ("Pass" if passed else "Fail")),
+            )
+        )
+
+    # ===== A2b) Tail gap proxy: P90 realized =====
+    p90 = _percentile(realized_vals, 0.90) if realized_vals else None
+    if n_used < int(TAIL_SAMPLE_MIN):
+        checks.append(
+            _mk_check(
+                id="SN_TAIL_P90_RICHNESS",
+                label="Expected move vs P90 realized (tail proxy)",
+                state="MISSING",
+                code="SN_TAIL_SAMPLE_TOO_SMALL",
+                value={"expectedMovePct": expected_move_pct, "p90RealizedPct": p90, "nUsed": n_used},
+                threshold={"minEarningsN": int(TAIL_SAMPLE_MIN), "tailMult": float(TAIL_P90_MULT)},
+                explain=f"Insufficient usable earnings events for tail estimate (n={n_used} < {int(TAIL_SAMPLE_MIN)}).",
+            )
+        )
+    elif expected_move_pct is None or p90 is None or float(p90) <= 0:
+        checks.append(
+            _mk_check(
+                id="SN_TAIL_P90_RICHNESS",
+                label="Expected move vs P90 realized (tail proxy)",
+                state="MISSING",
+                code="SN_TAIL_DATA_MISSING",
+                value={"expectedMovePct": expected_move_pct, "p90RealizedPct": p90, "nUsed": n_used},
+                threshold={"minEarningsN": int(TAIL_SAMPLE_MIN), "tailMult": float(TAIL_P90_MULT)},
+                explain="Missing expected move or P90 realized.",
+            )
+        )
+    else:
+        req = float(TAIL_P90_MULT) * float(p90)
+        ratio90 = float(expected_move_pct) / float(p90) if float(p90) > 0 else None
+        passed90 = float(expected_move_pct) >= float(req)
+        checks.append(
+            _mk_check(
+                id="SN_TAIL_P90_RICHNESS",
+                label="Expected move vs P90 realized (tail proxy)",
+                state="PASS" if passed90 else "FAIL",
+                code=None if passed90 else "SN_TAIL_P90_TOO_LARGE",
+                value={
+                    "expectedMovePct": expected_move_pct,
+                    "p90RealizedPct": round(float(p90), 4),
+                    "nUsed": n_used,
+                    "ratio": None if ratio90 is None else round(float(ratio90), 4),
+                },
+                threshold={"tailMult": float(TAIL_P90_MULT), "requiredExpectedMovePct": round(float(req), 4)},
+                explain=f"Expected/P90 ratio={ratio90:.3f}× vs min {float(TAIL_P90_MULT):.2f}×." if ratio90 is not None else ("Pass" if passed90 else "Fail"),
             )
         )
 
@@ -879,8 +1000,50 @@ def compute_go_no_go(
             )
         )
 
+    # ===== Index sensitivity (corr/beta vs SPY) — tighten-only mode =====
+    corr20 = None
+    beta20 = None
+    n_sens = 0
+    try:
+        start_s = today - dt.timedelta(days=60)
+        t_bars = fetch_dailies_ohlc_range(client, ticker=t, start=start_s, end=today) or []
+        spy_bars = fetch_dailies_ohlc_range(client, ticker="SPY", start=start_s, end=today) or []
+        t_map = {b.trade_date: float(b.close) for b in t_bars if getattr(b, "trade_date", None) and getattr(b, "close", None) is not None}
+        spy_map = {b.trade_date: float(b.close) for b in spy_bars if getattr(b, "trade_date", None) and getattr(b, "close", None) is not None}
+        corr20, beta20, n_sens = _corr_beta_from_close_maps(a_by_date=t_map, b_by_date=spy_map, lookback_days=20)
+    except Exception:
+        corr20, beta20, n_sens = None, None, 0
+
+    is_sensitive = False
+    if corr20 is not None and abs(float(corr20)) >= float(CORR20_HIGH):
+        is_sensitive = True
+    if beta20 is not None and abs(float(beta20)) >= float(BETA20_HIGH):
+        is_sensitive = True
+
+    # Informational check (PASS always). If sensitivity is high, we tighten macro cutoffs below.
+    checks.append(
+        _mk_check(
+            id="SN_INDEX_SENSITIVITY",
+            label="Index sensitivity (corr/beta vs SPY)",
+            state="PASS",
+            code=None,
+            value={
+                "corr20": None if corr20 is None else round(float(corr20), 4),
+                "beta20": None if beta20 is None else round(float(beta20), 4),
+                "nReturns": int(n_sens),
+                "sensitive": bool(is_sensitive),
+            },
+            threshold={"corrHigh": float(CORR20_HIGH), "betaHigh": float(BETA20_HIGH)},
+            explain=("High index sensitivity: macro cutoffs tightened." if is_sensitive else "No index-sensitivity tightening applied."),
+        )
+    )
+
     # ===== B2) Gamma flip distance in EM (dynamic cutoff) =====
-    flip_cutoff = float(FLIP_CUTOFF_TIGHT) if (rv5_jump is not None and float(rv5_jump) > float(RV5_ACCEL_TIGHTEN)) else float(FLIP_CUTOFF_BASE)
+    flip_cutoff = float(FLIP_CUTOFF_BASE)
+    if rv5_jump is not None and float(rv5_jump) > float(RV5_ACCEL_TIGHTEN):
+        flip_cutoff = max(float(flip_cutoff), float(FLIP_CUTOFF_TIGHT))
+    if is_sensitive:
+        flip_cutoff = max(float(flip_cutoff), float(FLIP_CUTOFF_TIGHT))
     heat = spx_levels.get("gexHeatmap") if isinstance(spx_levels, dict) else None
     enabled_heat = bool(heat.get("enabled")) if isinstance(heat, dict) else False
     m = heat.get("metrics") if isinstance(heat, dict) and isinstance(heat.get("metrics"), dict) else {}

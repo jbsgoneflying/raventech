@@ -147,6 +147,12 @@ class FeatureFlags:
     GO_MIN_EARNINGS_N: int = 6
     GO_EM_RICHNESS_MULT: float = 1.05
 
+    GO_TAIL_SAMPLE_MIN: int = 8
+    GO_TAIL_P90_MULT: float = 0.80
+
+    GO_CORR20_HIGH: float = 0.70
+    GO_BETA20_HIGH: float = 1.20
+
     GO_AVG_DOLLAR_VOL20D_MIN: float = 200_000_000.0
     GO_OPT_DELTA_BAND_LO: float = 0.15
     GO_OPT_DELTA_BAND_HI: float = 0.20
@@ -243,6 +249,12 @@ class FeatureFlags:
 
             GO_MIN_EARNINGS_N=_get_int("GO_MIN_EARNINGS_N", 6),
             GO_EM_RICHNESS_MULT=_get_float("GO_EM_RICHNESS_MULT", 1.05),
+
+            GO_TAIL_SAMPLE_MIN=_get_int("GO_TAIL_SAMPLE_MIN", 8),
+            GO_TAIL_P90_MULT=_get_float("GO_TAIL_P90_MULT", 0.80),
+
+            GO_CORR20_HIGH=_get_float("GO_CORR20_HIGH", 0.70),
+            GO_BETA20_HIGH=_get_float("GO_BETA20_HIGH", 1.20),
 
             GO_AVG_DOLLAR_VOL20D_MIN=_get_float("GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0),
             GO_OPT_DELTA_BAND_LO=_get_float("GO_OPT_DELTA_BAND_LO", 0.15),

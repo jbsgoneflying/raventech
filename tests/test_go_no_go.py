@@ -34,6 +34,12 @@ class DummyFlags:
     GO_MIN_EARNINGS_N = 6
     GO_EM_RICHNESS_MULT = 1.05
 
+    GO_TAIL_SAMPLE_MIN = 8
+    GO_TAIL_P90_MULT = 0.80
+
+    GO_CORR20_HIGH = 0.70
+    GO_BETA20_HIGH = 1.20
+
     GO_AVG_DOLLAR_VOL20D_MIN = 200_000_000.0
     GO_OPT_DELTA_BAND_LO = 0.15
     GO_OPT_DELTA_BAND_HI = 0.20
@@ -195,5 +201,78 @@ def test_macro_gamma_fails_if_magnitude_low(monkeypatch):
     c = _find(out["checks"], "MACRO_GAMMA")
     assert c["state"] == "FAIL"
     assert c["code"] == "MACRO_GAMMA_TOO_SMALL"
+
+
+def test_tail_p90_fail_when_expected_move_too_small(monkeypatch):
+    from backend import go_no_go
+
+    monkeypatch.setattr(go_no_go, "get_flags", lambda: DummyFlags)
+    monkeypatch.setattr(go_no_go, "fetch_hist_cores_range", lambda *a, **k: _mk_hist_cores_rows([35.0] * 25))
+    monkeypatch.setattr(go_no_go, "compute_live_levels", lambda *a, **k: {"enabled": False})
+    monkeypatch.setattr(go_no_go, "fetch_dailies_ohlc_range", lambda *a, **k: [])
+
+    client = DummyClient(cores_row={"avgDollarVol20": 300_000_000.0}, monies_rows=[{"expirDate": "2026-01-03", "dte": 2}], strikes_rows=[])
+    # realized P90 is 12; expected move=8, needs >= 0.8*12=9.6 => FAIL
+    payload = {"ticker": "AAPL", "current": {"asOfDate": "2026-01-02", "impliedMovePct": 8.0}, "events": [{"realizedMovePct": x} for x in ([6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 12.0])]}
+    out = go_no_go.compute_go_no_go(client, ticker="AAPL", payload=payload, benzinga_client=None)
+    c = _find(out["checks"], "SN_TAIL_P90_RICHNESS")
+    assert c["state"] == "FAIL"
+    assert c["code"] == "SN_TAIL_P90_TOO_LARGE"
+
+
+def test_index_sensitivity_tightens_flip_cutoff(monkeypatch):
+    from backend import go_no_go
+
+    monkeypatch.setattr(go_no_go, "get_flags", lambda: DummyFlags)
+    monkeypatch.setattr(go_no_go, "fetch_hist_cores_range", lambda *a, **k: _mk_hist_cores_rows([35.0] * 25))
+
+    # Minimal bars object with the fields go_no_go reads.
+    class Bar:
+        def __init__(self, d, c):
+            self.trade_date = d
+            self.close = c
+
+    # Build perfectly correlated returns for ticker and SPY
+    base = dt.date.fromisoformat("2025-12-01")
+    dates = [(base + dt.timedelta(days=i)).isoformat() for i in range(0, 40) if (base + dt.timedelta(days=i)).weekday() < 5]
+    px = 100.0
+    t_bars = []
+    spy_bars = []
+    for i, d0 in enumerate(dates):
+        # Vary returns slightly to avoid zero variance (still perfectly correlated).
+        mult = 1.01 if (i % 2 == 0) else 1.02
+        px = px * mult
+        t_bars.append(Bar(d0, px))
+        spy_bars.append(Bar(d0, px))
+
+    def fake_dailies(_client, *, ticker, start, end):
+        tt = str(ticker).upper()
+        if tt == "AAPL":
+            return t_bars
+        if tt == "SPY":
+            return spy_bars
+        # SPX RV fetch will probe SPX then SPY; return spy bars for SPX to keep RV computable
+        if tt == "SPX":
+            return spy_bars
+        return []
+
+    monkeypatch.setattr(go_no_go, "fetch_dailies_ohlc_range", fake_dailies)
+
+    # Heatmap reports minFlipEm=2.2 (would pass base 2.0 but fail tightened 2.5)
+    monkeypatch.setattr(
+        go_no_go,
+        "compute_live_levels",
+        lambda *a, **k: {"enabled": True, "symbolUsed": "SPX", "expiry": "2026-01-03", "dealerGamma": {"netGammaSign": "positive", "magnitudeBucket": "medium"}, "gexHeatmap": {"enabled": True, "metrics": {"downsideDistanceEm": 2.2, "upsideDistanceEm": 3.0}, "notes": []}},
+    )
+
+    client = DummyClient(cores_row={"avgDollarVol20": 300_000_000.0}, monies_rows=[{"expirDate": "2026-01-03", "dte": 2}], strikes_rows=[])
+    payload = {"ticker": "AAPL", "current": {"asOfDate": "2026-01-02", "impliedMovePct": 10.0}, "events": [{"realizedMovePct": 4.0}] * 8}
+    out = go_no_go.compute_go_no_go(client, ticker="AAPL", payload=payload, benzinga_client=None)
+    sens = _find(out["checks"], "SN_INDEX_SENSITIVITY")
+    assert sens["state"] == "PASS"
+    assert sens["value"]["sensitive"] is True
+    flip = _find(out["checks"], "MACRO_GAMMA_FLIP")
+    assert flip["value"]["cutoffEm"] == DummyFlags.GO_FLIP_CUTOFF_TIGHT
+    assert flip["state"] == "FAIL"
 
 
