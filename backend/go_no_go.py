@@ -200,12 +200,14 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
     t = str(ticker).strip().upper()
     if not t:
         return {"enabled": False, "notes": ["Missing ticker."]}
+    notes: List[str] = []
     fields = "ticker,stockPrice,spotPrice,avgDollarVol20,avgDolVol20,avgDVol20,avgVolume20,avgVol20,marketCap"
     try:
         rows = client.cores(ticker=t, fields=fields).rows or []
         row = rows[0] if rows and isinstance(rows[0], dict) else {}
     except Exception as e:
-        return {"enabled": False, "notes": [f"cores unavailable: {type(e).__name__}: {e}"]}
+        row = {}
+        notes.append(f"cores unavailable: {type(e).__name__}: {e}")
 
     px = _to_float(row.get("spotPrice")) or _to_float(row.get("stockPrice"))
     avg_dvol = _to_float(row.get("avgDollarVol20") or row.get("avgDolVol20") or row.get("avgDVol20"))
@@ -213,7 +215,25 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
     if avg_dvol is None and px is not None and avg_vol is not None and px > 0 and avg_vol > 0:
         avg_dvol = float(px) * float(avg_vol)
     mcap = _to_float(row.get("marketCap"))
-    return {"enabled": True, "price": px, "avgDollarVol20d": avg_dvol, "marketCap": mcap, "notes": []}
+
+    # Fallback: derive avg $ volume from last ~20 trading days of dailies.
+    # (This keeps GO/NO-GO resilient when /cores doesn't include volume fields.)
+    if avg_dvol is None:
+        try:
+            end = _now_et_date()
+            start = end - dt.timedelta(days=45)  # buffer for ~20 trading days
+            bars = fetch_dailies_ohlc_range(client, ticker=t, start=start, end=end) or []
+            pairs = [(b.close, b.volume) for b in bars if getattr(b, "close", None) and getattr(b, "volume", None)]
+            pairs = [(float(c), float(v)) for (c, v) in pairs if c and v and math.isfinite(float(c)) and math.isfinite(float(v)) and float(c) > 0 and float(v) > 0]
+            if len(pairs) >= 10:
+                tail = pairs[-20:]
+                avg_dvol = sum(c * v for (c, v) in tail) / float(len(tail))
+                notes.append("avgDollarVol20d derived from /hist/dailies (close*volume).")
+        except Exception:
+            pass
+
+    enabled = bool(row) or (avg_dvol is not None) or (px is not None)
+    return {"enabled": enabled, "price": px, "avgDollarVol20d": avg_dvol, "marketCap": mcap, "notes": notes}
 
 
 @dataclass(frozen=True)
@@ -434,6 +454,15 @@ def compute_go_no_go(
         asof_date = _now_et_date()
 
     expected_move_pct = _to_float(current.get("impliedMovePct"))
+    expected_move_src: Optional[str] = "current.impliedMovePct" if expected_move_pct is not None else None
+    if expected_move_pct is None:
+        ne = payload.get("nextEvent") if isinstance(payload.get("nextEvent"), dict) else {}
+        for k in ("impliedMovePctPlanned", "impliedMovePct", "expectedMovePct"):
+            cand = _to_float(ne.get(k))
+            if cand is not None:
+                expected_move_pct = cand
+                expected_move_src = f"nextEvent.{k}"
+                break
 
     # ===== A2) EM richness =====
     events = payload.get("events") if isinstance(payload.get("events"), list) else []
@@ -449,7 +478,7 @@ def compute_go_no_go(
                 label="Expected move rich vs realized median",
                 state="MISSING",
                 code="SN_EM_SAMPLE_TOO_SMALL",
-                value={"expectedMovePct": expected_move_pct, "realizedMedianPct": realized_median, "nUsed": n_used},
+                value={"expectedMovePct": expected_move_pct, "expectedMoveSource": expected_move_src, "realizedMedianPct": realized_median, "nUsed": n_used},
                 threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT},
                 explain=f"Insufficient usable earnings events (n={n_used} < {MIN_EARNINGS_N}).",
             )
@@ -461,7 +490,7 @@ def compute_go_no_go(
                 label="Expected move rich vs realized median",
                 state="MISSING",
                 code="SN_EM_DATA_MISSING",
-                value={"expectedMovePct": expected_move_pct, "realizedMedianPct": realized_median, "nUsed": n_used},
+                value={"expectedMovePct": expected_move_pct, "expectedMoveSource": expected_move_src, "realizedMedianPct": realized_median, "nUsed": n_used},
                 threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT},
                 explain="Missing expected move or realized median.",
             )
@@ -476,7 +505,7 @@ def compute_go_no_go(
                 label="Expected move rich vs realized median",
                 state="PASS" if passed else "FAIL",
                 code=None if passed else "SN_EM_NOT_RICH_ENOUGH",
-                value={"expectedMovePct": expected_move_pct, "realizedMedianPct": realized_median, "nUsed": n_used, "ratio": None if ratio is None else round(float(ratio), 4)},
+                value={"expectedMovePct": expected_move_pct, "expectedMoveSource": expected_move_src, "realizedMedianPct": realized_median, "nUsed": n_used, "ratio": None if ratio is None else round(float(ratio), 4)},
                 threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT, "requiredExpectedMovePct": round(float(need), 4)},
                 explain=(f"Expected/median ratio={ratio:.3f}× vs min {EM_RICHNESS_MULT:.2f}×." if ratio is not None else ("Pass" if passed else "Fail")),
             )
@@ -491,7 +520,7 @@ def compute_go_no_go(
                 label="Expected move vs P90 realized (tail proxy)",
                 state="MISSING",
                 code="SN_TAIL_SAMPLE_TOO_SMALL",
-                value={"expectedMovePct": expected_move_pct, "p90RealizedPct": p90, "nUsed": n_used},
+                value={"expectedMovePct": expected_move_pct, "expectedMoveSource": expected_move_src, "p90RealizedPct": p90, "nUsed": n_used},
                 threshold={"minEarningsN": int(TAIL_SAMPLE_MIN), "tailMult": float(TAIL_P90_MULT)},
                 explain=f"Insufficient usable earnings events for tail estimate (n={n_used} < {int(TAIL_SAMPLE_MIN)}).",
             )
@@ -503,7 +532,7 @@ def compute_go_no_go(
                 label="Expected move vs P90 realized (tail proxy)",
                 state="MISSING",
                 code="SN_TAIL_DATA_MISSING",
-                value={"expectedMovePct": expected_move_pct, "p90RealizedPct": p90, "nUsed": n_used},
+                value={"expectedMovePct": expected_move_pct, "expectedMoveSource": expected_move_src, "p90RealizedPct": p90, "nUsed": n_used},
                 threshold={"minEarningsN": int(TAIL_SAMPLE_MIN), "tailMult": float(TAIL_P90_MULT)},
                 explain="Missing expected move or P90 realized.",
             )
@@ -520,6 +549,7 @@ def compute_go_no_go(
                 code=None if passed90 else "SN_TAIL_P90_TOO_LARGE",
                 value={
                     "expectedMovePct": expected_move_pct,
+                    "expectedMoveSource": expected_move_src,
                     "p90RealizedPct": round(float(p90), 4),
                     "nUsed": n_used,
                     "ratio": None if ratio90 is None else round(float(ratio90), 4),

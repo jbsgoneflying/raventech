@@ -311,12 +311,14 @@ function openGoNoGoModal(go) {
 function goMetricsLine(c) {
   const id = String(c?.id || "");
   const v = c?.value || {};
+  // Avoid JS gotcha: Number(null) === 0. Treat null/undefined/"" as "missing".
+  const num = (x) => (x === null || x === undefined || x === "" ? Number.NaN : Number(x));
   try {
     if (id === "SN_IV_ELEVATED") {
-      const iv = Number(v?.currentIv30Pct);
-      const n = Number(v?.sampleN);
-      const p = Number(v?.percentile01);
-      const z = Number(v?.z);
+      const iv = num(v?.currentIv30Pct);
+      const n = num(v?.sampleN);
+      const p = num(v?.percentile01);
+      const z = num(v?.z);
       const parts = [];
       if (Number.isFinite(iv)) parts.push(`IV=${iv.toFixed(2)}%`);
       if (Number.isFinite(p)) parts.push(`pctl=${p.toFixed(2)}`);
@@ -325,10 +327,10 @@ function goMetricsLine(c) {
       return parts.join(" · ");
     }
     if (id === "SN_EM_RICHNESS") {
-      const em = Number(v?.expectedMovePct);
-      const med = Number(v?.realizedMedianPct);
-      const n = Number(v?.nUsed);
-      const r = Number(v?.ratio);
+      const em = num(v?.expectedMovePct);
+      const med = num(v?.realizedMedianPct);
+      const n = num(v?.nUsed);
+      const r = num(v?.ratio);
       const parts = [];
       if (Number.isFinite(em)) parts.push(`EM=${em.toFixed(2)}%`);
       if (Number.isFinite(med)) parts.push(`med=${med.toFixed(2)}%`);
@@ -337,10 +339,10 @@ function goMetricsLine(c) {
       return parts.join(" · ");
     }
     if (id === "SN_TAIL_P90_RICHNESS") {
-      const em = Number(v?.expectedMovePct);
-      const p90 = Number(v?.p90RealizedPct);
-      const n = Number(v?.nUsed);
-      const r = Number(v?.ratio);
+      const em = num(v?.expectedMovePct);
+      const p90 = num(v?.p90RealizedPct);
+      const n = num(v?.nUsed);
+      const r = num(v?.ratio);
       const parts = [];
       if (Number.isFinite(em)) parts.push(`EM=${em.toFixed(2)}%`);
       if (Number.isFinite(p90)) parts.push(`p90=${p90.toFixed(2)}%`);
@@ -349,15 +351,17 @@ function goMetricsLine(c) {
       return parts.join(" · ");
     }
     if (id === "SN_LIQUIDITY") {
-      const dvol = Number(v?.avgDollarVol20d);
+      const dvol = num(v?.avgDollarVol20d);
       const rep = v?.rep || {};
       const put = rep?.put || {};
       const call = rep?.call || {};
       const parts = [];
       if (Number.isFinite(dvol)) parts.push(`$vol20=${Math.round(dvol/1e6)}M`);
       if (rep?.expiry) parts.push(`exp=${String(rep.expiry).slice(5)}`);
-      if (Number.isFinite(Number(put?.strike))) parts.push(`P${Number(put.strike).toFixed(0)}`);
-      if (Number.isFinite(Number(call?.strike))) parts.push(`C${Number(call.strike).toFixed(0)}`);
+      const pK = num(put?.strike);
+      const cK = num(call?.strike);
+      if (Number.isFinite(pK)) parts.push(`P${pK.toFixed(0)}`);
+      if (Number.isFinite(cK)) parts.push(`C${cK.toFixed(0)}`);
       return parts.join(" · ");
     }
     if (id === "MACRO_GAMMA") {
@@ -367,8 +371,8 @@ function goMetricsLine(c) {
       return `${sym} · ${sign} · ${b}`;
     }
     if (id === "SN_INDEX_SENSITIVITY") {
-      const c20 = Number(v?.corr20);
-      const b20 = Number(v?.beta20);
+      const c20 = num(v?.corr20);
+      const b20 = num(v?.beta20);
       const sens = v?.sensitive === true;
       const parts = [];
       if (Number.isFinite(c20)) parts.push(`corr20=${c20.toFixed(2)}`);
@@ -377,16 +381,16 @@ function goMetricsLine(c) {
       return parts.join(" · ");
     }
     if (id === "MACRO_RV_ACCEL") {
-      const r5 = Number(v?.rv5Jump);
-      const r20 = Number(v?.rv20Jump);
+      const r5 = num(v?.rv5Jump);
+      const r20 = num(v?.rv20Jump);
       const parts = [];
       if (Number.isFinite(r5)) parts.push(`rv5=${r5.toFixed(2)}×`);
       if (Number.isFinite(r20)) parts.push(`rv20=${r20.toFixed(2)}×`);
       return parts.join(" · ");
     }
     if (id === "MACRO_GAMMA_FLIP") {
-      const m = Number(v?.minFlipEm);
-      const cut = Number(v?.cutoffEm);
+      const m = num(v?.minFlipEm);
+      const cut = num(v?.cutoffEm);
       if (Number.isFinite(m) && Number.isFinite(cut)) return `minFlip=${m.toFixed(2)}×EM · cut=${cut.toFixed(2)}`;
       if (Number.isFinite(m)) return `minFlip=${m.toFixed(2)}×EM`;
     }
