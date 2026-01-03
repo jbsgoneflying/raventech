@@ -201,6 +201,7 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
     if not t:
         return {"enabled": False, "notes": ["Missing ticker."]}
     notes: List[str] = []
+    source: Optional[str] = None
     fields = "ticker,stockPrice,spotPrice,avgDollarVol20,avgDolVol20,avgDVol20,avgVolume20,avgVol20,marketCap"
     try:
         rows = client.cores(ticker=t, fields=fields).rows or []
@@ -211,9 +212,12 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
 
     px = _to_float(row.get("spotPrice")) or _to_float(row.get("stockPrice"))
     avg_dvol = _to_float(row.get("avgDollarVol20") or row.get("avgDolVol20") or row.get("avgDVol20"))
+    if avg_dvol is not None:
+        source = "cores"
     avg_vol = _to_float(row.get("avgVolume20") or row.get("avgVol20"))
     if avg_dvol is None and px is not None and avg_vol is not None and px > 0 and avg_vol > 0:
         avg_dvol = float(px) * float(avg_vol)
+        source = source or "cores_price_x_avgVolume20"
     mcap = _to_float(row.get("marketCap"))
 
     # Fallback: derive avg $ volume from last ~20 trading days of dailies.
@@ -229,11 +233,117 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
                 tail = pairs[-20:]
                 avg_dvol = sum(c * v for (c, v) in tail) / float(len(tail))
                 notes.append("avgDollarVol20d derived from /hist/dailies (close*volume).")
+                source = "dailies_close_x_volume"
         except Exception:
             pass
 
     enabled = bool(row) or (avg_dvol is not None) or (px is not None)
-    return {"enabled": enabled, "price": px, "avgDollarVol20d": avg_dvol, "marketCap": mcap, "notes": notes}
+    return {"enabled": enabled, "price": px, "avgDollarVol20d": avg_dvol, "marketCap": mcap, "notes": notes, "source": source}
+
+
+def _band_liquidity_agg(
+    *,
+    rows: List[dict],
+    side: str,
+    underlying: Optional[float],
+    delta_lo: float,
+    delta_hi: float,
+    min_mid: float,
+) -> Dict[str, Any]:
+    """
+    Strike-less liquidity proxy: aggregate across an expiry within the target delta band.
+    """
+    s = str(side).lower()
+    if s not in ("put", "call"):
+        return {"side": s, "nBand": 0}
+
+    def _strike(r: dict) -> Optional[float]:
+        return _to_float(r.get("strike"))
+
+    def _delta(r: dict) -> Optional[float]:
+        if s == "call":
+            v = _to_float(r.get("callDelta"))
+            if v is None:
+                d0 = _to_float(r.get("delta"))
+                v = d0 if d0 is not None and d0 > 0 else None
+            return v
+        v = _to_float(r.get("putDelta"))
+        if v is None:
+            d0 = _to_float(r.get("delta"))
+            v = d0 if d0 is not None and d0 < 0 else None
+        return v
+
+    bid_key = "callBidPrice" if s == "call" else "putBidPrice"
+    ask_key = "callAskPrice" if s == "call" else "putAskPrice"
+    oi_key = "callOpenInterest" if s == "call" else "putOpenInterest"
+    vol_key = "callVolume" if s == "call" else "putVolume"
+
+    spreads: List[float] = []
+    mids: List[float] = []
+    n_band = 0
+    n_good = 0
+    oi_sum = 0.0
+    vol_sum = 0.0
+
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        k = _strike(r)
+        if k is None:
+            continue
+        if underlying is not None and math.isfinite(float(underlying)) and float(underlying) > 0:
+            if s == "call" and float(k) <= float(underlying):
+                continue
+            if s == "put" and float(k) >= float(underlying):
+                continue
+
+        d = _delta(r)
+        if d is None:
+            continue
+        ad = abs(float(d))
+        if ad < float(delta_lo) - 1e-12 or ad > float(delta_hi) + 1e-12:
+            continue
+
+        n_band += 1
+
+        oi = _to_float(r.get(oi_key))
+        if oi is not None and math.isfinite(float(oi)) and float(oi) > 0:
+            oi_sum += float(oi)
+        vol = _to_float(r.get(vol_key))
+        if vol is not None and math.isfinite(float(vol)) and float(vol) > 0:
+            vol_sum += float(vol)
+
+        bid = _to_float(r.get(bid_key))
+        ask = _to_float(r.get(ask_key))
+        if bid is None or ask is None:
+            continue
+        mid = 0.5 * (float(bid) + float(ask))
+        if not (math.isfinite(mid) and mid > 0):
+            continue
+        if float(mid) < float(min_mid):
+            continue
+        spr = (float(ask) - float(bid)) / float(mid) if mid > 0 else None
+        if spr is None or not math.isfinite(float(spr)) or float(spr) < 0:
+            continue
+        n_good += 1
+        mids.append(float(mid))
+        spreads.append(float(spr))
+
+    cov = (float(n_good) / float(n_band)) if n_band > 0 else None
+    med_mid = _median(mids)
+    med_spr = _median(spreads)
+    p90_spr = _percentile(spreads, 0.90) if spreads else None
+    return {
+        "side": s,
+        "nBand": int(n_band),
+        "nQuoted": int(n_good),
+        "coverage": None if cov is None else round(float(cov), 4),
+        "medianMid": None if med_mid is None else round(float(med_mid), 4),
+        "medianSpread": None if med_spr is None else round(float(med_spr), 4),
+        "p90Spread": None if p90_spr is None else round(float(p90_spr), 4),
+        "sumOI": round(float(oi_sum), 2),
+        "sumVol": round(float(vol_sum), 2),
+    }
 
 
 @dataclass(frozen=True)
@@ -431,9 +541,13 @@ def compute_go_no_go(
     DELTA_LO = float(getattr(f, "GO_OPT_DELTA_BAND_LO", 0.15))
     DELTA_HI = float(getattr(f, "GO_OPT_DELTA_BAND_HI", 0.20))
     SPREAD_MAX = float(getattr(f, "GO_OPT_SPREAD_MAX", 0.15))
+    SPREAD_MAX_P90 = float(getattr(f, "GO_OPT_SPREAD_MAX_P90", 0.25))
     MIN_MID = float(getattr(f, "GO_OPT_MIN_MID", 0.20))
     OI_MIN = float(getattr(f, "GO_OPT_OI_MIN", 500.0))
     VOL_MIN = float(getattr(f, "GO_OPT_VOL_MIN", 50.0))
+    BAND_QUOTE_COVERAGE_MIN = float(getattr(f, "GO_BAND_QUOTE_COVERAGE_MIN", 0.70))
+    BAND_OI_SUM_MIN = float(getattr(f, "GO_BAND_OI_SUM_MIN", 2000.0))
+    BAND_VOL_SUM_MIN = float(getattr(f, "GO_BAND_VOL_SUM_MIN", 200.0))
 
     RV5_JUMP_MAX = float(getattr(f, "GO_RV5_JUMP_MAX", 1.15))
     RV20_JUMP_MAX = float(getattr(f, "GO_RV20_JUMP_MAX", 1.10))
@@ -786,21 +900,18 @@ def compute_go_no_go(
     underlying_ok = avg_dvol is not None and float(avg_dvol) >= float(AVG_DVOL_MIN)
     liq_notes = list(liq.get("notes") or []) if isinstance(liq, dict) else []
 
-    # Representative options liquidity (both legs)
+    # Options liquidity (strike-less): aggregate within delta band for chosen expiry
     trade_date = str(current.get("asOfDate") or "")[:10] or None
     dte_target = 2
-    target_abs_delta = 0.5 * (DELTA_LO + DELTA_HI)
     tb_inputs = payload.get("tradeBuilderInputs") if isinstance(payload.get("tradeBuilderInputs"), dict) else {}
     if isinstance(tb_inputs, dict):
-        td = _to_float(tb_inputs.get("target_delta"))
-        if td is not None and 0.02 < abs(float(td)) < 0.40:
-            target_abs_delta = abs(float(td))
         dte_in = _to_int(tb_inputs.get("dte_target"))
         if dte_in is not None and 1 <= int(dte_in) <= 60:
             dte_target = int(dte_in)
     opt_expiry = None
-    opt_put: Optional[_OptLegQuote] = None
-    opt_call: Optional[_OptLegQuote] = None
+    band_put: Optional[Dict[str, Any]] = None
+    band_call: Optional[Dict[str, Any]] = None
+    under_px: Optional[float] = None
 
     opt_state: State = "PASS"
     opt_code: Optional[str] = None
@@ -829,7 +940,7 @@ def compute_go_no_go(
             opt_expiry = None
 
         if not opt_expiry:
-            opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Unable to determine expiration for representative strikes."
+            opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Unable to determine expiration for liquidity check."
         else:
             fields_s = ",".join(
                 [
@@ -862,36 +973,50 @@ def compute_go_no_go(
                 opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Options chain unavailable for selected expiration."
             else:
                 under_px = _to_float(rows[0].get("stockPrice")) or _to_float(liq.get("price"))
-                put_row = _pick_opt_leg_row(rows=rows, side="put", underlying=under_px, target_abs_delta=target_abs_delta)
-                call_row = _pick_opt_leg_row(rows=rows, side="call", underlying=under_px, target_abs_delta=target_abs_delta)
-                if not put_row or not call_row:
-                    opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Unable to select representative strikes (missing delta fields)."
-                else:
-                    opt_put = _extract_leg_metrics(put_row, side="put")
-                    opt_call = _extract_leg_metrics(call_row, side="call")
+                band_put = _band_liquidity_agg(rows=rows, side="put", underlying=under_px, delta_lo=DELTA_LO, delta_hi=DELTA_HI, min_mid=MIN_MID)
+                band_call = _band_liquidity_agg(rows=rows, side="call", underlying=under_px, delta_lo=DELTA_LO, delta_hi=DELTA_HI, min_mid=MIN_MID)
 
-                    for leg in (opt_put, opt_call):
-                        if leg.bid is None or leg.ask is None or leg.mid is None:
-                            opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", f"Missing quotes at representative {leg.side} strike."
-                            break
-                        if leg.mid is not None and float(leg.mid) < float(MIN_MID):
-                            opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_MID_TOO_SMALL", f"{leg.side} mid ${float(leg.mid):.2f} below ${MIN_MID:.2f}."
-                            break
-                        if leg.spread_ratio is None or float(leg.spread_ratio) > float(SPREAD_MAX):
-                            opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_SPREAD_TOO_WIDE", f"{leg.side} spread ratio {float(leg.spread_ratio or 0):.2f} above {SPREAD_MAX:.2f}."
-                            break
-                        # OI/vol sanity when available
-                        oi = leg.oi
-                        vol = leg.vol
-                        if (oi is not None and math.isfinite(float(oi))) or (vol is not None and math.isfinite(float(vol))):
-                            ok_liq = False
-                            if oi is not None and math.isfinite(float(oi)) and float(oi) >= float(OI_MIN):
-                                ok_liq = True
-                            if vol is not None and math.isfinite(float(vol)) and float(vol) >= float(VOL_MIN):
-                                ok_liq = True
-                            if not ok_liq:
-                                opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_OI_TOO_LOW", f"{leg.side} OI/vol below minimum (OI>={OI_MIN:.0f} or Vol>={VOL_MIN:.0f})."
-                                break
+                n_p = _to_int((band_put or {}).get("nBand")) or 0
+                n_c = _to_int((band_call or {}).get("nBand")) or 0
+                cov_p = _to_float((band_put or {}).get("coverage"))
+                cov_c = _to_float((band_call or {}).get("coverage"))
+
+                if n_p <= 0 or n_c <= 0:
+                    opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "No strikes found in target delta band for one or both sides."
+                elif cov_p is None or cov_c is None or float(cov_p) < float(BAND_QUOTE_COVERAGE_MIN) or float(cov_c) < float(BAND_QUOTE_COVERAGE_MIN):
+                    opt_state, opt_code, opt_explain = (
+                        "MISSING",
+                        "SN_OPT_QUOTES_MISSING",
+                        f"Insufficient quote coverage in delta band (P={cov_p if cov_p is not None else '—'}, C={cov_c if cov_c is not None else '—'}) vs min {BAND_QUOTE_COVERAGE_MIN:.2f}.",
+                    )
+                else:
+                    med_sp_p = _to_float((band_put or {}).get("medianSpread"))
+                    med_sp_c = _to_float((band_call or {}).get("medianSpread"))
+                    p90_sp_p = _to_float((band_put or {}).get("p90Spread"))
+                    p90_sp_c = _to_float((band_call or {}).get("p90Spread"))
+                    if (med_sp_p is not None and float(med_sp_p) > float(SPREAD_MAX)) or (med_sp_c is not None and float(med_sp_c) > float(SPREAD_MAX)):
+                        opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_SPREAD_TOO_WIDE", f"Median spread ratio above {SPREAD_MAX:.2f} in delta band."
+                    elif float(SPREAD_MAX_P90) > 0 and (
+                        (p90_sp_p is not None and float(p90_sp_p) > float(SPREAD_MAX_P90)) or (p90_sp_c is not None and float(p90_sp_c) > float(SPREAD_MAX_P90))
+                    ):
+                        opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_SPREAD_TOO_WIDE", f"P90 spread ratio above {SPREAD_MAX_P90:.2f} in delta band."
+                    else:
+                        oi_p = _to_float((band_put or {}).get("sumOI")) or 0.0
+                        oi_c = _to_float((band_call or {}).get("sumOI")) or 0.0
+                        vol_p = _to_float((band_put or {}).get("sumVol")) or 0.0
+                        vol_c = _to_float((band_call or {}).get("sumVol")) or 0.0
+
+                        def _side_ok(oi_sum: float, vol_sum: float) -> bool:
+                            return (float(oi_sum) >= float(BAND_OI_SUM_MIN)) or (float(vol_sum) >= float(BAND_VOL_SUM_MIN))
+
+                        if not _side_ok(oi_p, vol_p) or not _side_ok(oi_c, vol_c):
+                            opt_state, opt_code, opt_explain = (
+                                "FAIL",
+                                "SN_OPT_OI_TOO_LOW",
+                                f"Band OI/vol below minimum (need OI_sum>={BAND_OI_SUM_MIN:.0f} or Vol_sum>={BAND_VOL_SUM_MIN:.0f} per side).",
+                            )
+                        else:
+                            opt_state, opt_code, opt_explain = "PASS", None, "Options liquidity looks sufficient in delta band."
     else:
         opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Missing trade date for options chain."
 
@@ -913,15 +1038,27 @@ def compute_go_no_go(
             value={
                 "avgDollarVol20d": avg_dvol,
                 "avgDollarVolOk": underlying_ok,
+                "underlyingSource": liq.get("source") if isinstance(liq, dict) else None,
                 "notes": liq_notes,
-                "rep": {
-                    "expiry": opt_expiry,
-                    "targetAbsDelta": round(float(target_abs_delta), 3),
-                    "put": (opt_put.__dict__ if opt_put else None),
-                    "call": (opt_call.__dict__ if opt_call else None),
-                },
+                "expiry": opt_expiry,
+                "dteTarget": dte_target,
+                "spotUsed": under_px,
+                "deltaBandAgg": {"put": band_put, "call": band_call, "deltaBand": [DELTA_LO, DELTA_HI]},
             },
-            threshold={"avgDollarVol20dMin": AVG_DVOL_MIN, "deltaBand": [DELTA_LO, DELTA_HI], "targetAbsDelta": target_abs_delta, "dteTarget": dte_target, "minMid": MIN_MID, "spreadMax": SPREAD_MAX, "oiMin": OI_MIN, "volMin": VOL_MIN},
+            threshold={
+                "avgDollarVol20dMin": AVG_DVOL_MIN,
+                "deltaBand": [DELTA_LO, DELTA_HI],
+                "dteTarget": dte_target,
+                "minMid": MIN_MID,
+                "spreadMax": SPREAD_MAX,
+                "spreadMaxP90": SPREAD_MAX_P90,
+                "bandQuoteCoverageMin": BAND_QUOTE_COVERAGE_MIN,
+                "bandOiSumMin": BAND_OI_SUM_MIN,
+                "bandVolSumMin": BAND_VOL_SUM_MIN,
+                # legacy per-strike knobs kept for backwards-compatibility/visibility
+                "oiMin": OI_MIN,
+                "volMin": VOL_MIN,
+            },
             explain=liq_explain,
         )
     )

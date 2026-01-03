@@ -157,9 +157,13 @@ class FeatureFlags:
     GO_OPT_DELTA_BAND_LO: float = 0.15
     GO_OPT_DELTA_BAND_HI: float = 0.20
     GO_OPT_SPREAD_MAX: float = 0.15
+    GO_OPT_SPREAD_MAX_P90: float = 0.25
     GO_OPT_MIN_MID: float = 0.20
     GO_OPT_OI_MIN: float = 500.0
     GO_OPT_VOL_MIN: float = 50.0
+    GO_BAND_QUOTE_COVERAGE_MIN: float = 0.70
+    GO_BAND_OI_SUM_MIN: float = 2000.0
+    GO_BAND_VOL_SUM_MIN: float = 200.0
 
     GO_RV5_JUMP_MAX: float = 1.15
     GO_RV20_JUMP_MAX: float = 1.10
@@ -260,9 +264,13 @@ class FeatureFlags:
             GO_OPT_DELTA_BAND_LO=_get_float("GO_OPT_DELTA_BAND_LO", 0.15),
             GO_OPT_DELTA_BAND_HI=_get_float("GO_OPT_DELTA_BAND_HI", 0.20),
             GO_OPT_SPREAD_MAX=_get_float("GO_OPT_SPREAD_MAX", 0.15),
+            GO_OPT_SPREAD_MAX_P90=_get_float("GO_OPT_SPREAD_MAX_P90", 0.25),
             GO_OPT_MIN_MID=_get_float("GO_OPT_MIN_MID", 0.20),
             GO_OPT_OI_MIN=_get_float("GO_OPT_OI_MIN", 500.0),
             GO_OPT_VOL_MIN=_get_float("GO_OPT_VOL_MIN", 50.0),
+            GO_BAND_QUOTE_COVERAGE_MIN=_get_float("GO_BAND_QUOTE_COVERAGE_MIN", 0.70),
+            GO_BAND_OI_SUM_MIN=_get_float("GO_BAND_OI_SUM_MIN", 2000.0),
+            GO_BAND_VOL_SUM_MIN=_get_float("GO_BAND_VOL_SUM_MIN", 200.0),
 
             GO_RV5_JUMP_MAX=_get_float("GO_RV5_JUMP_MAX", 1.15),
             GO_RV20_JUMP_MAX=_get_float("GO_RV20_JUMP_MAX", 1.10),
@@ -326,6 +334,42 @@ class FeatureFlags:
             ("MC_MAX_BREACH_EITHER_PCT", float(self.MC_MAX_BREACH_EITHER_PCT)),
             ("MC_MAX_CVAR95_TOTAL", float(self.MC_MAX_CVAR95_TOTAL)),
             ("MC_DEFAULT_WING_WIDTH_DOLLARS", float(self.MC_DEFAULT_WING_WIDTH_DOLLARS)),
+
+            # --- Engine 1 GO/NO-GO knobs (affects additive decision payload; must be deterministic) ---
+            ("GO_IVP_MIN", float(self.GO_IVP_MIN)),
+            ("GO_IV_SAMPLE_MIN", int(self.GO_IV_SAMPLE_MIN)),
+            ("GO_IV30_FLOOR", float(self.GO_IV30_FLOOR)),
+            ("GO_IV_Z_ENABLED", bool(self.GO_IV_Z_ENABLED)),
+            ("GO_IV30_Z_MIN", float(self.GO_IV30_Z_MIN)),
+            ("GO_MIN_EARNINGS_N", int(self.GO_MIN_EARNINGS_N)),
+            ("GO_EM_RICHNESS_MULT", float(self.GO_EM_RICHNESS_MULT)),
+            ("GO_TAIL_SAMPLE_MIN", int(self.GO_TAIL_SAMPLE_MIN)),
+            ("GO_TAIL_P90_MULT", float(self.GO_TAIL_P90_MULT)),
+            ("GO_CORR20_HIGH", float(self.GO_CORR20_HIGH)),
+            ("GO_BETA20_HIGH", float(self.GO_BETA20_HIGH)),
+            ("GO_AVG_DOLLAR_VOL20D_MIN", float(self.GO_AVG_DOLLAR_VOL20D_MIN)),
+            ("GO_OPT_DELTA_BAND_LO", float(self.GO_OPT_DELTA_BAND_LO)),
+            ("GO_OPT_DELTA_BAND_HI", float(self.GO_OPT_DELTA_BAND_HI)),
+            ("GO_OPT_SPREAD_MAX", float(self.GO_OPT_SPREAD_MAX)),
+            ("GO_OPT_SPREAD_MAX_P90", float(self.GO_OPT_SPREAD_MAX_P90)),
+            ("GO_OPT_MIN_MID", float(self.GO_OPT_MIN_MID)),
+            ("GO_OPT_OI_MIN", float(self.GO_OPT_OI_MIN)),
+            ("GO_OPT_VOL_MIN", float(self.GO_OPT_VOL_MIN)),
+            ("GO_BAND_QUOTE_COVERAGE_MIN", float(self.GO_BAND_QUOTE_COVERAGE_MIN)),
+            ("GO_BAND_OI_SUM_MIN", float(self.GO_BAND_OI_SUM_MIN)),
+            ("GO_BAND_VOL_SUM_MIN", float(self.GO_BAND_VOL_SUM_MIN)),
+            ("GO_RV5_JUMP_MAX", float(self.GO_RV5_JUMP_MAX)),
+            ("GO_RV20_JUMP_MAX", float(self.GO_RV20_JUMP_MAX)),
+            ("GO_RV5_ACCEL_TIGHTEN_TRIGGER", float(self.GO_RV5_ACCEL_TIGHTEN_TRIGGER)),
+            ("GO_FLIP_CUTOFF_BASE", float(self.GO_FLIP_CUTOFF_BASE)),
+            ("GO_FLIP_CUTOFF_TIGHT", float(self.GO_FLIP_CUTOFF_TIGHT)),
+            ("GO_FORCED_FLOW_WINDOW_TRADING_DAYS", int(self.GO_FORCED_FLOW_WINDOW_TRADING_DAYS)),
+            ("GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN", int(self.GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN)),
+            ("GO_FORCED_FLOW_IMPORTANCE_MED_MIN", int(self.GO_FORCED_FLOW_IMPORTANCE_MED_MIN)),
+            ("GO_FORCED_FLOW_MANUAL_RANGES", tuple(self.GO_FORCED_FLOW_MANUAL_RANGES)),
+            ("LEGAL_REG_TICKER_DENYLIST", tuple(self.LEGAL_REG_TICKER_DENYLIST)),
+            ("LEGAL_REG_TICKER_ALLOWLIST", tuple(self.LEGAL_REG_TICKER_ALLOWLIST)),
+            ("LEGAL_REG_KEYWORDS", tuple(self.LEGAL_REG_KEYWORDS)),
         )
 
     # Backwards-compatible alias used by some modules.

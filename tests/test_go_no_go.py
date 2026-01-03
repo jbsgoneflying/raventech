@@ -44,9 +44,13 @@ class DummyFlags:
     GO_OPT_DELTA_BAND_LO = 0.15
     GO_OPT_DELTA_BAND_HI = 0.20
     GO_OPT_SPREAD_MAX = 0.15
+    GO_OPT_SPREAD_MAX_P90 = 0.25
     GO_OPT_MIN_MID = 0.20
     GO_OPT_OI_MIN = 500.0
     GO_OPT_VOL_MIN = 50.0
+    GO_BAND_QUOTE_COVERAGE_MIN = 0.70
+    GO_BAND_OI_SUM_MIN = 2000.0
+    GO_BAND_VOL_SUM_MIN = 200.0
 
     GO_RV5_JUMP_MAX = 1.15
     GO_RV20_JUMP_MAX = 1.10
@@ -166,10 +170,12 @@ def test_liquidity_missing_when_quotes_missing(monkeypatch):
     monkeypatch.setattr(go_no_go, "compute_live_levels", lambda *a, **k: {"enabled": False})
     monkeypatch.setattr(go_no_go, "fetch_dailies_ohlc_range", lambda *a, **k: [])
 
-    # strikes with missing put bid/ask
+    # strikes with missing put bid/ask (and at least one call-side strike in band) -> coverage too low -> MISSING
     strikes = [
-        {"expirDate": "2026-01-03", "strike": 100, "stockPrice": 110, "putDelta": -0.17, "callDelta": 0.17, "callBidPrice": 1.0, "callAskPrice": 1.1},
-        {"expirDate": "2026-01-03", "strike": 105, "stockPrice": 110, "putDelta": -0.10, "callDelta": 0.10, "putBidPrice": None, "putAskPrice": None, "callBidPrice": 1.0, "callAskPrice": 1.1},
+        # Put-side band (OTM put): missing quotes
+        {"expirDate": "2026-01-03", "strike": 100, "stockPrice": 110, "putDelta": -0.17, "putBidPrice": None, "putAskPrice": None, "putOpenInterest": 5000, "putVolume": 500},
+        # Call-side band (OTM call): has quotes
+        {"expirDate": "2026-01-03", "strike": 120, "stockPrice": 110, "callDelta": 0.17, "callBidPrice": 1.0, "callAskPrice": 1.1, "callOpenInterest": 5000, "callVolume": 500},
     ]
     client = DummyClient(
         cores_row={"avgDollarVol20": 300_000_000.0},
@@ -181,6 +187,71 @@ def test_liquidity_missing_when_quotes_missing(monkeypatch):
     c = _find(out["checks"], "SN_LIQUIDITY")
     assert c["state"] == "MISSING"
     assert c["code"] == "SN_OPT_QUOTES_MISSING"
+
+
+def test_liquidity_fail_when_spread_too_wide(monkeypatch):
+    from backend import go_no_go
+
+    monkeypatch.setattr(go_no_go, "get_flags", lambda: DummyFlags)
+    monkeypatch.setattr(go_no_go, "fetch_hist_cores_range", lambda *a, **k: _mk_hist_cores_rows([35.0] * 25))
+    monkeypatch.setattr(go_no_go, "compute_live_levels", lambda *a, **k: {"enabled": False})
+    monkeypatch.setattr(go_no_go, "fetch_dailies_ohlc_range", lambda *a, **k: [])
+
+    # Wide spreads inside band -> FAIL
+    strikes = [
+        {"expirDate": "2026-01-03", "strike": 100, "stockPrice": 110, "putDelta": -0.17, "putBidPrice": 1.0, "putAskPrice": 1.4, "putOpenInterest": 5000, "putVolume": 500},
+        {"expirDate": "2026-01-03", "strike": 120, "stockPrice": 110, "callDelta": 0.17, "callBidPrice": 1.0, "callAskPrice": 1.4, "callOpenInterest": 5000, "callVolume": 500},
+    ]
+    client = DummyClient(cores_row={"avgDollarVol20": 300_000_000.0}, monies_rows=[{"expirDate": "2026-01-03", "dte": 2}], strikes_rows=strikes)
+    payload = {"ticker": "AAPL", "current": {"asOfDate": "2026-01-02", "impliedMovePct": 6.0}, "events": [{"realizedMovePct": 4.0}] * 6}
+    out = go_no_go.compute_go_no_go(client, ticker="AAPL", payload=payload, benzinga_client=None)
+    c = _find(out["checks"], "SN_LIQUIDITY")
+    assert c["state"] == "FAIL"
+    assert c["code"] == "SN_OPT_SPREAD_TOO_WIDE"
+
+
+def test_liquidity_fail_when_band_oi_vol_too_low(monkeypatch):
+    from backend import go_no_go
+
+    monkeypatch.setattr(go_no_go, "get_flags", lambda: DummyFlags)
+    monkeypatch.setattr(go_no_go, "fetch_hist_cores_range", lambda *a, **k: _mk_hist_cores_rows([35.0] * 25))
+    monkeypatch.setattr(go_no_go, "compute_live_levels", lambda *a, **k: {"enabled": False})
+    monkeypatch.setattr(go_no_go, "fetch_dailies_ohlc_range", lambda *a, **k: [])
+
+    # Good quotes/spreads but low OI/vol sums -> FAIL
+    strikes = [
+        {"expirDate": "2026-01-03", "strike": 100, "stockPrice": 110, "putDelta": -0.17, "putBidPrice": 1.0, "putAskPrice": 1.1, "putOpenInterest": 10, "putVolume": 1},
+        {"expirDate": "2026-01-03", "strike": 120, "stockPrice": 110, "callDelta": 0.17, "callBidPrice": 1.0, "callAskPrice": 1.1, "callOpenInterest": 10, "callVolume": 1},
+    ]
+    client = DummyClient(cores_row={"avgDollarVol20": 300_000_000.0}, monies_rows=[{"expirDate": "2026-01-03", "dte": 2}], strikes_rows=strikes)
+    payload = {"ticker": "AAPL", "current": {"asOfDate": "2026-01-02", "impliedMovePct": 6.0}, "events": [{"realizedMovePct": 4.0}] * 6}
+    out = go_no_go.compute_go_no_go(client, ticker="AAPL", payload=payload, benzinga_client=None)
+    c = _find(out["checks"], "SN_LIQUIDITY")
+    assert c["state"] == "FAIL"
+    assert c["code"] == "SN_OPT_OI_TOO_LOW"
+
+
+def test_liquidity_pass_when_band_healthy(monkeypatch):
+    from backend import go_no_go
+
+    monkeypatch.setattr(go_no_go, "get_flags", lambda: DummyFlags)
+    monkeypatch.setattr(go_no_go, "fetch_hist_cores_range", lambda *a, **k: _mk_hist_cores_rows([35.0] * 25))
+    monkeypatch.setattr(go_no_go, "compute_live_levels", lambda *a, **k: {"enabled": False})
+    monkeypatch.setattr(go_no_go, "fetch_dailies_ohlc_range", lambda *a, **k: [])
+
+    # Multiple strikes in band with good quotes and large aggregate OI -> PASS
+    strikes = [
+        {"expirDate": "2026-01-03", "strike": 100, "stockPrice": 110, "putDelta": -0.17, "putBidPrice": 1.0, "putAskPrice": 1.1, "putOpenInterest": 1500, "putVolume": 50},
+        {"expirDate": "2026-01-03", "strike": 98, "stockPrice": 110, "putDelta": -0.19, "putBidPrice": 0.9, "putAskPrice": 1.0, "putOpenInterest": 1500, "putVolume": 60},
+        {"expirDate": "2026-01-03", "strike": 120, "stockPrice": 110, "callDelta": 0.17, "callBidPrice": 1.0, "callAskPrice": 1.1, "callOpenInterest": 1500, "callVolume": 50},
+        {"expirDate": "2026-01-03", "strike": 122, "stockPrice": 110, "callDelta": 0.19, "callBidPrice": 0.9, "callAskPrice": 1.0, "callOpenInterest": 1500, "callVolume": 60},
+    ]
+    client = DummyClient(cores_row={"avgDollarVol20": 300_000_000.0}, monies_rows=[{"expirDate": "2026-01-03", "dte": 2}], strikes_rows=strikes)
+    payload = {"ticker": "AAPL", "current": {"asOfDate": "2026-01-02", "impliedMovePct": 6.0}, "events": [{"realizedMovePct": 4.0}] * 6}
+    out = go_no_go.compute_go_no_go(client, ticker="AAPL", payload=payload, benzinga_client=None)
+    c = _find(out["checks"], "SN_LIQUIDITY")
+    assert c["state"] == "PASS"
+    assert c["code"] is None
 
 
 def test_macro_gamma_fails_if_magnitude_low(monkeypatch):

@@ -352,16 +352,41 @@ function goMetricsLine(c) {
     }
     if (id === "SN_LIQUIDITY") {
       const dvol = num(v?.avgDollarVol20d);
-      const rep = v?.rep || {};
-      const put = rep?.put || {};
-      const call = rep?.call || {};
+      const exp = v?.expiry ? String(v.expiry).slice(5) : "";
+      const src = v?.underlyingSource ? String(v.underlyingSource) : "";
+      const agg = v?.deltaBandAgg || {};
+      const put = agg?.put || {};
+      const call = agg?.call || {};
+      const covP = num(put?.coverage);
+      const covC = num(call?.coverage);
+      const sprP = num(put?.medianSpread);
+      const sprC = num(call?.medianSpread);
+      const oiP = num(put?.sumOI);
+      const oiC = num(call?.sumOI);
+      const volP = num(put?.sumVol);
+      const volC = num(call?.sumVol);
       const parts = [];
       if (Number.isFinite(dvol)) parts.push(`$vol20=${Math.round(dvol/1e6)}M`);
-      if (rep?.expiry) parts.push(`exp=${String(rep.expiry).slice(5)}`);
-      const pK = num(put?.strike);
-      const cK = num(call?.strike);
-      if (Number.isFinite(pK)) parts.push(`P${pK.toFixed(0)}`);
-      if (Number.isFinite(cK)) parts.push(`C${cK.toFixed(0)}`);
+      if (exp) parts.push(`exp=${exp}`);
+      if (src) parts.push(`src=${src}`);
+      if (Number.isFinite(covP) || Number.isFinite(covC)) {
+        const a = Number.isFinite(covP) ? covP.toFixed(2) : "—";
+        const b = Number.isFinite(covC) ? covC.toFixed(2) : "—";
+        parts.push(`cov(P,C)=${a},${b}`);
+      }
+      if (Number.isFinite(sprP) || Number.isFinite(sprC)) {
+        const a = Number.isFinite(sprP) ? sprP.toFixed(2) : "—";
+        const b = Number.isFinite(sprC) ? sprC.toFixed(2) : "—";
+        parts.push(`spr50(P,C)=${a},${b}`);
+      }
+      if (Number.isFinite(oiP) || Number.isFinite(oiC) || Number.isFinite(volP) || Number.isFinite(volC)) {
+        const a = Number.isFinite(oiP) ? oiP.toFixed(0) : "—";
+        const b = Number.isFinite(oiC) ? oiC.toFixed(0) : "—";
+        const c0 = Number.isFinite(volP) ? volP.toFixed(0) : "—";
+        const d0 = Number.isFinite(volC) ? volC.toFixed(0) : "—";
+        parts.push(`OI(P,C)=${a},${b}`);
+        parts.push(`Vol(P,C)=${c0},${d0}`);
+      }
       return parts.join(" · ");
     }
     if (id === "MACRO_GAMMA") {
