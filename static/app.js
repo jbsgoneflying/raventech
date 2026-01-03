@@ -273,7 +273,10 @@ function openGoNoGoModal(go) {
       const metrics = goMetricsLine(c);
       const explain = (c?.explain !== null && c?.explain !== undefined) ? String(c.explain) : "";
       const notes = Array.isArray(c?.value?.notes) ? c.value.notes : [];
-      const note0 = notes.length ? String(notes[0] ?? "") : "";
+      const noteLines = notes
+        .slice(0, 3)
+        .map((x) => String(x ?? "").trim())
+        .filter(Boolean);
       const showExplain = (!metrics || !metrics.trim()) || (String(c?.state || "").toUpperCase() !== "PASS");
       return `
         <div class="goRow">
@@ -284,7 +287,7 @@ function openGoNoGoModal(go) {
             ${code ? `<span class="mono goRowCode">${escapeHtml(code)}</span>` : ""}
             ${metrics ? `<span class="mono goRowMetrics">${escapeHtml(metrics)}</span>` : ""}
             ${showExplain && explain ? `<div class="goRowExplain muted">${escapeHtml(explain)}</div>` : ""}
-            ${showExplain && note0 ? `<div class="goRowExplain muted">${escapeHtml(note0)}</div>` : ""}
+            ${showExplain && noteLines.length ? noteLines.map((s) => `<div class="goRowExplain muted">${escapeHtml(s)}</div>`).join("") : ""}
           </div>
         </div>
       `;

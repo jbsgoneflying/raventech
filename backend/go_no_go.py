@@ -15,7 +15,7 @@ from backend.benzinga_client import BenzingaClient
 from backend.config import get_flags
 from backend.market_calendar import market_structure_events_by_date, opex_events_by_date
 from backend.macro_events import macro_events_by_date
-from backend.spx_ic_engine import compute_live_levels, fetch_dailies_ohlc_range, fetch_hist_cores_range
+from backend.spx_ic_engine import compute_live_levels, fetch_dailies_ohlc_range, fetch_hist_cores_range, fetch_trading_bars
 
 
 State = str  # PASS|FAIL|MISSING
@@ -249,6 +249,23 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
                 source = "dailies_close_x_volume"
             else:
                 notes.append(f"/hist/dailies insufficient volume rows (bars={len(bars)}, usable_close_x_vol={len(pairs)}).")
+        except Exception:
+            pass
+
+    # Fallback #2: if range pulls are empty/unreliable for this symbol, probe day-by-day (cached) to get last ~20 bars.
+    if avg_dvol is None:
+        try:
+            end = _now_et_date()
+            bars = fetch_trading_bars(client, ticker=t, end=end, n=60, max_calendar_scan=140) or []
+            pairs = [(b.close, b.volume) for b in bars if getattr(b, "close", None) and getattr(b, "volume", None)]
+            pairs = [(float(c), float(v)) for (c, v) in pairs if c and v and math.isfinite(float(c)) and math.isfinite(float(v)) and float(c) > 0 and float(v) > 0]
+            if len(pairs) >= 10:
+                tail = pairs[-20:]
+                avg_dvol = sum(c * v for (c, v) in tail) / float(len(tail))
+                notes.append("avgDollarVol20d derived via per-day /hist/dailies probe (close*volume).")
+                source = "dailies_probe_close_x_volume"
+            else:
+                notes.append(f"Per-day dailies probe insufficient volume rows (bars={len(bars)}, usable_close_x_vol={len(pairs)}).")
         except Exception:
             pass
 
@@ -935,7 +952,8 @@ def compute_go_no_go(
     if trade_date:
         try:
             fields_m = "ticker,tradeDate,expirDate,dte,stockPrice,vol50,atmiv"
-            lo = max(1, int(dte_target) - 2)
+            # Include 0DTE on Fridays so "Friday looks at Friday" works.
+            lo = max(0, int(dte_target) - 2)
             hi = int(dte_target) + 10
             mrows = client.hist_monies_implied(ticker=t, trade_date=trade_date, fields=fields_m, dte=f"{lo},{hi}").rows or []
             mrows = [r for r in mrows if isinstance(r, dict)]
