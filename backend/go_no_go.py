@@ -51,6 +51,22 @@ def _to_int(v: Any) -> Optional[int]:
         return None
 
 
+def _norm_delta_01(v: Any) -> Optional[float]:
+    """Normalize ORATS delta to 0..1 when possible (supports 0..1 or 0..100 scales)."""
+    x = _to_float(v)
+    if x is None:
+        return None
+    ax = abs(float(x))
+    # Some feeds use 0..100
+    if ax > 1.5:
+        x = float(x) / 100.0
+    if not math.isfinite(float(x)):
+        return None
+    if float(x) < -1.0 or float(x) > 1.0:
+        return None
+    return float(x)
+
+
 def _pct_rank(x: float, xs: List[float]) -> Optional[float]:
     vals = [float(v) for v in (xs or []) if v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))]
     if not vals:
@@ -344,20 +360,25 @@ def _band_liquidity_agg(
 
     def _delta(r: dict) -> Optional[float]:
         if s == "call":
-            v = _to_float(r.get("callDelta"))
+            v = _norm_delta_01(r.get("callDelta"))
             if v is None:
-                d0 = _to_float(r.get("delta"))
-                # Some ORATS plans expose only a generic `delta` that can be unsigned.
-                # Treat it as side-signed for robustness.
+                d0 = _norm_delta_01(r.get("delta"))
+                # ORATS often exposes generic `delta` as CALL delta (0..1 or 0..100).
                 v = None if d0 is None else abs(float(d0))
-            return v
-        v = _to_float(r.get("putDelta"))
+            return None if v is None else abs(float(v))
+        v = _norm_delta_01(r.get("putDelta"))
         if v is None:
-            d0 = _to_float(r.get("delta"))
-            # Some ORATS plans expose only a generic `delta` that can be unsigned.
-            # Treat it as side-signed for robustness.
-            v = None if d0 is None else -abs(float(d0))
-        return v
+            d0 = _norm_delta_01(r.get("delta"))
+            # ORATS docs: `delta` is call delta; put delta = call delta - 1.
+            return None if d0 is None else (float(d0) - 1.0)
+        # If putDelta is provided but unsigned, interpret:
+        # - small positives (<=0.5) as abs(putDelta) for OTM puts
+        # - large positives (>0.5) as call-delta equivalent (convert via - (1 - callDelta))
+        if float(v) > 0:
+            if float(v) > 0.5:
+                return float(v) - 1.0
+            return -abs(float(v))
+        return float(v)
 
     bid_key = "callBidPrice" if s == "call" else "putBidPrice"
     ask_key = "callAskPrice" if s == "call" else "putAskPrice"
@@ -455,16 +476,20 @@ def _pick_opt_leg_row(*, rows: List[dict], side: str, underlying: Optional[float
 
     def _delta(r: dict) -> Optional[float]:
         if s == "call":
-            v = _to_float(r.get("callDelta"))
+            v = _norm_delta_01(r.get("callDelta"))
             if v is None:
-                d0 = _to_float(r.get("delta"))
+                d0 = _norm_delta_01(r.get("delta"))
                 v = None if d0 is None else abs(float(d0))
-            return v
-        v = _to_float(r.get("putDelta"))
+            return None if v is None else abs(float(v))
+        v = _norm_delta_01(r.get("putDelta"))
         if v is None:
-            d0 = _to_float(r.get("delta"))
-            v = None if d0 is None else -abs(float(d0))
-        return v
+            d0 = _norm_delta_01(r.get("delta"))
+            return None if d0 is None else (float(d0) - 1.0)
+        if float(v) > 0:
+            if float(v) > 0.5:
+                return float(v) - 1.0
+            return -abs(float(v))
+        return float(v)
 
     use = [r for r in rows if isinstance(r, dict)]
     if underlying is not None and underlying > 0:

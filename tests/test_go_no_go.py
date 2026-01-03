@@ -254,6 +254,32 @@ def test_liquidity_pass_when_band_healthy(monkeypatch):
     assert c["code"] is None
 
 
+def test_liquidity_pass_when_using_orats_call_delta_for_puts(monkeypatch):
+    """
+    ORATS docs: generic `delta` field is call delta (0..1 or 0..100).
+    For 15–20Δ puts, call delta will be ~0.80–0.85. We must convert: putDelta = callDelta - 1.
+    """
+    from backend import go_no_go
+
+    monkeypatch.setattr(go_no_go, "get_flags", lambda: DummyFlags)
+    monkeypatch.setattr(go_no_go, "fetch_hist_cores_range", lambda *a, **k: _mk_hist_cores_rows([35.0] * 25))
+    monkeypatch.setattr(go_no_go, "compute_live_levels", lambda *a, **k: {"enabled": False})
+    monkeypatch.setattr(go_no_go, "fetch_dailies_ohlc_range", lambda *a, **k: [])
+
+    strikes = [
+        # OTM put row uses generic delta as CALL delta ~0.83 (i.e. 17Δ put)
+        {"expirDate": "2026-01-03", "strike": 100, "stockPrice": 110, "delta": 0.83, "putBidPrice": 1.0, "putAskPrice": 1.1, "putOpenInterest": 2500, "putVolume": 250},
+        # OTM call row uses generic delta ~0.17
+        {"expirDate": "2026-01-03", "strike": 120, "stockPrice": 110, "delta": 0.17, "callBidPrice": 1.0, "callAskPrice": 1.1, "callOpenInterest": 2500, "callVolume": 250},
+    ]
+    client = DummyClient(cores_row={"avgDollarVol20": 300_000_000.0}, monies_rows=[{"expirDate": "2026-01-03", "dte": 2}], strikes_rows=strikes)
+    payload = {"ticker": "AAPL", "current": {"asOfDate": "2026-01-02", "impliedMovePct": 6.0}, "events": [{"realizedMovePct": 4.0}] * 6}
+    out = go_no_go.compute_go_no_go(client, ticker="AAPL", payload=payload, benzinga_client=None)
+    c = _find(out["checks"], "SN_LIQUIDITY")
+    assert c["state"] == "PASS"
+    assert c["code"] is None
+
+
 def test_macro_gamma_fails_if_magnitude_low(monkeypatch):
     from backend import go_no_go
 
