@@ -1010,12 +1010,12 @@ function renderEngine2DecisionPanel(payload) {
     if (!enabled) return { main: "—", sub: "Live hedging-pressure unavailable." };
 
     const bucket = String(hp.elasticityBucket || "").toUpperCase();
-    const e = Number(hp.elasticity50bp);
+    const e = (hp.elasticity50bp === null || hp.elasticity50bp === undefined) ? null : Number(hp.elasticity50bp);
     const scen = Array.isArray(hp.scenarios) ? hp.scenarios : [];
     const s50 = scen.find(x => Number(x?.movePct) === 0.5) || null;
     const n50 = s50 ? Number(s50.hedgeNotional) : null;
 
-    const main = Number.isFinite(e)
+    const main = (e !== null && Number.isFinite(e))
       ? `${(e * 100).toFixed(2)}% ADV${bucket ? ` ${bucket}` : ""}`
       : (Number.isFinite(n50) ? `${fmtMoneyShort(n50)} @50bp` : "—");
 
@@ -1040,10 +1040,10 @@ function renderEngine2DecisionPanel(payload) {
 
     const main = `Down ${Number.isFinite(dScore) ? dScore : "—"} ${dLbl} · Up ${Number.isFinite(uScore) ? uScore : "—"} ${uLbl}`;
 
-    const dp = Number(t.distToPutWallPct);
-    const cp = Number(t.distToCallWallPct);
-    const fp = Number(t.flipDistancePct);
-    const sub = `walls: put=${Number.isFinite(dp) ? dp.toFixed(2) + "%" : "—"} · call=${Number.isFinite(cp) ? cp.toFixed(2) + "%" : "—"} · flip=${Number.isFinite(fp) ? fp.toFixed(2) + "%" : "—"}`;
+    const dp = (t.distToPutWallPct === null || t.distToPutWallPct === undefined) ? null : Number(t.distToPutWallPct);
+    const cp = (t.distToCallWallPct === null || t.distToCallWallPct === undefined) ? null : Number(t.distToCallWallPct);
+    const fp = (t.flipDistancePct === null || t.flipDistancePct === undefined) ? null : Number(t.flipDistancePct);
+    const sub = `walls: put=${(dp !== null && Number.isFinite(dp)) ? dp.toFixed(2) + "%" : "—"} · call=${(cp !== null && Number.isFinite(cp)) ? cp.toFixed(2) + "%" : "—"} · flip=${(fp !== null && Number.isFinite(fp)) ? fp.toFixed(2) + "%" : "—"}`;
     return { main, sub };
   }
 
@@ -1055,10 +1055,15 @@ function renderEngine2DecisionPanel(payload) {
   const vp = lc?.volPressure || null;
   const vpEnabled = !!(vp && vp.enabled);
   const vpState = vpEnabled ? String(vp.state || "—") : "—";
-  const vpScore = vpEnabled ? Number(vp.scoreZ) : null;
+  const vpScore = (vpEnabled && vp.scoreZ !== null && vp.scoreZ !== undefined) ? Number(vp.scoreZ) : null;
   const vpInp = vpEnabled ? (vp.inputs || {}) : {};
+  const _vpNum = (v, d = 2) => {
+    if (v === null || v === undefined) return "—";
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(d) : "—";
+  };
   const vpSub = vpEnabled
-    ? `iv7=${Number.isFinite(Number(vpInp.iv7)) ? Number(vpInp.iv7).toFixed(2) : "—"} · rv10=${Number.isFinite(Number(vpInp.rv10)) ? Number(vpInp.rv10).toFixed(2) : "—"} · term=${Number.isFinite(Number(vpInp.termSlope)) ? Number(vpInp.termSlope).toFixed(2) : "—"}`
+    ? `iv7=${_vpNum(vpInp.iv7, 2)} · rv10=${_vpNum(vpInp.rv10, 2)} · term=${_vpNum(vpInp.termSlope, 2)}`
     : "Vol pressure unavailable.";
 
   const dots = Array.from({ length: 5 }).map((_, i) => `<span class="taDot ${i < 3 ? "isOn" : ""}"></span>`).join("");
