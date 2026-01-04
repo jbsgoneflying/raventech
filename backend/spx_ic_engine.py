@@ -19,6 +19,11 @@ from backend.orats_client import OratsClient, OratsError
 LOG = logging.getLogger("spx_ic_engine")
 
 from backend.dealer_gamma_context import compute_dealer_gamma_context
+from backend.engine2_gamma_addons import (
+    compute_hedging_pressure,
+    compute_tail_ignition,
+    compute_vol_pressure,
+)
 from backend.oi_clusters import compute_open_interest_clusters
 from backend.technicals import DailyBar as TechDailyBar
 from backend.technicals import (
@@ -2817,10 +2822,11 @@ def compute_engine2_spx_ic(
     # This avoids 100+ slow /hist/monies/implied calls when range mode isn't supported there.
     iv7_by_date: Dict[str, float] = {}
     iv30_by_date: Dict[str, float] = {}
+    slope_by_date: Dict[str, float] = {}
     try:
         from_core = (now - dt.timedelta(days=int(yrs) * 365 + 120))
         to_core = now
-        fields = "ticker,tradeDate,iv7,iv7d,iv7Day,iv30,iv30d,iv30Day,iv"
+        fields = "ticker,tradeDate,iv7,iv7d,iv7Day,iv30,iv30d,iv30Day,iv,slope"
         core_rows = fetch_hist_cores_range(client, ticker=underlying, start=from_core, end=to_core, fields=fields)
         telemetry["counts"]["orats.cores_rows"] = len(core_rows)
         for r in core_rows:
@@ -2841,11 +2847,46 @@ def compute_engine2_spx_ic(
                 iv7_by_date[d0] = float(iv7)
             if iv30 is not None:
                 iv30_by_date[d0] = float(iv30)
+            s0 = _to_float(r.get("slope"))
+            if s0 is not None:
+                slope_by_date[d0] = float(s0)
     except Exception:
         telemetry["notes"].append("ORATS cores IV range fetch failed; IV inputs will be reduced (fallback to realized vol).")
         iv7_by_date = {}
         iv30_by_date = {}
+        slope_by_date = {}
     mark("orats.cores_iv_range")
+
+    # Realized vol proxy: 10d annualized stdev of log returns (percent)
+    rv10_by_date: Dict[str, float] = {}
+    try:
+        # logrets_all aligns with trade_dates[1:]
+        for i in range(1, len(trade_dates)):
+            if i - 10 < 0:
+                continue
+            window_rets = [float(x) for x in logrets_all[i - 10 : i] if x is not None and math.isfinite(float(x))]
+            if len(window_rets) < 6:
+                continue
+            try:
+                sd = float(statistics.pstdev(window_rets))
+            except Exception:
+                sd = None
+            if sd is None or not math.isfinite(sd) or sd <= 0:
+                continue
+            rv = float(sd) * math.sqrt(252.0) * 100.0
+            rv10_by_date[str(trade_dates[i])[:10]] = float(rv)
+    except Exception:
+        rv10_by_date = {}
+
+    # ADV proxy (shares): 20d average daily volume from ORATS dailies (best-effort)
+    adv20_shares = None
+    try:
+        vols = [float(b.volume) for b in (bars or []) if getattr(b, "volume", None) is not None and float(b.volume) > 0]
+        if len(vols) >= 5:
+            tail = vols[-20:] if len(vols) >= 20 else vols
+            adv20_shares = float(sum(tail) / len(tail)) if tail else None
+    except Exception:
+        adv20_shares = None
 
     # Precompute sector dispersion (EOD) across trade_dates.
     sector_tickers = ["XLF", "XLK", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU"]
@@ -3138,6 +3179,8 @@ def compute_engine2_spx_ic(
                     "greeksAgg": None,
                     "dealerGamma": None,
                     "oiClusters": None,
+                    "gammaFlipStrike": None,
+                    "addons": None,
                     "warnings": [],
                     "notes": [],
                 }
@@ -3220,6 +3263,54 @@ def compute_engine2_spx_ic(
                             iv = _iv_to_pct(r.get("callMidIv")) or _iv_to_pct(r.get("putMidIv"))
                             iv_atm = iv
 
+                # Gamma flip (best-effort, weighted by OI/volume mode)
+                gamma_flip = None
+                try:
+                    if spot is not None:
+                        gamma_flip = _compute_gamma_flip_strike(
+                            chain_rows,
+                            spot=float(spot),
+                            band_pct=0.05,
+                            weighting_mode=str(w_mode),
+                            contract_multiplier=100,
+                        )
+                except Exception:
+                    gamma_flip = None
+
+                # Addon metrics (weekly + nearest cards)
+                put_wall = oi.get("putWall") if isinstance(oi, dict) else None
+                call_wall = oi.get("callWall") if isinstance(oi, dict) else None
+                put_strike = None
+                call_strike = None
+                try:
+                    if isinstance(put_wall, dict):
+                        put_strike = _to_float(put_wall.get("peakStrike") or put_wall.get("centerStrike") or put_wall.get("maxStrike"))
+                    if isinstance(call_wall, dict):
+                        call_strike = _to_float(call_wall.get("peakStrike") or call_wall.get("centerStrike") or call_wall.get("maxStrike"))
+                except Exception:
+                    put_strike = None
+                    call_strike = None
+
+                addons = {
+                    "hedgingPressure": compute_hedging_pressure(
+                        chain_rows,
+                        spot=_to_float(spot),
+                        band_pct=0.05,
+                        contract_multiplier=100,
+                        adv_shares_20d=adv20_shares,
+                        weighting_mode=str(w_mode),
+                    ),
+                    "tailIgnition": compute_tail_ignition(
+                        chain_rows,
+                        spot=_to_float(spot),
+                        put_wall_strike=put_strike,
+                        call_wall_strike=call_strike,
+                        gamma_flip_strike=gamma_flip,
+                        weighting_mode=str(w_mode),
+                        contract_multiplier=100,
+                    ),
+                }
+
                 base.update(
                     {
                         "enabled": True,
@@ -3235,6 +3326,8 @@ def compute_engine2_spx_ic(
                         },
                         "dealerGamma": dg,
                         "oiClusters": oi,
+                        "gammaFlipStrike": (None if gamma_flip is None else round(float(gamma_flip), 2)),
+                        "addons": addons,
                         "warnings": chain_warn,
                         "notes": [
                             "Live, informational only. Dealer gamma context does not change breach odds or any historical stats.",
@@ -3262,6 +3355,7 @@ def compute_engine2_spx_ic(
                 "oiClusters": primary_view.get("oiClusters"),
                 "weeklyFriday": weekly_view,
                 "nearestDaily": daily_view,
+                "volPressure": None,
                 "warnings": [*exp_warn, *(primary_view.get("warnings") or [])],
                 "notes": [
                     "Live, informational only. Backtest/odds use ORATS EOD and are not affected by these live panels.",
@@ -3291,9 +3385,26 @@ def compute_engine2_spx_ic(
             "oiClusters": None,
             "weeklyFriday": None,
             "nearestDaily": None,
+            "volPressure": None,
             "warnings": [],
             "notes": ["Live context unavailable (unexpected error)."],
         }
+
+    # Underlying-level vol supply/demand (same regardless of weekly/nearest)
+    try:
+        # Use the last available bar date as the volatility as-of date.
+        asof_trade = str(bars[-1].trade_date)[:10] if bars else str(now)[:10]
+        live_context["volPressure"] = compute_vol_pressure(
+            asof=asof_trade,
+            dates_sorted=[str(d)[:10] for d in trade_dates],
+            iv7_by_date=iv7_by_date,
+            iv30_by_date=iv30_by_date,
+            rv10_by_date=rv10_by_date,
+            slope_by_date=slope_by_date,
+            window=60,
+        )
+    except Exception:
+        live_context["volPressure"] = {"enabled": False, "reason": "error"}
 
     # "Like now" conditional odds: filter historical weeks to the current buckets (regime/macro/season).
     # This is the core desk question: "in conditions like now, how often do 1.0/1.5/2.0× EM breach?"

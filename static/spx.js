@@ -1004,6 +1004,63 @@ function renderEngine2DecisionPanel(payload) {
   const wOi = _oiDetail(weekly);
   const nOi = _oiDetail(nearest);
 
+  function _hpSummary(view) {
+    const hp = view?.addons?.hedgingPressure || null;
+    const enabled = !!(view && view.enabled && hp && hp.enabled);
+    if (!enabled) return { main: "—", sub: "Live hedging-pressure unavailable." };
+
+    const bucket = String(hp.elasticityBucket || "").toUpperCase();
+    const e = Number(hp.elasticity50bp);
+    const scen = Array.isArray(hp.scenarios) ? hp.scenarios : [];
+    const s50 = scen.find(x => Number(x?.movePct) === 0.5) || null;
+    const n50 = s50 ? Number(s50.hedgeNotional) : null;
+
+    const main = Number.isFinite(e)
+      ? `${(e * 100).toFixed(2)}% ADV${bucket ? ` ${bucket}` : ""}`
+      : (Number.isFinite(n50) ? `${fmtMoneyShort(n50)} @50bp` : "—");
+
+    const gTot = Number(hp.gammaTotal);
+    const gTxt = Number.isFinite(gTot) ? `Γ=${gTot.toExponential(2)}` : "Γ=—";
+    const band = Math.round(Number(hp.bandPct || 0.05) * 100);
+    const sub = `${gTxt} · band=±${band}% · strikes=${fmt0(hp.strikesUsed)}`;
+    return { main, sub };
+  }
+
+  function _tailSummary(view) {
+    const t = view?.addons?.tailIgnition || null;
+    const enabled = !!(view && view.enabled && t && t.enabled);
+    if (!enabled) return { main: "—", sub: "Tail ignition unavailable." };
+
+    const d = t.down || {};
+    const u = t.up || {};
+    const dScore = Number(d.score);
+    const uScore = Number(u.score);
+    const dLbl = String(d.label || "—").toUpperCase();
+    const uLbl = String(u.label || "—").toUpperCase();
+
+    const main = `Down ${Number.isFinite(dScore) ? dScore : "—"} ${dLbl} · Up ${Number.isFinite(uScore) ? uScore : "—"} ${uLbl}`;
+
+    const dp = Number(t.distToPutWallPct);
+    const cp = Number(t.distToCallWallPct);
+    const fp = Number(t.flipDistancePct);
+    const sub = `walls: put=${Number.isFinite(dp) ? dp.toFixed(2) + "%" : "—"} · call=${Number.isFinite(cp) ? cp.toFixed(2) + "%" : "—"} · flip=${Number.isFinite(fp) ? fp.toFixed(2) + "%" : "—"}`;
+    return { main, sub };
+  }
+
+  const wHp = _hpSummary(weekly);
+  const nHp = _hpSummary(nearest);
+  const wTail = _tailSummary(weekly);
+  const nTail = _tailSummary(nearest);
+
+  const vp = lc?.volPressure || null;
+  const vpEnabled = !!(vp && vp.enabled);
+  const vpState = vpEnabled ? String(vp.state || "—") : "—";
+  const vpScore = vpEnabled ? Number(vp.scoreZ) : null;
+  const vpInp = vpEnabled ? (vp.inputs || {}) : {};
+  const vpSub = vpEnabled
+    ? `iv7=${Number.isFinite(Number(vpInp.iv7)) ? Number(vpInp.iv7).toFixed(2) : "—"} · rv10=${Number.isFinite(Number(vpInp.rv10)) ? Number(vpInp.rv10).toFixed(2) : "—"} · term=${Number.isFinite(Number(vpInp.termSlope)) ? Number(vpInp.termSlope).toFixed(2) : "—"}`
+    : "Vol pressure unavailable.";
+
   const dots = Array.from({ length: 5 }).map((_, i) => `<span class="taDot ${i < 3 ? "isOn" : ""}"></span>`).join("");
   const chips = [
     `Regime: ${bucket}`,
@@ -1067,6 +1124,23 @@ function renderEngine2DecisionPanel(payload) {
           <div class="taCardTop"><div class="taCardTitle">Dealer gamma (nearest)</div></div>
           <div class="taCardState">${escapeHtml(nSum.main)}</div>
           <div class="taCardInterp muted">${escapeHtml(nSum.sub)}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Hedging pressure (HPI)</div></div>
+          <div class="taCardState mono">${escapeHtml(wHp.main)}</div>
+          <div class="taCardInterp muted">${escapeHtml(wHp.sub)}</div>
+          <div class="taCardInterp muted">Nearest: ${escapeHtml(nHp.main)} · ${escapeHtml(nHp.sub)}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Tail ignition</div></div>
+          <div class="taCardState">${escapeHtml(wTail.main)}</div>
+          <div class="taCardInterp muted">${escapeHtml(wTail.sub)}</div>
+          <div class="taCardInterp muted">Nearest: ${escapeHtml(nTail.main)} · ${escapeHtml(nTail.sub)}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Vol pressure</div></div>
+          <div class="taCardState mono">${escapeHtml(vpState)}${Number.isFinite(vpScore) ? ` · z=${escapeHtml(vpScore.toFixed(2))}` : ""}</div>
+          <div class="taCardInterp muted">${escapeHtml(vpSub)}</div>
         </div>
       </div>
 
