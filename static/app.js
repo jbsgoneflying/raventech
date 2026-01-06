@@ -95,6 +95,114 @@ function _mdTable(headers, rows) {
   return [head, bar, body].filter(Boolean).join("\n");
 }
 
+function buildEngine1OnePageMarkdown({ sanitizedPayload, riskChecks, levels, uiState }) {
+  const p = sanitizedPayload || {};
+  const t = String(p?.ticker || "—").toUpperCase();
+  const tech = p?.technicals || {};
+  const asOf = String(tech?.asOfDate || p?.regime?.asOfDate || "—").slice(0, 10);
+  const px = tech?.narrative?.priceUsed ?? tech?.livePrice ?? tech?.lastDailyClose;
+  const pxTxt = Number.isFinite(Number(px)) ? Number(px).toFixed(2) : "—";
+
+  const summary = p?.summary || {};
+  const baseline = p?.baseline || {};
+  const regime = p?.regime || {};
+  const quarters = p?.quarters || {};
+  const events = Array.isArray(p?.events) ? p.events : [];
+
+  const kv = [];
+  const add = (k, v) => kv.push({ key: k, value: (v === null || v === undefined || v === "" ? "—" : String(v)) });
+
+  add("engine1.ticker", t);
+  add("engine1.asOfDate", asOf);
+  add("engine1.priceUsed", pxTxt);
+  add("engine1.ui.k", uiState?.k);
+  add("engine1.ui.n", uiState?.n);
+  add("engine1.ui.years", uiState?.years);
+
+  add("engine1.summary.breach_rate_pct", summary?.breach_rate_pct);
+  add("engine1.summary.avg_above_breach_pct", summary?.avg_above_breach_pct);
+  add("engine1.summary.events_used", summary?.events_used);
+  add("engine1.summary.events_found", summary?.events_found);
+  add("engine1.baseline.avg_ratio_realized_to_implied", baseline?.avg_ratio_realized_to_implied);
+
+  add("engine1.regime.label", regime?.label);
+  add("engine1.regime.tailMultiplier", regime?.tailMultiplier);
+  add("engine1.regime.tradeGate", regime?.guidance?.tradeGate);
+
+  // Levels highlights
+  const heat = levels?.levels?.gexHeatmap || null;
+  const hm = heat?.metrics || {};
+  const hs = heat?.stability || {};
+  add("engine1.levels.gexHeatmap.enabled", heat?.enabled);
+  add("engine1.levels.gexHeatmap.stability.label", hs?.label);
+  add("engine1.levels.gexHeatmap.metrics.downsideDistancePts", hm?.downsideDistancePts);
+  add("engine1.levels.gexHeatmap.metrics.upsideDistancePts", hm?.upsideDistancePts);
+  add("engine1.levels.gexHeatmap.metrics.downsideDistanceEm", hm?.downsideDistanceEm);
+  add("engine1.levels.gexHeatmap.metrics.upsideDistanceEm", hm?.upsideDistanceEm);
+
+  const lines = [];
+  lines.push(`# ${t} — Engine 1 (One Page)`);
+  lines.push("");
+  lines.push(`If you need a number, reference it by the **Key** in the Key/Value index below (stable keys).`);
+  lines.push("");
+  lines.push("## Key/Value index");
+  lines.push(_mdTable(["key", "value"], kv));
+  lines.push("");
+
+  lines.push("## Risk checks (sanitized; no verdict/state)");
+  lines.push("```json");
+  lines.push(JSON.stringify(riskChecks || {}, null, 2));
+  lines.push("```");
+  lines.push("");
+
+  lines.push("## Quarter seasonality");
+  const qRows = ["Q1", "Q2", "Q3", "Q4"].map((q) => {
+    const r = quarters?.[q] || {};
+    const s = r?.seasonality || {};
+    return {
+      quarter: q,
+      recommendation: r?.recommendation ?? "",
+      breach_delta_pp: s?.breach_delta_pp ?? "",
+      ratio_delta: s?.ratio_delta ?? "",
+      overshoot_delta_pp: s?.overshoot_delta_pp ?? "",
+      avg_ratio_realized_to_implied: r?.avg_ratio_realized_to_implied ?? "",
+      max_ratio_realized_to_implied: r?.max_ratio_realized_to_implied ?? "",
+    };
+  });
+  lines.push(_mdTable(Object.keys(qRows[0]), qRows));
+  lines.push("");
+
+  lines.push("## Earnings Events (all rows; advanced columns included)");
+  if (events.length) {
+    const eRows = events.map((e) => ({
+      earnDate: e?.earnDate ?? "",
+      anncTod: e?.anncTod ?? "",
+      timing: e?.timing ?? "",
+      pricingDateUsed: e?.pricingDateUsed ?? "",
+      impErnMv: e?.impErnMv ?? "",
+      impliedMovePct: e?.impliedMovePct ?? "",
+      closeDateUsed: e?.closeDateUsed ?? "",
+      closePx: e?.closePx ?? "",
+      openDateUsed: e?.openDateUsed ?? "",
+      openPx: e?.openPx ?? "",
+      realizedMovePct: e?.realizedMovePct ?? "",
+      signedMovePct: e?.signedMovePct ?? "",
+      breachSide: e?.breachSide ?? "",
+      dirOvershootPct: (e?.upOvershootPct ?? e?.downOvershootPct) ?? "",
+      breach: e?.breach ?? "",
+      regime: e?.regimeAtEvent?.label ?? "",
+      gate: e?.regimeAtEvent?.tradeGate ?? "",
+      aboveBreachPct: e?.aboveBreachPct ?? "",
+    }));
+    lines.push(_mdTable(Object.keys(eRows[0]), eRows));
+  } else {
+    lines.push("_No rows._");
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 function _scrubVerdictText(s) {
   // Remove explicit decisioning words without destroying surrounding content.
   // Use word boundaries to avoid mangling tickers like GOOG.
@@ -336,6 +444,8 @@ async function exportEngine1LLMBundle() {
 
     const md = buildEngine1SnapshotMarkdown({ payload: sanitizedPayload, levels, uiState, riskChecks });
     zip.addText("snapshot.md", md);
+    const onePageMd = buildEngine1OnePageMarkdown({ sanitizedPayload, riskChecks, levels, uiState });
+    zip.addText("one_page.md", onePageMd);
     zip.addText("payload.engine1.json", JSON.stringify(sanitizedPayload, null, 2));
     zip.addText("risk_checks.json", JSON.stringify(riskChecks, null, 2));
     zip.addText("ui_state.json", JSON.stringify(uiState, null, 2));
@@ -400,6 +510,46 @@ async function exportEngine1LLMBundle() {
 
     downloadBlob(`${base}.zip`, zip.toBlob());
     if (status) status.textContent = `Exported: ${base}.zip`;
+  } catch (e) {
+    if (status) status.textContent = `Export error: ${String(e?.message || e)}`;
+  }
+}
+
+async function exportEngine1OnePageOnly() {
+  const status = $("status");
+  const payload = lastPayload;
+  if (!payload) {
+    if (status) status.textContent = "Export: run Engine 1 first (no payload yet).";
+    return;
+  }
+  const t = String(payload?.ticker || $("ticker")?.value || "").trim().toUpperCase();
+
+  try {
+    if (status) status.textContent = "Exporting one-page…";
+    const levels = await _ensureEngine1LevelsPayload(t);
+    const riskChecks = sanitizeRiskChecks(payload?.goNoGo || null);
+    const sanitizedPayload = sanitizeEngine1Payload(payload);
+
+    const uiState = {
+      engine: "engine1",
+      url: String(window.location?.href || ""),
+      ticker: t,
+      k: String($("k")?.value || ""),
+      n: 20,
+      years: 5,
+      showAdvancedCols: true,
+      earningsExpanded: true,
+      gammaView: String(engine1GammaState?.view || ""),
+      gammaLayers: { ...(engine1GammaState?.layers || {}) },
+      heatmapView: String(engine1GexState?.view || ""),
+      heatmapMode: String(engine1GexState?.mode || ""),
+    };
+
+    const base = _engine1ExportFileNameBase(payload);
+    const md = buildEngine1OnePageMarkdown({ sanitizedPayload, riskChecks, levels, uiState });
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    downloadBlob(`${base}-one_page.md`, blob);
+    if (status) status.textContent = `Exported: ${base}-one_page.md`;
   } catch (e) {
     if (status) status.textContent = `Export error: ${String(e?.message || e)}`;
   }
@@ -471,8 +621,8 @@ function renderEngine1DecisionPanel(payload) {
           <div class="taConf" title="Confidence dots (heuristic)">${dots}</div>
           <div class="taChips">${chipHtml}</div>
           <div class="taHeaderActions">
-            <button class="taActionBtn" type="button" id="e1CopySnapshot">Copy snapshot</button>
             <button class="taActionBtn" type="button" id="e1ExportLLM">Export (LLM)</button>
+            <button class="taActionBtn" type="button" id="e1ExportOnePage">Export One-Page (LLM)</button>
           </div>
         </div>
       </div>
@@ -514,19 +664,6 @@ function renderEngine1DecisionPanel(payload) {
     </div>
   `;
 
-  const snap = `${t} (Engine 1) | EOD ${barDate || "—"} | Price ${pxTxt} | Breach ${Number.isFinite(br) ? br.toFixed(2) + "%" : "—"} | Overshoot ${Number.isFinite(os) ? os.toFixed(2) + "%" : "—"} | Gate ${gateTxt}`;
-  const btn = $("e1CopySnapshot");
-  if (btn) {
-    btn.addEventListener("click", async () => {
-      try {
-        if (window.RavenUI?.copyToClipboard) await window.RavenUI.copyToClipboard(snap);
-        else await navigator.clipboard.writeText(snap);
-      } catch {
-        // ignore
-      }
-    });
-  }
-
   // GO/NO-GO modal (centered)
   const goBtn = $("e1GoNoGoBtn");
   if (goBtn) {
@@ -541,6 +678,13 @@ function renderEngine1DecisionPanel(payload) {
   if (expBtn) {
     expBtn.addEventListener("click", async () => {
       try { await exportEngine1LLMBundle(); } catch { /* ignore */ }
+    });
+  }
+
+  const oneBtn = $("e1ExportOnePage");
+  if (oneBtn) {
+    oneBtn.addEventListener("click", async () => {
+      try { await exportEngine1OnePageOnly(); } catch { /* ignore */ }
     });
   }
 }

@@ -914,6 +914,148 @@ function _mdTable(headers, rows) {
   return [head, bar, body].filter(Boolean).join("\n");
 }
 
+function buildEngine2OnePageMarkdown({ payload, levels, uiState }) {
+  const sym = String(payload?.underlying?.symbol || "—").toUpperCase();
+  const asOf = String(payload?.asOfDate || "—");
+  const spot = payload?.current?.vwap?.livePrice ?? payload?.liveContext?.weeklyFriday?.dealerGamma?.spot ?? payload?.liveContext?.spot;
+  const spotTxt = Number.isFinite(Number(spot)) ? Number(spot).toFixed(2) : "—";
+
+  const reg = payload?.current?.regime || {};
+  const regComp = reg?.components || {};
+  const macro = payload?.current?.macro || {};
+  const flags = macro?.flags || {};
+  const like = payload?.oddsLikeNow || {};
+  const rows = Array.isArray(like?.byWidth) ? like.byWidth : [];
+  const vwap = payload?.current?.vwap || {};
+  const lc = payload?.liveContext || {};
+  const w = lc?.weeklyFriday || null;
+  const n = lc?.nearestDaily || null;
+
+  const heat = levels?.levels?.gexHeatmap || null;
+  const hm = heat?.metrics || {};
+  const hb = heat?.boundaries || {};
+  const hs = heat?.stability || {};
+
+  // Flattened key/value index for fast lookup.
+  const kv = [];
+  const add = (k, v) => kv.push({ key: k, value: (v === null || v === undefined || v === "" ? "—" : String(v)) });
+
+  add("engine2.asOfDate", asOf);
+  add("engine2.underlying.symbol", sym);
+  add("engine2.spot", spotTxt);
+  add("engine2.ui.underlyingSelected", uiState?.underlyingSelected);
+  add("engine2.ui.entryDay", uiState?.entryDay);
+  add("engine2.ui.seasonalityMode", uiState?.seasonalityMode);
+  add("engine2.ui.gammaView", uiState?.gammaView);
+  add("engine2.ui.heatmapView", uiState?.heatmapView);
+  add("engine2.ui.heatmapMode", uiState?.heatmapMode);
+
+  add("engine2.regime.score100", reg?.score100);
+  add("engine2.regime.bucket", reg?.bucket);
+  add("engine2.regime.component.trend", regComp?.trend);
+  add("engine2.regime.component.volatility", regComp?.volatility);
+  add("engine2.regime.component.stress", regComp?.stress);
+  add("engine2.regime.component.event", regComp?.event);
+  add("engine2.regime.component.dispersion", regComp?.dispersion);
+
+  add("engine2.macro.multiplier", macro?.multiplier);
+  add("engine2.macro.flag.CPI", flags?.CPI);
+  add("engine2.macro.flag.FOMC", flags?.FOMC);
+  add("engine2.macro.flag.NFP", flags?.NFP);
+  add("engine2.macro.flag.OPEX", flags?.OPEX);
+  add("engine2.macro.flag.REFUNDING", flags?.REFUNDING);
+  add("engine2.oddsLikeNow.weeksUsed", like?.weeksUsed);
+  add("engine2.oddsLikeNow.regimeBucket", like?.regimeBucket);
+  add("engine2.oddsLikeNow.macroBucket", like?.macroBucket);
+  add("engine2.oddsLikeNow.seasonBucket", like?.seasonBucket);
+
+  add("engine2.vwap.enabled", vwap?.enabled);
+  add("engine2.vwap.value", vwap?.value);
+  add("engine2.vwap.distance", vwap?.distance ? JSON.stringify(vwap.distance) : "—");
+
+  // Dealer gamma + addons (weekly + nearest)
+  const wdg = w?.dealerGamma || {};
+  const ndg = n?.dealerGamma || {};
+  add("engine2.live.weekly.expiry", w?.expiry);
+  add("engine2.live.weekly.dealerGamma.netGammaSign", wdg?.netGammaSign);
+  add("engine2.live.weekly.dealerGamma.magnitudeBucket", wdg?.magnitudeBucket);
+  add("engine2.live.weekly.gammaFlipStrike", w?.gammaFlipStrike);
+  add("engine2.live.nearest.expiry", n?.expiry);
+  add("engine2.live.nearest.dealerGamma.netGammaSign", ndg?.netGammaSign);
+  add("engine2.live.nearest.dealerGamma.magnitudeBucket", ndg?.magnitudeBucket);
+  add("engine2.live.nearest.gammaFlipStrike", n?.gammaFlipStrike);
+
+  const whp = w?.addons?.hedgingPressure || {};
+  const nhp = n?.addons?.hedgingPressure || {};
+  add("engine2.hpi.weekly.elasticity50bp", whp?.elasticity50bp);
+  add("engine2.hpi.weekly.elasticityBucket", whp?.elasticityBucket);
+  add("engine2.hpi.weekly.gammaTotal", whp?.gammaTotal);
+  add("engine2.hpi.nearest.elasticity50bp", nhp?.elasticity50bp);
+  add("engine2.hpi.nearest.elasticityBucket", nhp?.elasticityBucket);
+  add("engine2.hpi.nearest.gammaTotal", nhp?.gammaTotal);
+
+  const wt = w?.addons?.tailIgnition || {};
+  const nt = n?.addons?.tailIgnition || {};
+  add("engine2.tail.weekly.down.score", wt?.down?.score);
+  add("engine2.tail.weekly.up.score", wt?.up?.score);
+  add("engine2.tail.weekly.distToPutWallPct", wt?.distToPutWallPct);
+  add("engine2.tail.weekly.distToCallWallPct", wt?.distToCallWallPct);
+  add("engine2.tail.nearest.down.score", nt?.down?.score);
+  add("engine2.tail.nearest.up.score", nt?.up?.score);
+
+  const vp = lc?.volPressure || {};
+  add("engine2.volPressure.state", vp?.state);
+  add("engine2.volPressure.scoreZ", vp?.scoreZ);
+  add("engine2.volPressure.inputs.iv7", vp?.inputs?.iv7);
+  add("engine2.volPressure.inputs.iv30", vp?.inputs?.iv30);
+  add("engine2.volPressure.inputs.rv10", vp?.inputs?.rv10);
+  add("engine2.volPressure.inputs.termSlope", vp?.inputs?.termSlope);
+
+  // Levels / heatmap highlights (from /api/spx-levels export)
+  add("engine2.levels.gexHeatmap.enabled", heat?.enabled);
+  add("engine2.levels.gexHeatmap.stability.label", hs?.label);
+  add("engine2.levels.gexHeatmap.metrics.downsideDistancePts", hm?.downsideDistancePts);
+  add("engine2.levels.gexHeatmap.metrics.upsideDistancePts", hm?.upsideDistancePts);
+  add("engine2.levels.gexHeatmap.metrics.downsideDistanceEm", hm?.downsideDistanceEm);
+  add("engine2.levels.gexHeatmap.metrics.upsideDistanceEm", hm?.upsideDistanceEm);
+  add("engine2.levels.gexHeatmap.boundary.downStrike", hb?.downsideAccelerationBoundaryStrike);
+  add("engine2.levels.gexHeatmap.boundary.upStrike", hb?.upsideAccelerationBoundaryStrike);
+
+  const lines = [];
+  lines.push(`# ${sym} — Engine 2 (One Page)`);
+  lines.push("");
+  lines.push(`If you need a number, reference it by the **Key** in the Key/Value index below (stable keys).`);
+  lines.push("");
+  lines.push("## Key/Value index");
+  lines.push(_mdTable(["key", "value"], kv));
+  lines.push("");
+
+  // Embedded key tables
+  lines.push("## Odds like now (by width)");
+  if (rows.length) {
+    const table = rows.map((r) => ({
+      w: r?.w,
+      n: r?.n,
+      breachEitherPct: r?.breachEitherPct,
+      breachPutPct: r?.breachPutPct,
+      breachCallPct: r?.breachCallPct,
+      avgAbsRetPct: r?.avgAbsRetPct,
+    }));
+    lines.push(_mdTable(["w", "n", "breachEitherPct", "breachPutPct", "breachCallPct", "avgAbsRetPct"], table));
+  } else {
+    lines.push("_No rows._");
+  }
+  lines.push("");
+
+  lines.push("## Macro high-impact US events");
+  const hiTop = Array.isArray(macro?.highImpactUS?.top) ? macro.highImpactUS.top : [];
+  if (hiTop.length) hiTop.forEach((x) => lines.push(`- ${String(x)}`));
+  else lines.push("_None._");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 function buildEngine2SnapshotMarkdown({ payload, levels, uiState }) {
   const sym = String(payload?.underlying?.symbol || "—").toUpperCase();
   const asOf = String(payload?.asOfDate || "—");
@@ -1125,6 +1267,8 @@ async function exportEngine2LLMBundle() {
     // snapshot.md
     const md = buildEngine2SnapshotMarkdown({ payload, levels, uiState });
     zip.addText("snapshot.md", md);
+    const onePageMd = buildEngine2OnePageMarkdown({ payload, levels, uiState });
+    zip.addText("one_page.md", onePageMd);
 
     // Raw payloads
     zip.addText("payload.engine2.json", JSON.stringify(payload, null, 2));
@@ -1172,6 +1316,61 @@ async function exportEngine2LLMBundle() {
       status.classList.remove("hidden");
       // auto-hide after a moment to keep UI clean
       window.setTimeout(() => status.classList.add("hidden"), 4000);
+    }
+  } catch (e) {
+    if (status) {
+      status.textContent = `Export error: ${String(e?.message || e)}`;
+      status.classList.remove("isRunning");
+      status.classList.add("isError");
+      status.classList.remove("hidden");
+    }
+  }
+}
+
+async function exportEngine2OnePageOnly() {
+  const status = $("status");
+  const payload = lastPayload;
+  if (!payload) {
+    if (status) {
+      status.textContent = "Export: run Engine 2 first (no payload yet).";
+      status.classList.add("isError");
+      status.classList.remove("hidden");
+    }
+    return;
+  }
+
+  try {
+    if (status) {
+      status.textContent = "Exporting one-page…";
+      status.classList.remove("isError");
+      status.classList.add("isRunning");
+      status.classList.remove("hidden");
+    }
+
+    const levels = await _ensureEngine2LevelsPayload().catch(() => null);
+    const uiState = {
+      engine: "engine2",
+      url: String(window.location?.href || ""),
+      underlyingSelected: String(engine2UnderlyingState.symbol || ""),
+      entryDay: String($("entryDay")?.value || ""),
+      seasonalityMode: String($("seasonalityMode")?.value || ""),
+      gammaView: String(gammaState.view || ""),
+      gammaLayers: { ...(gammaState.layers || {}) },
+      heatmapView: String(gexState.view || ""),
+      heatmapMode: String(gexState.mode || ""),
+    };
+
+    const base = _engine2ExportFileNameBase(payload);
+    const md = buildEngine2OnePageMarkdown({ payload, levels, uiState });
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    downloadBlob(`${base}-one_page.md`, blob);
+
+    if (status) {
+      status.textContent = `Exported: ${base}-one_page.md`;
+      status.classList.remove("isRunning", "isError");
+      status.classList.add("isOk");
+      status.classList.remove("hidden");
+      window.setTimeout(() => status.classList.add("hidden"), 3500);
     }
   } catch (e) {
     if (status) {
@@ -1365,8 +1564,6 @@ function renderEngine2DecisionPanel(payload) {
   host.classList.toggle("hidden", !sym || sym === "—");
   if (!sym || sym === "—") return;
 
-  const snap = `${sym} (Engine 2) | asOf ${asOf} | spot ${spotTxt} | regime ${Number.isFinite(score) ? score.toFixed(1) : "—"}/100 ${bucket} | macro ${Number.isFinite(multVal) ? multVal.toFixed(2) + "×" : "—"} ${macroBucket} | odds(1.0x) ${Number.isFinite(odds10) ? odds10.toFixed(2) + "%" : "—"} | VWAP ${Number.isFinite(vwapVal) ? vwapVal.toFixed(2) : "—"} (${vwapDist})`;
-
   host.innerHTML = `
     <div class="taPanel e2Conditions">
       <div class="taHeader">
@@ -1379,8 +1576,8 @@ function renderEngine2DecisionPanel(payload) {
           <div class="taConf" title="Confidence dots (heuristic)">${dots}</div>
           <div class="taChips">${chipHtml}</div>
           <div class="taHeaderActions">
-            <button class="taActionBtn" type="button" id="e2CopySnapshot">Copy snapshot</button>
             <button class="taActionBtn" type="button" id="e2ExportLLM">Export (LLM)</button>
+            <button class="taActionBtn" type="button" id="e2ExportOnePage">Export One-Page (LLM)</button>
           </div>
         </div>
       </div>
@@ -1464,23 +1661,22 @@ function renderEngine2DecisionPanel(payload) {
     </div>
   `;
 
-  const btn = $("e2CopySnapshot");
-  if (btn) {
-    btn.addEventListener("click", async () => {
+  const expBtn = $("e2ExportLLM");
+  if (expBtn) {
+    expBtn.addEventListener("click", async () => {
       try {
-        if (window.RavenUI?.copyToClipboard) await window.RavenUI.copyToClipboard(snap);
-        else await navigator.clipboard.writeText(snap);
+        await exportEngine2LLMBundle();
       } catch {
         // ignore
       }
     });
   }
 
-  const expBtn = $("e2ExportLLM");
-  if (expBtn) {
-    expBtn.addEventListener("click", async () => {
+  const oneBtn = $("e2ExportOnePage");
+  if (oneBtn) {
+    oneBtn.addEventListener("click", async () => {
       try {
-        await exportEngine2LLMBundle();
+        await exportEngine2OnePageOnly();
       } catch {
         // ignore
       }
