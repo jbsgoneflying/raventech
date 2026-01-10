@@ -123,7 +123,20 @@ def _normalize_host(host: str | None) -> str:
         return ""
     if ":" in h:
         h = h.split(":", 1)[0].strip()
-    return h
+    # Some reverse proxies / clients may include a trailing dot; normalize it away.
+    return h.rstrip(".")
+
+
+def _is_tailnet_host(host: str | None) -> bool:
+    """
+    Treat Tailscale MagicDNS hostnames as private access.
+    Example: raven-tech.tail530226.ts.net
+
+    This allows the iOS app (VPN-only) to call APIs without the web login gate,
+    while keeping the public web domain behavior unchanged.
+    """
+    h = _normalize_host(host)
+    return h.endswith(".ts.net")
 
 
 def _is_root_domain_host(host: str | None) -> bool:
@@ -159,6 +172,10 @@ async def invite_gate(request: Request, call_next):
 
     # Root-domain landing page should remain public even in gated mode.
     if request.url.path == "/" and _is_root_domain_host(request.headers.get("host")):
+        return await call_next(request)
+
+    # VPN-only / private access path (Tailscale). Do not require web login cookie.
+    if _is_tailnet_host(request.headers.get("host")):
         return await call_next(request)
 
     if _path_is_public(request.url.path):
