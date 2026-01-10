@@ -17,7 +17,12 @@ final class EngineOneViewModel: ObservableObject {
         isLoading = true
         self.error = nil
         do {
-            response = try await client.get("api/breach", query: ["ticker": tk, "n": "20", "years": "5", "k": "1.0"])
+            // Breach can take longer than lightweight endpoints like calendar.
+            response = try await client.get(
+                "api/breach",
+                query: ["ticker": tk, "n": "20", "years": "5", "k": "1.0"],
+                timeout: 180
+            )
         } catch let appError as AppError {
             self.error = appError
         } catch {

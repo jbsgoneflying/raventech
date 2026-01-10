@@ -13,8 +13,12 @@ struct APIClient {
         self.decoder = dec
     }
 
-    func get<T: Decodable>(_ path: String, query: [String: String?] = [:]) async throws -> T {
-        let data = try await getData(path, query: query)
+    func get<T: Decodable>(
+        _ path: String,
+        query: [String: String?] = [:],
+        timeout: TimeInterval? = nil
+    ) async throws -> T {
+        let data = try await getData(path, query: query, timeout: timeout)
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
@@ -27,7 +31,11 @@ struct APIClient {
         }
     }
 
-    func getData(_ path: String, query: [String: String?] = [:]) async throws -> Data {
+    func getData(
+        _ path: String,
+        query: [String: String?] = [:],
+        timeout: TimeInterval? = nil
+    ) async throws -> Data {
         guard var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false) else {
             throw AppError.badURL
         }
@@ -41,7 +49,7 @@ struct APIClient {
         guard let url = components.url else { throw AppError.badURL }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 45
+        request.timeoutInterval = timeout ?? 45
 
         do {
             let (data, response) = try await session.data(for: request)

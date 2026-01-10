@@ -35,7 +35,33 @@ struct CalendarDay: Decodable, Identifiable {
     var id: String { date ?? UUID().uuidString }
     var date: String?
     var earnings: EarningsGroups?
-    @Default<Defaults.EmptyArray<[CalendarEvent]>> var events: [CalendarEvent]
+
+    // Some backend event rows omit `date`. We normalize by inheriting the day's date
+    // so SwiftUI IDs stay unique and stable.
+    var events: [CalendarEvent]
+
+    enum CodingKeys: String, CodingKey {
+        case date, earnings, events
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.date = try c.decodeIfPresent(String.self, forKey: .date)
+        self.earnings = try c.decodeIfPresent(EarningsGroups.self, forKey: .earnings)
+
+        let decodedEvents = (try? c.decode([CalendarEvent].self, forKey: .events)) ?? []
+        if let dayDate = self.date, !dayDate.isEmpty {
+            self.events = decodedEvents.map { ev in
+                var m = ev
+                if m.date == nil || m.date?.isEmpty == true {
+                    m.date = dayDate
+                }
+                return m
+            }
+        } else {
+            self.events = decodedEvents
+        }
+    }
 }
 
 struct EarningsGroups: Decodable {
@@ -65,7 +91,25 @@ struct EarningsTicker: Decodable, Identifiable {
 }
 
 struct CalendarEvent: Decodable, Identifiable {
-    var id: String { (key ?? title ?? short ?? UUID().uuidString) + (date ?? "") }
+    // Stable, unique ID for SwiftUI diffing.
+    // Prefer real fields; fall back to a per-decode UUID if the payload is too sparse.
+    private let localId: String
+    var id: String {
+        let parts: [String] = [
+            key,
+            kind,
+            short,
+            title,
+            date,
+            timeEt
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+
+        let base = parts.joined(separator: "|")
+        return base.isEmpty ? localId : base
+    }
+
     var key: String?
     var kind: String?
     var title: String?
@@ -78,6 +122,28 @@ struct CalendarEvent: Decodable, Identifiable {
     var previous: Double?
     var actual: Double?
     var unit: String?
+
+    enum CodingKeys: String, CodingKey {
+        case key, kind, title, short, date, timeEt, importance, playbook, forecast, previous, actual, unit
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.key = try c.decodeIfPresent(String.self, forKey: .key)
+        self.kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        self.title = try c.decodeIfPresent(String.self, forKey: .title)
+        self.short = try c.decodeIfPresent(String.self, forKey: .short)
+        self.date = try c.decodeIfPresent(String.self, forKey: .date)
+        self.timeEt = try c.decodeIfPresent(String.self, forKey: .timeEt)
+        self.importance = try c.decodeIfPresent(Int.self, forKey: .importance)
+        self.playbook = try c.decodeIfPresent(Playbook.self, forKey: .playbook)
+        self.forecast = try c.decodeIfPresent(Double.self, forKey: .forecast)
+        self.previous = try c.decodeIfPresent(Double.self, forKey: .previous)
+        self.actual = try c.decodeIfPresent(Double.self, forKey: .actual)
+        self.unit = try c.decodeIfPresent(String.self, forKey: .unit)
+
+        self.localId = UUID().uuidString
+    }
 }
 
 struct Playbook: Decodable {
