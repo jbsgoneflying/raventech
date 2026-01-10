@@ -104,43 +104,134 @@ struct SPXLiveLevels: Decodable {
     var symbolUsed: String?
     var expiry: String?
     var spot: Double?
+    var bandPct: Double?
+    var weightingMode: String?
     var gammaFlipStrike: Double?
-    var putWallStrike: Double?
-    var callWallStrike: Double?
-    var downsideAccelStart: Double?
-    var upsideAccelStart: Double?
+    var dealerGamma: DealerGammaData?
+    var oiClusters: OIClustersData?
+    var gexHeatmap: SPXGexHeatmap?
+    var weeklyFriday: SPXLevelView?
+    var nearestDaily: SPXLevelView?
+    var volPressure: VolPressureData?
     var warnings: [String]?
     var notes: [String]?
-    var gexHeatmap: SPXGexHeatmap?
-    var stability: SPXStabilityInfo?
-    var priceHistory: [SPXPricePoint]?
+
+    // Convenience accessors for put/call walls
+    var putWallStrike: Double? { oiClusters?.putWall?.peakStrike }
+    var callWallStrike: Double? { oiClusters?.callWall?.peakStrike }
+
+    // Convenience accessors for addons (from weekly view)
+    var hedgingPressure: HedgingPressure? { weeklyFriday?.addons?.hedgingPressure }
+    var tailIgnition: TailIgnition? { weeklyFriday?.addons?.tailIgnition }
 }
 
-struct SPXStabilityInfo: Decodable {
-    var weeklyStability: SPXHeatStability?
-    var downsideDistancePts: Double?
-    var upsideDistancePts: Double?
-    var downsideDistanceEm: Double?
-    var upsideDistanceEm: Double?
+struct SPXLevelView: Decodable {
+    var enabled: Bool?
+    var symbolUsed: String?
+    var expiry: String?
+    var spot: Double?
+    var dealerGamma: DealerGammaData?
+    var oiClusters: OIClustersData?
+    var gammaFlipStrike: Double?
+    var addons: LevelAddons?
+    var warnings: [String]?
+    var notes: [String]?
+}
+
+struct LevelAddons: Decodable {
+    var hedgingPressure: HedgingPressure?
+    var tailIgnition: TailIgnition?
+}
+
+struct HedgingPressure: Decodable {
+    var label: String?
+    var bucket: String?
+    var reasons: [String]?
+}
+
+struct TailIgnition: Decodable {
+    var label: String?
+    var bucket: String?
+    var reasons: [String]?
+}
+
+struct VolPressureData: Decodable {
+    var enabled: Bool?
+    var label: String?
+    var bucket: String?
+    var putCallRatio: Double?
+    var ivRank: Double?
+    var reasons: [String]?
+}
+
+struct DealerGammaData: Decodable {
+    var spot: Double?
+    var expiry: String?
+    var bandPct: Double?
+    var weightingMode: String?
+    var callsGex: Double?
+    var putsGex: Double?
+    var netGex: Double?
+    var netGammaSign: String?
+    var magnitudeRatio: Double?
+    var magnitudeBucket: String?
+    var callPutImbalance: Double?
+    var topGammaStrikes: [TopGammaStrike]?
+    var warnings: [String]?
+}
+
+struct TopGammaStrike: Decodable, Identifiable {
+    var strike: Double?
+    var side: String?
+    var gex: Double?
+    var gamma: Double?
+    var weight: Double?
+    var id: String { "\(strike ?? 0)-\(side ?? "")" }
+}
+
+struct OIClustersData: Decodable {
+    var spot: Double?
+    var expiry: String?
+    var bandPct: Double?
+    var weightingMode: String?
+    var strikeStep: Double?
+    var clusterSteps: Int?
+    var callClusters: [OICluster]?
+    var putClusters: [OICluster]?
+    var callWall: OICluster?
+    var putWall: OICluster?
+    var warnings: [String]?
+}
+
+struct OICluster: Decodable, Identifiable {
+    var side: String?
+    var minStrike: Double?
+    var maxStrike: Double?
+    var centerStrike: Double?
+    var totalOI: Double?
+    var peakStrike: Double?
+    var peakOI: Double?
+    var nStrikes: Int?
+    var id: String { "\(peakStrike ?? 0)-\(side ?? "")" }
 }
 
 struct SPXGexHeatmap: Decodable {
     var enabled: Bool?
-    var stability: SPXHeatStability?
-    var metrics: SPXHeatMetrics?
-    var warnings: [String]?
-    var notes: [String]?
+    var spot: Double?
     var strikes: [Double]?
     var expiries: [String]?
     var matrix: [[Double?]]?
+    var matrixSlope: [[Double?]]?
+    var downsideAccelStart: Double?
+    var upsideAccelStart: Double?
+    var stability: SPXHeatStability?
+    var warnings: [String]?
+    var notes: [String]?
 }
 
 struct SPXHeatStability: Decodable {
     var label: String?
     var reasons: [String]?
-}
-
-struct SPXHeatMetrics: Decodable {
     var downsideDistancePts: Double?
     var upsideDistancePts: Double?
     var downsideDistanceEm: Double?

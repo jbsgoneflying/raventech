@@ -13,16 +13,8 @@ struct TickerTile: View {
             onTap?()
         } label: {
             VStack(spacing: 4) {
-                // Logo placeholder (dark background for white logos)
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(hex: "121216").opacity(0.92))
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Text(String(ticker.prefix(2)))
-                            .font(.caption)
-                            .fontWeight(.black)
-                            .foregroundStyle(.white.opacity(0.9))
-                    )
+                // Ticker logo
+                TickerLogo(ticker: ticker, size: 44, cornerRadius: 10)
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
                             .stroke(Color.black.opacity(0.16), lineWidth: 1)

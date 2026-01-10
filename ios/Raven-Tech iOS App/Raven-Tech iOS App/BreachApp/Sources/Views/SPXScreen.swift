@@ -5,7 +5,7 @@ struct SPXScreen: View {
     @StateObject private var viewModel = SPXViewModel()
 
     @State private var showingInfoSheet: InfoContent?
-    @State private var showingGEXLevels: [ChartLevel] = []
+    @State private var showingMacroEvents: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -45,13 +45,14 @@ struct SPXScreen: View {
             }
             .navigationTitle("SPX")
             .navigationBarTitleDisplayMode(.inline)
-            .task {
-                if viewModel.ic == nil && viewModel.flags == nil {
-                    await viewModel.load(client: appState.apiClient)
-                }
-            }
             .sheet(item: $showingInfoSheet) { content in
                 content.sheet()
+            }
+            .sheet(isPresented: $showingMacroEvents) {
+                MacroEventsSheet(
+                    events: viewModel.ic?.current?.macro?.highImpactUS?.top ?? [],
+                    multiplier: viewModel.ic?.current?.macro?.multiplier
+                )
             }
         }
     }
@@ -235,9 +236,11 @@ struct SPXScreen: View {
             regimeBucket: ic.current?.regime?.bucket,
             macroMultiplier: ic.current?.macro?.macroMultiplier,
             highImpactCount: ic.current?.macro?.highImpactCount,
+            highImpactEvents: ic.current?.macro?.highImpactUS?.top,
             spot: ic.underlying?.last,
             asOfDate: ic.asOfDate,
-            onInfoTap: { content in showingInfoSheet = content }
+            onInfoTap: { content in showingInfoSheet = content },
+            onMacroTap: { showingMacroEvents = true }
         )
         .padding(.horizontal)
 
@@ -247,13 +250,19 @@ struct SPXScreen: View {
 
         // Gamma chart section
         if let lv = levels?.levels {
-            gammaChartSection(lv)
+            gammaChartSection(lv, priceSeries: levels?.priceSeries)
                 .padding(.horizontal)
         }
 
         // GEX heatmap section
         if let heatmap = levels?.levels?.gexHeatmap {
-            gexHeatmapSection(heatmap, levels: levels?.levels)
+            gexHeatmapSection(heatmap)
+                .padding(.horizontal)
+        }
+
+        // Additional metrics cards
+        if let lv = levels?.levels {
+            additionalMetricsSection(lv)
                 .padding(.horizontal)
         }
 
@@ -314,7 +323,7 @@ struct SPXScreen: View {
     // MARK: - Gamma Chart
 
     @ViewBuilder
-    private func gammaChartSection(_ levels: SPXLiveLevels) -> some View {
+    private func gammaChartSection(_ levels: SPXLiveLevels, priceSeries: [SPXPricePoint]?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Dealer Gamma Map")
@@ -330,8 +339,8 @@ struct SPXScreen: View {
             .padding(.leading, 4)
 
             // Price chart with levels
-            if let priceHistory = levels.priceHistory, !priceHistory.isEmpty {
-                let series = priceHistory.map { p in
+            if let priceData = priceSeries, !priceData.isEmpty {
+                let series = priceData.map { p in
                     PricePoint(date: p.date ?? "", close: p.close ?? 0)
                 }
                 let overlays = buildChartLevels(levels)
@@ -373,13 +382,13 @@ struct SPXScreen: View {
     private func levelLegend(_ levels: SPXLiveLevels) -> some View {
         HStack(spacing: 16) {
             if let putWall = levels.putWallStrike {
-                ChartLevelIndicator(label: "Put wall", kind: .putWall, strike: putWall)
+                ChartLevelIndicator(label: "Put wall", kind: ChartLevel.LevelKind.putWall, strike: putWall)
             }
             if let callWall = levels.callWallStrike {
-                ChartLevelIndicator(label: "Call wall", kind: .callWall, strike: callWall)
+                ChartLevelIndicator(label: "Call wall", kind: ChartLevel.LevelKind.callWall, strike: callWall)
             }
             if let gammaFlip = levels.gammaFlipStrike {
-                ChartLevelIndicator(label: "Gamma flip", kind: .gammaFlip, strike: gammaFlip)
+                ChartLevelIndicator(label: "Gamma flip", kind: ChartLevel.LevelKind.gammaFlip, strike: gammaFlip)
             }
 
             Spacer()
@@ -389,7 +398,7 @@ struct SPXScreen: View {
     // MARK: - GEX Heatmap
 
     @ViewBuilder
-    private func gexHeatmapSection(_ heatmap: SPXGexHeatmap, levels: SPXLiveLevels?) -> some View {
+    private func gexHeatmapSection(_ heatmap: SPXGexHeatmap) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("GEX Heatmap")
                 .font(.caption)
@@ -400,15 +409,16 @@ struct SPXScreen: View {
 
             if let strikes = heatmap.strikes,
                let expiries = heatmap.expiries,
-               let matrix = heatmap.matrix {
+               let matrix = heatmap.matrix,
+               !strikes.isEmpty, !expiries.isEmpty, !matrix.isEmpty {
                 GEXHeatmap(
                     strikes: strikes,
                     expiries: expiries,
                     matrix: matrix,
-                    spot: levels?.spot,
+                    spot: heatmap.spot,
                     boundaries: HeatmapBoundaries(
-                        downsideStrike: levels?.downsideAccelStart,
-                        upsideStrike: levels?.upsideAccelStart
+                        downsideStrike: heatmap.downsideAccelStart,
+                        upsideStrike: heatmap.upsideAccelStart
                     )
                 )
             } else {
@@ -419,7 +429,7 @@ struct SPXScreen: View {
             }
 
             // Stability metrics
-            if let stability = levels?.stability, let weeklyStability = stability.weeklyStability {
+            if let stability = heatmap.stability {
                 GEXMetricsStrip(
                     metrics: HeatmapMetrics(
                         downsideDistancePts: stability.downsideDistancePts,
@@ -428,11 +438,94 @@ struct SPXScreen: View {
                         upsideDistanceEm: stability.upsideDistanceEm
                     ),
                     stability: HeatmapStability(
-                        label: weeklyStability.label ?? "Unknown",
-                        reasons: weeklyStability.reasons ?? []
+                        label: stability.label ?? "Unknown",
+                        reasons: stability.reasons ?? []
                     )
                 )
             }
+        }
+    }
+
+    // MARK: - Additional Metrics
+
+    @ViewBuilder
+    private func additionalMetricsSection(_ levels: SPXLiveLevels) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Additional Metrics")
+                .font(.caption)
+                .fontWeight(.heavy)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
+
+            MetricCardGrid(columns: 2) {
+                // Net GEX
+                if let netGex = levels.dealerGamma?.netGex {
+                    MetricCard(
+                        title: "Net GEX",
+                        value: formatLargeNumber(netGex),
+                        subtitle: levels.dealerGamma?.netGammaSign
+                    )
+                }
+
+                // Hedging Pressure (from weeklyFriday addons)
+                if let hp = levels.hedgingPressure {
+                    MetricCard(
+                        title: "Hedging Pressure",
+                        value: hp.label ?? hp.bucket ?? "—",
+                        subtitle: hp.reasons?.first,
+                        onInfoTap: { showingInfoSheet = .custom(
+                            title: "Hedging Pressure",
+                            body: "Measures the directional bias of dealer hedging activity.",
+                            bullets: hp.reasons,
+                            deskView: nil
+                        )}
+                    )
+                }
+
+                // Tail Ignition (from weeklyFriday addons)
+                if let ti = levels.tailIgnition {
+                    MetricCard(
+                        title: "Tail Ignition",
+                        value: ti.label ?? ti.bucket ?? "—",
+                        subtitle: ti.reasons?.first,
+                        onInfoTap: { showingInfoSheet = .custom(
+                            title: "Tail Ignition",
+                            body: "Risk of accelerated moves in the tails due to gamma positioning.",
+                            bullets: ti.reasons,
+                            deskView: nil
+                        )}
+                    )
+                }
+
+                // Vol Pressure (from levels top level)
+                if let vp = levels.volPressure, vp.enabled == true {
+                    MetricCard(
+                        title: "Vol Pressure",
+                        value: vp.label ?? vp.bucket ?? "—",
+                        subtitle: vp.putCallRatio.map { String(format: "P/C: %.2f", $0) },
+                        onInfoTap: { showingInfoSheet = .custom(
+                            title: "Vol Pressure",
+                            body: "Volatility pressure based on put/call ratios and IV rank.",
+                            bullets: vp.reasons,
+                            deskView: nil
+                        )}
+                    )
+                }
+            }
+        }
+    }
+
+    private func formatLargeNumber(_ value: Double) -> String {
+        let absValue = abs(value)
+        if absValue >= 1_000_000_000 {
+            return String(format: "%.2fB", value / 1_000_000_000)
+        } else if absValue >= 1_000_000 {
+            return String(format: "%.2fM", value / 1_000_000)
+        } else if absValue >= 1_000 {
+            return String(format: "%.1fK", value / 1_000)
+        } else {
+            return String(format: "%.2f", value)
         }
     }
 

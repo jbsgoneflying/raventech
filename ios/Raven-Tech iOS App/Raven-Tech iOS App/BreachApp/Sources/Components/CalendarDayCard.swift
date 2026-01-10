@@ -84,7 +84,13 @@ struct CalendarDayCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
-        .background(isWeekend ? Color.white.opacity(0.58) : .ultraThinMaterial)
+        .background {
+            if isWeekend {
+                Color.white.opacity(0.58)
+            } else {
+                Rectangle().fill(.ultraThinMaterial)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: RavenTheme.radiusCard, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: RavenTheme.radiusCard, style: .continuous)
@@ -130,23 +136,22 @@ struct CalendarDayCard: View {
     @ViewBuilder
     private func earningsSection(label: String, tickers: [EarningsTicker]) -> some View {
         let filtered = tickers.filter { !$0.ticker.trimmingCharacters(in: .whitespaces).isEmpty }
-        guard !filtered.isEmpty else { return EmptyView().eraseToAnyView() }
+        if !filtered.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(label)
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundStyle(.secondary)
+                        .tracking(0.25)
 
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(label)
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundStyle(.secondary)
-                    .tracking(0.25)
+                    Text("\(filtered.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
 
-                Text("\(filtered.count)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                earningsGrid(label: label, tickers: filtered)
             }
-
-            earningsGrid(label: label, tickers: filtered)
         }
-        .eraseToAnyView()
     }
 
     @ViewBuilder
@@ -257,61 +262,4 @@ struct FlowLayout: Layout {
     }
 }
 
-// MARK: - Type Erasure Helper
-
-extension View {
-    func eraseToAnyView() -> AnyView {
-        AnyView(self)
-    }
-}
-
-#Preview {
-    ScrollView {
-        LazyVGrid(
-            columns: [GridItem(.flexible()), GridItem(.flexible())],
-            spacing: 12
-        ) {
-            CalendarDayCard(
-                day: CalendarDay(
-                    date: "2025-01-06",
-                    earnings: EarningsGroups(
-                        bmo: [EarningsTicker(ticker: "AAPL"), EarningsTicker(ticker: "MSFT")],
-                        amc: [EarningsTicker(ticker: "GOOGL")],
-                        unk: []
-                    ),
-                    events: []
-                ),
-                onEventTap: { _ in },
-                onTickerTap: { _ in }
-            )
-
-            CalendarDayCard(
-                day: CalendarDay(
-                    date: "2025-01-07",
-                    earnings: nil,
-                    events: []
-                )
-            )
-        }
-        .padding()
-    }
-    .background(Color.gray.opacity(0.1))
-}
-
-// MARK: - Helper initializer for CalendarDay
-
-extension CalendarDay {
-    init(date: String?, earnings: EarningsGroups?, events: [CalendarEvent]) {
-        self.date = date
-        self.earnings = earnings
-        self.events = events
-    }
-}
-
-extension EarningsGroups {
-    init(bmo: [EarningsTicker], amc: [EarningsTicker], unk: [EarningsTicker]) {
-        self.bmo = bmo
-        self.amc = amc
-        self.unk = unk
-    }
-}
+// Preview disabled - requires CalendarDay from API response

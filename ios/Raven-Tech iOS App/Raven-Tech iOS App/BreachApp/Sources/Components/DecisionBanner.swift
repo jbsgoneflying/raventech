@@ -9,6 +9,7 @@ struct DecisionBanner: View {
     var chips: [String]?
     var asOfDate: String?
     var spot: Double?
+    var onGoNoGoTap: (() -> Void)?
 
     enum Bias: String {
         case bullish = "BULLISH"
@@ -29,16 +30,8 @@ struct DecisionBanner: View {
             // Top row: ticker + meta
             HStack(alignment: .center) {
                 HStack(spacing: 10) {
-                    // Ticker logo placeholder
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(hex: "121216").opacity(0.92))
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            Text(String(ticker.prefix(2)))
-                                .font(.caption)
-                                .fontWeight(.black)
-                                .foregroundStyle(.white.opacity(0.9))
-                        )
+                    // Ticker logo
+                    TickerLogo(ticker: ticker, size: 40, cornerRadius: 12)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(ticker)
@@ -67,7 +60,19 @@ struct DecisionBanner: View {
             // Middle row: GO/NO-GO + bias + confidence
             HStack(spacing: 12) {
                 if let isGo = isGo {
-                    DecisionPill(isGo: isGo, size: .regular)
+                    Button {
+                        onGoNoGoTap?()
+                    } label: {
+                        HStack(spacing: 6) {
+                            DecisionPill(isGo: isGo, size: .regular)
+                            if onGoNoGoTap != nil {
+                                Image(systemName: "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 if let bias = bias {
@@ -122,16 +127,8 @@ struct EngineOneHeader: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Ticker logo placeholder (updates as user types)
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(hex: "121216").opacity(0.92))
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Text(String(ticker.prefix(2).uppercased()))
-                        .font(.caption)
-                        .fontWeight(.black)
-                        .foregroundStyle(.white.opacity(0.9))
-                )
+            // Ticker logo (updates as user types)
+            TickerLogo(ticker: ticker.isEmpty ? "?" : ticker, size: 40, cornerRadius: 12)
                 .animation(.easeInOut(duration: 0.15), value: ticker)
 
             // Ticker input
@@ -267,6 +264,138 @@ struct BreachEventRow: View {
         .padding(12)
         .background(event.breach == true ? Color(hex: "FF3B30").opacity(0.06) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// GO/NO-GO breakdown sheet
+struct GoNoGoBreakdownSheet: View {
+    let decision: GoNoGoDecision?
+    let ticker: String
+
+    var body: some View {
+        NavigationStack {
+            List {
+                // Overall status
+                Section {
+                    HStack {
+                        if decision?.passed == true {
+                            DecisionPill(isGo: true, size: .regular)
+                        } else {
+                            DecisionPill(isGo: false, size: .regular)
+                        }
+
+                        Spacer()
+
+                        Text(decision?.status ?? "Unknown")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Overall Decision")
+                }
+
+                // Individual checks
+                Section {
+                    if let checks = decision?.checks, !checks.isEmpty {
+                        ForEach(checks) { check in
+                            checkRow(check)
+                        }
+                    } else {
+                        Text("No checks available")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Checks")
+                }
+
+                // Warnings
+                if let warnings = decision?.warnings, !warnings.isEmpty {
+                    Section {
+                        ForEach(warnings, id: \.self) { warning in
+                            HStack(spacing: 10) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text(warning)
+                                    .font(.subheadline)
+                            }
+                        }
+                    } header: {
+                        Text("Warnings")
+                    }
+                }
+
+                // Notes
+                if let notes = decision?.notes, !notes.isEmpty {
+                    Section {
+                        ForEach(notes, id: \.self) { note in
+                            Text(note)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Notes")
+                    }
+                }
+            }
+            .navigationTitle("\(ticker) GO/NO-GO")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private func checkRow(_ check: GoNoGoCheck) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(check.label ?? check.code ?? "Check")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                checkStatePill(check.state)
+            }
+
+            if let explain = check.explain, !explain.isEmpty {
+                Text(explain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func checkStatePill(_ state: String?) -> some View {
+        let stateText = state ?? "UNKNOWN"
+        let isPassing = stateText == "PASS"
+        let isFailing = stateText == "FAIL"
+        let isWarning = stateText == "WARN"
+
+        Text(stateText)
+            .font(.caption2)
+            .fontWeight(.bold)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(backgroundColor(isPassing: isPassing, isFailing: isFailing, isWarning: isWarning))
+            .clipShape(Capsule())
+            .foregroundStyle(foregroundColor(isPassing: isPassing, isFailing: isFailing, isWarning: isWarning))
+    }
+
+    private func backgroundColor(isPassing: Bool, isFailing: Bool, isWarning: Bool) -> Color {
+        if isPassing { return Color(hex: "34C759").opacity(0.15) }
+        if isFailing { return Color(hex: "FF3B30").opacity(0.15) }
+        if isWarning { return Color.orange.opacity(0.15) }
+        return Color.gray.opacity(0.15)
+    }
+
+    private func foregroundColor(isPassing: Bool, isFailing: Bool, isWarning: Bool) -> Color {
+        if isPassing { return Color(hex: "34C759") }
+        if isFailing { return Color(hex: "FF3B30") }
+        if isWarning { return .orange }
+        return .secondary
     }
 }
 

@@ -151,21 +151,33 @@ struct DecisionPill: View {
         }
     }
 
-    private let goForeground = Color(hex: "0C4626").opacity(0.96)
-    private let goBorder = Color(hex: "2ECC71").opacity(0.40)
-    private let goBackground = Color(hex: "2ECC71").opacity(0.14)
-    private let goShadow = Color(hex: "2ECC71").opacity(0.10)
+    private var goForeground: Color { Color(hex: "0C4626").opacity(0.96) }
+    private var goBorder: Color { Color(hex: "2ECC71").opacity(0.40) }
+    private var goBackground: Color { Color(hex: "2ECC71").opacity(0.14) }
+    private var goShadow: Color { Color(hex: "2ECC71").opacity(0.10) }
 
-    private let noForeground = Color(hex: "56110C").opacity(0.96)
-    private let noBorder = Color(hex: "E74C3C").opacity(0.40)
-    private let noBackground = Color(hex: "E74C3C").opacity(0.14)
-    private let noShadow = Color(hex: "E74C3C").opacity(0.10)
+    private var noForeground: Color { Color(hex: "56110C").opacity(0.96) }
+    private var noBorder: Color { Color(hex: "E74C3C").opacity(0.40) }
+    private var noBackground: Color { Color(hex: "E74C3C").opacity(0.14) }
+    private var noShadow: Color { Color(hex: "E74C3C").opacity(0.10) }
 }
 
 /// Chip toggle button matching web's `.chipToggle`
 struct ChipToggle: View {
     let label: String
     @Binding var isOn: Bool
+
+    private var foregroundColor: Color {
+        isOn ? Color.black.opacity(0.92) : Color.black.opacity(0.72)
+    }
+
+    private var backgroundColor: Color {
+        isOn ? Color.black.opacity(0.06) : Color.white.opacity(0.60)
+    }
+
+    private var borderColor: Color {
+        isOn ? Color.black.opacity(0.14) : Color.black.opacity(0.10)
+    }
 
     var body: some View {
         Button {
@@ -177,12 +189,12 @@ struct ChipToggle: View {
                 .tracking(-0.1)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .foregroundStyle(isOn ? Color.black.opacity(0.92) : Color.black.opacity(0.72))
-                .background(isOn ? Color.black.opacity(0.06) : Color.white.opacity(0.60))
+                .foregroundStyle(foregroundColor)
+                .background(backgroundColor)
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
-                        .stroke(isOn ? Color.black.opacity(0.14) : Color.black.opacity(0.10), lineWidth: 1)
+                        .stroke(borderColor, lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)

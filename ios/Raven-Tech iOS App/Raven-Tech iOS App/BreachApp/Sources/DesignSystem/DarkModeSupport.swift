@@ -89,22 +89,13 @@ struct AdaptiveGlassSurface<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(materialStyle)
+            .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(RavenTheme.adaptiveBorder, lineWidth: 1)
             )
             .shadow(color: RavenTheme.adaptiveShadow, radius: 15, x: 0, y: 10)
-    }
-
-    @ViewBuilder
-    private var materialStyle: some View {
-        if colorScheme == .dark {
-            Material.ultraThinMaterial
-        } else {
-            Material.ultraThinMaterial
-        }
     }
 }
 

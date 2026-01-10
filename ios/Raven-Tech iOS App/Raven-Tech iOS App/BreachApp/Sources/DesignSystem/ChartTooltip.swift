@@ -96,35 +96,8 @@ struct PositionedTooltip<Content: View>: View {
 /// Overlay level indicator for charts
 struct ChartLevelIndicator: View {
     let label: String
-    let kind: LevelKind
+    let kind: ChartLevel.LevelKind
     var strike: Double?
-
-    enum LevelKind {
-        case putWall
-        case callWall
-        case gammaFlip
-        case cluster
-        case gammaPeak
-
-        var color: Color {
-            switch self {
-            case .putWall: return Color(hex: "DC2626").opacity(0.95)
-            case .callWall: return Color(hex: "16A34A").opacity(0.95)
-            case .gammaFlip: return Color(hex: "111827").opacity(0.72)
-            case .cluster: return Color.black.opacity(0.44)
-            case .gammaPeak: return Color(hex: "6366F1").opacity(0.92)
-            }
-        }
-
-        var dashPattern: [CGFloat] {
-            switch self {
-            case .putWall, .callWall: return [6, 6]
-            case .gammaFlip: return [10, 6]
-            case .cluster: return [3, 6]
-            case .gammaPeak: return [2, 7]
-            }
-        }
-    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -162,23 +135,4 @@ struct ChartLegend: View {
     }
 }
 
-#Preview {
-    VStack(spacing: 20) {
-        ChartTooltip(
-            title: "SPX Close",
-            subtitle: "2024-01-15 · 4,850.25",
-            rows: [
-                ("Put wall", "4,800"),
-                ("Call wall", "4,900")
-            ]
-        )
-
-        HStack {
-            ChartLevelIndicator(label: "Put wall", kind: .putWall, strike: 4800)
-            ChartLevelIndicator(label: "Call wall", kind: .callWall, strike: 4900)
-            ChartLevelIndicator(label: "Gamma flip", kind: .gammaFlip, strike: 4850)
-        }
-    }
-    .padding()
-    .background(Color.gray.opacity(0.1))
-}
+// Preview disabled - requires ChartLevel.LevelKind from Charts module

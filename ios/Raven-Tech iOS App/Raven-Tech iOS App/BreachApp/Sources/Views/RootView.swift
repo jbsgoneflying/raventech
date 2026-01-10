@@ -4,23 +4,27 @@ struct RootView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        TabView {
+        TabView(selection: $appState.selectedTab) {
             CalendarScreen()
                 .tabItem {
                     Label("Calendar", systemImage: "calendar")
                 }
+                .tag(0)
             EngineOneScreen()
                 .tabItem {
                     Label("Engine 1", systemImage: "chart.bar.doc.horizontal")
                 }
+                .tag(1)
             SPXScreen()
                 .tabItem {
                     Label("SPX", systemImage: "chart.xyaxis.line")
                 }
+                .tag(2)
             SettingsScreen()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
+                .tag(3)
         }
         .onAppear {
             configureTabBarAppearance()

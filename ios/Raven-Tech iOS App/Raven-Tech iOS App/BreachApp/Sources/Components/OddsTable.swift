@@ -163,9 +163,11 @@ struct EngineTwoDecisionPanel: View {
     var regimeBucket: String?
     var macroMultiplier: Double?
     var highImpactCount: Int?
+    var highImpactEvents: [String]?
     var spot: Double?
     var asOfDate: String?
     var onInfoTap: ((InfoContent) -> Void)?
+    var onMacroTap: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -208,13 +210,8 @@ struct EngineTwoDecisionPanel: View {
                     onInfo: { onInfoTap?(.regimeScore) }
                 )
 
-                // Macro
-                miniCard(
-                    title: "Macro",
-                    value: macroMultiplier.map { String(format: "%.2fx", $0) } ?? "—",
-                    subtitle: highImpactCount.map { "\($0) events" },
-                    onInfo: { onInfoTap?(.macroMultiplier) }
-                )
+                // Macro - tappable to show events
+                macroCard
             }
         }
         .padding(14)
@@ -225,6 +222,52 @@ struct EngineTwoDecisionPanel: View {
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.08), radius: 15, x: 0, y: 10)
+    }
+
+    @ViewBuilder
+    private var macroCard: some View {
+        Button {
+            onMacroTap?()
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Macro")
+                        .font(.caption2)
+                        .fontWeight(.heavy)
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    Spacer()
+
+                    if highImpactCount ?? 0 > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(macroMultiplier.map { String(format: "%.2fx", $0) } ?? "—")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+
+                if let count = highImpactCount {
+                    Text("\(count) events")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.60))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -275,6 +318,59 @@ struct EngineTwoDecisionPanel: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.black.opacity(0.06), lineWidth: 1)
         )
+    }
+}
+
+/// Sheet to display macro events
+struct MacroEventsSheet: View {
+    let events: [String]
+    let multiplier: Double?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if let mult = multiplier {
+                        HStack {
+                            Text("Macro Multiplier")
+                                .font(.subheadline)
+                            Spacer()
+                            Text(String(format: "%.2fx", mult))
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+
+                Section("High Impact Events") {
+                    if events.isEmpty {
+                        Text("No high-impact events this week")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(events, id: \.self) { event in
+                            HStack(spacing: 12) {
+                                Image(systemName: "calendar.badge.exclamationmark")
+                                    .foregroundStyle(.orange)
+
+                                Text(event)
+                                    .font(.subheadline)
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Text("These events may increase expected move volatility. The macro multiplier adjusts breach probability estimates accordingly.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Macro Events")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 

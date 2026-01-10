@@ -121,7 +121,7 @@ struct HeatmapMetrics {
 
 /// Configuration for price line chart appearance
 struct PriceChartConfig {
-    var lineColor: Color = Color(hex: "0F172A").opacity(0.86)
+    var lineColor: Color = Color(red: 15/255, green: 23/255, blue: 42/255, opacity: 0.86)
     var lineWidth: CGFloat = 2.2
     var showCrosshair: Bool = true
     var showOverlays: Bool = true
@@ -133,7 +133,7 @@ struct HeatmapConfig {
     var cellCornerRadius: CGFloat = 2
     var positiveColor: Color = Color(hex: "F97316") // Orange
     var negativeColor: Color = Color(hex: "3B82F6") // Blue
-    var missingColor: Color = Color.gray.opacity(0.10)
+    var missingColor: Color = Color(white: 0.5, opacity: 0.10)
     var showSpotLine: Bool = true
     var showBoundaries: Bool = true
 }

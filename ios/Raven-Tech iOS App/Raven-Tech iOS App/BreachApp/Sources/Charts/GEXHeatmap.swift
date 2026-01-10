@@ -35,7 +35,8 @@ struct GEXHeatmap: View {
                     .onChanged { value in
                         isDragging = true
                         let cell = cellAt(point: value.location, size: size)
-                        if cell != selectedCell {
+                        let cellChanged = (cell?.row != selectedCell?.row) || (cell?.col != selectedCell?.col)
+                        if cellChanged {
                             selectedCell = cell
                             if cell != nil {
                                 let generator = UISelectionFeedbackGenerator()
@@ -321,7 +322,7 @@ struct GEXMetricsStrip: View {
                 .fontWeight(.heavy)
                 .foregroundStyle(.secondary)
 
-            HStack(baseline: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
                     .font(.subheadline)
                     .fontWeight(.heavy)
@@ -355,18 +356,18 @@ struct GEXMetricsStrip: View {
                 .fontWeight(.heavy)
                 .foregroundStyle(.secondary)
 
-            if let stability = stability {
-                Text(stability.label)
+            if let stab = stability {
+                Text(stab.label)
                     .font(.subheadline)
                     .fontWeight(.black)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .foregroundStyle(stability.style.color)
-                    .background(stability.style.backgroundColor)
+                    .foregroundStyle(stab.style.color)
+                    .background(stab.style.backgroundColor)
                     .clipShape(Capsule())
                     .overlay(
                         Capsule()
-                            .stroke(stability.style.borderColor, lineWidth: 1)
+                            .stroke(stab.style.borderColor, lineWidth: 1)
                     )
             } else {
                 Text("—")

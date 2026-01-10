@@ -5,8 +5,8 @@ struct CalendarScreen: View {
     @StateObject private var viewModel = CalendarViewModel()
 
     @State private var selectedEvent: CalendarEvent?
-    @State private var selectedTicker: String?
-    @State private var expandedTickers: (timing: String, date: String, tickers: [EarningsTicker])?
+    @State private var selectedTicker: SelectedTicker?
+    @State private var expandedTickers: ExpandedTickersData?
 
     var body: some View {
         NavigationStack {
@@ -53,20 +53,21 @@ struct CalendarScreen: View {
             .sheet(item: $selectedEvent) { event in
                 EventDetailSheet(event: event)
             }
-            .sheet(item: $expandedTickersBinding) { expanded in
+            .sheet(item: $expandedTickers) { expanded in
                 TickerExpandSheet(
                     title: "\(expanded.timing) Earnings",
                     date: expanded.date,
                     timing: expanded.timing,
-                    tickers: expanded.tickers.map(\.ticker)
+                    tickers: expanded.tickers.map { $0.ticker }
                 ) { ticker in
                     expandedTickers = nil
-                    selectedTicker = ticker
+                    selectedTicker = SelectedTicker(symbol: ticker)
                 }
             }
             .sheet(item: $selectedTicker) { ticker in
-                TickerDetailSheet(ticker: ticker) {
+                TickerDetailSheet(ticker: ticker.symbol) {
                     selectedTicker = nil
+                    appState.navigateToEngine1(ticker: ticker.symbol)
                 }
             }
         }
@@ -193,10 +194,10 @@ struct CalendarScreen: View {
                         selectedEvent = event
                     },
                     onTickerTap: { ticker in
-                        selectedTicker = ticker
+                        selectedTicker = SelectedTicker(symbol: ticker)
                     },
                     onMoreTickers: { timing, tickers in
-                        expandedTickers = (timing: timing, date: day.date ?? "", tickers: tickers)
+                        expandedTickers = ExpandedTickersData(timing: timing, date: day.date ?? "", tickers: tickers)
                     }
                 )
             }
@@ -285,22 +286,6 @@ struct CalendarScreen: View {
         return outFormatter.string(from: date)
     }
 
-    // Binding wrapper for sheet
-    private var expandedTickersBinding: Binding<ExpandedTickersData?> {
-        Binding(
-            get: {
-                guard let exp = expandedTickers else { return nil }
-                return ExpandedTickersData(timing: exp.timing, date: exp.date, tickers: exp.tickers)
-            },
-            set: { newValue in
-                if let nv = newValue {
-                    expandedTickers = (timing: nv.timing, date: nv.date, tickers: nv.tickers)
-                } else {
-                    expandedTickers = nil
-                }
-            }
-        )
-    }
 }
 
 // MARK: - Supporting Types
@@ -312,8 +297,9 @@ struct ExpandedTickersData: Identifiable {
     let tickers: [EarningsTicker]
 }
 
-extension String: Identifiable {
-    public var id: String { self }
+struct SelectedTicker: Identifiable {
+    let id = UUID()
+    let symbol: String
 }
 
 // MARK: - Event Detail Sheet
@@ -339,12 +325,33 @@ struct EventDetailSheet: View {
                     }
                 }
 
+                // Forecast / Previous / Actual
+                if event.forecast != nil || event.previous != nil || event.actual != nil {
+                    Section("Data") {
+                        if let forecast = event.forecast {
+                            valueRow("Forecast", forecast, unit: event.unit)
+                        }
+                        if let previous = event.previous {
+                            valueRow("Previous", previous, unit: event.unit)
+                        }
+                        if let actual = event.actual {
+                            valueRow("Actual", actual, unit: event.unit, highlight: true)
+                        }
+                    }
+                }
+
+                // SPX Reaction Stats (from playbook deskView)
                 if let playbook = event.playbook {
                     if let deskView = playbook.deskView, !deskView.isEmpty {
-                        Section("Desk View") {
+                        Section("SPX Reaction Stats") {
                             ForEach(deskView, id: \.self) { item in
-                                Text(item)
-                                    .font(.subheadline)
+                                HStack(spacing: 8) {
+                                    Image(systemName: "chart.line.uptrend.xyaxis")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(item)
+                                        .font(.subheadline)
+                                }
                             }
                         }
                     }
@@ -352,8 +359,13 @@ struct EventDetailSheet: View {
                     if let watch = playbook.watch, !watch.isEmpty {
                         Section("Watch") {
                             ForEach(watch, id: \.self) { item in
-                                Text(item)
-                                    .font(.subheadline)
+                                HStack(spacing: 8) {
+                                    Image(systemName: "eye")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(item)
+                                        .font(.subheadline)
+                                }
                             }
                         }
                     }
@@ -375,6 +387,34 @@ struct EventDetailSheet: View {
         }
     }
 
+    private func valueRow(_ label: String, _ value: Double, unit: String?, highlight: Bool = false) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            HStack(spacing: 4) {
+                Text(formatValue(value))
+                    .fontWeight(highlight ? .semibold : .regular)
+                    .monospacedDigit()
+                if let unit = unit, !unit.isEmpty {
+                    Text(unit)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .foregroundStyle(highlight ? .primary : .secondary)
+        }
+    }
+
+    private func formatValue(_ value: Double) -> String {
+        if abs(value) >= 1000 {
+            return String(format: "%.2fK", value / 1000)
+        } else if abs(value) >= 1 {
+            return String(format: "%.2f", value)
+        } else {
+            return String(format: "%.4f", value)
+        }
+    }
+
     @ViewBuilder
     private func importancePill(_ importance: Int) -> some View {
         let style: PillStyle = importance >= 3 ? .bad : importance >= 2 ? .warn : .neutral
@@ -391,16 +431,8 @@ struct TickerDetailSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                // Logo placeholder
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(hex: "121216").opacity(0.92))
-                    .frame(width: 80, height: 80)
-                    .overlay(
-                        Text(String(ticker.prefix(2)))
-                            .font(.title2)
-                            .fontWeight(.black)
-                            .foregroundStyle(.white.opacity(0.9))
-                    )
+                // Ticker logo
+                TickerLogo(ticker: ticker, size: 80, cornerRadius: 20)
 
                 Text(ticker)
                     .font(.title2)

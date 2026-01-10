@@ -5,6 +5,8 @@ struct EngineOneScreen: View {
     @StateObject private var viewModel = EngineOneViewModel()
 
     @State private var showingInfoSheet: InfoContent?
+    @State private var showingGoNoGoSheet: Bool = false
+    @State private var showingAllEvents: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -45,7 +47,44 @@ struct EngineOneScreen: View {
             .sheet(item: $showingInfoSheet) { content in
                 content.sheet()
             }
+            .sheet(isPresented: $showingGoNoGoSheet) {
+                GoNoGoBreakdownSheet(
+                    decision: viewModel.response?.goNoGo,
+                    ticker: viewModel.ticker.uppercased()
+                )
+            }
+            .sheet(isPresented: $showingAllEvents) {
+                allEventsSheet
+            }
+            .onAppear {
+                // Check if navigated from Calendar with a pending ticker
+                if let pending = appState.pendingTicker {
+                    viewModel.ticker = pending
+                    appState.pendingTicker = nil
+                    Task { await viewModel.load(client: appState.apiClient) }
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private var allEventsSheet: some View {
+        NavigationStack {
+            List {
+                if let events = viewModel.response?.events {
+                    ForEach(events) { event in
+                        BreachEventRow(event: event)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("All Events (\(viewModel.response?.events.count ?? 0))")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     // MARK: - Background
@@ -144,7 +183,6 @@ struct EngineOneScreen: View {
 
     @ViewBuilder
     private func decisionBanner(_ response: BreachResponse) -> some View {
-        let summary = response.summary
         let isGo = computeIsGo(response)
         let bias = computeBias(response)
 
@@ -155,7 +193,8 @@ struct EngineOneScreen: View {
             confidence: computeConfidence(response),
             chips: buildChips(response),
             asOfDate: nil,
-            spot: nil
+            spot: nil,
+            onGoNoGoTap: { showingGoNoGoSheet = true }
         )
     }
 
@@ -219,8 +258,7 @@ struct EngineOneScreen: View {
                 MetricCard(
                     title: "Avg Overshoot",
                     value: formatPct(summary?.avgUpOvershootPct),
-                    subtitle: "When breach occurs (upside)",
-                    onInfoTap: { showingInfoSheet = .avgOvershoot }
+                    subtitle: "When breach occurs (upside)"
                 )
 
                 MetricCard(
@@ -405,10 +443,20 @@ struct EngineOneScreen: View {
                             Divider()
                                 .padding(.horizontal, 12)
 
-                            Text("+\(events.count - 10) more events")
-                                .font(.caption)
+                            Button {
+                                showingAllEvents = true
+                            } label: {
+                                HStack {
+                                    Text("+\(events.count - 10) more events")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                }
                                 .foregroundStyle(.secondary)
                                 .padding(12)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
