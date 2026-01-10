@@ -22,6 +22,25 @@ struct RootView: View {
                     Label("Settings", systemImage: "gear")
                 }
         }
+        .onAppear {
+            configureTabBarAppearance()
+        }
+    }
+
+    private func configureTabBarAppearance() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+
+        // Glass-like background
+        appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        appearance.backgroundColor = UIColor.white.withAlphaComponent(0.78)
+
+        // Subtle shadow
+        appearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+
+        // Apply
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
     }
 }
 

@@ -16,6 +16,12 @@ struct Engine2Underlying: Decodable {
     var symbol: String?
     var isProxy: Bool?
     var proxyFor: String?
+    var last: Double?
+    var open: Double?
+    var high: Double?
+    var low: Double?
+    var close: Double?
+    var volume: Double?
 }
 
 struct Engine2Current: Decodable {
@@ -27,12 +33,19 @@ struct Engine2Current: Decodable {
 struct Engine2Regime: Decodable {
     var score100: Double?
     var bucket: String?
+
+    // Convenience accessor
+    var score: Double? { score100 }
 }
 
 struct Engine2Macro: Decodable {
     var multiplier: Double?
     var flags: [String: Bool]?
     var highImpactUS: Engine2HighImpactUS?
+
+    // Convenience accessors
+    var macroMultiplier: Double? { multiplier }
+    var highImpactCount: Int? { highImpactUS?.count }
 }
 
 struct Engine2HighImpactUS: Decodable {
@@ -53,6 +66,11 @@ struct Engine2OddsLikeNow: Decodable {
     var macroBucket: String?
     var seasonBucket: String?
     var byWidth: [Engine2OddsRow]?
+
+    // Convenience accessors for specific widths
+    var width10: Engine2OddsRow? { byWidth?.first { $0.w == 1.0 } }
+    var width15: Engine2OddsRow? { byWidth?.first { $0.w == 1.5 } }
+    var width20: Engine2OddsRow? { byWidth?.first { $0.w == 2.0 } }
 }
 
 struct Engine2OddsRow: Decodable, Identifiable {
@@ -87,9 +105,23 @@ struct SPXLiveLevels: Decodable {
     var expiry: String?
     var spot: Double?
     var gammaFlipStrike: Double?
+    var putWallStrike: Double?
+    var callWallStrike: Double?
+    var downsideAccelStart: Double?
+    var upsideAccelStart: Double?
     var warnings: [String]?
     var notes: [String]?
     var gexHeatmap: SPXGexHeatmap?
+    var stability: SPXStabilityInfo?
+    var priceHistory: [SPXPricePoint]?
+}
+
+struct SPXStabilityInfo: Decodable {
+    var weeklyStability: SPXHeatStability?
+    var downsideDistancePts: Double?
+    var upsideDistancePts: Double?
+    var downsideDistanceEm: Double?
+    var upsideDistanceEm: Double?
 }
 
 struct SPXGexHeatmap: Decodable {
@@ -98,6 +130,9 @@ struct SPXGexHeatmap: Decodable {
     var metrics: SPXHeatMetrics?
     var warnings: [String]?
     var notes: [String]?
+    var strikes: [Double]?
+    var expiries: [String]?
+    var matrix: [[Double?]]?
 }
 
 struct SPXHeatStability: Decodable {
@@ -111,4 +146,3 @@ struct SPXHeatMetrics: Decodable {
     var downsideDistanceEm: Double?
     var upsideDistanceEm: Double?
 }
-

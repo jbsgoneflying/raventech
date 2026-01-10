@@ -4,132 +4,419 @@ struct EngineOneScreen: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var viewModel = EngineOneViewModel()
 
+    @State private var showingInfoSheet: InfoContent?
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section(header: Text("Ticker")) {
-                    TextField("AAPL", text: $viewModel.ticker)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                    Button {
-                        Task { await viewModel.load(client: appState.apiClient) }
-                    } label: {
-                        viewModel.isLoading ? AnyView(ProgressView()) : AnyView(Text("Run"))
-                    }
-                    .disabled(viewModel.isLoading)
-                }
+            ZStack {
+                backgroundGradient
 
-                if let err = viewModel.error {
-                    Section {
-                        Text(err.localizedDescription).foregroundColor(.red)
-                    }
-                }
+                ScrollView {
+                    VStack(spacing: 16) {
+                        // Header with ticker input
+                        EngineOneHeader(
+                            ticker: $viewModel.ticker,
+                            isLoading: viewModel.isLoading,
+                            onRun: {
+                                let generator = UIImpactFeedbackGenerator(style: .medium)
+                                generator.impactOccurred()
+                                Task { await viewModel.load(client: appState.apiClient) }
+                            }
+                        )
+                        .padding(.horizontal)
 
-                if let resp = viewModel.response {
-                    summarySection(resp)
-                    wingSection(resp.wingRecommendation)
-                    quartersSection(resp.quarters)
-                    eventsSection(resp.events)
+                        // Error display
+                        if let error = viewModel.error {
+                            errorBanner(error)
+                        }
+
+                        // Results
+                        if let response = viewModel.response {
+                            resultsContent(response)
+                        } else if !viewModel.isLoading && viewModel.error == nil {
+                            emptyState
+                        }
+                    }
+                    .padding(.bottom, 32)
                 }
             }
             .navigationTitle("Engine 1")
-        }
-    }
-
-    private func summarySection(_ resp: BreachResponse) -> some View {
-        Section(header: Text("Summary")) {
-            let s = resp.summary
-            summaryRow("Breach rate", pct: s?.breachRatePct)
-            summaryRow("Avg overshoot (up)", pct: s?.avgUpOvershootPct)
-            summaryRow("Avg realized / implied", value: s?.avgRealizedAllPct, suffix: "% vs \(s?.avgImpliedAllPct ?? 0)%")
-            if let used = s?.eventsUsed {
-                Text("Events used: \(used)").font(.subheadline)
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $showingInfoSheet) { content in
+                content.sheet()
             }
         }
     }
 
-    private func summaryRow(_ label: String, pct: Double?) -> some View {
-        HStack {
-            Text(label)
+    // MARK: - Background
+
+    private var backgroundGradient: some View {
+        ZStack {
+            Color(UIColor.systemBackground)
+
+            RadialGradient(
+                colors: [Color(hex: "007AFF").opacity(0.08), .clear],
+                center: UnitPoint(x: 0.18, y: -0.10),
+                startRadius: 0,
+                endRadius: 700
+            )
+
+            RadialGradient(
+                colors: [Color(hex: "34C759").opacity(0.05), .clear],
+                center: UnitPoint(x: 0.85, y: 0.10),
+                startRadius: 0,
+                endRadius: 600
+            )
+        }
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Error Banner
+
+    @ViewBuilder
+    private func errorBanner(_ error: AppError) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+
+            Text(error.localizedDescription)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+
             Spacer()
-            Text(formatPct(pct))
-                .monospacedDigit()
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.red.opacity(0.20), lineWidth: 1)
+        )
+        .padding(.horizontal)
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary.opacity(0.5))
+
+            Text("Enter a ticker and tap Run")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Text("Analyze historical earnings breach probability,\nwing recommendations, and seasonality")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 60)
+    }
+
+    // MARK: - Results Content
+
+    @ViewBuilder
+    private func resultsContent(_ response: BreachResponse) -> some View {
+        // Decision banner
+        decisionBanner(response)
+            .padding(.horizontal)
+
+        // Summary metrics grid
+        summaryMetricsGrid(response)
+            .padding(.horizontal)
+
+        // Wing recommendation
+        wingRecommendationSection(response.wingRecommendation)
+            .padding(.horizontal)
+
+        // Quarter seasonality
+        quarterSeasonalitySection(response.quarters)
+            .padding(.horizontal)
+
+        // Events history
+        eventsSection(response.events)
+            .padding(.horizontal)
+    }
+
+    // MARK: - Decision Banner
+
+    @ViewBuilder
+    private func decisionBanner(_ response: BreachResponse) -> some View {
+        let summary = response.summary
+        let isGo = computeIsGo(response)
+        let bias = computeBias(response)
+
+        DecisionBanner(
+            ticker: viewModel.ticker.uppercased(),
+            isGo: isGo,
+            bias: bias,
+            confidence: computeConfidence(response),
+            chips: buildChips(response),
+            asOfDate: nil,
+            spot: nil
+        )
+    }
+
+    private func computeIsGo(_ response: BreachResponse) -> Bool? {
+        guard let breachRate = response.summary?.breachRatePct else { return nil }
+        // Simple heuristic: GO if breach rate < 30%
+        return breachRate < 30
+    }
+
+    private func computeBias(_ response: BreachResponse) -> DecisionBanner.Bias? {
+        guard let rec = response.wingRecommendation else { return nil }
+        if let callMult = rec.callWingMultiple, let putMult = rec.putWingMultiple {
+            if callMult > putMult + 0.2 { return .bearish }
+            if putMult > callMult + 0.2 { return .bullish }
+        }
+        return .neutral
+    }
+
+    private func computeConfidence(_ response: BreachResponse) -> Int {
+        guard let used = response.summary?.eventsUsed else { return 2 }
+        if used >= 40 { return 5 }
+        if used >= 30 { return 4 }
+        if used >= 20 { return 3 }
+        if used >= 10 { return 2 }
+        return 1
+    }
+
+    private func buildChips(_ response: BreachResponse) -> [String] {
+        var chips: [String] = []
+        if let used = response.summary?.eventsUsed {
+            chips.append("n=\(used)")
+        }
+        if let breachRate = response.summary?.breachRatePct {
+            chips.append(String(format: "Breach %.1f%%", breachRate))
+        }
+        return chips
+    }
+
+    // MARK: - Summary Metrics
+
+    @ViewBuilder
+    private func summaryMetricsGrid(_ response: BreachResponse) -> some View {
+        let summary = response.summary
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Summary")
+                .font(.caption)
+                .fontWeight(.heavy)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
+
+            MetricCardGrid(columns: 2) {
+                MetricCard(
+                    title: "Breach Rate",
+                    value: formatPct(summary?.breachRatePct),
+                    subtitle: "Historical breach frequency",
+                    onInfoTap: { showingInfoSheet = .breachRate }
+                )
+
+                MetricCard(
+                    title: "Avg Overshoot",
+                    value: formatPct(summary?.avgUpOvershootPct),
+                    subtitle: "When breach occurs (upside)",
+                    onInfoTap: { showingInfoSheet = .avgOvershoot }
+                )
+
+                MetricCard(
+                    title: "Realized Move",
+                    value: formatPct(summary?.avgRealizedAllPct),
+                    subtitle: "vs \(formatPct(summary?.avgImpliedAllPct)) implied"
+                )
+
+                MetricCard(
+                    title: "Events Used",
+                    value: "\(summary?.eventsUsed ?? 0)",
+                    subtitle: "Historical sample size"
+                )
+            }
         }
     }
 
-    private func summaryRow(_ label: String, value: Double?, suffix: String = "") -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value.map { String(format: "%.2f", $0) } ?? "—")
-                .monospacedDigit()
-            if !suffix.isEmpty {
-                Text(suffix).foregroundColor(.secondary).font(.caption)
-            }
-        }
-    }
+    // MARK: - Wing Recommendation
 
-    private func wingSection(_ rec: WingRecommendation?) -> some View {
-        Section(header: Text("Wing recommendation")) {
-            Text(rec?.recommendationLabel ?? "—").font(.headline)
-            if let call = rec?.callWingMultiple, let put = rec?.putWingMultiple {
-                Text("Calls: \(String(format: "%.2fx", call)) · Puts: \(String(format: "%.2fx", put))")
-            }
-            if let gate = rec?.tradeGate {
-                Text("Gate: \(gate)").foregroundColor(.secondary)
-            }
-            if let rationale = rec?.rationale {
-                Text(rationale).font(.caption)
-            }
-        }
-    }
+    @ViewBuilder
+    private func wingRecommendationSection(_ rec: WingRecommendation?) -> some View {
+        GlassSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Wing Recommendation")
+                        .font(.caption)
+                        .fontWeight(.heavy)
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
 
-    private func quartersSection(_ quarters: [String: QuarterStats]?) -> some View {
-        Section(header: Text("Quarter seasonality")) {
-            if let quarters = quarters, !quarters.isEmpty {
-                ForEach(quarters.keys.sorted(), id: \.self) { key in
-                    let q = quarters[key]
-                    HStack {
-                        Text(key)
+                    Spacer()
+
+                    InfoButton { showingInfoSheet = .wingRecommendation }
+                }
+
+                if let rec = rec {
+                    Text(rec.recommendationLabel ?? "—")
+                        .font(.title3)
+                        .fontWeight(.bold)
+
+                    HStack(spacing: 20) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Calls")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "%.2fx", rec.callWingMultiple ?? 1.0))
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .monospacedDigit()
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Puts")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "%.2fx", rec.putWingMultiple ?? 1.0))
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .monospacedDigit()
+                        }
+
                         Spacer()
-                        Text(formatPct(q?.breachRatePct))
-                            .monospacedDigit()
+
+                        if let gate = rec.tradeGate {
+                            Pill(
+                                text: gate,
+                                style: gate.lowercased().contains("go") ? .good : .warn
+                            )
+                        }
                     }
-                    if let rec = q?.recommendation {
-                        Text("Rec: \(rec)").font(.caption).foregroundColor(.secondary)
+
+                    if let rationale = rec.rationale {
+                        Text(rationale)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                } else {
+                    Text("No recommendation available")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Quarter Seasonality
+
+    @ViewBuilder
+    private func quarterSeasonalitySection(_ quarters: [String: QuarterStats]?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Quarter Seasonality")
+                    .font(.caption)
+                    .fontWeight(.heavy)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Spacer()
+
+                InfoButton { showingInfoSheet = .quarterSeasonality }
+            }
+            .padding(.leading, 4)
+
+            if let quarters = quarters, !quarters.isEmpty {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
+                    ],
+                    spacing: 10
+                ) {
+                    ForEach(quarters.keys.sorted(), id: \.self) { key in
+                        let stats = quarters[key]
+                        QuarterSeasonalityCard(
+                            quarter: key,
+                            breachRate: stats?.breachRatePct,
+                            recommendation: stats?.recommendation,
+                            isCurrentQuarter: isCurrentQuarter(key)
+                        )
                     }
                 }
             } else {
-                Text("No quarter data")
+                Text("No quarter data available")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding()
             }
         }
     }
 
+    private func isCurrentQuarter(_ quarter: String) -> Bool {
+        let month = Calendar.current.component(.month, from: Date())
+        let currentQ: String
+        switch month {
+        case 1...3: currentQ = "Q1"
+        case 4...6: currentQ = "Q2"
+        case 7...9: currentQ = "Q3"
+        default: currentQ = "Q4"
+        }
+        return quarter == currentQ
+    }
+
+    // MARK: - Events Section
+
+    @ViewBuilder
     private func eventsSection(_ events: [BreachEvent]) -> some View {
-        Section(header: Text("Events")) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Earnings History")
+                    .font(.caption)
+                    .fontWeight(.heavy)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Spacer()
+
+                Text("\(events.count) events")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.leading, 4)
+
             if events.isEmpty {
                 Text("No events")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding()
             } else {
-                ForEach(events) { ev in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(ev.earnDate ?? "—")
-                            Spacer()
-                            if let breach = ev.breach, breach {
-                                Text("Breach").foregroundColor(.red).font(.caption)
+                GlassSurface(padding: 0) {
+                    VStack(spacing: 0) {
+                        ForEach(events.prefix(10)) { event in
+                            BreachEventRow(event: event)
+
+                            if event.id != events.prefix(10).last?.id {
+                                Divider()
+                                    .padding(.horizontal, 12)
                             }
                         }
-                        if let implied = ev.impliedMovePct, let realized = ev.realizedMovePct {
-                            Text("Implied \(formatPct(implied)) · Realized \(formatPct(realized))")
+
+                        if events.count > 10 {
+                            Divider()
+                                .padding(.horizontal, 12)
+
+                            Text("+\(events.count - 10) more events")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
+                                .padding(12)
                         }
                     }
-                    .padding(.vertical, 2)
                 }
             }
         }
     }
+
+    // MARK: - Helpers
 
     private func formatPct(_ value: Double?) -> String {
         guard let v = value else { return "—" }
@@ -137,8 +424,17 @@ struct EngineOneScreen: View {
     }
 }
 
+// MARK: - InfoContent Identifiable
+
+extension InfoContent: Identifiable {
+    var id: String { title }
+}
+
+// MARK: - Preview
+
 struct EngineOneScreen_Previews: PreviewProvider {
     static var previews: some View {
-        EngineOneScreen().environmentObject(AppState())
+        EngineOneScreen()
+            .environmentObject(AppState())
     }
 }
