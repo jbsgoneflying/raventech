@@ -12,7 +12,7 @@ final class AppState: ObservableObject {
     // Cross-screen ticker (set from Calendar, used by Engine 1)
     @Published var pendingTicker: String?
 
-    init(baseURL: URL = AppConfig.BaseURL.dev) {
+    init(baseURL: URL = AppConfig.BaseURL.prod) {
         self.baseURL = baseURL
     }
 

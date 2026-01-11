@@ -63,6 +63,17 @@ AUTH_COOKIE_TTL_S = int(float(os.getenv("AUTH_COOKIE_TTL_S") or (7 * 24 * 60 * 6
 INVITE_CODE = (os.getenv("INVITE_CODE") or "").strip()
 AUTH_SECRET = (os.getenv("AUTH_SECRET") or "").strip()
 
+# iOS app API token (allows TestFlight/production iOS app to bypass invite gate)
+IOS_API_TOKEN = (os.getenv("IOS_API_TOKEN") or "").strip()
+
+
+def _check_api_token(request: Request) -> bool:
+    """Check if request has valid X-API-Token header for iOS app access."""
+    if not IOS_API_TOKEN:
+        return False
+    token = request.headers.get("X-API-Token", "").strip()
+    return token and hmac.compare_digest(token, IOS_API_TOKEN)
+
 
 def _b64url_encode(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
@@ -176,6 +187,10 @@ async def invite_gate(request: Request, call_next):
 
     # VPN-only / private access path (Tailscale). Do not require web login cookie.
     if _is_tailnet_host(request.headers.get("host")):
+        return await call_next(request)
+
+    # iOS app API token (X-API-Token header) — allows TestFlight builds to bypass invite gate.
+    if _check_api_token(request):
         return await call_next(request)
 
     if _path_is_public(request.url.path):

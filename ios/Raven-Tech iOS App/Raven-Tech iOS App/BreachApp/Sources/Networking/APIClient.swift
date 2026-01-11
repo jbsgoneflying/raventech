@@ -68,6 +68,11 @@ struct APIClient {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout ?? 45
+        
+        // Add API token header for production access (bypasses invite gate)
+        if let token = AppConfig.apiToken, !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: "X-API-Token")
+        }
 
         do {
             let (data, response) = try await session.data(for: request)
