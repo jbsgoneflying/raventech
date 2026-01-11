@@ -9,7 +9,28 @@ struct SPXICResponse: Decodable {
     var underlying: Engine2Underlying?
     var current: Engine2Current?
     var oddsLikeNow: Engine2OddsLikeNow?
+    var liveContext: LiveContext?
     var notes: [String]?
+}
+
+// MARK: - Live Context (contains weeklyFriday, nearestDaily, volPressure)
+struct LiveContext: Decodable {
+    var enabled: Bool?
+    var symbolUsed: String?
+    var expiry: String?
+    var spot: Double?
+    var bandPct: Double?
+    var dealerGamma: DealerGammaData?
+    var oiClusters: OIClustersData?
+    var weeklyFriday: SPXLevelView?
+    var nearestDaily: SPXLevelView?
+    var volPressure: VolPressureData?
+    var warnings: [String]?
+    var notes: [String]?
+    
+    // Convenience accessors for addons (from weekly view)
+    var hedgingPressure: HedgingPressure? { weeklyFriday?.addons?.hedgingPressure }
+    var tailIgnition: TailIgnition? { weeklyFriday?.addons?.tailIgnition }
 }
 
 struct Engine2Underlying: Decodable {
@@ -144,40 +165,71 @@ struct LevelAddons: Decodable {
 }
 
 struct HedgingPressure: Decodable {
-    var label: String?
-    var bucket: String?
-    var netGex: Double?
-    var gamma: Double?
-    var bpFromFlip: Double?
+    var enabled: Bool?
+    var spot: Double?
     var bandPct: Double?
-    var nStrikes: Int?
-    var reasons: [String]?
+    var weightingMode: String?
+    var gammaTotal: Double?
+    var strikesUsed: Int?
+    var elasticity50bp: Double?
+    var elasticityBucket: String?
+    var advNotional20d: Double?
+    var reason: String?
+    
+    // Convenience accessors for UI
+    var label: String? { elasticityBucket }
+    var bucket: String? { elasticityBucket }
 }
 
 struct TailIgnition: Decodable {
-    var label: String?
-    var bucket: String?
-    var downScore: Double?
-    var downBucket: String?
-    var upScore: Double?
-    var upBucket: String?
-    var putWallDistancePct: Double?
-    var callWallDistancePct: Double?
+    var enabled: Bool?
+    var spot: Double?
+    var putWallStrike: Double?
+    var callWallStrike: Double?
+    var gammaFlipStrike: Double?
+    var distToPutWallPct: Double?
+    var distToCallWallPct: Double?
     var flipDistancePct: Double?
-    var reasons: [String]?
+    var down: TailDirection?
+    var up: TailDirection?
+    var notes: [String]?
+    
+    // Convenience accessors
+    var downScore: Int? { down?.score }
+    var downLabel: String? { down?.label }
+    var upScore: Int? { up?.score }
+    var upLabel: String? { up?.label }
+}
+
+struct TailDirection: Decodable {
+    var score: Int?
+    var label: String?
+    var airPocket01: Double?
 }
 
 struct VolPressureData: Decodable {
     var enabled: Bool?
-    var label: String?
-    var bucket: String?
-    var zScore: Double?
+    var asOfDate: String?
+    var state: String?
+    var scoreZ: Double?
+    var inputs: VolPressureInputs?
+    var notes: [String]?
+    
+    // Convenience accessors for UI
+    var label: String? { state }
+    var bucket: String? { state }
+    var zScore: Double? { scoreZ }
+}
+
+struct VolPressureInputs: Decodable {
     var iv7: Double?
+    var iv30: Double?
     var rv10: Double?
-    var termStructure: String?
-    var putCallRatio: Double?
-    var ivRank: Double?
-    var reasons: [String]?
+    var slope: Double?
+    var dIv: Double?
+    var dSkew: Double?
+    var ivRv: Double?
+    var termSlope: Double?
 }
 
 struct DealerGammaData: Decodable {

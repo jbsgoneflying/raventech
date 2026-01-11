@@ -28,15 +28,14 @@ struct SPXScreen: View {
                             disabledBanner
                         }
 
-                        // Loading state
+                        // Loading state - show loading and hide results
                         if viewModel.isLoading {
                             loadingView
-                        }
-
-                        // Results
-                        if let ic = viewModel.ic {
+                        } else if let ic = viewModel.ic {
+                            // Only show results when NOT loading
                             resultsContent(ic: ic, levels: viewModel.levels)
-                        } else if !viewModel.isLoading && viewModel.error == nil {
+                        } else if viewModel.error == nil {
+                            // No data yet, no loading, no error = empty state
                             emptyState
                         }
                     }
@@ -496,6 +495,9 @@ struct SPXScreen: View {
 
     @ViewBuilder
     private func vwapNetGexSection(ic: SPXICResponse, levels: SPXLiveLevels?) -> some View {
+        // Use liveContext from IC response for the metric cards (this is where the backend puts it)
+        let lc = ic.liveContext
+        
         VStack(spacing: 12) {
             // Row 1: VWAP & Net GEX
             MetricCardGrid(columns: 2) {
@@ -514,11 +516,11 @@ struct SPXScreen: View {
                     )
                 }
 
-                // Net GEX
+                // Net GEX (from liveContext)
                 MetricCard(
                     title: "Net GEX",
-                    value: levels?.dealerGamma?.netGex.map { formatLargeNumber($0) } ?? "—",
-                    subtitle: levels?.dealerGamma?.netGammaSign ?? "No data"
+                    value: lc?.dealerGamma?.netGex.map { formatLargeNumber($0) } ?? "—",
+                    subtitle: lc?.dealerGamma?.netGammaSign ?? "No data"
                 )
             }
 
@@ -527,10 +529,10 @@ struct SPXScreen: View {
                 // Dealer Gamma (Weekly)
                 MetricCard(
                     title: "Dealer Gamma (Weekly)",
-                    value: formatDealerGammaValue(levels?.weeklyFriday?.dealerGamma),
-                    subtitle: levels?.weeklyFriday.map { formatDealerGammaSubtitle($0) } ?? "No weekly data",
+                    value: formatDealerGammaValue(lc?.weeklyFriday?.dealerGamma),
+                    subtitle: lc?.weeklyFriday.map { formatDealerGammaSubtitle($0) } ?? "No weekly data",
                     onInfoTap: {
-                        if let weekly = levels?.weeklyFriday {
+                        if let weekly = lc?.weeklyFriday {
                             showingInfoSheet = .custom(
                                 title: "Dealer Gamma (Weekly)",
                                 body: "Net dealer gamma exposure for the weekly expiration.",
@@ -544,10 +546,10 @@ struct SPXScreen: View {
                 // Dealer Gamma (Nearest)
                 MetricCard(
                     title: "Dealer Gamma (Nearest)",
-                    value: formatDealerGammaValue(levels?.nearestDaily?.dealerGamma),
-                    subtitle: levels?.nearestDaily.map { formatDealerGammaSubtitle($0) } ?? "No nearest data",
+                    value: formatDealerGammaValue(lc?.nearestDaily?.dealerGamma),
+                    subtitle: lc?.nearestDaily.map { formatDealerGammaSubtitle($0) } ?? "No nearest data",
                     onInfoTap: {
-                        if let nearest = levels?.nearestDaily {
+                        if let nearest = lc?.nearestDaily {
                             showingInfoSheet = .custom(
                                 title: "Dealer Gamma (Nearest)",
                                 body: "Net dealer gamma exposure for the nearest expiration.",
@@ -564,14 +566,14 @@ struct SPXScreen: View {
                 // Hedging Pressure (HPI)
                 MetricCard(
                     title: "Hedging Pressure (HPI)",
-                    value: levels?.hedgingPressure.map { formatHedgingPressureValue($0) } ?? "—",
-                    subtitle: levels?.hedgingPressure.map { formatHedgingPressureSubtitle($0, levels: levels) } ?? "No HPI data",
+                    value: lc?.hedgingPressure.map { formatHedgingPressureValue($0) } ?? "—",
+                    subtitle: lc?.hedgingPressure.map { formatHedgingPressureSubtitle($0, liveContext: lc) } ?? "No HPI data",
                     onInfoTap: {
-                        if let hp = levels?.hedgingPressure {
+                        if let hp = lc?.hedgingPressure {
                             showingInfoSheet = .custom(
                                 title: "Hedging Pressure (HPI)",
                                 body: "Measures the directional bias of dealer hedging activity based on gamma exposure.",
-                                bullets: buildHedgingPressureBullets(hp, levels: levels),
+                                bullets: buildHedgingPressureBullets(hp, liveContext: lc),
                                 deskView: nil
                             )
                         }
@@ -581,14 +583,14 @@ struct SPXScreen: View {
                 // Tail Ignition
                 MetricCard(
                     title: "Tail Ignition",
-                    value: levels?.tailIgnition.map { formatTailIgnitionValue($0) } ?? "—",
-                    subtitle: levels?.tailIgnition.map { formatTailIgnitionSubtitle($0) } ?? "No tail data",
+                    value: lc?.tailIgnition.map { formatTailIgnitionValue($0) } ?? "—",
+                    subtitle: lc?.tailIgnition.map { formatTailIgnitionSubtitle($0) } ?? "No tail data",
                     onInfoTap: {
-                        if let ti = levels?.tailIgnition {
+                        if let ti = lc?.tailIgnition {
                             showingInfoSheet = .custom(
                                 title: "Tail Ignition",
                                 body: "Risk of accelerated moves in the tails due to gamma positioning.",
-                                bullets: buildTailIgnitionBullets(ti, levels: levels),
+                                bullets: buildTailIgnitionBullets(ti, liveContext: lc),
                                 deskView: nil
                             )
                         }
@@ -596,15 +598,15 @@ struct SPXScreen: View {
                 )
             }
 
-            // Row 4: Vol Pressure (single card, full width would need adjustment or pair with another)
+            // Row 4: Vol Pressure
             MetricCardGrid(columns: 2) {
                 // Vol Pressure
                 MetricCard(
                     title: "Vol Pressure",
-                    value: levels?.volPressure.map { formatVolPressureValue($0) } ?? "—",
-                    subtitle: levels?.volPressure.map { formatVolPressureSubtitle($0) } ?? "No vol data",
+                    value: lc?.volPressure.map { formatVolPressureValue($0) } ?? "—",
+                    subtitle: lc?.volPressure.map { formatVolPressureSubtitle($0) } ?? "No vol data",
                     onInfoTap: {
-                        if let vp = levels?.volPressure {
+                        if let vp = lc?.volPressure {
                             showingInfoSheet = .custom(
                                 title: "Vol Pressure",
                                 body: "Volatility pressure based on put/call ratios, IV rank, and term structure.",
@@ -673,57 +675,52 @@ struct SPXScreen: View {
     // MARK: - Hedging Pressure Formatting
 
     private func formatHedgingPressureValue(_ hp: HedgingPressure) -> String {
-        var value = ""
-        if let netGex = hp.netGex {
-            value = formatLargeNumber(netGex)
-        } else if let label = hp.label ?? hp.bucket {
-            value = label
-        } else {
-            value = "—"
+        // Show elasticity bucket with elasticity value
+        if let bucket = hp.elasticityBucket {
+            if let e = hp.elasticity50bp {
+                return "\(bucket) · \(String(format: "%.1f", e * 100))%"
+            }
+            return bucket
         }
-        if let bp = hp.bpFromFlip {
-            value += " @\(Int(bp))bp"
-        }
-        return value
+        return "—"
     }
 
-    private func formatHedgingPressureSubtitle(_ hp: HedgingPressure, levels: SPXLiveLevels?) -> String {
+    private func formatHedgingPressureSubtitle(_ hp: HedgingPressure, liveContext: LiveContext?) -> String {
         var parts: [String] = []
-        if let gamma = hp.gamma {
+        if let gamma = hp.gammaTotal {
             parts.append("Γ=\(formatScientific(gamma))")
         }
         if let band = hp.bandPct {
             parts.append("band=±\(Int(band * 100))%")
         }
-        if let strikes = hp.nStrikes {
+        if let strikes = hp.strikesUsed {
             parts.append("strikes=\(strikes)")
         }
-        return parts.isEmpty ? hp.reasons?.first ?? "—" : parts.joined(separator: " · ")
+        return parts.isEmpty ? hp.reason ?? "—" : parts.joined(separator: " · ")
     }
 
-    private func buildHedgingPressureBullets(_ hp: HedgingPressure, levels: SPXLiveLevels?) -> [String] {
+    private func buildHedgingPressureBullets(_ hp: HedgingPressure, liveContext: LiveContext?) -> [String] {
         var bullets: [String] = []
-        if let netGex = hp.netGex {
-            bullets.append("Net $GEX: \(formatLargeNumber(netGex))")
+        if let e = hp.elasticity50bp {
+            bullets.append("Elasticity (50bp): \(String(format: "%.2f", e * 100))%")
         }
-        if let gamma = hp.gamma {
-            bullets.append("Gamma (Γ): \(formatScientific(gamma))")
+        if let gamma = hp.gammaTotal {
+            bullets.append("Gamma Total (Γ): \(formatScientific(gamma))")
         }
-        if let bp = hp.bpFromFlip {
-            bullets.append("BP from Flip: \(Int(bp))bp")
+        if let adv = hp.advNotional20d {
+            bullets.append("ADV Notional (20d): \(formatLargeNumber(adv))")
         }
         if let band = hp.bandPct {
             bullets.append("Band: ±\(Int(band * 100))%")
         }
-        if let strikes = hp.nStrikes {
+        if let strikes = hp.strikesUsed {
             bullets.append("Strikes analyzed: \(strikes)")
         }
-        if let reasons = hp.reasons, !reasons.isEmpty {
-            bullets.append(contentsOf: reasons)
-        }
         // Add nearest info if available
-        if let nearest = levels?.nearestDaily?.addons?.hedgingPressure {
-            bullets.append("Nearest: \(formatLargeNumber(nearest.netGex ?? 0)) @\(Int(nearest.bpFromFlip ?? 0))bp")
+        if let nearest = liveContext?.nearestDaily?.addons?.hedgingPressure,
+           let nearestBucket = nearest.elasticityBucket {
+            let nearestE = nearest.elasticity50bp.map { String(format: "%.1f%%", $0 * 100) } ?? ""
+            bullets.append("Nearest: \(nearestBucket) \(nearestE)")
         }
         return bullets
     }
@@ -732,60 +729,60 @@ struct SPXScreen: View {
 
     private func formatTailIgnitionValue(_ ti: TailIgnition) -> String {
         var parts: [String] = []
-        if let down = ti.downScore, let downBucket = ti.downBucket {
-            parts.append("Down \(Int(down)) \(downBucket.uppercased())")
+        if let down = ti.down, let score = down.score, let label = down.label {
+            parts.append("↓\(score) \(label)")
         }
-        if let up = ti.upScore, let upBucket = ti.upBucket {
-            parts.append("Up \(Int(up)) \(upBucket.uppercased())")
+        if let up = ti.up, let score = up.score, let label = up.label {
+            parts.append("↑\(score) \(label)")
         }
         if parts.isEmpty {
-            return ti.label ?? ti.bucket ?? "—"
+            return "—"
         }
         return parts.joined(separator: " · ")
     }
 
     private func formatTailIgnitionSubtitle(_ ti: TailIgnition) -> String {
         var parts: [String] = []
-        if let putWallPct = ti.putWallDistancePct {
+        if let putWallPct = ti.distToPutWallPct {
             parts.append("put=\(String(format: "%.2f", putWallPct))%")
         }
-        if let callWallPct = ti.callWallDistancePct {
+        if let callWallPct = ti.distToCallWallPct {
             parts.append("call=\(String(format: "%.2f", callWallPct))%")
         }
         if let flipPct = ti.flipDistancePct {
             parts.append("flip=\(String(format: "%.2f", flipPct))%")
         }
-        return parts.isEmpty ? ti.reasons?.first ?? "—" : "walls: " + parts.joined(separator: " · ")
+        return parts.isEmpty ? ti.notes?.first ?? "—" : "walls: " + parts.joined(separator: " · ")
     }
 
-    private func buildTailIgnitionBullets(_ ti: TailIgnition, levels: SPXLiveLevels?) -> [String] {
+    private func buildTailIgnitionBullets(_ ti: TailIgnition, liveContext: LiveContext?) -> [String] {
         var bullets: [String] = []
-        if let down = ti.downScore, let downBucket = ti.downBucket {
-            bullets.append("Downside: \(Int(down)) (\(downBucket))")
+        if let down = ti.down, let score = down.score, let label = down.label {
+            bullets.append("Downside: \(score) (\(label))")
         }
-        if let up = ti.upScore, let upBucket = ti.upBucket {
-            bullets.append("Upside: \(Int(up)) (\(upBucket))")
+        if let up = ti.up, let score = up.score, let label = up.label {
+            bullets.append("Upside: \(score) (\(label))")
         }
-        if let putWallPct = ti.putWallDistancePct {
+        if let putWallPct = ti.distToPutWallPct {
             bullets.append("Put Wall Distance: \(String(format: "%.2f", putWallPct))%")
         }
-        if let callWallPct = ti.callWallDistancePct {
+        if let callWallPct = ti.distToCallWallPct {
             bullets.append("Call Wall Distance: \(String(format: "%.2f", callWallPct))%")
         }
         if let flipPct = ti.flipDistancePct {
             bullets.append("Gamma Flip Distance: \(String(format: "%.2f", flipPct))%")
         }
-        if let reasons = ti.reasons, !reasons.isEmpty {
-            bullets.append(contentsOf: reasons)
+        if let notes = ti.notes, !notes.isEmpty {
+            bullets.append(contentsOf: notes)
         }
         // Add nearest info if available
-        if let nearest = levels?.nearestDaily?.addons?.tailIgnition {
+        if let nearest = liveContext?.nearestDaily?.addons?.tailIgnition {
             var nearestParts: [String] = []
-            if let down = nearest.downScore, let downBucket = nearest.downBucket {
-                nearestParts.append("Down \(Int(down)) \(downBucket)")
+            if let down = nearest.down, let score = down.score, let label = down.label {
+                nearestParts.append("↓\(score) \(label)")
             }
-            if let up = nearest.upScore, let upBucket = nearest.upBucket {
-                nearestParts.append("Up \(Int(up)) \(upBucket)")
+            if let up = nearest.up, let score = up.score, let label = up.label {
+                nearestParts.append("↑\(score) \(label)")
             }
             if !nearestParts.isEmpty {
                 bullets.append("Nearest: " + nearestParts.joined(separator: " · "))
@@ -797,53 +794,54 @@ struct SPXScreen: View {
     // MARK: - Vol Pressure Formatting
 
     private func formatVolPressureValue(_ vp: VolPressureData) -> String {
-        var value = vp.label ?? vp.bucket ?? "—"
-        if let z = vp.zScore {
+        var value = vp.state ?? "—"
+        if let z = vp.scoreZ {
             value += " · z=\(String(format: "%.2f", z))"
         }
         return value
     }
 
     private func formatVolPressureSubtitle(_ vp: VolPressureData) -> String {
+        let inputs = vp.inputs
         var parts: [String] = []
-        if let iv7 = vp.iv7 {
-            parts.append("iv7=\(String(format: "%.2f", iv7))")
-        } else {
-            parts.append("iv7=—")
+        if let iv7 = inputs?.iv7 {
+            parts.append("iv7=\(String(format: "%.2f", iv7 * 100))%")
         }
-        if let rv10 = vp.rv10 {
-            parts.append("rv10=\(String(format: "%.2f", rv10))")
+        if let rv10 = inputs?.rv10 {
+            parts.append("rv10=\(String(format: "%.2f", rv10 * 100))%")
         }
-        if let term = vp.termStructure {
-            parts.append("term=\(term)")
-        } else {
-            parts.append("term=—")
+        if let term = inputs?.termSlope {
+            parts.append("term=\(String(format: "%.2f", term * 100))%")
         }
-        return parts.isEmpty ? vp.reasons?.first ?? "—" : parts.joined(separator: " · ")
+        return parts.isEmpty ? vp.notes?.first ?? "—" : parts.joined(separator: " · ")
     }
 
     private func buildVolPressureBullets(_ vp: VolPressureData) -> [String] {
         var bullets: [String] = []
-        if let label = vp.label {
-            bullets.append("Pressure: \(label)")
+        if let state = vp.state {
+            bullets.append("State: \(state)")
         }
-        if let z = vp.zScore {
+        if let z = vp.scoreZ {
             bullets.append("Z-Score: \(String(format: "%.2f", z))")
         }
-        if let iv7 = vp.iv7 {
-            bullets.append("IV7: \(String(format: "%.2f", iv7))")
+        let inputs = vp.inputs
+        if let iv7 = inputs?.iv7 {
+            bullets.append("IV7: \(String(format: "%.2f", iv7 * 100))%")
         }
-        if let rv10 = vp.rv10 {
-            bullets.append("RV10: \(String(format: "%.2f", rv10))")
+        if let iv30 = inputs?.iv30 {
+            bullets.append("IV30: \(String(format: "%.2f", iv30 * 100))%")
         }
-        if let term = vp.termStructure {
-            bullets.append("Term Structure: \(term)")
+        if let rv10 = inputs?.rv10 {
+            bullets.append("RV10: \(String(format: "%.2f", rv10 * 100))%")
         }
-        if let pcRatio = vp.putCallRatio {
-            bullets.append("Put/Call Ratio: \(String(format: "%.2f", pcRatio))")
+        if let term = inputs?.termSlope {
+            bullets.append("Term Slope (IV7-IV30): \(String(format: "%.2f", term * 100))%")
         }
-        if let reasons = vp.reasons, !reasons.isEmpty {
-            bullets.append(contentsOf: reasons)
+        if let ivRv = inputs?.ivRv {
+            bullets.append("IV-RV Spread: \(String(format: "%.2f", ivRv * 100))%")
+        }
+        if let notes = vp.notes, !notes.isEmpty {
+            bullets.append(contentsOf: notes)
         }
         return bullets
     }
