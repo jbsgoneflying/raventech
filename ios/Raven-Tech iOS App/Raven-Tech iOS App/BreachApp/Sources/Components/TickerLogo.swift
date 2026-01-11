@@ -1,120 +1,46 @@
 import SwiftUI
 
 /// Displays a ticker's company logo or a styled fallback
+/// Updates reactively as user types - shows initials immediately, loads logo in background
 struct TickerLogo: View {
     let ticker: String
     var size: CGFloat = 40
     var cornerRadius: CGFloat = 12
 
-    @State private var logoLoaded = false
     @State private var logoImage: Image?
+    @State private var loadedTicker: String = ""
 
-    // Map of known tickers to their company domains for logo lookup
-    private static let domainMap: [String: String] = [
-        "AAPL": "apple.com",
-        "MSFT": "microsoft.com",
-        "GOOGL": "google.com",
-        "GOOG": "google.com",
-        "AMZN": "amazon.com",
-        "META": "meta.com",
-        "NVDA": "nvidia.com",
-        "TSLA": "tesla.com",
-        "AMD": "amd.com",
-        "NFLX": "netflix.com",
-        "INTC": "intel.com",
-        "CRM": "salesforce.com",
-        "ORCL": "oracle.com",
-        "ADBE": "adobe.com",
-        "PYPL": "paypal.com",
-        "CSCO": "cisco.com",
-        "PEP": "pepsico.com",
-        "KO": "coca-cola.com",
-        "NKE": "nike.com",
-        "DIS": "disney.com",
-        "BA": "boeing.com",
-        "JPM": "jpmorganchase.com",
-        "GS": "goldmansachs.com",
-        "V": "visa.com",
-        "MA": "mastercard.com",
-        "WMT": "walmart.com",
-        "HD": "homedepot.com",
-        "MCD": "mcdonalds.com",
-        "SBUX": "starbucks.com",
-        "XOM": "exxonmobil.com",
-        "CVX": "chevron.com",
-        "UNH": "unitedhealthgroup.com",
-        "JNJ": "jnj.com",
-        "PFE": "pfizer.com",
-        "MRK": "merck.com",
-        "ABBV": "abbvie.com",
-        "LLY": "lilly.com",
-        "TMO": "thermofisher.com",
-        "ABT": "abbott.com",
-        "MDT": "medtronic.com",
-        "DHR": "danaher.com",
-        "COST": "costco.com",
-        "TGT": "target.com",
-        "LOW": "lowes.com",
-        "FDX": "fedex.com",
-        "UPS": "ups.com",
-        "CAT": "caterpillar.com",
-        "DE": "deere.com",
-        "MMM": "3m.com",
-        "HON": "honeywell.com",
-        "GE": "ge.com",
-        "RTX": "rtx.com",
-        "LMT": "lockheedmartin.com",
-        "NOC": "northropgrumman.com",
-        "T": "att.com",
-        "VZ": "verizon.com",
-        "TMUS": "t-mobile.com",
-        "CMCSA": "comcast.com",
-        "CHTR": "charter.com",
-        "NOW": "servicenow.com",
-        "SNOW": "snowflake.com",
-        "PLTR": "palantir.com",
-        "ZM": "zoom.us",
-        "DOCU": "docusign.com",
-        "SHOP": "shopify.com",
-        "SQ": "squareup.com",
-        "COIN": "coinbase.com",
-        "UBER": "uber.com",
-        "LYFT": "lyft.com",
-        "ABNB": "airbnb.com",
-        "DASH": "doordash.com",
-        "ROKU": "roku.com",
-        "SPOT": "spotify.com",
-        "SNAP": "snap.com",
-        "PINS": "pinterest.com",
-        "TWTR": "twitter.com",
-        "MU": "micron.com",
-        "QCOM": "qualcomm.com",
-        "AVGO": "broadcom.com",
-        "TXN": "ti.com",
-        "IBM": "ibm.com",
-        "HPQ": "hp.com",
-        "DELL": "dell.com",
-        "SPX": "spglobal.com",
-        "SPY": "ssga.com",
-        "QQQ": "invesco.com",
-    ]
+    // Normalized ticker for consistent display
+    private var displayTicker: String {
+        ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
 
     var body: some View {
         ZStack {
-            if let image = logoImage {
+            // Always show fallback first for immediate feedback
+            fallbackView
+
+            // Overlay the loaded logo if we have one for the CURRENT ticker
+            if let image = logoImage, loadedTicker == displayTicker {
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: size * 0.7, height: size * 0.7)
+                    .frame(width: size * 0.8, height: size * 0.8)
                     .frame(width: size, height: size)
                     .background(Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            } else {
-                fallbackView
+                    .transition(.opacity)
             }
         }
-        .task {
-            await loadLogo()
+        .animation(.easeInOut(duration: 0.2), value: displayTicker)
+        .onChange(of: displayTicker) { oldValue, newValue in
+            // Immediately clear logo when ticker changes so fallback shows
+            if newValue != loadedTicker {
+                logoImage = nil
+            }
+        }
+        .task(id: displayTicker) {
+            await loadLogoDebounced()
         }
     }
 
@@ -123,7 +49,7 @@ struct TickerLogo: View {
             .fill(gradientForTicker)
             .frame(width: size, height: size)
             .overlay(
-                Text(String(ticker.prefix(2)).uppercased())
+                Text(String(displayTicker.prefix(2)))
                     .font(.system(size: size * 0.35, weight: .black, design: .rounded))
                     .foregroundStyle(.white.opacity(0.9))
             )
@@ -131,7 +57,7 @@ struct TickerLogo: View {
 
     private var gradientForTicker: LinearGradient {
         // Generate a consistent gradient based on ticker hash
-        let hash = abs(ticker.uppercased().hashValue)
+        let hash = abs(displayTicker.hashValue)
         let hue1 = Double(hash % 360) / 360.0
         let hue2 = Double((hash / 360) % 360) / 360.0
 
@@ -145,14 +71,21 @@ struct TickerLogo: View {
         )
     }
 
-    private func loadLogo() async {
-        guard let domain = Self.domainMap[ticker.uppercased()] else { return }
+    private func loadLogoDebounced() async {
+        let t = displayTicker
+        guard !t.isEmpty, t != "?" else { return }
 
-        // Use Clearbit Logo API (free, no auth needed for basic use)
-        let urlString = "https://logo.clearbit.com/\(domain)"
+        // Debounce: wait a bit before fetching to avoid spamming on every keystroke
+        try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+
+        // Check if ticker changed while we were waiting
+        guard t == displayTicker else { return }
+
+        // FMP serves ticker logos from a stable static URL (no API key required)
+        let urlString = "https://financialmodelingprep.com/image-stock/\(t).png"
         guard let url = URL(string: urlString) else { return }
 
-        // Create a custom session with shorter timeout to fail fast
+        // Create a custom session with shorter timeout
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 5
         config.timeoutIntervalForResource = 10
@@ -161,17 +94,23 @@ struct TickerLogo: View {
 
         do {
             let (data, response) = try await session.data(from: url)
+
+            // Check again if ticker changed during fetch
+            guard t == displayTicker else { return }
+
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200,
                   let uiImage = UIImage(data: data) else { return }
 
             await MainActor.run {
-                self.logoImage = Image(uiImage: uiImage)
-                self.logoLoaded = true
+                // Only update if ticker still matches
+                if t == displayTicker {
+                    self.logoImage = Image(uiImage: uiImage)
+                    self.loadedTicker = t
+                }
             }
         } catch {
-            // Silent fail - fallback gradient with initials will show
-            // This is expected when offline or API is unreachable
+            // Silent fail - fallback initials will show
         }
     }
 }

@@ -198,18 +198,23 @@ struct CalendarDayCard: View {
     @ViewBuilder
     private func miniTickerTile(_ ticker: String, onTap: @escaping () -> Void) -> some View {
         Button(action: onTap) {
-            Text(ticker.uppercased())
-                .font(.caption2)
-                .fontWeight(.black)
-                .tracking(0.2)
-                .frame(maxWidth: .infinity)
-                .frame(height: 32)
-                .background(Color.white.opacity(0.80))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                )
+            HStack(spacing: 4) {
+                TickerLogo(ticker: ticker, size: 22, cornerRadius: 6)
+
+                Text(ticker.uppercased())
+                    .font(.caption2)
+                    .fontWeight(.black)
+                    .tracking(0.2)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 32)
+            .background(Color.white.opacity(0.80))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
         }
         .buttonStyle(TileButtonStyle())
     }

@@ -244,6 +244,10 @@ struct SPXScreen: View {
         )
         .padding(.horizontal)
 
+        // VWAP and Net GEX - right under Regime/Macro
+        vwapNetGexSection(ic: ic, levels: levels?.levels)
+            .padding(.horizontal)
+
         // Odds summary
         oddsSummarySection(ic.oddsLikeNow)
             .padding(.horizontal)
@@ -407,112 +411,474 @@ struct SPXScreen: View {
                 .textCase(.uppercase)
                 .padding(.leading, 4)
 
-            if let strikes = heatmap.strikes,
-               let expiries = heatmap.expiries,
-               let matrix = heatmap.matrix,
-               !strikes.isEmpty, !expiries.isEmpty, !matrix.isEmpty {
+            // Use COMPOSITE + SLOPE mode (matches web app defaults)
+            // Composite groups expiries into buckets (e.g., "0-5 DTE", "6-10 DTE", "20-40 DTE")
+            // Slope uses slopeNetDollarGex for cleaner visualization
+            let compositeData = buildCompositeHeatmapData(heatmap)
+
+            if heatmap.enabled == true, !compositeData.strikes.isEmpty, !compositeData.labels.isEmpty, !compositeData.matrix.isEmpty {
                 GEXHeatmap(
-                    strikes: strikes,
-                    expiries: expiries,
-                    matrix: matrix,
+                    strikes: compositeData.strikes,
+                    expiries: compositeData.labels,
+                    matrix: compositeData.matrix,
                     spot: heatmap.spot,
                     boundaries: HeatmapBoundaries(
-                        downsideStrike: heatmap.downsideAccelStart,
-                        upsideStrike: heatmap.upsideAccelStart
+                        downsideStrike: heatmap.boundaries?.downsideAccelerationBoundaryStrike,
+                        upsideStrike: heatmap.boundaries?.upsideAccelerationBoundaryStrike
                     )
                 )
             } else {
-                Text("No heatmap data available")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding()
+                VStack(spacing: 8) {
+                    Text("No heatmap data available")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if let notes = heatmap.notes, !notes.isEmpty {
+                        Text(notes.first ?? "")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding()
             }
 
-            // Stability metrics
-            if let stability = heatmap.stability {
+            // Metrics strip (from metrics)
+            let metrics = heatmap.metrics
+            let stability = heatmap.stability
+            if metrics != nil || stability != nil {
                 GEXMetricsStrip(
                     metrics: HeatmapMetrics(
-                        downsideDistancePts: stability.downsideDistancePts,
-                        upsideDistancePts: stability.upsideDistancePts,
-                        downsideDistanceEm: stability.downsideDistanceEm,
-                        upsideDistanceEm: stability.upsideDistanceEm
+                        downsideDistancePts: metrics?.downsideDistancePts,
+                        upsideDistancePts: metrics?.upsideDistancePts,
+                        downsideDistanceEm: metrics?.downsideDistanceEm,
+                        upsideDistanceEm: metrics?.upsideDistanceEm
                     ),
                     stability: HeatmapStability(
-                        label: stability.label ?? "Unknown",
-                        reasons: stability.reasons ?? []
+                        label: stability?.label ?? "Unknown",
+                        reasons: stability?.reasons ?? []
                     )
                 )
             }
         }
     }
 
-    // MARK: - Additional Metrics
+    /// Build heatmap data from composite buckets using slope values
+    private func buildCompositeHeatmapData(_ heatmap: SPXGexHeatmap) -> (strikes: [Double], labels: [String], matrix: [[Double?]]) {
+        // Get strikes from composite
+        guard let strikes = heatmap.composite?.strikes, !strikes.isEmpty else {
+            return ([], [], [])
+        }
+
+        // Get buckets from composite
+        guard let buckets = heatmap.composite?.buckets, !buckets.isEmpty else {
+            return ([], [], [])
+        }
+
+        // Build labels and matrix from buckets using SLOPE data
+        var labels: [String] = []
+        var matrix: [[Double?]] = []
+
+        for bucket in buckets {
+            // Use bucket label (e.g., "0-5 DTE", "6-10 DTE", "20-40 DTE")
+            let label = bucket.label ?? bucket.key ?? "—"
+            labels.append(label)
+
+            // Use slopeNetDollarGex for slope mode (cleaner visualization)
+            // Fall back to netDollarGex if slope not available
+            let rowData = bucket.slopeNetDollarGex ?? bucket.netDollarGex ?? []
+            matrix.append(rowData)
+        }
+
+        return (strikes, labels, matrix)
+    }
+
+    // MARK: - Key Metrics Grid (all cards in one section)
+
+    @ViewBuilder
+    private func vwapNetGexSection(ic: SPXICResponse, levels: SPXLiveLevels?) -> some View {
+        VStack(spacing: 12) {
+            // Row 1: VWAP & Net GEX
+            MetricCardGrid(columns: 2) {
+                // VWAP (from IC response)
+                if let vwap = ic.current?.vwap, vwap.enabled == true {
+                    MetricCard(
+                        title: "VWAP (Daily)",
+                        value: String(format: "%.2f", vwap.value ?? 0),
+                        subtitle: vwapDistanceText(vwap),
+                        onInfoTap: { showingInfoSheet = .custom(
+                            title: "VWAP",
+                            body: "Volume-weighted average price for the current session.",
+                            bullets: ["Used to assess intraday positioning relative to fair value"],
+                            deskView: nil
+                        )}
+                    )
+                }
+
+                // Net GEX
+                MetricCard(
+                    title: "Net GEX",
+                    value: levels?.dealerGamma?.netGex.map { formatLargeNumber($0) } ?? "—",
+                    subtitle: levels?.dealerGamma?.netGammaSign ?? "No data"
+                )
+            }
+
+            // Row 2: Dealer Gamma (Weekly) & Dealer Gamma (Nearest)
+            MetricCardGrid(columns: 2) {
+                // Dealer Gamma (Weekly)
+                MetricCard(
+                    title: "Dealer Gamma (Weekly)",
+                    value: formatDealerGammaValue(levels?.weeklyFriday?.dealerGamma),
+                    subtitle: levels?.weeklyFriday.map { formatDealerGammaSubtitle($0) } ?? "No weekly data",
+                    onInfoTap: {
+                        if let weekly = levels?.weeklyFriday {
+                            showingInfoSheet = .custom(
+                                title: "Dealer Gamma (Weekly)",
+                                body: "Net dealer gamma exposure for the weekly expiration.",
+                                bullets: buildDealerGammaBullets(weekly),
+                                deskView: nil
+                            )
+                        }
+                    }
+                )
+
+                // Dealer Gamma (Nearest)
+                MetricCard(
+                    title: "Dealer Gamma (Nearest)",
+                    value: formatDealerGammaValue(levels?.nearestDaily?.dealerGamma),
+                    subtitle: levels?.nearestDaily.map { formatDealerGammaSubtitle($0) } ?? "No nearest data",
+                    onInfoTap: {
+                        if let nearest = levels?.nearestDaily {
+                            showingInfoSheet = .custom(
+                                title: "Dealer Gamma (Nearest)",
+                                body: "Net dealer gamma exposure for the nearest expiration.",
+                                bullets: buildDealerGammaBullets(nearest),
+                                deskView: nil
+                            )
+                        }
+                    }
+                )
+            }
+
+            // Row 3: Hedging Pressure & Tail Ignition
+            MetricCardGrid(columns: 2) {
+                // Hedging Pressure (HPI)
+                MetricCard(
+                    title: "Hedging Pressure (HPI)",
+                    value: levels?.hedgingPressure.map { formatHedgingPressureValue($0) } ?? "—",
+                    subtitle: levels?.hedgingPressure.map { formatHedgingPressureSubtitle($0, levels: levels) } ?? "No HPI data",
+                    onInfoTap: {
+                        if let hp = levels?.hedgingPressure {
+                            showingInfoSheet = .custom(
+                                title: "Hedging Pressure (HPI)",
+                                body: "Measures the directional bias of dealer hedging activity based on gamma exposure.",
+                                bullets: buildHedgingPressureBullets(hp, levels: levels),
+                                deskView: nil
+                            )
+                        }
+                    }
+                )
+
+                // Tail Ignition
+                MetricCard(
+                    title: "Tail Ignition",
+                    value: levels?.tailIgnition.map { formatTailIgnitionValue($0) } ?? "—",
+                    subtitle: levels?.tailIgnition.map { formatTailIgnitionSubtitle($0) } ?? "No tail data",
+                    onInfoTap: {
+                        if let ti = levels?.tailIgnition {
+                            showingInfoSheet = .custom(
+                                title: "Tail Ignition",
+                                body: "Risk of accelerated moves in the tails due to gamma positioning.",
+                                bullets: buildTailIgnitionBullets(ti, levels: levels),
+                                deskView: nil
+                            )
+                        }
+                    }
+                )
+            }
+
+            // Row 4: Vol Pressure (single card, full width would need adjustment or pair with another)
+            MetricCardGrid(columns: 2) {
+                // Vol Pressure
+                MetricCard(
+                    title: "Vol Pressure",
+                    value: levels?.volPressure.map { formatVolPressureValue($0) } ?? "—",
+                    subtitle: levels?.volPressure.map { formatVolPressureSubtitle($0) } ?? "No vol data",
+                    onInfoTap: {
+                        if let vp = levels?.volPressure {
+                            showingInfoSheet = .custom(
+                                title: "Vol Pressure",
+                                body: "Volatility pressure based on put/call ratios, IV rank, and term structure.",
+                                bullets: buildVolPressureBullets(vp),
+                                deskView: nil
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    // MARK: - Dealer Gamma Formatting
+
+    private func formatDealerGammaValue(_ dg: DealerGammaData?) -> String {
+        guard let dg = dg else { return "—" }
+        let sign = dg.netGammaSign?.uppercased() ?? "—"
+        let magnitude = dg.magnitudeBucket?.uppercased() ?? "—"
+        return "\(sign) · \(magnitude)"
+    }
+
+    private func formatDealerGammaSubtitle(_ view: SPXLevelView) -> String {
+        var parts: [String] = []
+        if let expiry = view.expiry {
+            parts.append("exp=\(expiry)")
+        }
+        if let oi = view.oiClusters {
+            if let putWall = oi.putWall?.peakStrike {
+                parts.append("put=\(Int(putWall))")
+            }
+            if let callWall = oi.callWall?.peakStrike {
+                parts.append("call=\(Int(callWall))")
+            }
+        }
+        return parts.isEmpty ? nil ?? "—" : parts.joined(separator: " · ")
+    }
+
+    private func buildDealerGammaBullets(_ view: SPXLevelView) -> [String] {
+        var bullets: [String] = []
+        if let expiry = view.expiry {
+            bullets.append("Expiry: \(expiry)")
+        }
+        if let dg = view.dealerGamma {
+            if let sign = dg.netGammaSign {
+                bullets.append("Net Gamma Sign: \(sign)")
+            }
+            if let mag = dg.magnitudeBucket {
+                bullets.append("Magnitude: \(mag)")
+            }
+        }
+        if let oi = view.oiClusters {
+            if let putWall = oi.putWall {
+                bullets.append("Put Wall: \(Int(putWall.peakStrike ?? 0)) (OI: \(formatLargeNumber(putWall.totalOI ?? 0)))")
+            }
+            if let callWall = oi.callWall {
+                bullets.append("Call Wall: \(Int(callWall.peakStrike ?? 0)) (OI: \(formatLargeNumber(callWall.totalOI ?? 0)))")
+            }
+        }
+        if let warnings = view.dealerGamma?.warnings, !warnings.isEmpty {
+            bullets.append(contentsOf: warnings)
+        }
+        return bullets
+    }
+
+    // MARK: - Hedging Pressure Formatting
+
+    private func formatHedgingPressureValue(_ hp: HedgingPressure) -> String {
+        var value = ""
+        if let netGex = hp.netGex {
+            value = formatLargeNumber(netGex)
+        } else if let label = hp.label ?? hp.bucket {
+            value = label
+        } else {
+            value = "—"
+        }
+        if let bp = hp.bpFromFlip {
+            value += " @\(Int(bp))bp"
+        }
+        return value
+    }
+
+    private func formatHedgingPressureSubtitle(_ hp: HedgingPressure, levels: SPXLiveLevels?) -> String {
+        var parts: [String] = []
+        if let gamma = hp.gamma {
+            parts.append("Γ=\(formatScientific(gamma))")
+        }
+        if let band = hp.bandPct {
+            parts.append("band=±\(Int(band * 100))%")
+        }
+        if let strikes = hp.nStrikes {
+            parts.append("strikes=\(strikes)")
+        }
+        return parts.isEmpty ? hp.reasons?.first ?? "—" : parts.joined(separator: " · ")
+    }
+
+    private func buildHedgingPressureBullets(_ hp: HedgingPressure, levels: SPXLiveLevels?) -> [String] {
+        var bullets: [String] = []
+        if let netGex = hp.netGex {
+            bullets.append("Net $GEX: \(formatLargeNumber(netGex))")
+        }
+        if let gamma = hp.gamma {
+            bullets.append("Gamma (Γ): \(formatScientific(gamma))")
+        }
+        if let bp = hp.bpFromFlip {
+            bullets.append("BP from Flip: \(Int(bp))bp")
+        }
+        if let band = hp.bandPct {
+            bullets.append("Band: ±\(Int(band * 100))%")
+        }
+        if let strikes = hp.nStrikes {
+            bullets.append("Strikes analyzed: \(strikes)")
+        }
+        if let reasons = hp.reasons, !reasons.isEmpty {
+            bullets.append(contentsOf: reasons)
+        }
+        // Add nearest info if available
+        if let nearest = levels?.nearestDaily?.addons?.hedgingPressure {
+            bullets.append("Nearest: \(formatLargeNumber(nearest.netGex ?? 0)) @\(Int(nearest.bpFromFlip ?? 0))bp")
+        }
+        return bullets
+    }
+
+    // MARK: - Tail Ignition Formatting
+
+    private func formatTailIgnitionValue(_ ti: TailIgnition) -> String {
+        var parts: [String] = []
+        if let down = ti.downScore, let downBucket = ti.downBucket {
+            parts.append("Down \(Int(down)) \(downBucket.uppercased())")
+        }
+        if let up = ti.upScore, let upBucket = ti.upBucket {
+            parts.append("Up \(Int(up)) \(upBucket.uppercased())")
+        }
+        if parts.isEmpty {
+            return ti.label ?? ti.bucket ?? "—"
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func formatTailIgnitionSubtitle(_ ti: TailIgnition) -> String {
+        var parts: [String] = []
+        if let putWallPct = ti.putWallDistancePct {
+            parts.append("put=\(String(format: "%.2f", putWallPct))%")
+        }
+        if let callWallPct = ti.callWallDistancePct {
+            parts.append("call=\(String(format: "%.2f", callWallPct))%")
+        }
+        if let flipPct = ti.flipDistancePct {
+            parts.append("flip=\(String(format: "%.2f", flipPct))%")
+        }
+        return parts.isEmpty ? ti.reasons?.first ?? "—" : "walls: " + parts.joined(separator: " · ")
+    }
+
+    private func buildTailIgnitionBullets(_ ti: TailIgnition, levels: SPXLiveLevels?) -> [String] {
+        var bullets: [String] = []
+        if let down = ti.downScore, let downBucket = ti.downBucket {
+            bullets.append("Downside: \(Int(down)) (\(downBucket))")
+        }
+        if let up = ti.upScore, let upBucket = ti.upBucket {
+            bullets.append("Upside: \(Int(up)) (\(upBucket))")
+        }
+        if let putWallPct = ti.putWallDistancePct {
+            bullets.append("Put Wall Distance: \(String(format: "%.2f", putWallPct))%")
+        }
+        if let callWallPct = ti.callWallDistancePct {
+            bullets.append("Call Wall Distance: \(String(format: "%.2f", callWallPct))%")
+        }
+        if let flipPct = ti.flipDistancePct {
+            bullets.append("Gamma Flip Distance: \(String(format: "%.2f", flipPct))%")
+        }
+        if let reasons = ti.reasons, !reasons.isEmpty {
+            bullets.append(contentsOf: reasons)
+        }
+        // Add nearest info if available
+        if let nearest = levels?.nearestDaily?.addons?.tailIgnition {
+            var nearestParts: [String] = []
+            if let down = nearest.downScore, let downBucket = nearest.downBucket {
+                nearestParts.append("Down \(Int(down)) \(downBucket)")
+            }
+            if let up = nearest.upScore, let upBucket = nearest.upBucket {
+                nearestParts.append("Up \(Int(up)) \(upBucket)")
+            }
+            if !nearestParts.isEmpty {
+                bullets.append("Nearest: " + nearestParts.joined(separator: " · "))
+            }
+        }
+        return bullets
+    }
+
+    // MARK: - Vol Pressure Formatting
+
+    private func formatVolPressureValue(_ vp: VolPressureData) -> String {
+        var value = vp.label ?? vp.bucket ?? "—"
+        if let z = vp.zScore {
+            value += " · z=\(String(format: "%.2f", z))"
+        }
+        return value
+    }
+
+    private func formatVolPressureSubtitle(_ vp: VolPressureData) -> String {
+        var parts: [String] = []
+        if let iv7 = vp.iv7 {
+            parts.append("iv7=\(String(format: "%.2f", iv7))")
+        } else {
+            parts.append("iv7=—")
+        }
+        if let rv10 = vp.rv10 {
+            parts.append("rv10=\(String(format: "%.2f", rv10))")
+        }
+        if let term = vp.termStructure {
+            parts.append("term=\(term)")
+        } else {
+            parts.append("term=—")
+        }
+        return parts.isEmpty ? vp.reasons?.first ?? "—" : parts.joined(separator: " · ")
+    }
+
+    private func buildVolPressureBullets(_ vp: VolPressureData) -> [String] {
+        var bullets: [String] = []
+        if let label = vp.label {
+            bullets.append("Pressure: \(label)")
+        }
+        if let z = vp.zScore {
+            bullets.append("Z-Score: \(String(format: "%.2f", z))")
+        }
+        if let iv7 = vp.iv7 {
+            bullets.append("IV7: \(String(format: "%.2f", iv7))")
+        }
+        if let rv10 = vp.rv10 {
+            bullets.append("RV10: \(String(format: "%.2f", rv10))")
+        }
+        if let term = vp.termStructure {
+            bullets.append("Term Structure: \(term)")
+        }
+        if let pcRatio = vp.putCallRatio {
+            bullets.append("Put/Call Ratio: \(String(format: "%.2f", pcRatio))")
+        }
+        if let reasons = vp.reasons, !reasons.isEmpty {
+            bullets.append(contentsOf: reasons)
+        }
+        return bullets
+    }
+
+    // MARK: - Helper Formatters
+
+    private func formatScientific(_ value: Double) -> String {
+        if abs(value) >= 1e6 {
+            return String(format: "%.2fe+%d", value / pow(10, floor(log10(abs(value)))), Int(floor(log10(abs(value)))))
+        } else if abs(value) >= 1000 {
+            return String(format: "%.2fK", value / 1000)
+        } else {
+            return String(format: "%.2f", value)
+        }
+    }
+
+    // MARK: - Additional Metrics (kept for any overflow cards)
 
     @ViewBuilder
     private func additionalMetricsSection(_ levels: SPXLiveLevels) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Additional Metrics")
-                .font(.caption)
-                .fontWeight(.heavy)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .padding(.leading, 4)
+        // This section is now minimal - most cards moved to vwapNetGexSection
+        // Only show if there's additional data not covered above
+        EmptyView()
+    }
 
-            MetricCardGrid(columns: 2) {
-                // Net GEX
-                if let netGex = levels.dealerGamma?.netGex {
-                    MetricCard(
-                        title: "Net GEX",
-                        value: formatLargeNumber(netGex),
-                        subtitle: levels.dealerGamma?.netGammaSign
-                    )
-                }
-
-                // Hedging Pressure (from weeklyFriday addons)
-                if let hp = levels.hedgingPressure {
-                    MetricCard(
-                        title: "Hedging Pressure",
-                        value: hp.label ?? hp.bucket ?? "—",
-                        subtitle: hp.reasons?.first,
-                        onInfoTap: { showingInfoSheet = .custom(
-                            title: "Hedging Pressure",
-                            body: "Measures the directional bias of dealer hedging activity.",
-                            bullets: hp.reasons,
-                            deskView: nil
-                        )}
-                    )
-                }
-
-                // Tail Ignition (from weeklyFriday addons)
-                if let ti = levels.tailIgnition {
-                    MetricCard(
-                        title: "Tail Ignition",
-                        value: ti.label ?? ti.bucket ?? "—",
-                        subtitle: ti.reasons?.first,
-                        onInfoTap: { showingInfoSheet = .custom(
-                            title: "Tail Ignition",
-                            body: "Risk of accelerated moves in the tails due to gamma positioning.",
-                            bullets: ti.reasons,
-                            deskView: nil
-                        )}
-                    )
-                }
-
-                // Vol Pressure (from levels top level)
-                if let vp = levels.volPressure, vp.enabled == true {
-                    MetricCard(
-                        title: "Vol Pressure",
-                        value: vp.label ?? vp.bucket ?? "—",
-                        subtitle: vp.putCallRatio.map { String(format: "P/C: %.2f", $0) },
-                        onInfoTap: { showingInfoSheet = .custom(
-                            title: "Vol Pressure",
-                            body: "Volatility pressure based on put/call ratios and IV rank.",
-                            bullets: vp.reasons,
-                            deskView: nil
-                        )}
-                    )
-                }
-            }
+    private func vwapDistanceText(_ vwap: Engine2VWAP) -> String? {
+        guard let live = vwap.livePrice, let value = vwap.value, value > 0 else { return nil }
+        let diff = live - value
+        let pct = (diff / value) * 100
+        if abs(pct) < 0.05 {
+            return "At VWAP"
+        } else if diff > 0 {
+            return String(format: "%.2f pts above (%.2f%%)", diff, pct)
+        } else {
+            return String(format: "%.2f pts below (%.2f%%)", abs(diff), abs(pct))
         }
     }
 

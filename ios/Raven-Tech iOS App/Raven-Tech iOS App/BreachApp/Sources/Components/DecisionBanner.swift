@@ -312,13 +312,38 @@ struct GoNoGoBreakdownSheet: View {
                 // Warnings
                 if let warnings = decision?.warnings, !warnings.isEmpty {
                     Section {
-                        ForEach(warnings, id: \.self) { warning in
-                            HStack(spacing: 10) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange)
-                                Text(warning)
-                                    .font(.subheadline)
+                        ForEach(warnings) { warning in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.orange)
+                                    Text(warning.label ?? "Warning")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                }
+                                if let events = warning.events, !events.isEmpty {
+                                    ForEach(events.prefix(5)) { event in
+                                        HStack(spacing: 8) {
+                                            Circle()
+                                                .fill(Color.orange.opacity(0.6))
+                                                .frame(width: 6, height: 6)
+                                            Text(event.title ?? event.kind ?? "Event")
+                                                .font(.caption)
+                                            Spacer()
+                                            Text(event.date ?? "")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    let total = warning.events?.count ?? 0
+                                    if total > 5 {
+                                        Text("+\(total - 5) more")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
+                            .padding(.vertical, 4)
                         }
                     } header: {
                         Text("Warnings")
@@ -361,6 +386,24 @@ struct GoNoGoBreakdownSheet: View {
             if let explain = check.explain, !explain.isEmpty {
                 Text(explain)
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let code = check.code, !code.isEmpty {
+                Text("Code: \(code)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let value = check.valueSummary {
+                Text("Value: \(value)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let threshold = check.thresholdSummary {
+                Text("Threshold: \(threshold)")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }

@@ -22,6 +22,24 @@ struct APIClient {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
+            // Debug: print the actual decoding error
+            print("🔴 Decoding error for \(T.self):")
+            print("   \(error)")
+            if let decodingError = error as? DecodingError {
+                switch decodingError {
+                case .keyNotFound(let key, let context):
+                    print("   Key not found: \(key.stringValue) at \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+                case .typeMismatch(let type, let context):
+                    print("   Type mismatch: expected \(type) at \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+                case .valueNotFound(let type, let context):
+                    print("   Value not found: \(type) at \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+                case .dataCorrupted(let context):
+                    print("   Data corrupted at \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+                @unknown default:
+                    break
+                }
+            }
+            
             // If the body looks like HTML, surface that.
             if let body = String(data: data, encoding: .utf8),
                body.lowercased().contains("<html") || body.lowercased().contains("<!doctype") {

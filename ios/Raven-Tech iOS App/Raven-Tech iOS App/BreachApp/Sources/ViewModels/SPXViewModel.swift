@@ -23,8 +23,9 @@ final class SPXViewModel: ObservableObject {
         isLoading = true
         self.error = nil
         defer { isLoading = false }
+
+        // Feature gate + defaults
         do {
-            // Feature gate + defaults
             let f: FlagsResponse = try await client.get("api/flags", timeout: 20)
             self.flags = f
             if f.enableEngine2SpxIc == false {
@@ -34,11 +35,16 @@ final class SPXViewModel: ObservableObject {
                 levelsSummary = "Engine 2 disabled (ENABLE_ENGINE2_SPX_IC=0)"
                 return
             }
+        } catch {
+            self.error = .network(error)
+            return
+        }
 
-            let years = String(f.engine2DefaultYears ?? 2)
-            let widths = f.engine2DefaultEmMults ?? "1.0,1.5,2.0"
+        let years = String(flags?.engine2DefaultYears ?? 2)
+        let widths = flags?.engine2DefaultEmMults ?? "1.0,1.5,2.0"
 
-            // /api/spx-ic (Engine 2 core) can be heavy; give it more time than the shared 45s.
+        // /api/spx-ic (Engine 2 core) - required
+        do {
             ic = try await client.get(
                 "api/spx-ic",
                 query: [
@@ -47,13 +53,21 @@ final class SPXViewModel: ObservableObject {
                     "years": years,
                     "widths": widths,
                     "seasonality_mode": seasonalityMode,
-                    "weeks_limit": "0", // keep payload lightweight like web initial render
+                    "weeks_limit": "0",
                 ],
                 timeout: 120
             )
             icSummary = summarizeIC(ic) ?? "Loaded (/api/spx-ic)"
+        } catch let appError as AppError {
+            self.error = appError
+            return
+        } catch {
+            self.error = .network(error)
+            return
+        }
 
-            // /api/spx-levels (dealer gamma + heatmap) can also be non-trivial.
+        // /api/spx-levels (dealer gamma + heatmap) - optional, don't fail if this errors
+        do {
             levels = try await client.get(
                 "api/spx-levels",
                 query: [
@@ -70,10 +84,11 @@ final class SPXViewModel: ObservableObject {
                 timeout: 90
             )
             levelsSummary = summarizeLevels(levels) ?? "Loaded (/api/spx-levels)"
-        } catch let appError as AppError {
-            self.error = appError
         } catch {
-            self.error = .network(error)
+            // Log but don't fail - levels is optional enhancement
+            print("⚠️ SPX levels failed to load: \(error)")
+            levels = nil
+            levelsSummary = "Levels unavailable"
         }
     }
 

@@ -146,12 +146,24 @@ struct LevelAddons: Decodable {
 struct HedgingPressure: Decodable {
     var label: String?
     var bucket: String?
+    var netGex: Double?
+    var gamma: Double?
+    var bpFromFlip: Double?
+    var bandPct: Double?
+    var nStrikes: Int?
     var reasons: [String]?
 }
 
 struct TailIgnition: Decodable {
     var label: String?
     var bucket: String?
+    var downScore: Double?
+    var downBucket: String?
+    var upScore: Double?
+    var upBucket: String?
+    var putWallDistancePct: Double?
+    var callWallDistancePct: Double?
+    var flipDistancePct: Double?
     var reasons: [String]?
 }
 
@@ -159,6 +171,10 @@ struct VolPressureData: Decodable {
     var enabled: Bool?
     var label: String?
     var bucket: String?
+    var zScore: Double?
+    var iv7: Double?
+    var rv10: Double?
+    var termStructure: String?
     var putCallRatio: Double?
     var ivRank: Double?
     var reasons: [String]?
@@ -217,23 +233,124 @@ struct OICluster: Decodable, Identifiable {
 
 struct SPXGexHeatmap: Decodable {
     var enabled: Bool?
+    var error: String?
     var spot: Double?
-    var strikes: [Double]?
-    var expiries: [String]?
-    var matrix: [[Double?]]?
-    var matrixSlope: [[Double?]]?
-    var downsideAccelStart: Double?
-    var upsideAccelStart: Double?
+    var bandPct: Double?
+    var atmIvUsedPct: Double?
+    var scaleDenom: Double?
+    var raw: HeatmapRawData?
+    var composite: HeatmapCompositeData?
+    var boundaries: HeatmapBoundariesData?
+    var metrics: HeatmapMetricsData?
     var stability: SPXHeatStability?
     var warnings: [String]?
     var notes: [String]?
+
+    // Convenience accessors for heatmap rendering
+    var strikes: [Double]? { composite?.strikes ?? raw?.strikes }
+    var expiries: [String]? { raw?.expiries }
+    var downsideAccelStart: Double? { boundaries?.downsideAccelerationBoundaryStrike }
+    var upsideAccelStart: Double? { boundaries?.upsideAccelerationBoundaryStrike }
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, error, spot, bandPct, atmIvUsedPct, scaleDenom
+        case raw, composite, boundaries, metrics, stability
+        case warnings, notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.enabled = try? c.decodeIfPresent(Bool.self, forKey: .enabled)
+        self.error = try? c.decodeIfPresent(String.self, forKey: .error)
+        self.spot = try? c.decodeIfPresent(Double.self, forKey: .spot)
+        self.bandPct = try? c.decodeIfPresent(Double.self, forKey: .bandPct)
+        self.atmIvUsedPct = try? c.decodeIfPresent(Double.self, forKey: .atmIvUsedPct)
+        self.scaleDenom = try? c.decodeIfPresent(Double.self, forKey: .scaleDenom)
+        self.raw = try? c.decodeIfPresent(HeatmapRawData.self, forKey: .raw)
+        self.composite = try? c.decodeIfPresent(HeatmapCompositeData.self, forKey: .composite)
+        self.boundaries = try? c.decodeIfPresent(HeatmapBoundariesData.self, forKey: .boundaries)
+        self.metrics = try? c.decodeIfPresent(HeatmapMetricsData.self, forKey: .metrics)
+        self.stability = try? c.decodeIfPresent(SPXHeatStability.self, forKey: .stability)
+        self.warnings = try? c.decodeIfPresent([String].self, forKey: .warnings)
+        self.notes = try? c.decodeIfPresent([String].self, forKey: .notes)
+    }
+}
+
+struct HeatmapRawData: Decodable {
+    var expiries: [String]?
+    var strikes: [Double]?
+    var netDollarGex: [[Double?]]?
+    var slopeNetDollarGex: [[Double?]]?
+
+    enum CodingKeys: String, CodingKey {
+        case expiries, strikes, netDollarGex, slopeNetDollarGex
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.expiries = try? c.decodeIfPresent([String].self, forKey: .expiries)
+        self.strikes = try? c.decodeIfPresent([Double].self, forKey: .strikes)
+        self.netDollarGex = try? c.decodeIfPresent([[Double?]].self, forKey: .netDollarGex)
+        self.slopeNetDollarGex = try? c.decodeIfPresent([[Double?]].self, forKey: .slopeNetDollarGex)
+    }
+}
+
+struct HeatmapCompositeData: Decodable {
+    var halfLifeDte: Double?
+    var strikes: [Double]?
+    var expiriesUsed: [String]?
+    var buckets: [HeatmapBucket]?
+
+    enum CodingKeys: String, CodingKey {
+        case halfLifeDte, strikes, expiriesUsed, buckets
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.halfLifeDte = try? c.decodeIfPresent(Double.self, forKey: .halfLifeDte)
+        self.strikes = try? c.decodeIfPresent([Double].self, forKey: .strikes)
+        self.expiriesUsed = try? c.decodeIfPresent([String].self, forKey: .expiriesUsed)
+        self.buckets = try? c.decodeIfPresent([HeatmapBucket].self, forKey: .buckets)
+    }
+}
+
+struct HeatmapBucket: Decodable {
+    var key: String?
+    var label: String?
+    var effectiveDte: Double?
+    var expectedMovePts: Double?
+    var netDollarGex: [Double?]?
+    var slopeNetDollarGex: [Double?]?
+
+    enum CodingKeys: String, CodingKey {
+        case key, label, effectiveDte, expectedMovePts, netDollarGex, slopeNetDollarGex
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.key = try? c.decodeIfPresent(String.self, forKey: .key)
+        self.label = try? c.decodeIfPresent(String.self, forKey: .label)
+        self.effectiveDte = try? c.decodeIfPresent(Double.self, forKey: .effectiveDte)
+        self.expectedMovePts = try? c.decodeIfPresent(Double.self, forKey: .expectedMovePts)
+        self.netDollarGex = try? c.decodeIfPresent([Double?].self, forKey: .netDollarGex)
+        self.slopeNetDollarGex = try? c.decodeIfPresent([Double?].self, forKey: .slopeNetDollarGex)
+    }
+}
+
+struct HeatmapBoundariesData: Decodable {
+    var flipAdjacentN: Int?
+    var downsideAccelerationBoundaryStrike: Double?
+    var upsideAccelerationBoundaryStrike: Double?
+}
+
+struct HeatmapMetricsData: Decodable {
+    var downsideDistancePts: Double?
+    var upsideDistancePts: Double?
+    var downsideDistanceEm: Double?
+    var upsideDistanceEm: Double?
 }
 
 struct SPXHeatStability: Decodable {
     var label: String?
     var reasons: [String]?
-    var downsideDistancePts: Double?
-    var upsideDistancePts: Double?
-    var downsideDistanceEm: Double?
-    var upsideDistanceEm: Double?
 }

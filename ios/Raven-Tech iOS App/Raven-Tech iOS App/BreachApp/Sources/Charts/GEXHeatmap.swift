@@ -106,10 +106,19 @@ struct GEXHeatmap: View {
             }
         }
 
-        // Draw Y-axis labels (expiries)
+        // Draw Y-axis labels (expiries or DTE bucket labels)
         for (row, expiry) in expiries.enumerated() {
             let y = padding.top + CGFloat(row) * rowHeight + rowHeight / 2
-            let label = String(expiry.suffix(5)) // MM-DD format
+
+            // Use full label for DTE buckets (e.g., "0-5 DTE"), or truncate dates to MM-DD
+            let label: String
+            if expiry.contains("DTE") || expiry.contains("-") && expiry.count <= 12 {
+                // Composite bucket label - use as-is
+                label = expiry
+            } else {
+                // Date format - truncate to MM-DD
+                label = String(expiry.suffix(5))
+            }
 
             context.draw(
                 Text(label)

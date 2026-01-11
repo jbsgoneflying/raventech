@@ -6,6 +6,7 @@ struct MetricCard: View {
     let value: String
     var subtitle: String?
     var badge: Pill?
+    var valueColor: Color?
     var onInfoTap: (() -> Void)?
 
     var body: some View {
@@ -30,7 +31,7 @@ struct MetricCard: View {
                     .font(.title3)
                     .fontWeight(.bold)
                     .monospacedDigit()
-                    .foregroundStyle(RavenTheme.textPrimary)
+                    .foregroundStyle(valueColor ?? RavenTheme.textPrimary)
 
                 if let badge = badge {
                     badge

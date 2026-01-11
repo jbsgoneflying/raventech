@@ -52,6 +52,7 @@ struct CalendarScreen: View {
             }
             .sheet(item: $selectedEvent) { event in
                 EventDetailSheet(event: event)
+                    .environmentObject(appState)
             }
             .sheet(item: $expandedTickers) { expanded in
                 TickerExpandSheet(
@@ -305,7 +306,12 @@ struct SelectedTicker: Identifiable {
 // MARK: - Event Detail Sheet
 
 struct EventDetailSheet: View {
+    @EnvironmentObject var appState: AppState
     let event: CalendarEvent
+
+    @State private var stats: MacroEventStatsResponse?
+    @State private var isLoadingStats = false
+    @State private var statsError: String?
 
     var body: some View {
         NavigationStack {
@@ -340,10 +346,13 @@ struct EventDetailSheet: View {
                     }
                 }
 
-                // SPX Reaction Stats (from playbook deskView)
+                // Historical SPY Move Stats (from /api/macro-event-stats)
+                historicalStatsSection
+
+                // Playbook guidance
                 if let playbook = event.playbook {
                     if let deskView = playbook.deskView, !deskView.isEmpty {
-                        Section("SPX Reaction Stats") {
+                        Section("Desk Notes") {
                             ForEach(deskView, id: \.self) { item in
                                 HStack(spacing: 8) {
                                     Image(systemName: "chart.line.uptrend.xyaxis")
@@ -373,10 +382,125 @@ struct EventDetailSheet: View {
             }
             .navigationTitle(event.short ?? "Event")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                await loadStats()
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
+
+    // MARK: - Historical Stats Section
+
+    @ViewBuilder
+    private var historicalStatsSection: some View {
+        Section {
+            if isLoadingStats {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading historical stats…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let error = statsError {
+                Text(error)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else if let stats = stats, stats.enabled == true {
+                // SPY spot reference
+                if let spot = stats.spySpotClose {
+                    statsRow("SPY Close", String(format: "%.2f", spot))
+                }
+
+                // Events used (sample size)
+                if let n = stats.eventsUsed {
+                    statsRow("Events Used", "\(n)")
+                }
+
+                // Event day stats
+                if let ed = stats.spy?.eventDayCloseToClose {
+                    if let pts = ed.medianAbsPts, let pct = ed.medianAbsPct {
+                        statsRow("Event Day |median|", formatBand(pts: pts, pct: pct))
+                    }
+                    if let pts = ed.p90AbsPts, let pct = ed.p90AbsPct {
+                        statsRow("Event Day p90 |abs|", formatBand(pts: pts, pct: pct))
+                    }
+                }
+
+                // Next day stats
+                if let nd = stats.spy?.nextDayCloseToClose {
+                    if let pts = nd.medianAbsPts, let pct = nd.medianAbsPct {
+                        statsRow("Next Day |median|", formatBand(pts: pts, pct: pct))
+                    }
+                    if let pts = nd.p90AbsPts, let pct = nd.p90AbsPct {
+                        statsRow("Next Day p90 |abs|", formatBand(pts: pts, pct: pct))
+                    }
+                }
+
+                // Prior day stats
+                if let pd = stats.spy?.priorDayCloseToClose {
+                    if let pts = pd.medianAbsPts, let pct = pd.medianAbsPct {
+                        statsRow("Prior Day |median|", formatBand(pts: pts, pct: pct))
+                    }
+                }
+            } else {
+                Text("Historical stats unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Historical SPY Moves")
+        } footer: {
+            if stats?.enabled == true {
+                Text("Based on historical event occurrences. Use to gauge expected risk.")
+                    .font(.caption2)
+            }
+        }
+    }
+
+    private func statsRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func formatBand(pts: Double, pct: Double) -> String {
+        String(format: "%.2f pts (%.2f%%)", pts, pct)
+    }
+
+    // MARK: - Load Stats
+
+    private func loadStats() async {
+        guard let key = event.key, !key.isEmpty else {
+            statsError = "No event key"
+            return
+        }
+
+        isLoadingStats = true
+        defer { isLoadingStats = false }
+
+        do {
+            let response: MacroEventStatsResponse = try await appState.apiClient.get(
+                "api/macro-event-stats",
+                query: ["key": key],
+                timeout: 45
+            )
+            stats = response
+        } catch {
+            statsError = "Stats unavailable"
+            print("Failed to load macro event stats: \(error)")
+        }
+    }
+
+    // MARK: - Helpers
 
     private func row(_ label: String, _ value: String?) -> some View {
         HStack {

@@ -162,6 +162,10 @@ struct EngineOneScreen: View {
         decisionBanner(response)
             .padding(.horizontal)
 
+        // Regime section
+        regimeSection(response.regime)
+            .padding(.horizontal)
+
         // Summary metrics grid
         summaryMetricsGrid(response)
             .padding(.horizontal)
@@ -177,6 +181,87 @@ struct EngineOneScreen: View {
         // Events history
         eventsSection(response.events)
             .padding(.horizontal)
+    }
+
+    // MARK: - Regime Section
+
+    @ViewBuilder
+    private func regimeSection(_ regime: RegimeData?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Market Regime")
+                .font(.caption)
+                .fontWeight(.heavy)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
+
+            MetricCardGrid(columns: 2) {
+                MetricCard(
+                    title: "Regime",
+                    value: regime?.label ?? "—",
+                    subtitle: regime?.guidance?.message ?? "Market environment label"
+                )
+
+                MetricCard(
+                    title: "Trade Gate",
+                    value: formatTradeGate(regime?.guidance?.tradeGate ?? regime?.tradeGate),
+                    subtitle: tradeGateSubtitle(regime?.guidance?.tradeGate ?? regime?.tradeGate),
+                    valueColor: tradeGateColor(regime?.guidance?.tradeGate ?? regime?.tradeGate)
+                )
+
+                MetricCard(
+                    title: "Tail Multiplier",
+                    value: formatMultiplier(regime?.tailMultiplier),
+                    subtitle: "Wing width adjustment"
+                )
+
+                MetricCard(
+                    title: "Regime Score",
+                    value: formatScore(regime?.scores?.regimeScore),
+                    subtitle: "Composite score (0-1)"
+                )
+            }
+        }
+    }
+
+    private func formatTradeGate(_ gate: String?) -> String {
+        guard let gate = gate else { return "—" }
+        switch gate.uppercased() {
+        case "OK": return "OK"
+        case "CAUTION": return "CAUTION"
+        case "NO_TRADE": return "NO TRADE"
+        default: return gate
+        }
+    }
+
+    private func tradeGateSubtitle(_ gate: String?) -> String {
+        guard let gate = gate else { return "Trade permission" }
+        switch gate.uppercased() {
+        case "OK": return "Clear to trade"
+        case "CAUTION": return "Proceed with care"
+        case "NO_TRADE": return "Avoid trading"
+        default: return "Trade permission"
+        }
+    }
+
+    private func tradeGateColor(_ gate: String?) -> Color? {
+        guard let gate = gate else { return nil }
+        switch gate.uppercased() {
+        case "OK": return Color(hex: "34C759")
+        case "CAUTION": return .orange
+        case "NO_TRADE": return Color(hex: "FF3B30")
+        default: return nil
+        }
+    }
+
+    private func formatMultiplier(_ value: Double?) -> String {
+        guard let v = value else { return "—" }
+        return String(format: "%.2f×", v)
+    }
+
+    private func formatScore(_ value: Double?) -> String {
+        guard let v = value else { return "—" }
+        return String(format: "%.2f", v)
     }
 
     // MARK: - Decision Banner
@@ -199,6 +284,9 @@ struct EngineOneScreen: View {
     }
 
     private func computeIsGo(_ response: BreachResponse) -> Bool? {
+        if let passed = response.goNoGo?.passed {
+            return passed
+        }
         guard let breachRate = response.summary?.breachRatePct else { return nil }
         // Simple heuristic: GO if breach rate < 30%
         return breachRate < 30

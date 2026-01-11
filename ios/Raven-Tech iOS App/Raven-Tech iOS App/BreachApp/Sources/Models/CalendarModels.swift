@@ -168,3 +168,29 @@ struct Playbook: Decodable {
     var deskView: [String]?
     var watch: [String]?
 }
+
+// MARK: - Macro Event Stats (from /api/macro-event-stats)
+
+struct MacroEventStatsResponse: Decodable {
+    var enabled: Bool?
+    var key: String?
+    var eventsUsed: Int?
+    var spySpotClose: Double?
+    var spy: SPYMoveStats?
+    var notes: [String]?
+}
+
+struct SPYMoveStats: Decodable {
+    var eventDayCloseToClose: MoveDistribution?
+    var nextDayCloseToClose: MoveDistribution?
+    var priorDayCloseToClose: MoveDistribution?
+}
+
+struct MoveDistribution: Decodable {
+    var medianAbsPct: Double?
+    var medianAbsPts: Double?
+    var p90AbsPct: Double?
+    var p90AbsPts: Double?
+    var meanAbsPct: Double?
+    var meanAbsPts: Double?
+}
