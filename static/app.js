@@ -583,6 +583,20 @@ function renderEngine1DecisionPanel(payload) {
   const gateTxt = gate === "NO_TRADE" ? "No Trade" : gate === "CAUTION" ? "Caution" : gate === "OK" ? "OK" : "—";
   const label = String(rg?.label || "—");
 
+  // Expected Move data
+  const em = payload?.expectedMove || {};
+  const emPct = em?.expectedMovePct;
+  const emDollars = em?.expectedMoveDollars;
+  const emExpiry = String(em?.expiry || "").slice(0, 10);
+  const emSource = String(em?.source || "").toLowerCase();
+  const emSourceLabel = emSource === "live" ? "Live" : emSource === "eod" ? "EOD" : emSource === "impermnv" ? "EM" : emSource ? emSource : "—";
+
+  // Strike Targets data
+  const st = payload?.strikeTargets || null;
+  const stWhite = st?.whitePts;
+  const stBlue = st?.bluePts;
+  const stRed = st?.redPts;
+
   const chips = [];
   if (gateTxt !== "—") chips.push(`Gate: ${gateTxt}`);
   if (label && label !== "—") chips.push(`Regime: ${label}`);
@@ -657,6 +671,26 @@ function renderEngine1DecisionPanel(payload) {
           <div class="taCardTop"><div class="taCardTitle">Trade gate</div></div>
           <div class="taCardState">${escapeHtml(gateTxt)}</div>
           <div class="taCardInterp">OK / Caution / No trade (risk-first).</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop">
+            <div class="taCardTitle">Expected Move</div>
+            <span class="info" title="Risk-neutral expected absolute move to near-dated expiry. Computed via ATM-forward straddle (gold standard). Uses live data when market is open, EOD otherwise.">ⓘ</span>
+          </div>
+          <div class="taCardState mono">${Number.isFinite(emPct) ? escapeHtml(emPct.toFixed(2)) + "%" : "—"}</div>
+          <div class="taCardInterp">${Number.isFinite(emDollars) ? `$${escapeHtml(emDollars.toFixed(2))} pts` : "—"} · ${emExpiry ? `Exp: ${escapeHtml(emExpiry)}` : ""} · ${emSourceLabel}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop">
+            <div class="taCardTitle">Strike Targets (EM)</div>
+            <span class="info" title="Wing strike distances based on expected move. White = 2× EM pts, Blue = 1.5× White, Red = 2× White. Use for short-strike targeting.">ⓘ</span>
+          </div>
+          <div class="emTargetGrid">
+            <div class="emRow emBox--white"><span class="k">1.0× EM</span><span class="v mono">${Number.isFinite(stWhite) ? escapeHtml(stWhite.toFixed(2)) + " pts" : "—"}</span></div>
+            <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span class="v mono">${Number.isFinite(stBlue) ? escapeHtml(stBlue.toFixed(2)) + " pts" : "—"}</span></div>
+            <div class="emRow emBox--red"><span class="k">2.0× EM</span><span class="v mono">${Number.isFinite(stRed) ? escapeHtml(stRed.toFixed(2)) + " pts" : "—"}</span></div>
+          </div>
+          <div class="taCardInterp">Wing distance from spot.</div>
         </div>
       </div>
 

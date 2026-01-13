@@ -20,6 +20,7 @@ from backend.trade_builder import compute_trade_builder
 from backend.wing_recommendation import compute_wing_recommendation
 from backend.mc_simulator import bootstrap_tas_stability, optimize_wings_risk_only, run_monte_carlo
 from backend.technicals import compute_technicals_payload
+from backend.expected_move import compute_expected_move, compute_strike_targets
 
 
 LOG = logging.getLogger(__name__)
@@ -1975,6 +1976,41 @@ def compute_breach_stats(
                 )
             except Exception as e:
                 out["monteCarloOptimization"] = {"mode": "RISK_ONLY", "notes": [f"Optimization failed: {type(e).__name__}: {e}"]}
+
+    # --- Expected Move (ATM-forward straddle; live or EOD; additive, does not affect stats) ---
+    try:
+        # Determine target expiry: use next earnings if known, else nearest Friday
+        em_target_expiry: Optional[str] = None
+        if isinstance(out.get("nextEvent"), dict) and out["nextEvent"].get("earnDateNext"):
+            em_target_expiry = str(out["nextEvent"]["earnDateNext"])[:10]
+        elif next_event_date is not None:
+            em_target_expiry = _fmt_date(next_event_date)
+
+        expected_move_payload = compute_expected_move(
+            client,
+            ticker=t,
+            expiry=em_target_expiry,
+            as_of_date=today,
+        )
+        out["expectedMove"] = expected_move_payload
+
+        # Compute strike targets if expected move is available
+        em_pct = expected_move_payload.get("expectedMovePct")
+        spot_px = expected_move_payload.get("spotPrice")
+        if em_pct is not None and spot_px is not None and em_pct > 0 and spot_px > 0:
+            out["strikeTargets"] = compute_strike_targets(em_pct, spot_px)
+        else:
+            out["strikeTargets"] = None
+    except Exception as e:
+        LOG.debug(f"[{t}] Expected move computation failed: {type(e).__name__}: {e}")
+        out["expectedMove"] = {
+            "ticker": t,
+            "source": None,
+            "expectedMovePct": None,
+            "expectedMoveDollars": None,
+            "warnings": [f"Expected move unavailable: {type(e).__name__}"],
+        }
+        out["strikeTargets"] = None
 
     # --- GO / NO-GO decision (strict, additive; does not affect core stats) ---
     try:

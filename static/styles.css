@@ -3079,3 +3079,107 @@ body.landingPage {
   .landingCtas { gap: 8px; }
 }
 
+/* ============================================================
+   Expected Move Cards (Engine 1)
+   ============================================================ */
+
+.emTargetGrid {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.emRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.60);
+  font-size: 12px;
+}
+
+.emRow .k {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.emRow .v {
+  font-weight: 800;
+  color: rgba(11, 11, 15, 0.88);
+}
+
+/* White Box: neutral */
+.emBox--white {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.70);
+}
+
+/* Blue Box: blue tint */
+.emBox--blue {
+  border-color: rgba(0, 122, 255, 0.25);
+  background: rgba(0, 122, 255, 0.06);
+}
+
+.emBox--blue .k {
+  color: rgba(0, 90, 200, 0.80);
+}
+
+.emBox--blue .v {
+  color: rgba(0, 90, 200, 0.95);
+}
+
+/* Red Box: red tint */
+.emBox--red {
+  border-color: rgba(255, 59, 48, 0.28);
+  background: rgba(255, 59, 48, 0.06);
+}
+
+.emBox--red .k {
+  color: rgba(180, 40, 35, 0.80);
+}
+
+.emBox--red .v {
+  color: rgba(180, 40, 35, 0.95);
+}
+
+/* Dark mode adjustments for EM boxes */
+@media (prefers-color-scheme: dark) {
+  .emRow {
+    background: rgba(30, 30, 35, 0.40);
+    border-color: rgba(255, 255, 255, 0.10);
+  }
+
+  .emBox--white {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .emBox--blue {
+    background: rgba(0, 122, 255, 0.10);
+    border-color: rgba(0, 122, 255, 0.30);
+  }
+
+  .emBox--blue .k {
+    color: rgba(100, 180, 255, 0.85);
+  }
+
+  .emBox--blue .v {
+    color: rgba(100, 180, 255, 0.95);
+  }
+
+  .emBox--red {
+    background: rgba(255, 59, 48, 0.10);
+    border-color: rgba(255, 59, 48, 0.30);
+  }
+
+  .emBox--red .k {
+    color: rgba(255, 120, 110, 0.85);
+  }
+
+  .emBox--red .v {
+    color: rgba(255, 120, 110, 0.95);
+  }
+}
+

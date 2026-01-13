@@ -17,6 +17,8 @@ _ADDITIVE_KEYS = {
     "tickerDealerGamma",
     "goNoGo",
     "technicals",
+    "expectedMove",
+    "strikeTargets",
 }
 
 
