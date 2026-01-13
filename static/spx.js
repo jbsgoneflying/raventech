@@ -134,6 +134,38 @@ function initTooltips() {
   });
 }
 
+// -----------------------------------------------------------------------------
+// PERFORMANCE OPTIMIZATION: Client-side response cache with stale-while-revalidate
+// -----------------------------------------------------------------------------
+const _apiCache = new Map();
+const API_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes fresh TTL
+const API_CACHE_STALE_TTL_MS = 30 * 60 * 1000; // 30 minutes stale-but-usable TTL
+
+function _getCacheKey(url) {
+  return url.split("?")[0] + "?" + new URLSearchParams(url.split("?")[1] || "").toString();
+}
+
+function _getCached(url) {
+  const key = _getCacheKey(url);
+  const entry = _apiCache.get(key);
+  if (!entry) return null;
+  const age = Date.now() - entry.ts;
+  return {
+    data: entry.data,
+    isFresh: age < API_CACHE_TTL_MS,
+    isStale: age < API_CACHE_STALE_TTL_MS,
+  };
+}
+
+function _setCache(url, data) {
+  const key = _getCacheKey(url);
+  _apiCache.set(key, { data, ts: Date.now() });
+  if (_apiCache.size > 100) {
+    const oldest = [..._apiCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    for (let i = 0; i < 20; i++) _apiCache.delete(oldest[i][0]);
+  }
+}
+
 async function fetchJson(url, { timeoutMs = 90000 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), Number(timeoutMs));
@@ -141,7 +173,9 @@ async function fetchJson(url, { timeoutMs = 90000 } = {}) {
     const r = await fetch(url, { signal: ctrl.signal });
     const txt = await r.text();
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${txt.slice(0, 300)}`);
-    return JSON.parse(txt);
+    const data = JSON.parse(txt);
+    _setCache(url, data);
+    return data;
   } catch (e) {
     if (String(e?.name || "").toLowerCase() === "aborterror") {
       throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
@@ -1766,25 +1800,51 @@ async function run() {
     weeks_limit: String(weeksLimit),
   });
 
+  const url = `/api/spx-ic?${qs.toString()}`;
+  
+  // PERFORMANCE: Show cached data immediately if available
+  const cached = _getCached(url);
+  if (cached?.isStale) {
+    render(cached.data);
+    if (status) {
+      status.textContent = "Refreshing…";
+      status.classList.remove("isError", "isOk");
+      status.classList.add("isRunning");
+      status.classList.remove("hidden");
+    }
+  }
+
   try {
     setLoading(true);
-    if (status) {
+    if (!cached?.isStale && status) {
       status.textContent = "Running…";
       status.classList.remove("isError", "isOk");
       status.classList.add("isRunning");
       status.classList.remove("hidden");
     }
-    const payload = await fetchJson(`/api/spx-ic?${qs.toString()}`);
+    const payload = await fetchJson(url);
     render(payload);
-  } catch (e) {
     if (status) {
-      status.textContent = `Error: ${String(e?.message || e)}`;
-      status.classList.remove("isRunning", "isOk");
-      status.classList.add("isError");
-      status.classList.remove("hidden");
+      status.classList.add("hidden");
     }
-    const results = $("results");
-    if (results) results.classList.toggle("hidden", true);
+  } catch (e) {
+    if (!cached?.isStale) {
+      if (status) {
+        status.textContent = `Error: ${String(e?.message || e)}`;
+        status.classList.remove("isRunning", "isOk");
+        status.classList.add("isError");
+        status.classList.remove("hidden");
+      }
+      const results = $("results");
+      if (results) results.classList.toggle("hidden", true);
+    } else {
+      // Had cached data, just note the refresh failed
+      if (status) {
+        status.textContent = "Refresh failed (showing cached data)";
+        status.classList.remove("isRunning", "isError");
+        status.classList.add("isOk");
+      }
+    }
   } finally {
     setLoading(false);
   }

@@ -1693,6 +1693,43 @@ const tradeBuilderState = {
 
 const NEAR_BREACH_THRESHOLD = 0.9;
 
+// -----------------------------------------------------------------------------
+// PERFORMANCE OPTIMIZATION: Client-side response cache with stale-while-revalidate
+// This avoids re-fetching data the user has already seen.
+// -----------------------------------------------------------------------------
+const _apiCache = new Map();
+const API_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes fresh TTL
+const API_CACHE_STALE_TTL_MS = 30 * 60 * 1000; // 30 minutes stale-but-usable TTL
+
+function _getCacheKey(url) {
+  // Normalize URL for consistent caching
+  return url.split("?")[0] + "?" + new URLSearchParams(url.split("?")[1] || "").toString();
+}
+
+function _getCached(url) {
+  const key = _getCacheKey(url);
+  const entry = _apiCache.get(key);
+  if (!entry) return null;
+  const age = Date.now() - entry.ts;
+  return {
+    data: entry.data,
+    isFresh: age < API_CACHE_TTL_MS,
+    isStale: age < API_CACHE_STALE_TTL_MS,
+  };
+}
+
+function _setCache(url, data) {
+  const key = _getCacheKey(url);
+  _apiCache.set(key, { data, ts: Date.now() });
+  // Prune old entries (keep cache size bounded)
+  if (_apiCache.size > 100) {
+    const oldest = [..._apiCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    for (let i = 0; i < 20; i++) {
+      _apiCache.delete(oldest[i][0]);
+    }
+  }
+}
+
 async function fetchJson(url) {
   const res = await fetch(url, { headers: { "Accept": "application/json" } });
   const body = await res.json().catch(() => ({}));
@@ -1700,7 +1737,37 @@ async function fetchJson(url) {
     const msg = body?.detail || `Request failed (${res.status})`;
     throw new Error(msg);
   }
+  // Cache successful responses
+  _setCache(url, body);
   return body;
+}
+
+/**
+ * Fetch with cache-first strategy for instant perceived performance.
+ * Returns { data, fromCache, isRefreshing } 
+ * If cached data exists, returns it immediately and optionally refreshes in background.
+ */
+async function fetchJsonCached(url, { forceRefresh = false, onRefresh = null } = {}) {
+  const cached = _getCached(url);
+  
+  // If we have fresh cached data and not forcing refresh, return it
+  if (cached?.isFresh && !forceRefresh) {
+    return { data: cached.data, fromCache: true, isRefreshing: false };
+  }
+  
+  // If we have stale cached data, return it immediately but refresh in background
+  if (cached?.isStale && !forceRefresh) {
+    // Background refresh
+    fetchJson(url).then((freshData) => {
+      if (onRefresh) onRefresh(freshData);
+    }).catch(() => {});
+    
+    return { data: cached.data, fromCache: true, isRefreshing: true };
+  }
+  
+  // No cache or force refresh: fetch fresh data
+  const data = await fetchJson(url);
+  return { data, fromCache: false, isRefreshing: false };
 }
 
 function recBadge(rec) {
@@ -2675,31 +2742,50 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    // Build URL
+    let url = `/api/breach?ticker=${encodeURIComponent(t)}&n=20&years=5&k=${encodeURIComponent(k)}`;
+    if (extraParams && typeof extraParams === "object") {
+      for (const [kk, vv] of Object.entries(extraParams)) {
+        if (vv === null || vv === undefined) continue;
+        url += `&${encodeURIComponent(kk)}=${encodeURIComponent(String(vv))}`;
+      }
+    }
+    if (mcEnabledPref) {
+      // Default-on conditioning for trader relevance; backend will still fail-safe if pools are too small.
+      url += `&mc=1&mc_cond_regime=1&mc_cond_quarter=1`;
+      if (mcEventOverride?.date) url += `&mc_event_date=${encodeURIComponent(String(mcEventOverride.date))}`;
+      if (mcEventOverride?.timing && String(mcEventOverride.timing).toUpperCase() !== "AUTO") {
+        url += `&mc_event_timing=${encodeURIComponent(String(mcEventOverride.timing).toUpperCase())}`;
+      }
+    }
+
+    // PERFORMANCE: Show cached data immediately if available
+    const cached = _getCached(url);
+    if (cached?.isStale) {
+      // Render cached data immediately for perceived instant response
+      render(cached.data);
+      loadEngine1Levels(t);
+      setStatus("Refreshing data...");
+    }
+
     setBusy(true);
-    setStatus(`Computing with k=${k}…`);
+    if (!cached?.isStale) {
+      setStatus(`Computing with k=${k}…`);
+    }
+
     try {
-      let url = `/api/breach?ticker=${encodeURIComponent(t)}&n=20&years=5&k=${encodeURIComponent(k)}`;
-      if (extraParams && typeof extraParams === "object") {
-        for (const [kk, vv] of Object.entries(extraParams)) {
-          if (vv === null || vv === undefined) continue;
-          url += `&${encodeURIComponent(kk)}=${encodeURIComponent(String(vv))}`;
-        }
-      }
-      if (mcEnabledPref) {
-        // Default-on conditioning for trader relevance; backend will still fail-safe if pools are too small.
-        url += `&mc=1&mc_cond_regime=1&mc_cond_quarter=1`;
-        if (mcEventOverride?.date) url += `&mc_event_date=${encodeURIComponent(String(mcEventOverride.date))}`;
-        if (mcEventOverride?.timing && String(mcEventOverride.timing).toUpperCase() !== "AUTO") {
-          url += `&mc_event_timing=${encodeURIComponent(String(mcEventOverride.timing).toUpperCase())}`;
-        }
-      }
       const payload = await fetchJson(url);
       render(payload);
       // Async live gamma visuals (do not block Engine 1 RUN completion)
       loadEngine1Levels(t);
       setStatus("");
     } catch (e) {
-      setStatus(e?.message || "Error", true);
+      // If we showed cached data, don't overwrite with error unless we have no data
+      if (!cached?.isStale) {
+        setStatus(e?.message || "Error", true);
+      } else {
+        setStatus("Refresh failed (showing cached data)");
+      }
     } finally {
       setBusy(false);
     }

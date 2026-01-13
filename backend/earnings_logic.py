@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -126,6 +127,151 @@ def _first_row(rows: list[dict]) -> Optional[dict]:
     if not rows:
         return None
     return rows[0]
+
+
+# -----------------------------------------------------------------------------
+# PERFORMANCE OPTIMIZATION: Range fetch functions
+# These functions fetch data in bulk with single API calls instead of per-event.
+# -----------------------------------------------------------------------------
+
+def _fetch_dailies_range(
+    client: OratsClient,
+    ticker: str,
+    start: dt.date,
+    end: dt.date,
+) -> Dict[str, DailyBar]:
+    """
+    Fetch daily bars for a date range in a single API call.
+    Returns a dict keyed by trade date (YYYY-MM-DD) for O(1) lookups.
+    
+    PERF: Replaces N sequential fetch_daily_bar calls with 1 range call.
+    """
+    if end < start:
+        return {}
+    try:
+        td = f"{_fmt_date(start)},{_fmt_date(end)}"
+        fields = "ticker,tradeDate,open,opPx,clsPx,close"
+        resp = client.hist_dailies(ticker=ticker, trade_date=td, fields=fields)
+        rows = resp.rows or []
+    except Exception:
+        rows = []
+    
+    out: Dict[str, DailyBar] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        td0 = str(r.get("tradeDate") or "")[:10]
+        if not td0:
+            continue
+        o = _to_float(r.get("open") or r.get("opPx") or r.get("op_px"))
+        c = _to_float(r.get("clsPx") or r.get("close") or r.get("cls_px"))
+        out[td0] = DailyBar(tradeDate=td0, open=o, clsPx=c)
+    return out
+
+
+def _fetch_cores_range(
+    client: OratsClient,
+    ticker: str,
+    start: dt.date,
+    end: dt.date,
+) -> Dict[str, dict]:
+    """
+    Fetch cores data for a date range in a single API call.
+    Returns a dict keyed by trade date (YYYY-MM-DD) for O(1) lookups.
+    
+    PERF: Replaces N sequential hist_cores calls with 1 range call.
+    """
+    if end < start:
+        return {}
+    get_fn = getattr(client, "get", None)
+    if not callable(get_fn):
+        return {}
+    try:
+        resp = get_fn(
+            "/hist/cores",
+            {
+                "ticker": ticker,
+                "fromDate": _fmt_date(start),
+                "toDate": _fmt_date(end),
+                "fields": "ticker,tradeDate,stockPrice,impErnMv",
+            },
+        )
+        rows = resp.rows or []
+    except Exception:
+        rows = []
+    
+    out: Dict[str, dict] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        td0 = str(r.get("tradeDate") or "")[:10]
+        if td0:
+            out[td0] = r
+    return out
+
+
+def _lookup_daily_bar(
+    bar_cache: Dict[str, DailyBar],
+    date_str: str,
+) -> Optional[DailyBar]:
+    """Lookup a daily bar from the prefetched cache."""
+    return bar_cache.get(date_str)
+
+
+def _find_prior_trading_day_cached(
+    bar_cache: Dict[str, DailyBar],
+    start: dt.date,
+    max_steps: int = 10,
+    require_close: bool = False,
+) -> Optional[DailyBar]:
+    """Find the prior trading day from cache, walking backwards."""
+    cur = start - dt.timedelta(days=1)
+    for _ in range(max_steps + 1):
+        bar = bar_cache.get(_fmt_date(cur))
+        if bar:
+            if require_close and bar.clsPx is None:
+                cur = cur - dt.timedelta(days=1)
+                continue
+            return bar
+        cur = cur - dt.timedelta(days=1)
+    return None
+
+
+def _find_next_trading_day_cached(
+    bar_cache: Dict[str, DailyBar],
+    start: dt.date,
+    max_steps: int = 10,
+    require_open: bool = False,
+) -> Optional[DailyBar]:
+    """Find the next trading day from cache, walking forwards."""
+    cur = start + dt.timedelta(days=1)
+    for _ in range(max_steps + 1):
+        bar = bar_cache.get(_fmt_date(cur))
+        if bar:
+            if require_open and bar.open is None:
+                cur = cur + dt.timedelta(days=1)
+                continue
+            return bar
+        cur = cur + dt.timedelta(days=1)
+    return None
+
+
+def _find_cores_row_cached(
+    cores_cache: Dict[str, dict],
+    start_date: dt.date,
+    max_steps: int = 5,
+) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Find a cores row with impErnMv from cache, walking backwards from start_date.
+    Returns (row, date_used) or (None, None) if not found.
+    """
+    cur = start_date
+    for _ in range(max_steps):
+        row = cores_cache.get(_fmt_date(cur))
+        if row and row.get("impErnMv") is not None:
+            return row, _fmt_date(cur)
+        cur = cur - dt.timedelta(days=1)
+    return None, None
 
 
 def _to_float(v: Any) -> Optional[float]:
@@ -761,6 +907,26 @@ def compute_breach_stats(
     # not the most recent earnings event in the lookback.
     current_quarter_key: Optional[str] = None
 
+    # ---------------------------------------------------------------------
+    # PERFORMANCE OPTIMIZATION: Prefetch all daily bars and cores in bulk
+    # This replaces ~80-120 sequential API calls with 2 range calls.
+    # ---------------------------------------------------------------------
+    if parsed:
+        all_dates = [e[0] for e in parsed]
+        range_start = min(all_dates) - dt.timedelta(days=15)  # Buffer for prior trading days
+        range_end = max(all_dates) + dt.timedelta(days=15)    # Buffer for next trading days
+        
+        # Single bulk fetch for all daily bars
+        _dailies_cache = _fetch_dailies_range(client, t, range_start, range_end)
+        
+        # Single bulk fetch for all cores data
+        _cores_cache = _fetch_cores_range(client, t, range_start, range_end)
+        
+        LOG.debug("Prefetched %d daily bars and %d cores rows for %s", len(_dailies_cache), len(_cores_cache), t)
+    else:
+        _dailies_cache = {}
+        _cores_cache = {}
+
     # Step 2-5: per-event computations
     out_events: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
@@ -881,26 +1047,25 @@ def compute_breach_stats(
         down_overshoot_pct: Optional[float] = None
 
         # Determine pricing date and realized window dates per spec.
+        # PERFORMANCE OPTIMIZATION: Use prefetched cache instead of per-event API calls.
         # Strict-mode guardrail: when enabled, probe until we find a bar with the field we need.
         if flags.STRICT_REALIZED_WINDOW:
-            prior_bar, _ = find_trading_day_with_shift(
-                lambda d: fetch_daily_bar(client, t, d),
-                start=earn_date - dt.timedelta(days=1),
-                direction=-1,
+            prior_bar = _find_prior_trading_day_cached(
+                _dailies_cache,
+                earn_date,
                 max_steps=10,
-                require=lambda b: b.clsPx is not None,
+                require_close=True,
             )
-            next_bar, _ = find_trading_day_with_shift(
-                lambda d: fetch_daily_bar(client, t, d),
-                start=earn_date + dt.timedelta(days=1),
-                direction=+1,
+            next_bar = _find_next_trading_day_cached(
+                _dailies_cache,
+                earn_date,
                 max_steps=10,
-                require=lambda b: b.open is not None,
+                require_open=True,
             )
         else:
-            prior_bar = get_prior_trading_day(client, t, earn_date)
-            next_bar = get_next_trading_day(client, t, earn_date)
-        earn_bar = fetch_daily_bar(client, t, _fmt_date(earn_date))
+            prior_bar = _find_prior_trading_day_cached(_dailies_cache, earn_date, max_steps=10)
+            next_bar = _find_next_trading_day_cached(_dailies_cache, earn_date, max_steps=10)
+        earn_bar = _lookup_daily_bar(_dailies_cache, _fmt_date(earn_date))
 
         if timing == "AMC":
             pricing_date_used = _fmt_date(earn_date)
@@ -951,42 +1116,24 @@ def compute_breach_stats(
             realized_window_shift_days = None
 
         # Step 3: implied move from cores using pricing_date_used
+        # PERFORMANCE OPTIMIZATION: Use prefetched cores cache instead of per-event API calls.
         if timing in ("AMC", "BMO") and pricing_date_used:
-            # if cores missing for date, retry with nearest prior trading day (max 5)
             expected_pricing_date = _parse_date(str(pricing_date_used)[:10])
-            cores_used_date = pricing_date_used
-            cores_row: Optional[dict] = None
-            cores_date = _parse_date(cores_used_date)
-            found = False
-            for i in range(0, 5):
-                try:
-                    cores_resp = client.hist_cores(
-                        ticker=t,
-                        trade_date=_fmt_date(cores_date),
-                        fields="ticker,tradeDate,stockPrice,impErnMv",
-                    )
-                    cores_row = _first_row(cores_resp.rows)
-                except OratsError as e:
-                    LOG.warning("cores fetch failed %s %s: %s", t, cores_date, e)
-                    cores_row = None
-
-                if cores_row and (cores_row.get("impErnMv") is not None):
-                    cores_used_date = str(cores_row.get("tradeDate") or _fmt_date(cores_date))[:10]
-                    found = True
-                    break
-                cores_date = cores_date - dt.timedelta(days=1)
-            if found:
+            cores_row, cores_used_date = _find_cores_row_cached(
+                _cores_cache,
+                expected_pricing_date,
+                max_steps=5,
+            )
+            
+            if cores_row and cores_used_date:
                 pricing_date_used = cores_used_date
                 pricing_date_shift_days = _shift_days(expected_pricing_date, cores_used_date)
-            else:
-                # If we never found impErnMv, preserve None shift (unknown actual).
-                pricing_date_shift_days = None
-
-            if not cores_row or cores_row.get("impErnMv") is None:
-                row_notes.append("missing cores impErnMv for pricing date after retries")
-            else:
                 imp_raw = cores_row.get("impErnMv")
                 implied_pct = _imp_to_pct(imp_raw)
+            else:
+                # If we never found impErnMv in cache, preserve None shift (unknown actual).
+                pricing_date_shift_days = None
+                row_notes.append("missing cores impErnMv for pricing date after retries")
 
         # Step 4: realized move
         if close_px is not None and open_px is not None and close_px > 0:
@@ -1300,12 +1447,18 @@ def compute_breach_stats(
         }
 
     # V3/V3.1 overlays (do not affect core breach/seasonality calculations)
-    _, regime_validation = compute_regime_backtest_view(client, t, events=out_events)
-    regime = compute_regime_overlay(client, t, quarters=quarters, n=n, years=years, k=float(k), today=(today or dt.date.today()))
-
-    # Current snapshot drives "current quarter" selection (used for wingRecommendation and trade builder)
+    # PERFORMANCE OPTIMIZATION: Run regime overlays in parallel
     now = today or dt.date.today()
-    current = _current_snapshot(client, ticker=t, as_of_date=_fmt_date(now))
+    
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_regime_backtest = executor.submit(compute_regime_backtest_view, client, t, events=out_events)
+        future_regime = executor.submit(compute_regime_overlay, client, t, quarters=quarters, n=n, years=years, k=float(k), today=now)
+        future_current = executor.submit(_current_snapshot, client, ticker=t, as_of_date=_fmt_date(now))
+        
+        _, regime_validation = future_regime_backtest.result()
+        regime = future_regime.result()
+        current = future_current.result()
+
     try:
         cq_date = _parse_date(str(current.get("asOfDate") or "")[:10])
         current_quarter_key = _quarter_key(cq_date)
@@ -1383,16 +1536,27 @@ def compute_breach_stats(
             wing_rec["confidence"] = _confidence_from_beta_ci(n=int(events_used), lo=lo, hi=hi)
         except Exception:
             pass
-    skew_overlay = compute_skew_overlay(
-        client,
-        ticker=t,
-        current_as_of_date=str(current.get("asOfDate") or str(regime.get("asOfDate") or ""))[:10],
-        events=out_events,
-        target_dte=2,
-    )
-
-    # --- Technicals (daily indicators + live overlay; additive, does not affect stats) ---
-    technicals = compute_technicals_payload(client, ticker=t, as_of_date=str(current.get("asOfDate") or _fmt_date(now))[:10])
+    # PERFORMANCE OPTIMIZATION: Run skew and technicals overlays in parallel
+    current_as_of = str(current.get("asOfDate") or str(regime.get("asOfDate") or _fmt_date(now)))[:10]
+    
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_skew = executor.submit(
+            compute_skew_overlay,
+            client,
+            ticker=t,
+            current_as_of_date=current_as_of,
+            events=out_events,
+            target_dte=2,
+        )
+        future_technicals = executor.submit(
+            compute_technicals_payload,
+            client,
+            ticker=t,
+            as_of_date=current_as_of,
+        )
+        
+        skew_overlay = future_skew.result()
+        technicals = future_technicals.result()
 
     out: Dict[str, Any] = {
         "ticker": t,

@@ -6,6 +6,7 @@ import math
 import statistics
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -2341,6 +2342,7 @@ def compute_sector_dispersion_series(
     """
     # NOTE: The old implementation did per-day per-ticker calls, which is too slow.
     # We now range-fetch each sector once and compute dispersion on intersected dates.
+    # PERFORMANCE OPTIMIZATION: Parallelize the 8 sector ticker fetches.
     out: Dict[str, float] = {}
     if len(dates) < 2 or not sector_tickers:
         return out
@@ -2350,9 +2352,16 @@ def compute_sector_dispersion_series(
     except Exception:
         return out
 
+    # Parallel fetch all sector tickers
     closes_by_ticker: Dict[str, Dict[str, float]] = {}
-    for t in sector_tickers:
-        closes_by_ticker[t] = fetch_close_map_range(client, ticker=t, start=start, end=end)
+    
+    def fetch_sector(ticker: str) -> Tuple[str, Dict[str, float]]:
+        return (ticker, fetch_close_map_range(client, ticker=ticker, start=start, end=end))
+    
+    with ThreadPoolExecutor(max_workers=min(8, len(sector_tickers))) as executor:
+        results = executor.map(fetch_sector, sector_tickers)
+        for ticker, closes in results:
+            closes_by_ticker[ticker] = closes
 
     for i in range(1, len(dates)):
         d0 = dates[i - 1]
