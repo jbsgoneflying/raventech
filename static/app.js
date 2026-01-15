@@ -2554,8 +2554,7 @@ function renderHoldRisk(payload) {
   }
   if (condNoteEl) {
     const n = hr.sample_size?.flat_open ?? 0;
-    const gate = hr.flat_open_gate ?? 0.25;
-    condNoteEl.textContent = `${n} events (gap ≤${(gate * 100).toFixed(0)}% EM)`;
+    condNoteEl.textContent = `${n} flat open events`;
   }
 
   // Render drift rates

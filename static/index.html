@@ -166,23 +166,28 @@
             <div class="sectionMeta muted" id="holdRiskMeta">—</div>
           </div>
 
-          <div class="metricGrid metricGrid--holdRisk">
-            <div class="metricCard">
+          <div class="holdRiskLayout">
+            <div class="metricCard holdRiskCard--standalone">
               <div class="metricLabel">Unconditional (all events)</div>
               <div id="holdRiskUnconditional" class="holdRiskGrid"></div>
               <div id="holdRiskUnconditionalNote" class="metricCaption muted">—</div>
             </div>
 
-            <div class="metricCard">
-              <div class="metricLabel">Conditional (flat open ≤0.25× EM)</div>
-              <div id="holdRiskConditional" class="holdRiskGrid"></div>
-              <div id="holdRiskConditionalNote" class="metricCaption muted">—</div>
-            </div>
+            <div class="holdRiskGroup">
+              <div class="holdRiskGroupLabel">Flat Open Events (gap ≤0.25× EM)</div>
+              <div class="holdRiskGroupCards">
+                <div class="metricCard">
+                  <div class="metricLabel">Conditional Breach Rates</div>
+                  <div id="holdRiskConditional" class="holdRiskGrid"></div>
+                  <div id="holdRiskConditionalNote" class="metricCaption muted">—</div>
+                </div>
 
-            <div class="metricCard">
-              <div class="metricLabel">Post-Event Drift</div>
-              <div id="holdRiskDrift" class="holdRiskGrid"></div>
-              <div id="holdRiskDriftNote" class="metricCaption muted">—</div>
+                <div class="metricCard">
+                  <div class="metricLabel">Post-Event Drift</div>
+                  <div id="holdRiskDrift" class="holdRiskGrid"></div>
+                  <div id="holdRiskDriftNote" class="metricCaption muted">—</div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
