@@ -3240,6 +3240,17 @@ body.landingPage {
 .holdRiskRow--med .hrValue { color: var(--amber); }
 .holdRiskRow--high .hrValue { color: var(--red); }
 
+/* Max deviation row styling */
+.holdRiskRow--maxdev {
+  background: rgba(0, 122, 255, 0.06);
+  border-color: rgba(0, 122, 255, 0.18);
+}
+
+.holdRiskRow--maxdev .hrValue {
+  color: var(--blue);
+  font-weight: 800;
+}
+
 /* Sub-headers for earnings close vs next day */
 .holdRiskSubhead {
   font-size: 11px;

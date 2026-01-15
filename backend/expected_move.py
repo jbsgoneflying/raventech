@@ -1092,7 +1092,37 @@ def compute_earnings_hold_risk(
     # Flat open sample size = events that passed the flat open gate
     flat_events = filter_flat_open_events(events, flat_open_gate)
     flat_open_sample_size = len(flat_events)
-    
+
+    # Compute max observed close deviation for flat open events
+    # max(abs(EC - PC) / EM) and max(abs(NC - PC) / EM)
+    # Shows how close to pain even when no breach occurred
+    max_ec_deviation: Optional[float] = None
+    max_nc_deviation: Optional[float] = None
+
+    if flat_events:
+        ec_deviations = []
+        nc_deviations = []
+
+        for ev in flat_events:
+            if ev.is_valid_for_unconditional():
+                # abs(EC - PC) / (PC * EM%)
+                deviation = abs(ev.earnings_day_close - ev.prior_close) / (
+                    ev.prior_close * ev.expected_move_pct / 100.0
+                )
+                ec_deviations.append(deviation)
+
+            if ev.is_valid_for_next_day():
+                # abs(NC - PC) / (PC * EM%)
+                deviation = abs(ev.next_day_close - ev.prior_close) / (
+                    ev.prior_close * ev.expected_move_pct / 100.0
+                )
+                nc_deviations.append(deviation)
+
+        if ec_deviations:
+            max_ec_deviation = round(max(ec_deviations), 2)
+        if nc_deviations:
+            max_nc_deviation = round(max(nc_deviations), 2)
+
     # Build the output schema per master plan
     result: Dict[str, Any] = {
         "em_source": em_source,
@@ -1109,11 +1139,15 @@ def compute_earnings_hold_risk(
         "conditional_flat_open": {
             "earnings_close": _rates_to_schema(conditional["earnings_close"]),
             "next_day_close": _rates_to_schema(conditional["next_day_close"]),
+            "max_observed_deviation": {
+                "earnings_close": max_ec_deviation,
+                "next_day_close": max_nc_deviation,
+            },
         },
         "drift": {
             "earnings_intraday": _rates_to_schema(drift["earnings_intraday"]),
             "next_day": _rates_to_schema(drift["next_day"]),
         },
     }
-    
+
     return result

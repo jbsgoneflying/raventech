@@ -441,6 +441,9 @@ class TestHoldRiskRateConsistency:
         
         for metric_group in [hr["unconditional"], hr["conditional_flat_open"], hr["drift"]]:
             for metric_name, k_rates in metric_group.items():
+                # Skip max_observed_deviation - it's a multiple, not a rate
+                if metric_name == "max_observed_deviation":
+                    continue
                 for k_val, rate in k_rates.items():
                     if rate is not None:
                         assert 0.0 <= rate <= 1.0, f"Rate out of bounds: {metric_name}[{k_val}] = {rate}"
