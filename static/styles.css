@@ -3183,3 +3183,83 @@ body.landingPage {
   }
 }
 
+/* =============================================================================
+   EARNINGS HOLD RISK SECTION
+   ============================================================================= */
+
+.metricGrid.metricGrid--holdRisk {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 980px) {
+  .metricGrid.metricGrid--holdRisk {
+    grid-template-columns: 1fr;
+  }
+}
+
+.holdRiskGrid {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.holdRiskRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.60);
+  font-size: 12px;
+}
+
+.holdRiskRow .hrLabel {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.holdRiskRow .hrValue {
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 50px;
+  text-align: right;
+}
+
+.holdRiskRow .hrK {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted2);
+  text-align: right;
+}
+
+/* Color coding for breach rates */
+.holdRiskRow--low .hrValue { color: var(--green); }
+.holdRiskRow--med .hrValue { color: var(--amber); }
+.holdRiskRow--high .hrValue { color: var(--red); }
+
+/* Sub-headers for earnings close vs next day */
+.holdRiskSubhead {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-top: 6px;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.holdRiskSubhead:first-child {
+  margin-top: 0;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  .holdRiskRow {
+    background: rgba(30, 30, 35, 0.40);
+    border-color: rgba(255, 255, 255, 0.10);
+  }
+}
+

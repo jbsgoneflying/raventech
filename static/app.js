@@ -2463,6 +2463,113 @@ function renderEarningsTable(events) {
   }
 }
 
+// --- Earnings Hold Risk Panel ---
+function renderHoldRisk(payload) {
+  const section = $("holdRiskSection");
+  if (!section) return;
+
+  const hr = payload?.earningsHoldRisk;
+  if (!hr) {
+    section.classList.add("hidden");
+    return;
+  }
+
+  section.classList.remove("hidden");
+
+  // Meta info
+  const meta = $("holdRiskMeta");
+  if (meta) {
+    const parts = [];
+    if (hr.lookback) parts.push(hr.lookback.replace("_", " "));
+    if (hr.em_source) parts.push(`EM: ${hr.em_source.replace(/_/g, " ")}`);
+    meta.textContent = parts.length ? parts.join(" · ") : "—";
+  }
+
+  // Helper to format rate
+  const fmtRate = (r) => {
+    if (r === null || r === undefined) return "—";
+    return (Number(r) * 100).toFixed(1) + "%";
+  };
+
+  // Helper to get risk class
+  const riskClass = (r) => {
+    if (r === null || r === undefined) return "";
+    const pct = Number(r);
+    if (pct <= 0.10) return "holdRiskRow--low";
+    if (pct <= 0.25) return "holdRiskRow--med";
+    return "holdRiskRow--high";
+  };
+
+  // Render unconditional rates
+  const uncondEl = $("holdRiskUnconditional");
+  const uncondNoteEl = $("holdRiskUnconditionalNote");
+  if (uncondEl) {
+    const uncond = hr.unconditional || {};
+    const ec = uncond.earnings_close || {};
+    const nc = uncond.next_day_close || {};
+    uncondEl.innerHTML = `
+      <div class="holdRiskSubhead">Earnings Close</div>
+      <div class="holdRiskRow ${riskClass(ec["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(ec["1.0"])}</span></div>
+      <div class="holdRiskRow ${riskClass(ec["1.5"])}"><span class="hrLabel">1.5× EM</span><span class="hrValue">${fmtRate(ec["1.5"])}</span></div>
+      <div class="holdRiskRow ${riskClass(ec["2.0"])}"><span class="hrLabel">2.0× EM</span><span class="hrValue">${fmtRate(ec["2.0"])}</span></div>
+      <div class="holdRiskSubhead">Next Day Close</div>
+      <div class="holdRiskRow ${riskClass(nc["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(nc["1.0"])}</span></div>
+      <div class="holdRiskRow ${riskClass(nc["1.5"])}"><span class="hrLabel">1.5× EM</span><span class="hrValue">${fmtRate(nc["1.5"])}</span></div>
+      <div class="holdRiskRow ${riskClass(nc["2.0"])}"><span class="hrLabel">2.0× EM</span><span class="hrValue">${fmtRate(nc["2.0"])}</span></div>
+    `;
+  }
+  if (uncondNoteEl) {
+    const n = hr.sample_size?.unconditional ?? 0;
+    uncondNoteEl.textContent = `${n} events`;
+  }
+
+  // Render conditional (flat open) rates
+  const condEl = $("holdRiskConditional");
+  const condNoteEl = $("holdRiskConditionalNote");
+  if (condEl) {
+    const cond = hr.conditional_flat_open || {};
+    const ec = cond.earnings_close || {};
+    const nc = cond.next_day_close || {};
+    condEl.innerHTML = `
+      <div class="holdRiskSubhead">Earnings Close</div>
+      <div class="holdRiskRow ${riskClass(ec["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(ec["1.0"])}</span></div>
+      <div class="holdRiskRow ${riskClass(ec["1.5"])}"><span class="hrLabel">1.5× EM</span><span class="hrValue">${fmtRate(ec["1.5"])}</span></div>
+      <div class="holdRiskRow ${riskClass(ec["2.0"])}"><span class="hrLabel">2.0× EM</span><span class="hrValue">${fmtRate(ec["2.0"])}</span></div>
+      <div class="holdRiskSubhead">Next Day Close</div>
+      <div class="holdRiskRow ${riskClass(nc["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(nc["1.0"])}</span></div>
+      <div class="holdRiskRow ${riskClass(nc["1.5"])}"><span class="hrLabel">1.5× EM</span><span class="hrValue">${fmtRate(nc["1.5"])}</span></div>
+      <div class="holdRiskRow ${riskClass(nc["2.0"])}"><span class="hrLabel">2.0× EM</span><span class="hrValue">${fmtRate(nc["2.0"])}</span></div>
+    `;
+  }
+  if (condNoteEl) {
+    const n = hr.sample_size?.flat_open ?? 0;
+    const gate = hr.flat_open_gate ?? 0.25;
+    condNoteEl.textContent = `${n} events (gap ≤${(gate * 100).toFixed(0)}% EM)`;
+  }
+
+  // Render drift rates
+  const driftEl = $("holdRiskDrift");
+  const driftNoteEl = $("holdRiskDriftNote");
+  if (driftEl) {
+    const drift = hr.drift || {};
+    const ei = drift.earnings_intraday || {};
+    const nd = drift.next_day || {};
+    driftEl.innerHTML = `
+      <div class="holdRiskSubhead">Intraday (EO→EC)</div>
+      <div class="holdRiskRow ${riskClass(ei["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(ei["1.0"])}</span></div>
+      <div class="holdRiskRow ${riskClass(ei["1.5"])}"><span class="hrLabel">1.5× EM</span><span class="hrValue">${fmtRate(ei["1.5"])}</span></div>
+      <div class="holdRiskRow ${riskClass(ei["2.0"])}"><span class="hrLabel">2.0× EM</span><span class="hrValue">${fmtRate(ei["2.0"])}</span></div>
+      <div class="holdRiskSubhead">Next Day (EC→NC)</div>
+      <div class="holdRiskRow ${riskClass(nd["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(nd["1.0"])}</span></div>
+      <div class="holdRiskRow ${riskClass(nd["1.5"])}"><span class="hrLabel">1.5× EM</span><span class="hrValue">${fmtRate(nd["1.5"])}</span></div>
+      <div class="holdRiskRow ${riskClass(nd["2.0"])}"><span class="hrLabel">2.0× EM</span><span class="hrValue">${fmtRate(nd["2.0"])}</span></div>
+    `;
+  }
+  if (driftNoteEl) {
+    driftNoteEl.textContent = "Post-event drift from baseline";
+  }
+}
+
 function renderQuarterCards(quarters) {
   const host = $("quarterCards");
   if (!host) return;
@@ -2669,6 +2776,7 @@ function render(payload) {
   renderSkewWings(payload);
   renderMonteCarlo(payload);
   renderTradeBuilder(payload);
+  renderHoldRisk(payload);
   try {
     if (typeof window.renderTechnicalsDailyPanel === "function") {
       window.renderTechnicalsDailyPanel(payload, { rootId: "technicalsSection", symbolOverride: payload?.ticker });
