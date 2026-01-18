@@ -457,6 +457,14 @@ def flags():
     }
 
 
+@app.get("/privacy-policy")
+def privacy_policy_page():
+    policy_path = STATIC_DIR / "privacy-policy.html"
+    if not policy_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/privacy-policy.html")
+    return FileResponse(str(policy_path))
+
+
 @app.get("/spx")
 def spx_page():
     spx_path = STATIC_DIR / "spx.html"
