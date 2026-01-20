@@ -159,7 +159,7 @@ def _path_is_public(path: str) -> bool:
     p = str(path or "")
     if p.startswith("/static/"):
         return True
-    if p in ("/api/health",):
+    if p in ("/api/health", "/privacy-policy", "/support/fasting-guide"):
         return True
     if p.startswith("/login") or p.startswith("/logout"):
         return True
@@ -463,6 +463,14 @@ def privacy_policy_page():
     if not policy_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/privacy-policy.html")
     return FileResponse(str(policy_path))
+
+
+@app.get("/support/fasting-guide")
+def fasting_guide_support_page():
+    support_path = STATIC_DIR / "support-fasting-guide.html"
+    if not support_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/support-fasting-guide.html")
+    return FileResponse(str(support_path))
 
 
 @app.get("/spx")

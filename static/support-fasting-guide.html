@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Support · Fasting Guide · Raven Tech</title>
+    <meta name="theme-color" content="#FAF8F5" />
+    <meta name="description" content="Get help and support for the Fasting Guide iOS app by Raven Tech." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <style>
+      :root {
+        --primary: #2D5A4A;
+        --primary-light: #3D6B5A;
+        --accent: #E8B86D;
+        --accent-light: #F5D77E;
+        --danger: #C94C4C;
+        --background: #FAF8F5;
+        --card-bg: #FFFDF9;
+        --text: #1A3D30;
+        --text-secondary: #5A7A6A;
+        --border: rgba(45, 90, 74, 0.12);
+        --shadow: 0 2px 8px rgba(26, 61, 48, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        background: var(--background);
+        color: var(--text);
+        line-height: 1.6;
+      }
+
+      .supportShell {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 40px 24px 80px;
+      }
+
+      .supportHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 40px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid var(--border);
+      }
+
+      .supportBrand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .supportLogo {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: var(--shadow);
+      }
+
+      .supportLogo svg {
+        width: 32px;
+        height: 32px;
+        fill: white;
+      }
+
+      .supportBrandText {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .supportBrandName {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--primary);
+        letter-spacing: -0.3px;
+      }
+
+      .supportBrandTagline {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+
+      .backLink {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 18px;
+        background: var(--primary);
+        color: white;
+        text-decoration: none;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 600;
+        transition: background 0.2s;
+      }
+
+      .backLink:hover {
+        background: var(--primary-light);
+      }
+
+      .supportTitle {
+        font-size: 36px;
+        font-weight: 800;
+        color: var(--primary);
+        margin-bottom: 8px;
+        letter-spacing: -0.5px;
+      }
+
+      .supportSubtitle {
+        font-size: 17px;
+        color: var(--text-secondary);
+        margin-bottom: 40px;
+      }
+
+      .contactCard {
+        background: var(--card-bg);
+        border: 2px solid var(--border);
+        border-radius: 16px;
+        padding: 28px;
+        margin-bottom: 32px;
+        box-shadow: var(--shadow);
+      }
+
+      .contactCard h2 {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--primary);
+        margin: 0 0 20px 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .contactCard h2 svg {
+        width: 24px;
+        height: 24px;
+        fill: var(--accent);
+      }
+
+      .contactGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+      }
+
+      .contactItem {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .contactLabel {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .contactValue {
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--text);
+      }
+
+      .contactValue a {
+        color: var(--primary);
+        text-decoration: none;
+      }
+
+      .contactValue a:hover {
+        text-decoration: underline;
+      }
+
+      .faqSection {
+        margin-bottom: 32px;
+      }
+
+      .faqSection h2 {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--primary);
+        margin: 0 0 20px 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .faqSection h2 svg {
+        width: 24px;
+        height: 24px;
+        fill: var(--accent);
+      }
+
+      .faqList {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .faqItem {
+        background: var(--card-bg);
+        border: 2px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+      }
+
+      .faqQuestion {
+        width: 100%;
+        padding: 16px 20px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+        text-align: left;
+        font-family: inherit;
+      }
+
+      .faqQuestion:hover {
+        background: rgba(45, 90, 74, 0.04);
+      }
+
+      .faqQuestion svg {
+        width: 20px;
+        height: 20px;
+        fill: var(--primary);
+        transition: transform 0.2s;
+        flex-shrink: 0;
+        margin-left: 12px;
+      }
+
+      .faqItem.open .faqQuestion svg {
+        transform: rotate(180deg);
+      }
+
+      .faqAnswer {
+        display: none;
+        padding: 0 20px 16px;
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.7;
+      }
+
+      .faqItem.open .faqAnswer {
+        display: block;
+      }
+
+      .linksCard {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+        border-radius: 16px;
+        padding: 28px;
+        margin-bottom: 32px;
+        color: white;
+      }
+
+      .linksCard h2 {
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0 0 16px 0;
+        color: white;
+      }
+
+      .linksList {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .linksList a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 16px;
+        background: rgba(255, 255, 255, 0.15);
+        color: white;
+        text-decoration: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s;
+      }
+
+      .linksList a:hover {
+        background: rgba(255, 255, 255, 0.25);
+      }
+
+      .supportFooter {
+        margin-top: 48px;
+        padding-top: 24px;
+        border-top: 2px solid var(--border);
+        text-align: center;
+      }
+
+      .supportFooter p {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin: 0 0 8px 0;
+      }
+
+      .supportFooter a {
+        color: var(--primary);
+        text-decoration: none;
+      }
+
+      .supportFooter a:hover {
+        text-decoration: underline;
+      }
+
+      @media (max-width: 600px) {
+        .supportShell {
+          padding: 24px 16px 60px;
+        }
+        .supportHeader {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 16px;
+        }
+        .supportTitle {
+          font-size: 28px;
+        }
+        .contactGrid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="supportShell">
+      <header class="supportHeader">
+        <div class="supportBrand">
+          <div class="supportLogo">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/>
+            </svg>
+          </div>
+          <div class="supportBrandText">
+            <div class="supportBrandName">Fasting Guide</div>
+            <div class="supportBrandTagline">by Raven Tech</div>
+          </div>
+        </div>
+        <a class="backLink" href="/">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+          Back to Home
+        </a>
+      </header>
+
+      <h1 class="supportTitle">Support</h1>
+      <p class="supportSubtitle">We're here to help you get the most out of Fasting Guide. Find answers below or reach out directly.</p>
+
+      <div class="contactCard">
+        <h2>
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+          </svg>
+          Contact Us
+        </h2>
+        <div class="contactGrid">
+          <div class="contactItem">
+            <span class="contactLabel">Email</span>
+            <span class="contactValue"><a href="mailto:info@raven-tech.co">info@raven-tech.co</a></span>
+          </div>
+          <div class="contactItem">
+            <span class="contactLabel">Phone</span>
+            <span class="contactValue"><a href="tel:+14178943638">(417) 894-3638</a></span>
+          </div>
+          <div class="contactItem">
+            <span class="contactLabel">Address</span>
+            <span class="contactValue">2733 E Battlefield Rd<br>Springfield, MO 65804</span>
+          </div>
+          <div class="contactItem">
+            <span class="contactLabel">Response Time</span>
+            <span class="contactValue">Within 24-48 hours</span>
+          </div>
+        </div>
+      </div>
+
+      <section class="faqSection">
+        <h2>
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/>
+          </svg>
+          Frequently Asked Questions
+        </h2>
+        <div class="faqList">
+          <div class="faqItem">
+            <button class="faqQuestion" onclick="this.parentElement.classList.toggle('open')">
+              How do I start a fast?
+              <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+            <div class="faqAnswer">
+              From the main screen, tap the "Start Fast" button. You can select your preferred fasting protocol (12:12, 16:8, 18:6, etc.) and the app will begin tracking your fast immediately. You'll see a live timer showing your progress toward your fasting goal.
+            </div>
+          </div>
+
+          <div class="faqItem">
+            <button class="faqQuestion" onclick="this.parentElement.classList.toggle('open')">
+              How do I change my fasting protocol?
+              <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+            <div class="faqAnswer">
+              Go to Settings > Default Protocol to change your preferred fasting window. You can choose from various protocols including 12:12, 14:10, 16:8, 18:6, 20:4, OMAD (one meal a day), or extended fasts. Your new protocol will apply to your next fast.
+            </div>
+          </div>
+
+          <div class="faqItem">
+            <button class="faqQuestion" onclick="this.parentElement.classList.toggle('open')">
+              Does the app work offline?
+              <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+            <div class="faqAnswer">
+              Yes! Fasting Guide works fully offline. All your fasting data, timers, and progress are stored locally on your device. An internet connection is only needed for initial sign-in and syncing data across devices if you choose to use that feature.
+            </div>
+          </div>
+
+          <div class="faqItem">
+            <button class="faqQuestion" onclick="this.parentElement.classList.toggle('open')">
+              How do I connect Apple Health?
+              <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+            <div class="faqAnswer">
+              Go to Settings > Apple Health to manage your HealthKit permissions. The app can read relevant health data to enhance your fasting insights. All Apple Health data stays on your device and is never transmitted to our servers. You can enable or disable this at any time.
+            </div>
+          </div>
+
+          <div class="faqItem">
+            <button class="faqQuestion" onclick="this.parentElement.classList.toggle('open')">
+              How do I delete my data?
+              <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+            <div class="faqAnswer">
+              You can delete your local data by going to Settings > Export Data, where you'll find an option to clear all app data. Alternatively, deleting the app from your device will remove all associated data. If you need help with data deletion, contact us at info@raven-tech.co.
+            </div>
+          </div>
+
+          <div class="faqItem">
+            <button class="faqQuestion" onclick="this.parentElement.classList.toggle('open')">
+              Is my data private?
+              <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+            <div class="faqAnswer">
+              Absolutely. Fasting Guide is designed with privacy first. We don't collect personal data, usage analytics, or advertising identifiers. Your fasting data stays on your device. Apple Health data is accessed only with your permission and never leaves your device. See our full Privacy Policy for details.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="linksCard">
+        <h2>Additional Resources</h2>
+        <div class="linksList">
+          <a href="/privacy-policy">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+            </svg>
+            Privacy Policy
+          </a>
+          <a href="mailto:info@raven-tech.co">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+            </svg>
+            Email Support
+          </a>
+          <a href="/">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+            </svg>
+            Raven Tech Home
+          </a>
+        </div>
+      </div>
+
+      <footer class="supportFooter">
+        <p>&copy; 2026 Raven Tech. All rights reserved.</p>
+        <p><a href="/">Return to Raven-Tech.co</a> · <a href="/privacy-policy">Privacy Policy</a></p>
+      </footer>
+    </main>
+  </body>
+</html>
