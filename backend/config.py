@@ -108,8 +108,8 @@ class FeatureFlags:
     # --- Engine 2: SPX weekly IC (default OFF; separate page/endpoint) ---
     ENABLE_ENGINE2_SPX_IC: bool = False
 
-    # --- Engine 3: Red Dog Reversal Scanner (default OFF) ---
-    ENABLE_ENGINE3_RED_DOG: bool = False
+    # --- Engine 3: Red Dog Reversal Scanner (default ON - UI controlled) ---
+    ENABLE_ENGINE3_RED_DOG: bool = True
     ENGINE3_CACHE_TTL_BARS: int = 6 * 3600       # 6 hours for daily bars
     ENGINE3_CACHE_TTL_SCAN: int = 30 * 60        # 30 minutes for full scan
     ENGINE3_MAX_WORKERS: int = 10                # Parallel workers for scanning
@@ -233,7 +233,7 @@ class FeatureFlags:
 
             ENABLE_ENGINE2_SPX_IC=_get_bool("ENABLE_ENGINE2_SPX_IC", False),
 
-            ENABLE_ENGINE3_RED_DOG=_get_bool("ENABLE_ENGINE3_RED_DOG", False),
+            ENABLE_ENGINE3_RED_DOG=_get_bool("ENABLE_ENGINE3_RED_DOG", True),
             ENGINE3_CACHE_TTL_BARS=_get_int("ENGINE3_CACHE_TTL_BARS", 6 * 3600),
             ENGINE3_CACHE_TTL_SCAN=_get_int("ENGINE3_CACHE_TTL_SCAN", 30 * 60),
             ENGINE3_MAX_WORKERS=_get_int("ENGINE3_MAX_WORKERS", 10),
