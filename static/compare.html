@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Compare · Earnings Rank</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Compare and rank multiple tickers for earnings plays." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      /* Compare page specific styles */
+      .tickerInputWide {
+        width: 100%;
+        max-width: 400px;
+        font-family: inherit;
+      }
+
+      .tierSummary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 16px 0;
+      }
+
+      .tierCount {
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .tierCount--slamDunk { background: rgba(52, 199, 89, 0.15); color: #0c4626; border: 1px solid rgba(52, 199, 89, 0.3); }
+      .tierCount--strong { background: rgba(48, 209, 88, 0.12); color: #0c4626; border: 1px solid rgba(48, 209, 88, 0.25); }
+      .tierCount--standard { background: rgba(0, 122, 255, 0.12); color: #003d80; border: 1px solid rgba(0, 122, 255, 0.25); }
+      .tierCount--caution { background: rgba(255, 149, 0, 0.12); color: #804a00; border: 1px solid rgba(255, 149, 0, 0.25); }
+      .tierCount--avoid { background: rgba(255, 59, 48, 0.12); color: #b42823; border: 1px solid rgba(255, 59, 48, 0.25); }
+
+      .rankingsGrid {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .rankCard {
+        padding: 16px;
+        border-radius: 16px;
+        border: 1px solid rgba(15, 23, 42, 0.10);
+        background: rgba(255, 255, 255, 0.85);
+        box-shadow: 0 4px 20px rgba(15, 20, 30, 0.08);
+        backdrop-filter: blur(12px);
+      }
+
+      .rankCard--slamDunk { border-left: 4px solid #34C759; }
+      .rankCard--strong { border-left: 4px solid #30D158; }
+      .rankCard--standard { border-left: 4px solid #007AFF; }
+      .rankCard--caution { border-left: 4px solid #FF9500; }
+      .rankCard--avoid { border-left: 4px solid #FF3B30; }
+
+      .rankCardHeader {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .rankBadge {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(15, 23, 42, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 800;
+        color: rgba(15, 23, 42, 0.7);
+      }
+
+      .rankCard--slamDunk .rankBadge { background: rgba(52, 199, 89, 0.2); color: #0c4626; }
+      .rankCard--strong .rankBadge { background: rgba(48, 209, 88, 0.15); color: #0c4626; }
+
+      .rankTickerInfo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1;
+      }
+
+      .rankTickerLogo {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        object-fit: contain;
+        background: #fff;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+      }
+
+      .rankTickerSymbol {
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .rankTierBadge {
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+      }
+
+      .rankTierBadge--slamDunk { background: #34C759; color: #fff; }
+      .rankTierBadge--strong { background: #30D158; color: #fff; }
+      .rankTierBadge--standard { background: #007AFF; color: #fff; }
+      .rankTierBadge--caution { background: #FF9500; color: #fff; }
+      .rankTierBadge--avoid { background: #FF3B30; color: #fff; }
+
+      .rankScore {
+        font-size: 14px;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.6);
+      }
+
+      .factorRow {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: 8px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(15, 23, 42, 0.08);
+      }
+
+      .factorCell {
+        text-align: center;
+        padding: 6px 4px;
+      }
+
+      .factorLabel {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: rgba(15, 23, 42, 0.5);
+        margin-bottom: 4px;
+      }
+
+      .factorValue {
+        font-size: 13px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+
+      .factorStatus {
+        font-size: 12px;
+      }
+
+      .factorStatus--good { color: #34C759; }
+      .factorStatus--ok { color: #FF9500; }
+      .factorStatus--poor { color: #FF3B30; }
+
+      .rankCardActions {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(15, 23, 42, 0.08);
+      }
+
+      .rankCardLink {
+        font-size: 12px;
+        font-weight: 600;
+        color: #007AFF;
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .rankCardLink:hover {
+        text-decoration: underline;
+      }
+
+      .detailsToggle {
+        font-size: 12px;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.6);
+        background: none;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .detailsToggle:hover {
+        color: rgba(15, 23, 42, 0.8);
+      }
+
+      .rankCardDetails {
+        display: none;
+        margin-top: 12px;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.03);
+        border-radius: 10px;
+        font-size: 12px;
+      }
+
+      .rankCardDetails.open {
+        display: block;
+      }
+
+      .detailsGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+      }
+
+      .detailItem {
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 8px;
+      }
+
+      .detailLabel {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: rgba(15, 23, 42, 0.5);
+        margin-bottom: 4px;
+      }
+
+      .detailValue {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .loadingState {
+        text-align: center;
+        padding: 40px 20px;
+        color: rgba(15, 23, 42, 0.6);
+      }
+
+      .errorsList {
+        margin-top: 16px;
+        padding: 12px;
+        background: rgba(255, 59, 48, 0.08);
+        border-radius: 10px;
+        border: 1px solid rgba(255, 59, 48, 0.2);
+      }
+
+      .errorsList h4 {
+        font-size: 12px;
+        font-weight: 700;
+        color: #b42823;
+        margin: 0 0 8px 0;
+      }
+
+      .errorItem {
+        font-size: 12px;
+        color: rgba(15, 23, 42, 0.7);
+        margin: 4px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Compare · Rank earnings plays by composite score</div>
+          </div>
+        </div>
+        <div class="tbInputs topNav">
+          <a class="primaryButton" href="/" style="text-decoration:none;">Calendar</a>
+          <a class="primaryButton" href="/breach" style="text-decoration:none;">Engine 1</a>
+          <a id="engine2Link" class="primaryButton hidden" href="/spx" style="text-decoration:none;">Engine 2</a>
+          <a class="primaryButton" href="/red-dog" style="text-decoration:none;">Engine 3</a>
+          <a class="primaryButton primaryButton--active" href="/compare" style="text-decoration:none;">Compare</a>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Controls">
+        <form id="form" class="controlBarForm">
+          <div class="controlGroup" style="flex: 2;">
+            <label class="controlLabel" for="tickers">
+              Tickers (up to 10)
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Tickers help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Multi-Ticker Comparison</div>
+                  <div class="tipBody">
+                    <p>Enter up to <b>10 tickers</b> separated by commas to compare and rank them for earnings plays.</p>
+                    <p><b>Example:</b> AAPL, MSFT, NVDA, GOOGL, META</p>
+                    <p>Each ticker is analyzed using Engine 1's earnings breach framework and scored on multiple factors.</p>
+                  </div>
+                </div>
+              </span>
+            </label>
+            <input id="tickers" name="tickers" class="controlInput tickerInputWide" inputmode="text" placeholder="AAPL, MSFT, NVDA, GOOGL, META" autocomplete="off" />
+          </div>
+
+          <div class="controlGroup">
+            <label class="controlLabel" for="k">
+              Breach multiple
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Breach multiple help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Breach multiple (k)</div>
+                  <div class="tipBody">
+                    <p><b>Breach</b> means the realized move exceeded k × implied move.</p>
+                    <ul>
+                      <li><b>k=1.0×</b>: standard breach threshold</li>
+                      <li><b>k=1.5× / 2.0×</b>: focuses on larger tail events</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </label>
+            <select id="k" name="k" class="controlSelect">
+              <option value="1.0" selected>1.0×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2.0">2.0×</option>
+            </select>
+          </div>
+
+          <div class="controlSpacer"></div>
+
+          <button type="submit" class="primaryButton">Compare</button>
+        </form>
+      </section>
+
+      <section id="results" class="surface hidden">
+        <div class="sectionHeader">
+          <h2 class="sectionTitle">Rankings</h2>
+          <div id="resultsMeta" class="sectionMeta muted">—</div>
+        </div>
+
+        <div id="tierSummary" class="tierSummary"></div>
+
+        <div id="rankingsGrid" class="rankingsGrid"></div>
+
+        <div id="errorsList" class="errorsList hidden"></div>
+      </section>
+
+      <section class="surface" style="margin-top: 24px;">
+        <div class="sectionHeader">
+          <h2 class="sectionTitle">
+            How Ranking Works
+            <span class="tipWrap">
+              <button class="tipBtn" type="button" aria-label="Ranking methodology" aria-expanded="false">i</button>
+              <div class="tipPanel" role="tooltip">
+                <div class="tipTitle">Composite Scoring Methodology</div>
+                <div class="tipBody">
+                  <p>Each ticker is scored on a 0-100 scale based on weighted factors. Higher scores indicate better risk/reward for selling earnings premium.</p>
+                  <p><b>Note:</b> This does NOT use the binary GO/NO-GO flag. Instead, each underlying factor is scored on a gradient to give you nuanced rankings.</p>
+                </div>
+              </div>
+            </span>
+          </h2>
+        </div>
+
+        <div class="taPanel">
+          <div class="taGrid taGrid--3">
+            <div class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">Breach Rate (25%)</div>
+              </div>
+              <div class="taCardInterp muted">Historical frequency of moves exceeding the implied. Lower = better.</div>
+            </div>
+
+            <div class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">IV Elevation (20%)</div>
+              </div>
+              <div class="taCardInterp muted">IV30 percentile rank. Higher IV = richer premium to sell.</div>
+            </div>
+
+            <div class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">EM Richness (15%)</div>
+              </div>
+              <div class="taCardInterp muted">Expected move vs historical median realized. Higher ratio = better cushion.</div>
+            </div>
+
+            <div class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">Liquidity (15%)</div>
+              </div>
+              <div class="taCardInterp muted">Underlying volume + option spread quality. Better liquidity = easier execution.</div>
+            </div>
+
+            <div class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">Tail Coverage (10%)</div>
+              </div>
+              <div class="taCardInterp muted">EM coverage of P90 realized move. Protection against fat tails.</div>
+            </div>
+
+            <div class="taCard">
+              <div class="taCardTop">
+                <div class="taCardTitle">Market Regime (10%)</div>
+              </div>
+              <div class="taCardInterp muted">SPX gamma, RV acceleration, forced flows. Macro backdrop quality.</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; padding: 14px; background: rgba(15, 23, 42, 0.03); border-radius: 12px;">
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 8px;">Tier Definitions</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px;">
+            <span><span class="rankTierBadge rankTierBadge--slamDunk">Slam Dunk</span> 80-100 pts</span>
+            <span><span class="rankTierBadge rankTierBadge--strong">Strong</span> 65-79 pts</span>
+            <span><span class="rankTierBadge rankTierBadge--standard">Standard</span> 50-64 pts</span>
+            <span><span class="rankTierBadge rankTierBadge--caution">Caution</span> 35-49 pts</span>
+            <span><span class="rankTierBadge rankTierBadge--avoid">Avoid</span> 0-34 pts</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/ui_kit.js"></script>
+    <script src="/static/compare.js"></script>
+    <script>
+      // Show Engine 2 link if enabled
+      (async () => {
+        try {
+          const res = await fetch("/api/flags");
+          if (res.ok) {
+            const flags = await res.json();
+            if (flags.ENGINE2_ENABLED || flags.ENABLE_ENGINE2 || flags.ENABLE_ENGINE_2) {
+              document.getElementById("engine2Link")?.classList.remove("hidden");
+            }
+          }
+        } catch {}
+      })();
+    </script>
+  </body>
+</html>

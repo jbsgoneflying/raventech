@@ -36,6 +36,7 @@ from backend.fmp_snapshot import FMP_EARNINGS_SNAPSHOT_KEY, load_fmp_earnings_sn
 from backend.macro_event_stats import compute_macro_event_stats
 from backend.fmp_client import FmpClient, FmpError
 from backend.engine3_screener import compute_engine3_scan, compute_single_ticker_scan
+from backend.breach_ranker import rank_tickers, summarize_tiers
 
 
 try:
@@ -901,6 +902,92 @@ def breach(
     except Exception as e:
         LOG.exception("Unhandled failure")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/breach-compare")
+def breach_compare(
+    tickers: str = Query(..., description="Comma-separated list of tickers (max 10)"),
+    k: float = Query(1.0, gt=0.0, description="Breach multiple (1.0, 1.5, 2.0)"),
+    n: int = Query(20, ge=1, le=50, description="Number of earnings events to analyze"),
+    years: int = Query(5, ge=1, le=10, description="Lookback years"),
+):
+    """
+    Compare and rank multiple tickers for earnings plays.
+    
+    Returns ranked list with composite scores based on:
+    - Breach rate (25%)
+    - IV elevation (20%)
+    - EM richness (15%)
+    - Liquidity (15%)
+    - Tail coverage (10%)
+    - Market regime (10%)
+    - Event risk (5%)
+    """
+    try:
+        # Parse and validate tickers
+        ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        ticker_list = list(dict.fromkeys(ticker_list))  # Dedupe, preserve order
+        
+        if not ticker_list:
+            raise HTTPException(status_code=400, detail="No valid tickers provided")
+        
+        if len(ticker_list) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 tickers allowed")
+        
+        LOG.info(f"Breach compare: {len(ticker_list)} tickers at k={k}")
+        
+        # Fetch breach data for each ticker
+        client = _get_client()
+        benzinga_client = _get_benzinga_client_optional()
+        base_flags = get_flags()
+        
+        payloads = []
+        errors = []
+        
+        for ticker in ticker_list:
+            try:
+                payload = compute_breach_stats(
+                    client=client,
+                    ticker=ticker,
+                    n=n,
+                    years=years,
+                    k=k,
+                    trade_builder_inputs=None,
+                    flags_override=base_flags,
+                    benzinga_client=benzinga_client,
+                )
+                payloads.append((ticker, payload))
+            except Exception as e:
+                LOG.warning(f"Failed to fetch {ticker}: {e}")
+                errors.append({"ticker": ticker, "error": str(e)})
+        
+        # Rank the tickers
+        rankings = rank_tickers(payloads)
+        tier_summary = summarize_tiers(rankings)
+        
+        return {
+            "asOfDate": dt.date.today().isoformat(),
+            "k": k,
+            "n": n,
+            "years": years,
+            "tickersRequested": len(ticker_list),
+            "tickersAnalyzed": len(payloads),
+            "summary": tier_summary,
+            "rankings": rankings,
+            "errors": errors if errors else None,
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (breach-compare)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/compare")
+def serve_compare():
+    """Serve the compare page."""
+    return FileResponse(STATIC / "compare.html", media_type="text/html")
 
 
 @app.get("/api/calendar")
