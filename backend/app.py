@@ -1199,7 +1199,7 @@ def engine3_red_dog_scan(
     - standard: Score 50-74 (decent setups)
     - watchlist: Combined and sorted by score
     """
-    _require_auth(request)
+    # Auth handled by middleware
 
     flags = get_flags()
     if not flags.ENABLE_ENGINE3_RED_DOG:
@@ -1265,7 +1265,7 @@ def engine3_red_dog_ticker(
 
     Analyzes a specific ticker for Red Dog Reversal setup with full indicator details.
     """
-    _require_auth(request)
+    # Auth handled by middleware
 
     flags = get_flags()
     if not flags.ENABLE_ENGINE3_RED_DOG:
