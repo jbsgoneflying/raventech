@@ -946,8 +946,8 @@ def breach_compare(
         errors = []
         
         def fetch_single(ticker: str):
-            """Fetch breach stats for a single ticker."""
-            return ticker, compute_breach_stats(
+            """Fetch breach stats + goNoGo (for liquidity) for a single ticker."""
+            payload = compute_breach_stats(
                 client=client,
                 ticker=ticker,
                 n=n,
@@ -957,6 +957,18 @@ def breach_compare(
                 flags_override=base_flags,
                 benzinga_client=benzinga_client,
             )
+            # Add goNoGo checks (includes critical liquidity data)
+            try:
+                payload["goNoGo"] = compute_go_no_go(
+                    client, 
+                    ticker=ticker, 
+                    payload=payload, 
+                    benzinga_client=benzinga_client
+                )
+            except Exception as e:
+                LOG.warning(f"goNoGo failed for {ticker}: {e}")
+                # Continue without goNoGo - liquidity will show as N/A
+            return ticker, payload
         
         # Use ThreadPoolExecutor to fetch all tickers in parallel
         with ThreadPoolExecutor(max_workers=min(len(ticker_list), 5)) as executor:
@@ -964,7 +976,7 @@ def breach_compare(
             for future in as_completed(futures):
                 ticker = futures[future]
                 try:
-                    _, payload = future.result(timeout=45)  # 45s per ticker max
+                    _, payload = future.result(timeout=60)  # 60s per ticker (goNoGo adds time)
                     payloads.append((ticker, payload))
                 except Exception as e:
                     LOG.warning(f"Failed to fetch {ticker}: {e}")

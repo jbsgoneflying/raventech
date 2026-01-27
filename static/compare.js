@@ -174,8 +174,15 @@
       </div>
     `;
 
+    // Liquidity warning banner (critical)
+    const liqWarning = item.liquidityWarning;
+    const warningHtml = liqWarning
+      ? `<div class="liquidityWarning">⚠️ ${escapeHtml(liqWarning)}</div>`
+      : "";
+
     return `
-      <div class="rankCard rankCard--${tier}" data-ticker="${ticker}">
+      <div class="rankCard rankCard--${tier}${liqWarning ? " rankCard--liqWarning" : ""}" data-ticker="${ticker}">
+        ${warningHtml}
         <div class="rankCardHeader">
           <div class="rankBadge">#${rank}</div>
           <div class="rankTickerInfo">
