@@ -987,7 +987,10 @@ def breach_compare(
 @app.get("/compare")
 def serve_compare():
     """Serve the compare page."""
-    return FileResponse(STATIC / "compare.html", media_type="text/html")
+    compare_path = STATIC_DIR / "compare.html"
+    if not compare_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/compare.html")
+    return FileResponse(str(compare_path))
 
 
 @app.get("/api/calendar")
