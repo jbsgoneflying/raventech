@@ -1192,7 +1192,7 @@ def engine3_red_dog_scan(
     """
     Engine 3: Red Dog Reversal Scanner
 
-    Scans SP100 + Nasdaq100 for Red Dog Reversal setups with A+ quality scoring.
+    Scans SP500 + Nasdaq100 (516 tickers) for Red Dog Reversal setups with A+ quality scoring.
 
     Returns setups categorized by grade:
     - aPlus: Score >= 75 (high-quality setups)

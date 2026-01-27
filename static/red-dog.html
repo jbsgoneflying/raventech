@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Raven-Tech.co · Engine 3 · Red Dog Reversal</title>
     <meta name="theme-color" content="#f5f5f7" />
-    <meta name="description" content="Raven-Tech.co — Engine 3 Red Dog Reversal scanner with A+ quality scoring for SP100 + Nasdaq100 (ORATS EOD)." />
+    <meta name="description" content="Raven-Tech.co — Engine 3 Red Dog Reversal scanner with A+ quality scoring for SP500 + Nasdaq100 (ORATS EOD)." />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
     <link rel="stylesheet" href="/static/styles.css" />
@@ -204,6 +204,108 @@
         font-weight: 500;
         line-height: 1.35;
       }
+
+      /* Gamma environment indicators */
+      .gammaPositive {
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .gammaNegative {
+        color: rgba(180, 40, 35, 0.95);
+      }
+
+      .gammaEnvSupportive {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+        font-weight: 800;
+        display: inline-block;
+      }
+
+      .gammaEnvChallenging {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(255, 159, 10, 0.14);
+        border: 1px solid rgba(255, 159, 10, 0.30);
+        color: rgba(180, 100, 0, 0.95);
+        font-weight: 800;
+        display: inline-block;
+      }
+
+      .gammaEnvUnknown {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(11, 11, 15, 0.06);
+        border: 1px solid rgba(11, 11, 15, 0.12);
+        color: rgba(11, 11, 15, 0.70);
+        font-weight: 800;
+        display: inline-block;
+      }
+
+      #gammaRecCard .taCardState,
+      #trendRecCard .taCardState {
+        white-space: normal;
+        line-height: 1.45;
+      }
+
+      /* Trend status indicators */
+      .trendAbove {
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .trendBelow {
+        color: rgba(180, 40, 35, 0.95);
+      }
+
+      .favorBullish {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+        font-weight: 800;
+        display: inline-block;
+      }
+
+      .favorBearish {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(255, 59, 48, 0.14);
+        border: 1px solid rgba(255, 59, 48, 0.30);
+        color: rgba(180, 40, 35, 0.95);
+        font-weight: 800;
+        display: inline-block;
+      }
+
+      /* Trend alignment badges on signal cards */
+      .trendAlignBadge {
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+      }
+
+      .trendAlignBadge.aligned {
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.25);
+        color: rgba(12, 70, 38, 0.90);
+      }
+
+      .trendAlignBadge.counter {
+        background: rgba(255, 159, 10, 0.14);
+        border: 1px solid rgba(255, 159, 10, 0.28);
+        color: rgba(180, 100, 0, 0.95);
+      }
+
+      .trendAlignBadge.unknown {
+        background: rgba(11, 11, 15, 0.06);
+        border: 1px solid rgba(11, 11, 15, 0.12);
+        color: rgba(11, 11, 15, 0.60);
+      }
     </style>
   </head>
   <body>
@@ -282,7 +384,7 @@
             Scan Universe
           </button>
         </form>
-        <div id="status" class="status">Click "Scan Universe" to find Red Dog Reversal setups in SP100 + Nasdaq100.</div>
+        <div id="status" class="status">Click "Scan Universe" to find Red Dog Reversal setups in SP500 + Nasdaq100 (516 tickers).</div>
       </section>
 
       <section class="results hidden" id="results">
@@ -298,7 +400,7 @@
                   <div class="tipBody">
                     <p>Overview of the current scan results:</p>
                     <ul>
-                      <li><b>Universe</b>: Total tickers scanned (SP100 + Nasdaq100)</li>
+                      <li><b>Universe</b>: Total tickers scanned (SP500 + Nasdaq100 = 516 unique)</li>
                       <li><b>Setups Found</b>: Red Dog patterns detected</li>
                       <li><b>A+ Setups</b>: High-quality setups (score >= 75)</li>
                     </ul>
@@ -312,7 +414,7 @@
             <div class="metricCard">
               <div class="metricLabel">Universe Scanned</div>
               <div id="statScanned" class="metricValue mono">—</div>
-              <div class="metricCaption muted">SP100 + Nasdaq100</div>
+              <div class="metricCaption muted">SP500 + Nasdaq100</div>
             </div>
             <div class="metricCard">
               <div class="metricLabel">Setups Found</div>
@@ -328,6 +430,205 @@
               <div class="metricLabel">Scan Duration</div>
               <div id="statDuration" class="metricValue mono">—</div>
               <div class="metricCaption muted">Processing time</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Market Gamma Context -->
+        <section class="surface" id="gammaSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Market Gamma Context
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Market gamma help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Market Gamma Context (SPX Dealer Positioning)</div>
+                  <div class="tipBody">
+                    <p><b>What is dealer gamma?</b> Options market makers (dealers) must hedge their positions. When they're "long gamma," they buy dips and sell rips. When "short gamma," they do the opposite.</p>
+                    <p><b>Why it matters for Red Dog:</b></p>
+                    <ul>
+                      <li><b>Positive (Long) Gamma</b>: Dealers are your ally. Their hedging naturally supports mean reversion — they buy weakness and sell strength, creating "cushions" at extremes.</li>
+                      <li><b>Negative (Short) Gamma</b>: Dealers work against you. Their hedging amplifies moves — they sell weakness and buy strength, making breakdowns more likely to accelerate rather than reverse.</li>
+                    </ul>
+                    <p><b>How to use it:</b></p>
+                    <ul>
+                      <li><b>Positive gamma</b>: Trade Red Dog setups with normal position sizing. The environment supports reversals.</li>
+                      <li><b>Negative gamma</b>: Be selective — only take A+ setups, use smaller size, or require additional confluence (S/R, volume climax).</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="gammaMeta">—</div>
+          </div>
+          <div class="taPanel">
+            <div class="taGrid taGrid--4">
+              <div class="taCard" id="gammaSignCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    SPX Dealer Gamma
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Gamma sign help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Net Dealer Gamma Position</div>
+                        <div class="tipBody">
+                          <p>Computed from SPX/SPXW option chain near spot (±3% band). Shows whether dealers are net long or short gamma.</p>
+                          <p><b>Positive</b>: Market has natural "shock absorbers" — extremes tend to mean-revert.</p>
+                          <p><b>Negative</b>: Market is "slippery" — moves can accelerate as dealers hedge in the same direction.</p>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="gammaSignValue" class="taCardState">—</div>
+                <div id="gammaSignNote" class="taCardInterp muted">—</div>
+              </div>
+
+              <div class="taCard" id="gammaEnvCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Red Dog Environment
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Environment help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Mean Reversion Environment</div>
+                        <div class="tipBody">
+                          <p>Assessment of how favorable current conditions are for Red Dog Reversal patterns:</p>
+                          <ul>
+                            <li><b>Supportive ✓</b>: Positive gamma creates natural mean-reversion pressure. Failed breakdowns are more likely to reverse.</li>
+                            <li><b>Challenging ⚠</b>: Negative gamma means momentum can accelerate. Be more selective with setups.</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="gammaEnvValue" class="taCardState">—</div>
+                <div id="gammaEnvNote" class="taCardInterp muted">—</div>
+              </div>
+
+              <div class="taCard" id="gammaRecCard" style="grid-column: span 2;">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Gamma Guidance
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Recommendation help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">How to Trade in This Environment</div>
+                        <div class="tipBody">
+                          <p>Actionable guidance based on current dealer gamma positioning:</p>
+                          <ul>
+                            <li><b>Green light</b>: Trade normally. Use standard position sizing and entry rules.</li>
+                            <li><b>Caution</b>: Be selective. Consider only A+ setups, reduce position size, or require additional confirmation (support/resistance, volume climax, broader market context).</li>
+                          </ul>
+                          <p><b>Remember:</b> Gamma is context, not a hard gate. A strong A+ setup can still work in negative gamma — just manage risk accordingly.</p>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="gammaRecValue" class="taCardState" style="font-size: 14px; line-height: 1.4;">—</div>
+                <div id="gammaRecNote" class="taCardInterp muted">—</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SPX 21 EMA Trend Filter -->
+        <section class="surface" id="trendSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              SPX Trend Filter (21 EMA)
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Trend filter help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">SPX 21 EMA Trend Filter</div>
+                  <div class="tipBody">
+                    <p><b>Why the 21 EMA?</b> Scott Redler (who popularized Red Dog) uses the 8/21 EMA as trend filters. The 21 EMA captures the intermediate-term trend direction.</p>
+                    <p><b>The Rule:</b></p>
+                    <ul>
+                      <li><b>SPX above 21 EMA</b>: Favor BULLISH Red Dog setups (failed breakdowns). These trade WITH the uptrend.</li>
+                      <li><b>SPX below 21 EMA</b>: Favor BEARISH Red Dog setups (failed breakouts). These trade WITH the downtrend.</li>
+                    </ul>
+                    <p><b>Counter-trend trades</b> (bullish in downtrend, bearish in uptrend) CAN work, but require higher conviction — A+ scores, tight stops, and additional confluence.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="trendMeta">—</div>
+          </div>
+          <div class="taPanel">
+            <div class="taGrid taGrid--4">
+              <div class="taCard" id="trendStatusCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    SPX vs 21 EMA
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="EMA status help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Current SPX Position</div>
+                        <div class="tipBody">
+                          <p>Shows whether SPX (using SPY as proxy) is currently trading above or below its 21-day Exponential Moving Average.</p>
+                          <p><b>Above</b>: Uptrend environment — bullish setups are "with trend"</p>
+                          <p><b>Below</b>: Downtrend environment — bearish setups are "with trend"</p>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="trendStatusValue" class="taCardState">—</div>
+                <div id="trendStatusNote" class="taCardInterp muted">—</div>
+              </div>
+
+              <div class="taCard" id="trendFavorCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Favored Direction
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Favored direction help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Which Setups to Favor</div>
+                        <div class="tipBody">
+                          <p>Based on the 21 EMA position, this indicates which Red Dog direction has higher probability:</p>
+                          <ul>
+                            <li><b>Favor Bullish</b>: Failed breakdowns in an uptrend have natural tailwinds. Take these with normal sizing.</li>
+                            <li><b>Favor Bearish</b>: Failed breakouts in a downtrend have natural tailwinds. Take these with normal sizing.</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="trendFavorValue" class="taCardState">—</div>
+                <div id="trendFavorNote" class="taCardInterp muted">—</div>
+              </div>
+
+              <div class="taCard" id="trendRecCard" style="grid-column: span 2;">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Trend Guidance
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Trend guidance help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">How to Apply the Trend Filter</div>
+                        <div class="tipBody">
+                          <p><b>With-trend setups</b>: Trade normally with standard position sizing.</p>
+                          <p><b>Counter-trend setups</b>: Exercise caution:</p>
+                          <ul>
+                            <li>Only take A+ quality scores (75+)</li>
+                            <li>Use smaller position size (50-75% normal)</li>
+                            <li>Set tighter stops</li>
+                            <li>Require additional confluence (S/R, volume climax)</li>
+                          </ul>
+                          <p><b>Important:</b> This is a probability filter, not a hard gate. Counter-trend A+ setups can still work — just manage risk.</p>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="trendRecValue" class="taCardState" style="font-size: 14px; line-height: 1.4;">—</div>
+                <div id="trendRecNote" class="taCardInterp muted">—</div>
+              </div>
             </div>
           </div>
         </section>

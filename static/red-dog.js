@@ -131,6 +131,117 @@ function renderStats(payload) {
   $("statsMeta").textContent = `As of ${payload.asOfDate || "—"}`;
 }
 
+function renderGammaContext(payload) {
+  const gamma = payload.marketGamma || {};
+  const available = gamma.available !== false;
+  
+  // Update meta with data source
+  const expiry = gamma.expiry ? `SPX expiry ${gamma.expiry}` : "SPX";
+  const spot = gamma.spot ? ` · Spot ${fmt0(gamma.spot)}` : "";
+  const dataSource = gamma.dataSource;
+  let sourceLabel = "";
+  if (dataSource && dataSource.startsWith("eod:")) {
+    const eodDate = dataSource.split(":")[1];
+    sourceLabel = ` · EOD ${eodDate}`;
+  } else if (dataSource === "live") {
+    sourceLabel = " · Live";
+  }
+  $("gammaMeta").textContent = available ? `${expiry}${spot}${sourceLabel}` : "Unavailable";
+  
+  // Gamma Sign
+  const sign = gamma.netGammaSign || "unknown";
+  const signEl = $("gammaSignValue");
+  if (sign === "positive") {
+    signEl.innerHTML = `<span class="gammaPositive">POSITIVE ✓</span>`;
+    $("gammaSignNote").textContent = "Dealers are long gamma — they buy dips, sell rips.";
+  } else if (sign === "negative") {
+    signEl.innerHTML = `<span class="gammaNegative">NEGATIVE ⚠</span>`;
+    $("gammaSignNote").textContent = "Dealers are short gamma — they sell dips, buy rips.";
+  } else {
+    signEl.textContent = "—";
+    $("gammaSignNote").textContent = "Unable to determine dealer positioning.";
+  }
+  
+  // Environment
+  const env = gamma.environment || "unknown";
+  const envEl = $("gammaEnvValue");
+  if (env === "supportive") {
+    envEl.innerHTML = `<span class="gammaEnvSupportive">Supportive ✓</span>`;
+    $("gammaEnvNote").textContent = "Mean reversion patterns have dealer flow as a tailwind.";
+  } else if (env === "challenging") {
+    envEl.innerHTML = `<span class="gammaEnvChallenging">Challenging ⚠</span>`;
+    $("gammaEnvNote").textContent = "Momentum can accelerate — be more selective.";
+  } else {
+    envEl.innerHTML = `<span class="gammaEnvUnknown">Unknown</span>`;
+    $("gammaEnvNote").textContent = "Gamma context unavailable.";
+  }
+  
+  // Recommendation
+  const rec = gamma.recommendation || "Proceed based on pattern quality alone.";
+  $("gammaRecValue").textContent = rec;
+  
+  // Note with explanation
+  const explanation = gamma.explanation || "";
+  $("gammaRecNote").textContent = explanation ? `Why: ${explanation.slice(0, 200)}${explanation.length > 200 ? '...' : ''}` : "";
+}
+
+function renderTrendContext(payload) {
+  const trend = payload.marketTrend || {};
+  const available = trend.available !== false;
+  
+  // Update meta with data source
+  const price = trend.currentPrice ? `SPY ${fmt2(trend.currentPrice)}` : "";
+  const ema = trend.ema21 ? ` · 21 EMA ${fmt2(trend.ema21)}` : "";
+  const dataSource = trend.dataSource;
+  const dataDate = trend.dataAsOfDate || trend.asOfDate;
+  let sourceLabel = "";
+  if (dataSource && dataSource.startsWith("eod:")) {
+    sourceLabel = ` · EOD ${dataDate}`;
+  } else {
+    sourceLabel = dataDate ? ` · ${dataDate}` : "";
+  }
+  $("trendMeta").textContent = available ? `${price}${ema}${sourceLabel}` : "Unavailable";
+  
+  // Trend Status (above/below EMA)
+  const aboveEma = trend.aboveEma;
+  const distPct = trend.distancePct || 0;
+  const statusEl = $("trendStatusValue");
+  
+  if (aboveEma === true) {
+    statusEl.innerHTML = `<span class="trendAbove">ABOVE +${Math.abs(distPct).toFixed(1)}%</span>`;
+    $("trendStatusNote").textContent = "SPX is in an uptrend (above 21 EMA).";
+  } else if (aboveEma === false) {
+    statusEl.innerHTML = `<span class="trendBelow">BELOW −${Math.abs(distPct).toFixed(1)}%</span>`;
+    $("trendStatusNote").textContent = "SPX is in a downtrend (below 21 EMA).";
+  } else {
+    statusEl.textContent = "—";
+    $("trendStatusNote").textContent = "Unable to determine trend status.";
+  }
+  
+  // Favored Direction
+  const trendDir = trend.trendDirection || "unknown";
+  const favorEl = $("trendFavorValue");
+  
+  if (trendDir === "bullish") {
+    favorEl.innerHTML = `<span class="favorBullish">BULLISH ↑</span>`;
+    $("trendFavorNote").textContent = "Failed breakdowns (bullish setups) trade WITH the trend.";
+  } else if (trendDir === "bearish") {
+    favorEl.innerHTML = `<span class="favorBearish">BEARISH ↓</span>`;
+    $("trendFavorNote").textContent = "Failed breakouts (bearish setups) trade WITH the trend.";
+  } else {
+    favorEl.innerHTML = `<span class="gammaEnvUnknown">Unknown</span>`;
+    $("trendFavorNote").textContent = "Trend direction unavailable.";
+  }
+  
+  // Trend Recommendation
+  const rec = trend.recommendation || "Trend filter unavailable. Use pattern quality for decisions.";
+  $("trendRecValue").textContent = rec;
+  
+  // Note
+  const explanation = trend.explanation || "";
+  $("trendRecNote").textContent = explanation ? explanation.slice(0, 250) + (explanation.length > 250 ? '...' : '') : "";
+}
+
 function getGradeClass(grade) {
   switch ((grade || "").toUpperCase()) {
     case "A+": return "grade-aplus";
@@ -158,8 +269,18 @@ function renderSignalCard(signal) {
   const volRatio = signal.indicators?.volumeRatio;
   const sma20Dev = signal.indicators?.sma20DeviationPct;
   
+  // Trend alignment
+  const trendAlign = signal.trendAlignment || {};
+  const alignClass = trendAlign.alignment === "aligned" ? "aligned" : 
+                     trendAlign.alignment === "counter" ? "counter" : "unknown";
+  const alignLabel = trendAlign.label || "Trend N/A";
+  const alignGuidance = trendAlign.guidance || "";
+  
   // Build indicator chips
   const chips = [];
+  
+  // Trend alignment chip (first, most important)
+  chips.push(`<span class="trendAlignBadge ${alignClass}" title="${escapeHtml(alignGuidance)}">${alignLabel}</span>`);
   
   // RSI chip
   const rsiActive = (direction === "bullish" && rsi <= 30) || (direction === "bearish" && rsi >= 70);
@@ -256,6 +377,12 @@ function renderResults(payload) {
   // Render stats
   renderStats(payload);
   
+  // Render gamma context
+  renderGammaContext(payload);
+  
+  // Render trend context (21 EMA)
+  renderTrendContext(payload);
+  
   // Render A+ watchlist
   renderWatchlist("aplusGrid", payload.aPlus, "aplusMeta", "A+");
   
@@ -274,7 +401,7 @@ async function handleSubmit(ev) {
   const minScore = parseInt($("minScore")?.value || "50", 10);
   
   setLoading(true);
-  setStatus("Scanning SP100 + Nasdaq100 for Red Dog setups...", "running");
+  setStatus("Scanning SP500 + Nasdaq100 (516 tickers) for Red Dog setups...", "running");
   
   try {
     const payload = await fetchScan(direction, minScore);
