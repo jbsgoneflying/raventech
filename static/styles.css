@@ -1540,6 +1540,18 @@ a.ravenTempDisabled {
   align-items: center;
 }
 
+/* Top navigation should not wrap */
+.tbInputs.topNav {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.tbInputs.topNav .primaryButton {
+  padding: 8px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .tradeBuilderOutputs {
   margin-top: 14px;
   display: grid;
