@@ -10,6 +10,7 @@ import time
 import datetime as dt
 from pathlib import Path
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from typing import Optional
 
@@ -908,8 +909,8 @@ def breach(
 def breach_compare(
     tickers: str = Query(..., description="Comma-separated list of tickers (max 10)"),
     k: float = Query(1.0, gt=0.0, description="Breach multiple (1.0, 1.5, 2.0)"),
-    n: int = Query(20, ge=1, le=50, description="Number of earnings events to analyze"),
-    years: int = Query(5, ge=1, le=10, description="Lookback years"),
+    n: int = Query(10, ge=1, le=50, description="Number of earnings events to analyze"),
+    years: int = Query(3, ge=1, le=10, description="Lookback years"),
 ):
     """
     Compare and rank multiple tickers for earnings plays.
@@ -936,7 +937,7 @@ def breach_compare(
         
         LOG.info(f"Breach compare: {len(ticker_list)} tickers at k={k}")
         
-        # Fetch breach data for each ticker
+        # Fetch breach data for each ticker in PARALLEL for speed
         client = _get_client()
         benzinga_client = _get_benzinga_client_optional()
         base_flags = get_flags()
@@ -944,22 +945,30 @@ def breach_compare(
         payloads = []
         errors = []
         
-        for ticker in ticker_list:
-            try:
-                payload = compute_breach_stats(
-                    client=client,
-                    ticker=ticker,
-                    n=n,
-                    years=years,
-                    k=k,
-                    trade_builder_inputs=None,
-                    flags_override=base_flags,
-                    benzinga_client=benzinga_client,
-                )
-                payloads.append((ticker, payload))
-            except Exception as e:
-                LOG.warning(f"Failed to fetch {ticker}: {e}")
-                errors.append({"ticker": ticker, "error": str(e)})
+        def fetch_single(ticker: str):
+            """Fetch breach stats for a single ticker."""
+            return ticker, compute_breach_stats(
+                client=client,
+                ticker=ticker,
+                n=n,
+                years=years,
+                k=k,
+                trade_builder_inputs=None,
+                flags_override=base_flags,
+                benzinga_client=benzinga_client,
+            )
+        
+        # Use ThreadPoolExecutor to fetch all tickers in parallel
+        with ThreadPoolExecutor(max_workers=min(len(ticker_list), 5)) as executor:
+            futures = {executor.submit(fetch_single, t): t for t in ticker_list}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    _, payload = future.result(timeout=45)  # 45s per ticker max
+                    payloads.append((ticker, payload))
+                except Exception as e:
+                    LOG.warning(f"Failed to fetch {ticker}: {e}")
+                    errors.append({"ticker": ticker, "error": str(e)})
         
         # Rank the tickers
         rankings = rank_tickers(payloads)
