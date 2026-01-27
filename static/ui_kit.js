@@ -75,6 +75,9 @@ function initTooltips() {
   function closeAllTooltips() {
     document.querySelectorAll(".tipWrap.isOpen").forEach((w) => {
       w.classList.remove("isOpen");
+      // Also remove lifted state from parent card
+      const parentCard = w.closest(".taCard");
+      if (parentCard) parentCard.classList.remove("taCard--tipOpen");
       const b = w.querySelector(".tipBtn");
       if (b) b.setAttribute("aria-expanded", "false");
       const p = w.querySelector(".tipPanel");
@@ -126,6 +129,9 @@ function initTooltips() {
     closeAllTooltips();
     if (!isOpen) {
       wrap.classList.add("isOpen");
+      // Lift parent card above siblings so tooltip isn't clipped
+      const parentCard = wrap.closest(".taCard");
+      if (parentCard) parentCard.classList.add("taCard--tipOpen");
       btn.setAttribute("aria-expanded", "true");
       placeFixedTooltip(wrap);
     }

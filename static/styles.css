@@ -1900,6 +1900,20 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   justify-content: center;
 }
 
+/* When tooltip is open, lift the entire card above siblings so the panel isn't clipped */
+.taCard:has(.tipWrap.isOpen),
+.taCard:has(.tipWrap:focus-within),
+.taCard.taCard--tipOpen {
+  position: relative;
+  z-index: 100;
+}
+
+/* Also lift the tipWrap itself when open */
+.tipWrap.isOpen,
+.tipWrap:focus-within {
+  z-index: 1000;
+}
+
 .tipBtn {
   width: 18px;
   height: 18px;
