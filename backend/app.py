@@ -11,6 +11,7 @@ import datetime as dt
 from pathlib import Path
 import threading
 from dataclasses import replace
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, Form
@@ -34,6 +35,7 @@ from backend.calendar_snapshot import EARNINGS_SNAPSHOT_KEY, load_earnings_snaps
 from backend.fmp_snapshot import FMP_EARNINGS_SNAPSHOT_KEY, load_fmp_earnings_snapshot
 from backend.macro_event_stats import compute_macro_event_stats
 from backend.fmp_client import FmpClient, FmpError
+from backend.engine3_screener import compute_engine3_scan, compute_single_ticker_scan
 
 
 try:
@@ -1160,6 +1162,133 @@ def macro_event_stats(
         raise
     except Exception as e:
         LOG.exception("Unhandled failure (macro-event-stats)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ---------------------------------------------------------------------------
+# Engine 3: Red Dog Reversal Scanner
+# ---------------------------------------------------------------------------
+
+_engine3_cache: TTLCache = TTLCache(maxsize=20, ttl=30 * 60)
+_engine3_cache_lock = threading.Lock()
+
+
+@app.get("/api/engine3-red-dog")
+def engine3_red_dog_scan(
+    request: Request,
+    date: Optional[str] = Query(None, description="Scan date (YYYY-MM-DD), defaults to today"),
+    min_score: int = Query(50, ge=0, le=100, description="Minimum score to include"),
+    direction: Optional[str] = Query(None, description="Filter by direction: bullish, bearish, or both"),
+):
+    """
+    Engine 3: Red Dog Reversal Scanner
+
+    Scans SP100 + Nasdaq100 for Red Dog Reversal setups with A+ quality scoring.
+
+    Returns setups categorized by grade:
+    - aPlus: Score >= 75 (high-quality setups)
+    - standard: Score 50-74 (decent setups)
+    - watchlist: Combined and sorted by score
+    """
+    _require_auth(request)
+
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE3_RED_DOG:
+        raise HTTPException(
+            status_code=503,
+            detail="Engine 3 (Red Dog Reversal) is disabled. Set ENABLE_ENGINE3_RED_DOG=1 to enable.",
+        )
+
+    try:
+        client = _get_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
+
+        # Normalize direction filter
+        dir_filter = None
+        if direction:
+            d = str(direction).strip().lower()
+            if d in ("bullish", "bull", "long"):
+                dir_filter = "bullish"
+            elif d in ("bearish", "bear", "short"):
+                dir_filter = "bearish"
+
+        # Check cache
+        cache_key = (date, min_score, dir_filter)
+        with _engine3_cache_lock:
+            cached = _engine3_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Run scan
+        result = compute_engine3_scan(
+            client,
+            as_of_date=date,
+            min_score=min_score,
+            direction=dir_filter,
+            max_workers=flags.ENGINE3_MAX_WORKERS,
+            use_cache=True,
+        )
+
+        with _engine3_cache_lock:
+            _engine3_cache[cache_key] = result
+
+        return result
+
+    except HTTPException:
+        raise
+    except OratsError as e:
+        LOG.exception("ORATS failure (engine3-red-dog)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (engine3-red-dog)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/engine3-red-dog/{ticker}")
+def engine3_red_dog_ticker(
+    request: Request,
+    ticker: str,
+    date: Optional[str] = Query(None, description="Scan date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Engine 3: Single ticker Red Dog analysis
+
+    Analyzes a specific ticker for Red Dog Reversal setup with full indicator details.
+    """
+    _require_auth(request)
+
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE3_RED_DOG:
+        raise HTTPException(
+            status_code=503,
+            detail="Engine 3 (Red Dog Reversal) is disabled. Set ENABLE_ENGINE3_RED_DOG=1 to enable.",
+        )
+
+    try:
+        client = _get_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
+
+        t = str(ticker or "").strip().upper()
+        if not t:
+            raise HTTPException(status_code=400, detail="Missing ticker.")
+
+        result = compute_single_ticker_scan(
+            client,
+            ticker=t,
+            as_of_date=date,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except OratsError as e:
+        LOG.exception(f"ORATS failure (engine3-red-dog/{ticker})")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception(f"Unhandled failure (engine3-red-dog/{ticker})")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

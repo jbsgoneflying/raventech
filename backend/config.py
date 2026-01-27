@@ -108,6 +108,14 @@ class FeatureFlags:
     # --- Engine 2: SPX weekly IC (default OFF; separate page/endpoint) ---
     ENABLE_ENGINE2_SPX_IC: bool = False
 
+    # --- Engine 3: Red Dog Reversal Scanner (default OFF) ---
+    ENABLE_ENGINE3_RED_DOG: bool = False
+    ENGINE3_CACHE_TTL_BARS: int = 6 * 3600       # 6 hours for daily bars
+    ENGINE3_CACHE_TTL_SCAN: int = 30 * 60        # 30 minutes for full scan
+    ENGINE3_MAX_WORKERS: int = 10                # Parallel workers for scanning
+    ENGINE3_MIN_SCORE_DEFAULT: int = 50          # Default minimum score filter
+    ENGINE3_APLUS_THRESHOLD: int = 75            # A+ grade threshold
+
     # Engine 2 policy knobs (risk-only; env-driven; safe defaults)
     ENGINE2_ENTRY_DAYS: str = "mon,tue,wed"
     ENGINE2_EM_MULTS: str = "0.7,0.8,0.9,1.0,1.1,1.2"
@@ -224,6 +232,13 @@ class FeatureFlags:
             MC_DEFAULT_WING_WIDTH_DOLLARS=_get_float("MC_DEFAULT_WING_WIDTH_DOLLARS", 5.0),
 
             ENABLE_ENGINE2_SPX_IC=_get_bool("ENABLE_ENGINE2_SPX_IC", False),
+
+            ENABLE_ENGINE3_RED_DOG=_get_bool("ENABLE_ENGINE3_RED_DOG", False),
+            ENGINE3_CACHE_TTL_BARS=_get_int("ENGINE3_CACHE_TTL_BARS", 6 * 3600),
+            ENGINE3_CACHE_TTL_SCAN=_get_int("ENGINE3_CACHE_TTL_SCAN", 30 * 60),
+            ENGINE3_MAX_WORKERS=_get_int("ENGINE3_MAX_WORKERS", 10),
+            ENGINE3_MIN_SCORE_DEFAULT=_get_int("ENGINE3_MIN_SCORE_DEFAULT", 50),
+            ENGINE3_APLUS_THRESHOLD=_get_int("ENGINE3_APLUS_THRESHOLD", 75),
 
             ENGINE2_ENTRY_DAYS=os.getenv("ENGINE2_ENTRY_DAYS", "mon,tue,wed"),
             ENGINE2_EM_MULTS=os.getenv("ENGINE2_EM_MULTS", "0.7,0.8,0.9,1.0,1.1,1.2"),
@@ -401,6 +416,17 @@ class FeatureFlags:
             ("ENGINE2_MACRO_BASE_NFP", float(self.ENGINE2_MACRO_BASE_NFP)),
             ("ENGINE2_MACRO_BASE_OPEX", float(self.ENGINE2_MACRO_BASE_OPEX)),
             ("ENGINE2_MACRO_BASE_REFUNDING", float(self.ENGINE2_MACRO_BASE_REFUNDING)),
+        )
+
+    def cache_key_engine3(self) -> tuple:
+        """Engine 3 cache fingerprint (Red Dog Reversal scanner)."""
+        return (
+            ("ENABLE_ENGINE3_RED_DOG", bool(self.ENABLE_ENGINE3_RED_DOG)),
+            ("ENGINE3_CACHE_TTL_BARS", int(self.ENGINE3_CACHE_TTL_BARS)),
+            ("ENGINE3_CACHE_TTL_SCAN", int(self.ENGINE3_CACHE_TTL_SCAN)),
+            ("ENGINE3_MAX_WORKERS", int(self.ENGINE3_MAX_WORKERS)),
+            ("ENGINE3_MIN_SCORE_DEFAULT", int(self.ENGINE3_MIN_SCORE_DEFAULT)),
+            ("ENGINE3_APLUS_THRESHOLD", int(self.ENGINE3_APLUS_THRESHOLD)),
         )
 
 
