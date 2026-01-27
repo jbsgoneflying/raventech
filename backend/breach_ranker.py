@@ -492,18 +492,62 @@ def compute_composite_score(breach_payload: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
     """
-    # Extract metrics from payload
-    summary = breach_payload.get("summary", {})
-    breach_pct = summary.get("breachRatePct")
+    # -----------------------------------------------------------------------
+    # EXTRACT METRICS - Try multiple paths for robustness
+    # -----------------------------------------------------------------------
     
-    iv30_pct, iv30_abs = _extract_iv_metrics(breach_payload)
-    em_to_median = _extract_em_richness(breach_payload)
+    # 1. Breach rate: summary.breach_rate_pct or baseline.breach_rate_pct
+    summary = breach_payload.get("summary", {})
+    baseline = breach_payload.get("baseline", {})
+    breach_pct = (
+        summary.get("breach_rate_pct") or 
+        summary.get("breachRatePct") or 
+        baseline.get("breach_rate_pct")
+    )
+    
+    # 2. IV elevation: regime.inputs.tickerIv30Percentile (0-1 scale, convert to 0-100)
+    # Or try goNoGo.checks path
+    regime = breach_payload.get("regime", {})
+    regime_inputs = regime.get("inputs", {})
+    iv30_pct_raw = regime_inputs.get("tickerIv30Percentile")
+    iv30_pct = iv30_pct_raw * 100 if iv30_pct_raw is not None else None
+    iv30_abs = regime_inputs.get("tickerIv30")
+    
+    # Fallback to goNoGo if available
+    if iv30_pct is None:
+        iv30_pct, iv30_abs = _extract_iv_metrics(breach_payload)
+    
+    # 3. EM Richness: baseline.avg_ratio_realized_to_implied (inverted - we want EM > realized)
+    # Also try goNoGo path
+    avg_ratio = baseline.get("avg_ratio_realized_to_implied")
+    if avg_ratio is not None and avg_ratio > 0:
+        # If realized/implied < 1.0, EM is rich. Convert so higher = better.
+        em_to_median = 1.0 / avg_ratio if avg_ratio > 0 else None
+    else:
+        em_to_median = _extract_em_richness(breach_payload)
+    
+    # 4. Tail Coverage: Try goNoGo path or estimate from summary
     em_to_p90 = _extract_tail_coverage(breach_payload)
+    
+    # 5. Liquidity: Try goNoGo path
     dollar_vol, spread_cov = _extract_liquidity(breach_payload)
-    macro_checks = _extract_macro_checks(breach_payload)
+    
+    # 6. Market Regime: Use regime.label and scores
+    regime_label = regime.get("label", "")
+    regime_score_raw = regime.get("scores", {}).get("regimeScore")
+    
+    # Convert regime to macro checks format OR score directly
+    if regime_label:
+        macro_checks = _regime_to_macro_checks(regime_label, regime_score_raw)
+    else:
+        macro_checks = _extract_macro_checks(breach_payload)
+    
+    # 7. Event Risk: goNoGo path
     legal_check, bz_score = _extract_event_risk(breach_payload)
     
-    # Score each factor
+    # -----------------------------------------------------------------------
+    # SCORE EACH FACTOR
+    # -----------------------------------------------------------------------
     factors = {
         "breachRate": score_breach_rate(breach_pct),
         "ivElevation": score_iv_elevation(iv30_pct, iv30_abs),
@@ -531,6 +575,41 @@ def compute_composite_score(breach_payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _regime_to_macro_checks(regime_label: str, regime_score: Optional[float]) -> Dict[str, Any]:
+    """
+    Convert regime label/score to macro checks format for scoring.
+    
+    Normal (regimeScore < 0.4): All PASS
+    Elevated (0.4-0.7): Partial PASS
+    Stress (> 0.7): Mostly FAIL
+    """
+    label = (regime_label or "").lower()
+    score = regime_score or 0.5
+    
+    checks = {}
+    
+    if label == "normal" or score < 0.4:
+        # All clear
+        checks["MACRO_GAMMA"] = {"result": "PASS"}
+        checks["MACRO_GAMMA_FLIP"] = {"result": "PASS"}
+        checks["MACRO_RV_ACCEL"] = {"result": "PASS"}
+        checks["MACRO_FORCED_FLOWS"] = {"result": "PASS"}
+    elif label == "elevated" or score < 0.7:
+        # Mixed
+        checks["MACRO_GAMMA"] = {"result": "PASS"}
+        checks["MACRO_GAMMA_FLIP"] = {"result": "PASS"}
+        checks["MACRO_RV_ACCEL"] = {"result": "FAIL"}  # RV elevated
+        checks["MACRO_FORCED_FLOWS"] = {"result": "PASS"}
+    else:
+        # Stress
+        checks["MACRO_GAMMA"] = {"result": "FAIL"}
+        checks["MACRO_GAMMA_FLIP"] = {"result": "FAIL"}
+        checks["MACRO_RV_ACCEL"] = {"result": "FAIL"}
+        checks["MACRO_FORCED_FLOWS"] = {"result": "FAIL"}
+    
+    return checks
+
+
 def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
     Score and rank multiple tickers.
@@ -547,9 +626,25 @@ def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, A
         try:
             scoring = compute_composite_score(payload)
             
-            # Extract quick stats for display
+            # Extract quick stats for display (try both naming conventions)
             summary = payload.get("summary", {})
+            baseline = payload.get("baseline", {})
             current = payload.get("current", {})
+            
+            breach_pct = (
+                summary.get("breach_rate_pct") or 
+                summary.get("breachRatePct") or
+                baseline.get("breach_rate_pct")
+            )
+            events_used = (
+                summary.get("events_used") or 
+                summary.get("eventsUsed") or
+                baseline.get("events_used")
+            )
+            implied_move = (
+                current.get("impliedMovePct") or
+                current.get("impErnMv")
+            )
             
             results.append({
                 "ticker": ticker,
@@ -558,9 +653,9 @@ def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, A
                 "tierLabel": scoring["tierLabel"],
                 "factors": scoring["factors"],
                 "quickStats": {
-                    "breachRatePct": summary.get("breachRatePct"),
-                    "eventsUsed": summary.get("eventsUsed"),
-                    "impliedMovePct": current.get("impliedMovePct"),
+                    "breachRatePct": breach_pct,
+                    "eventsUsed": events_used,
+                    "impliedMovePct": implied_move,
                 },
                 "fullPayload": payload,
             })
