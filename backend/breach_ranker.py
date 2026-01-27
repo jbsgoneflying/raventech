@@ -458,11 +458,17 @@ def _extract_go_no_go_checks(payload: Dict[str, Any]) -> Dict[str, Any]:
     go_no_go = payload.get("goNoGo", {})
     checks_list = go_no_go.get("checks", [])
     
-    # Convert list to dict keyed by check name
+    # Convert list to dict keyed by check ID
+    # Note: goNoGo uses 'id' and 'state', not 'check' and 'result'
     checks = {}
     for check in checks_list:
-        if isinstance(check, dict) and "check" in check:
-            checks[check["check"]] = check
+        if isinstance(check, dict):
+            check_id = check.get("id")
+            if check_id:
+                # Normalize to use 'result' for backwards compatibility
+                normalized = dict(check)
+                normalized["result"] = check.get("state")  # Map state -> result
+                checks[check_id] = normalized
     
     return checks
 

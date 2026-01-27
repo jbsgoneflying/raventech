@@ -1028,47 +1028,71 @@ def compute_go_no_go(
     opt_code: Optional[str] = None
     opt_explain = ""
 
+    # Try to find option chain data - ORATS data may lag by 1 day
+    # So we try today, then yesterday, then a few days back
+    today_et = _now_et_date()
+    trade_dates_to_try = [today_et - dt.timedelta(days=d) for d in range(5)]
+    
     if trade_date:
+        # Also try the asOfDate from payload if provided
+        try:
+            payload_date = dt.date.fromisoformat(str(trade_date)[:10])
+            if payload_date not in trade_dates_to_try:
+                trade_dates_to_try.insert(0, payload_date)
+        except Exception:
+            pass
+    
+    mrows = []
+    effective_trade_date = None
+    for td_try in trade_dates_to_try:
         try:
             fields_m = "ticker,tradeDate,expirDate,dte,stockPrice,vol50,atmiv"
             # Include 0DTE on Fridays so "Friday looks at Friday" works.
             lo = max(0, int(dte_target) - 2)
             hi = int(dte_target) + 10
-            mrows = client.hist_monies_implied(ticker=t, trade_date=trade_date, fields=fields_m, dte=f"{lo},{hi}").rows or []
-            mrows = [r for r in mrows if isinstance(r, dict)]
-            # Prefer nearest expiry to *today* (ET), not a fixed DTE.
-            today_et = _now_et_date()
-            best = None
-            best_gap = None
-            for r in mrows:
-                ed = str(r.get("expirDate") or "")[:10]
-                if not ed:
-                    continue
-                try:
-                    ed_dt = dt.date.fromisoformat(ed)
-                except Exception:
-                    continue
-                gap = (ed_dt - today_et).days
-                if gap < 0:
-                    continue
-                if best is None or best_gap is None or gap < best_gap:
-                    best = r
-                    best_gap = gap
-            # Fallback: if nothing is >= today, pick closest to dte_target (legacy behavior).
-            if best is None:
-                best_dist = None
-                for r in mrows:
-                    dte_v = _to_float(r.get("dte"))
-                    if dte_v is None:
-                        continue
-                    dist = abs(float(dte_v) - float(dte_target))
-                    if best is None or best_dist is None or dist < best_dist:
-                        best = r
-                        best_dist = dist
-            if best and best.get("expirDate"):
-                opt_expiry = str(best.get("expirDate"))[:10]
+            td_str = td_try.isoformat()
+            test_rows = client.hist_monies_implied(ticker=t, trade_date=td_str, fields=fields_m, dte=f"{lo},{hi}").rows or []
+            test_rows = [r for r in test_rows if isinstance(r, dict)]
+            if test_rows:
+                mrows = test_rows
+                effective_trade_date = td_str
+                break
         except Exception:
-            opt_expiry = None
+            continue
+    
+    if mrows:
+        # Prefer nearest expiry to *today* (ET), not a fixed DTE.
+        best = None
+        best_gap = None
+        for r in mrows:
+            ed = str(r.get("expirDate") or "")[:10]
+            if not ed:
+                continue
+            try:
+                ed_dt = dt.date.fromisoformat(ed)
+            except Exception:
+                continue
+            gap = (ed_dt - today_et).days
+            if gap < 0:
+                continue
+            if best is None or best_gap is None or gap < best_gap:
+                best = r
+                best_gap = gap
+        # Fallback: if nothing is >= today, pick closest to dte_target (legacy behavior).
+        if best is None:
+            best_dist = None
+            for r in mrows:
+                dte_v = _to_float(r.get("dte"))
+                if dte_v is None:
+                    continue
+                dist = abs(float(dte_v) - float(dte_target))
+                if best is None or best_dist is None or dist < best_dist:
+                    best = r
+                    best_dist = dist
+        if best and best.get("expirDate"):
+            opt_expiry = str(best.get("expirDate"))[:10]
+            if effective_trade_date and effective_trade_date != today_et.isoformat():
+                liq_notes.append(f"Options data from {effective_trade_date} (today's data not yet available).")
 
         if not opt_expiry:
             opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Unable to determine expiration for liquidity check."
@@ -1095,7 +1119,9 @@ def compute_go_no_go(
                 ]
             )
             try:
-                rows = client.hist_strikes(ticker=t, trade_date=trade_date, fields=fields_s, dte=f"{max(0,dte_target-2)},{dte_target+10}").rows or []
+                # Use effective_trade_date (which has data) instead of potentially unavailable today
+                use_td = effective_trade_date or trade_date or today_et.isoformat()
+                rows = client.hist_strikes(ticker=t, trade_date=use_td, fields=fields_s, dte=f"{max(0,dte_target-2)},{dte_target+10}").rows or []
                 rows = [r for r in rows if isinstance(r, dict) and str(r.get("expirDate") or "")[:10] == opt_expiry]
             except Exception:
                 rows = []

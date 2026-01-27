@@ -1453,8 +1453,17 @@ def _sniff_daily_volume(row: dict) -> Optional[float]:
     if not isinstance(row, dict):
         return None
 
-    # Common aliases.
-    v = _to_float(row.get("volume") or row.get("vol") or row.get("totalVolume") or row.get("total_volume") or row.get("shareVolume") or row.get("shares") or row.get("sharesTraded"))
+    # Common aliases (ORATS uses 'stockVolume' for many plans).
+    v = _to_float(
+        row.get("volume") or 
+        row.get("stockVolume") or  # ORATS common field
+        row.get("vol") or 
+        row.get("totalVolume") or 
+        row.get("total_volume") or 
+        row.get("shareVolume") or 
+        row.get("shares") or 
+        row.get("sharesTraded")
+    )
     if v is not None and math.isfinite(float(v)) and float(v) > 0:
         return float(v)
 
@@ -1495,7 +1504,7 @@ def fetch_daily_ohlc(client: OratsClient, *, ticker: str, date: dt.date) -> Opti
         return cached
 
     try:
-        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,vwap"
+        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,stockVolume,vwap"
         resp = client.hist_dailies(ticker=ticker, trade_date=_fmt_date(date), fields=fields)
         row = _first_row(resp.rows)
     except Exception:
@@ -2255,7 +2264,7 @@ def fetch_dailies_ohlc_range(
         return []
     try:
         td = f"{_fmt_date(start)},{_fmt_date(end)}"
-        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,vwap"
+        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,stockVolume,vwap"
         resp = client.hist_dailies(ticker=ticker, trade_date=td, fields=fields)
         rows = resp.rows or []
     except Exception:
