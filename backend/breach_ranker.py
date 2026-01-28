@@ -763,6 +763,7 @@ def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, A
             current = payload.get("current", {})
             expected_move = payload.get("expectedMove", {})
             next_event = payload.get("nextEvent", {})
+            events = payload.get("events", [])
             
             breach_pct = (
                 summary.get("breach_rate_pct") or 
@@ -774,12 +775,30 @@ def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, A
                 summary.get("eventsUsed") or
                 baseline.get("events_used")
             )
+            
             # ORATS EM (impErnMv) - used for historical earnings event calculations
-            orats_em = (
-                current.get("impliedMovePct") or
-                current.get("impErnMv") or
-                next_event.get("impliedMovePctPlanned")
-            )
+            # Try multiple fallback sources:
+            # 1. current.impliedMovePct (from ORATS cores snapshot)
+            # 2. current.impErnMv (raw value)
+            # 3. nextEvent.impliedMovePctPlanned (if Monte Carlo enabled)
+            # 4. summary.avg_implied_all_pct (average from historical events)
+            # 5. Most recent event's impliedMovePct
+            orats_em = None
+            if current.get("impliedMovePct") is not None:
+                orats_em = current.get("impliedMovePct")
+            elif current.get("impErnMv") is not None:
+                orats_em = current.get("impErnMv")
+            elif next_event.get("impliedMovePctPlanned") is not None:
+                orats_em = next_event.get("impliedMovePctPlanned")
+            elif summary.get("avg_implied_all_pct") is not None:
+                orats_em = summary.get("avg_implied_all_pct")
+            elif events and isinstance(events, list) and len(events) > 0:
+                # Get most recent event's implied move
+                for evt in events:
+                    if isinstance(evt, dict) and evt.get("impliedMovePct") is not None:
+                        orats_em = evt.get("impliedMovePct")
+                        break
+            
             # Straddle EM (ATM-forward straddle calculation)
             straddle_em = expected_move.get("expectedMovePct") if isinstance(expected_move, dict) else None
             
