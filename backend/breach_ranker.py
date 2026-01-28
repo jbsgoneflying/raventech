@@ -761,6 +761,8 @@ def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, A
             summary = payload.get("summary", {})
             baseline = payload.get("baseline", {})
             current = payload.get("current", {})
+            expected_move = payload.get("expectedMove", {})
+            next_event = payload.get("nextEvent", {})
             
             breach_pct = (
                 summary.get("breach_rate_pct") or 
@@ -772,10 +774,14 @@ def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, A
                 summary.get("eventsUsed") or
                 baseline.get("events_used")
             )
-            implied_move = (
+            # ORATS EM (impErnMv) - used for historical earnings event calculations
+            orats_em = (
                 current.get("impliedMovePct") or
-                current.get("impErnMv")
+                current.get("impErnMv") or
+                next_event.get("impliedMovePctPlanned")
             )
+            # Straddle EM (ATM-forward straddle calculation)
+            straddle_em = expected_move.get("expectedMovePct") if isinstance(expected_move, dict) else None
             
             result_entry = {
                 "ticker": ticker,
@@ -786,7 +792,9 @@ def rank_tickers(payloads: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, A
                 "quickStats": {
                     "breachRatePct": breach_pct,
                     "eventsUsed": events_used,
-                    "impliedMovePct": implied_move,
+                    "impliedMovePct": orats_em,  # Keep for backward compat
+                    "oratsEmPct": orats_em,      # ORATS implied earnings move
+                    "straddleEmPct": straddle_em,  # ATM-forward straddle EM
                 },
                 "fullPayload": payload,
             }

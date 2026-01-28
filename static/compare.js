@@ -156,8 +156,12 @@
           <div class="detailValue">${fmtPct(qs.breachRatePct)}</div>
         </div>
         <div class="detailItem">
-          <div class="detailLabel">Implied Move</div>
-          <div class="detailValue">${fmtPct(qs.impliedMovePct)}</div>
+          <div class="detailLabel">ORATS EM</div>
+          <div class="detailValue">${fmtPct(qs.oratsEmPct ?? qs.impliedMovePct)}</div>
+        </div>
+        <div class="detailItem">
+          <div class="detailLabel">Straddle EM</div>
+          <div class="detailValue">${fmtPct(qs.straddleEmPct)}</div>
         </div>
         <div class="detailItem">
           <div class="detailLabel">Events Used</div>
@@ -203,7 +207,7 @@
         </div>
         
         <div class="rankCardActions">
-          <a class="rankCardLink" href="/breach?ticker=${ticker}&autorun=1" target="_blank">
+          <a class="rankCardLink" href="/breach?ticker=${ticker}&k=1.0&mc=1&autorun=1" target="_blank">
             Full Analysis →
           </a>
           <button class="detailsToggle" onclick="toggleDetails(this)">

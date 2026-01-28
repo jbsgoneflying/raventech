@@ -2852,6 +2852,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Query params (calendar deep-links)
   const qs = new URLSearchParams(window.location.search || "");
   const qsTicker = (qs.get("ticker") || "").trim().toUpperCase();
+  const qsK = (qs.get("k") || "").trim();
   const qsMc = String(qs.get("mc") || "").trim().toLowerCase();
   const qsAutorun = String(qs.get("autorun") || "").trim().toLowerCase();
 
@@ -2860,6 +2861,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const kSel = $("k");
   ticker.value = (qsTicker || ticker.value || "AAPL").toUpperCase();
   setTickerLogo(ticker.value);
+
+  // Apply k from querystring if valid
+  if (kSel && qsK && ["1.0", "1.5", "2.0"].includes(qsK)) {
+    kSel.value = qsK;
+  }
 
   ticker.addEventListener("input", () => {
     ticker.value = ticker.value.toUpperCase();
