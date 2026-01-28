@@ -2350,8 +2350,28 @@ def compute_breach_stats(
         out["expectedMove"] = expected_move_payload
 
         # Compute strike targets using ORATS EM (used for earnings events calculations)
-        # Prefer ORATS EM from current snapshot, fall back to straddle EM
+        # Try multiple fallback sources for ORATS EM:
+        # 1. current.impliedMovePct (from ORATS cores snapshot)
+        # 2. nextEvent.impliedMovePctPlanned (if Monte Carlo enabled)
+        # 3. summary.avg_implied_all_pct (average from historical events)
+        # 4. Most recent event's impliedMovePct
         orats_em_pct = _to_float(current.get("impliedMovePct"))
+        
+        if orats_em_pct is None:
+            next_ev = out.get("nextEvent") if isinstance(out.get("nextEvent"), dict) else {}
+            orats_em_pct = _to_float(next_ev.get("impliedMovePctPlanned"))
+        
+        if orats_em_pct is None:
+            sum_obj = out.get("summary") if isinstance(out.get("summary"), dict) else {}
+            orats_em_pct = _to_float(sum_obj.get("avg_implied_all_pct"))
+        
+        if orats_em_pct is None:
+            evts = out.get("events") if isinstance(out.get("events"), list) else []
+            for evt in evts:
+                if isinstance(evt, dict) and evt.get("impliedMovePct") is not None:
+                    orats_em_pct = _to_float(evt.get("impliedMovePct"))
+                    break
+        
         spot_px = _to_float(current.get("stockPrice")) or expected_move_payload.get("spotPrice")
         
         if orats_em_pct is not None and spot_px is not None and orats_em_pct > 0 and spot_px > 0:
