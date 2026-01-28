@@ -3337,3 +3337,284 @@ body.landingPage {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CALCULATOR (Apple-style draggable popup)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.calcToggleBtn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9990;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #1d1d1f 0%, #2d2d30 100%);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.calcToggleBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+}
+.calcToggleBtn:active {
+  transform: translateY(0);
+}
+.calcToggleBtn svg {
+  width: 18px;
+  height: 18px;
+  opacity: 0.9;
+}
+
+/* Calculator Popup */
+.ravenCalc {
+  position: fixed;
+  z-index: 9999;
+  width: 280px;
+  background: linear-gradient(180deg, #3a3a3c 0%, #2c2c2e 4%, #1c1c1e 100%);
+  border-radius: 20px;
+  box-shadow: 
+    0 25px 50px rgba(0, 0, 0, 0.5),
+    0 0 0 0.5px rgba(255, 255, 255, 0.15) inset,
+    0 1px 0 rgba(255, 255, 255, 0.1) inset;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  user-select: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.ravenCalc.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.95);
+}
+.ravenCalc.isDragging {
+  opacity: 0.92;
+  cursor: grabbing;
+}
+
+/* Calculator Header */
+.calcHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(58, 58, 60, 0.6);
+  cursor: grab;
+}
+.calcHeader:active {
+  cursor: grabbing;
+}
+.calcDragHandle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.calcTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: -0.2px;
+}
+.calcCloseBtn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.calcCloseBtn:hover {
+  background: rgba(255, 59, 48, 0.8);
+  color: #fff;
+}
+
+/* Calculator Body */
+.calcBody {
+  padding: 12px;
+}
+
+/* Tabs */
+.calcTabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.calcTab {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.calcTab:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+.calcTab.isActive {
+  background: rgba(0, 122, 255, 0.9);
+  color: #fff;
+}
+.calcTab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Display */
+.calcDisplay {
+  background: #000;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  text-align: right;
+}
+.calcDisplayLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.calcDisplayValue {
+  font-size: 32px;
+  font-weight: 300;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+
+/* Sections */
+.calcSection {
+  margin-bottom: 14px;
+}
+.calcLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+/* Wing Size Buttons */
+.calcWingBtns {
+  display: flex;
+  gap: 6px;
+}
+.calcWingBtn {
+  flex: 1;
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.calcWingBtn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.calcWingBtn.isActive {
+  background: rgba(255, 159, 10, 0.9);
+  color: #fff;
+}
+
+/* Input */
+.calcInput {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 18px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.calcInput::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+.calcInput:focus {
+  border-color: rgba(0, 122, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+}
+
+/* Results */
+.calcResults {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.calcResultRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+}
+.calcResultRow:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.calcResultRow--highlight {
+  padding-top: 8px;
+  margin-top: 2px;
+}
+.calcResultLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+}
+.calcResultValue {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+}
+.calcResultRow--highlight .calcResultValue {
+  font-size: 16px;
+  color: rgba(52, 199, 89, 1);
+}
+
+/* Clear Button */
+.calcClearBtn {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.calcClearBtn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
