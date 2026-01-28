@@ -618,33 +618,40 @@ def compute_strike_targets(
     """
     Compute strike targets based on expected move.
     
-    White Box: EM% × spot × 2
-    Blue Box: White × 1.5
-    Red Box: White × 2
+    White Box: 1.0× EM
+    Blue Box: 1.5× EM
+    Red Box: 2.0× EM
     
     Args:
         expected_move_pct: Expected move as percentage (e.g., 2.5 for 2.5%)
         spot_price: Current spot price
     
     Returns:
-        Dict with strike target distances in points
+        Dict with strike target distances in both points and percentages
     """
-    # Convert percentage to decimal
+    # Convert percentage to decimal for points calculation
     em_decimal = expected_move_pct / 100.0
     
-    # White box: EM converted to points × 2
-    white_pts = spot_price * em_decimal * 2
+    # Percentage values (multiples of EM)
+    white_pct = expected_move_pct * 1.0
+    blue_pct = expected_move_pct * 1.5
+    red_pct = expected_move_pct * 2.0
     
-    # Blue box: White × 1.5
-    blue_pts = white_pts * 1.5
-    
-    # Red box: White × 2
-    red_pts = white_pts * 2
+    # Points values (for reference)
+    white_pts = spot_price * em_decimal * 1.0
+    blue_pts = spot_price * em_decimal * 1.5
+    red_pts = spot_price * em_decimal * 2.0
     
     return {
+        # Primary: percentage values
+        "whitePct": round(white_pct, 2),
+        "bluePct": round(blue_pct, 2),
+        "redPct": round(red_pct, 2),
+        # Secondary: points values (for reference)
         "whitePts": round(white_pts, 2),
         "bluePts": round(blue_pts, 2),
         "redPts": round(red_pts, 2),
+        # Metadata
         "whiteMultiple": 1.0,
         "blueMultiple": 1.5,
         "redMultiple": 2.0,

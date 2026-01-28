@@ -598,11 +598,11 @@ function renderEngine1DecisionPanel(payload) {
   const oratsEmSource = cur?.source || (nextEv?.impliedMoveSource ? "nextEvent" : null);
   const oratsEmAsOf = String(cur?.asOfDate || "").slice(0, 10);
 
-  // Strike Targets data
+  // Strike Targets data (using ORATS EM percentages)
   const st = payload?.strikeTargets || null;
-  const stWhite = st?.whitePts;
-  const stBlue = st?.bluePts;
-  const stRed = st?.redPts;
+  const stWhitePct = st?.whitePct;
+  const stBluePct = st?.bluePct;
+  const stRedPct = st?.redPct;
 
   const chips = [];
   if (gateTxt !== "—") chips.push(`Gate: ${gateTxt}`);
@@ -698,14 +698,14 @@ function renderEngine1DecisionPanel(payload) {
         <div class="taCard">
           <div class="taCardTop">
             <div class="taCardTitle">Strike Targets (EM)</div>
-            <span class="info" title="Wing strike distances based on expected move. White = 2× EM pts, Blue = 1.5× White, Red = 2× White. Use for short-strike targeting.">ⓘ</span>
+            <span class="info" title="Wing strike distances based on ORATS implied earnings move (EM). 1.0× = 1× EM, 1.5× = 1.5× EM, 2.0× = 2× EM. Use for short-strike targeting.">ⓘ</span>
           </div>
           <div class="emTargetGrid">
-            <div class="emRow emBox--white"><span class="k">1.0× EM</span><span class="v mono">${Number.isFinite(stWhite) ? escapeHtml(stWhite.toFixed(2)) + " pts" : "—"}</span></div>
-            <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span class="v mono">${Number.isFinite(stBlue) ? escapeHtml(stBlue.toFixed(2)) + " pts" : "—"}</span></div>
-            <div class="emRow emBox--red"><span class="k">2.0× EM</span><span class="v mono">${Number.isFinite(stRed) ? escapeHtml(stRed.toFixed(2)) + " pts" : "—"}</span></div>
+            <div class="emRow emBox--white"><span class="k">1.0× EM</span><span class="v mono">${Number.isFinite(stWhitePct) ? escapeHtml(stWhitePct.toFixed(2)) + "%" : "—"}</span></div>
+            <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span class="v mono">${Number.isFinite(stBluePct) ? escapeHtml(stBluePct.toFixed(2)) + "%" : "—"}</span></div>
+            <div class="emRow emBox--red"><span class="k">2.0× EM</span><span class="v mono">${Number.isFinite(stRedPct) ? escapeHtml(stRedPct.toFixed(2)) + "%" : "—"}</span></div>
           </div>
-          <div class="taCardInterp">Wing distance from spot.</div>
+          <div class="taCardInterp">Wing distance as % of spot (ORATS EM).</div>
         </div>
       </div>
 

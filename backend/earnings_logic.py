@@ -2349,11 +2349,13 @@ def compute_breach_stats(
         )
         out["expectedMove"] = expected_move_payload
 
-        # Compute strike targets if expected move is available
-        em_pct = expected_move_payload.get("expectedMovePct")
-        spot_px = expected_move_payload.get("spotPrice")
-        if em_pct is not None and spot_px is not None and em_pct > 0 and spot_px > 0:
-            out["strikeTargets"] = compute_strike_targets(em_pct, spot_px)
+        # Compute strike targets using ORATS EM (used for earnings events calculations)
+        # Prefer ORATS EM from current snapshot, fall back to straddle EM
+        orats_em_pct = _to_float(current.get("impliedMovePct"))
+        spot_px = _to_float(current.get("stockPrice")) or expected_move_payload.get("spotPrice")
+        
+        if orats_em_pct is not None and spot_px is not None and orats_em_pct > 0 and spot_px > 0:
+            out["strikeTargets"] = compute_strike_targets(orats_em_pct, spot_px)
         else:
             out["strikeTargets"] = None
     except Exception as e:
