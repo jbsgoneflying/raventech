@@ -144,6 +144,7 @@ function renderGammaContext(payload) {
   const ndx = gamma.ndx || {};
   
   // SPX Gamma
+  const spxAvailable = spx.available !== false && spx.netGammaSign;
   const spxSign = spx.netGammaSign || "unknown";
   const spxSignEl = $("spxGammaSign");
   if (spxSign === "positive") {
@@ -151,7 +152,7 @@ function renderGammaContext(payload) {
   } else if (spxSign === "negative") {
     spxSignEl.innerHTML = `<span class="gammaNegative">NEGATIVE</span>`;
   } else {
-    spxSignEl.textContent = "Unknown";
+    spxSignEl.innerHTML = `<span style="color: var(--muted);">Unavailable</span>`;
   }
   
   const spxEnv = spx.environment || "unknown";
@@ -161,12 +162,15 @@ function renderGammaContext(payload) {
   } else if (spxEnv === "challenging") {
     spxEnvEl.innerHTML = `<span class="gammaEnvChallenging">Challenging</span>`;
   } else {
-    spxEnvEl.textContent = "Unknown";
+    spxEnvEl.innerHTML = `<span style="color: var(--muted);">—</span>`;
   }
   
-  $("spxGammaNote").textContent = spx.recommendation || "";
+  // Show recommendation or unavailable message
+  const spxNote = spx.recommendation || (spx.warnings ? spx.warnings[0] : "Gamma context unavailable.");
+  $("spxGammaNote").textContent = spxNote;
   
   // NDX Gamma
+  const ndxAvailable = ndx.available !== false && ndx.netGammaSign;
   const ndxSign = ndx.netGammaSign || "unknown";
   const ndxSignEl = $("ndxGammaSign");
   if (ndxSign === "positive") {
@@ -174,7 +178,7 @@ function renderGammaContext(payload) {
   } else if (ndxSign === "negative") {
     ndxSignEl.innerHTML = `<span class="gammaNegative">NEGATIVE</span>`;
   } else {
-    ndxSignEl.textContent = "Unknown";
+    ndxSignEl.innerHTML = `<span style="color: var(--muted);">Unavailable</span>`;
   }
   
   const ndxEnv = ndx.environment || "unknown";
@@ -184,12 +188,14 @@ function renderGammaContext(payload) {
   } else if (ndxEnv === "challenging") {
     ndxEnvEl.innerHTML = `<span class="gammaEnvChallenging">Challenging</span>`;
   } else {
-    ndxEnvEl.textContent = "Unknown";
+    ndxEnvEl.innerHTML = `<span style="color: var(--muted);">—</span>`;
   }
   
-  $("ndxGammaNote").textContent = ndx.recommendation || "";
+  // Show recommendation or unavailable message
+  const ndxNote = ndx.recommendation || (ndx.warnings ? ndx.warnings[0] : "Gamma context unavailable.");
+  $("ndxGammaNote").textContent = ndxNote;
   
-  $("gammaMeta").textContent = "Dealer positioning by index";
+  $("gammaMeta").textContent = spxAvailable || ndxAvailable ? "Dealer positioning by index" : "Gamma data unavailable for today";
 }
 
 function renderSignalCard(signal) {

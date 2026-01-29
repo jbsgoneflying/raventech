@@ -200,61 +200,139 @@ def _fetch_gamma_context_for_symbol(
     symbols: List[str],
 ) -> Dict[str, Any]:
     """
-    Fetch gamma context for given symbols.
+    Fetch gamma context for given symbols with robust fallback logic.
+    
+    Strategy:
+    1. Try live strikes first (market hours)
+    2. Fall back to EOD hist_strikes
+    3. Walk back up to 5 trading days to find data
     """
     fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
     
-    # Find a Friday expiry near the trade date
+    # Find next Friday for weekly expiry
+    now = dt.datetime.now()
     days_until_friday = (4 - trade_date.weekday()) % 7
+    if days_until_friday == 0 and now.hour >= 16:
+        days_until_friday = 7
     target_friday = trade_date + dt.timedelta(days=days_until_friday if days_until_friday > 0 else 7)
     
-    dte_range = "3,21"  # 3-21 DTE
+    strikes = None
+    expiry_used = None
+    data_source = "unknown"
     
+    # STRATEGY 1: Try live strikes first (market hours)
     for symbol in symbols:
         try:
-            resp = client.get(
-                "hist/strikes",
+            resp = client.live_strikes_by_expiry(
                 ticker=symbol,
-                tradeDate=trade_date.isoformat(),
-                dte=dte_range,
+                expiry=target_friday.isoformat(),
                 fields=fields,
             )
-            rows = resp.rows if hasattr(resp, "rows") else []
-            if rows:
-                # Pick expiry closest to target Friday
-                expiries = set(str(r.get("expirDate", ""))[:10] for r in rows if r.get("expirDate"))
-                if expiries:
-                    target_str = target_friday.isoformat()
-                    chosen = min(expiries, key=lambda e: abs((dt.date.fromisoformat(e) - target_friday).days))
-                    filtered = [r for r in rows if str(r.get("expirDate", ""))[:10] == chosen]
-                    
-                    gamma = compute_dealer_gamma_context(filtered, expiry=chosen)
-                    
-                    # Add environment classification for continuation setups
-                    net_sign = gamma.get("netGammaSign")
-                    if net_sign == "positive":
-                        gamma["environment"] = "supportive"
-                        gamma["recommendation"] = "Positive gamma supports pullback continuation setups."
-                    elif net_sign == "negative":
-                        gamma["environment"] = "challenging"
-                        gamma["recommendation"] = "Negative gamma can accelerate moves - be selective with entries."
-                    else:
-                        gamma["environment"] = "unknown"
-                        gamma["recommendation"] = "Gamma context unclear - proceed with standard criteria."
-                    
-                    gamma["symbol"] = symbol
-                    gamma["dataSource"] = f"eod:{trade_date.isoformat()}"
-                    return gamma
+            live_rows = resp.rows if hasattr(resp, "rows") else []
+            if live_rows and len(live_rows) > 10:
+                strikes = live_rows
+                expiry_used = target_friday.isoformat()
+                data_source = "live"
+                LOG.info(f"Using live {symbol} strikes ({len(strikes)} rows)")
+                break
         except Exception as e:
-            LOG.warning(f"Failed to fetch gamma for {symbol}: {e}")
+            LOG.debug(f"Live strikes for {symbol} failed: {e}")
             continue
     
-    return {
-        "available": False,
-        "environment": "unknown",
-        "recommendation": "Gamma context unavailable.",
-        "warnings": ["Could not fetch gamma data for any symbol."],
-    }
+    # STRATEGY 2: Try live_strikes without specific expiry
+    if not strikes or len(strikes) < 10:
+        for symbol in symbols:
+            try:
+                resp = client.live_strikes(
+                    ticker=symbol,
+                    fields=fields,
+                )
+                live_rows = resp.rows if hasattr(resp, "rows") else []
+                if live_rows and len(live_rows) > 10:
+                    strikes = live_rows
+                    expiry_used = live_rows[0].get("expirDate", "")[:10] if live_rows else None
+                    data_source = "live"
+                    LOG.info(f"Using live {symbol} strikes without expiry filter ({len(strikes)} rows)")
+                    break
+            except Exception as e:
+                LOG.debug(f"Live strikes (no expiry) for {symbol} failed: {e}")
+                continue
+    
+    # STRATEGY 3: Fall back to EOD hist_strikes (after hours / weekends)
+    if not strikes or len(strikes) < 10:
+        LOG.info(f"Live strikes unavailable for {symbols}, falling back to EOD hist_strikes")
+        
+        dte_range = "3,21"  # 3-21 DTE
+        
+        # Walk back up to 5 trading days
+        for days_back in range(0, 6):
+            check_date = trade_date - dt.timedelta(days=days_back)
+            # Skip weekends
+            if check_date.weekday() >= 5:
+                continue
+            
+            for symbol in symbols:
+                try:
+                    resp = client.get(
+                        "hist/strikes",
+                        ticker=symbol,
+                        tradeDate=check_date.isoformat(),
+                        dte=dte_range,
+                        fields=fields,
+                    )
+                    rows = resp.rows if hasattr(resp, "rows") else []
+                    if rows and len(rows) > 10:
+                        # Pick expiry closest to target Friday
+                        expiries = set(str(r.get("expirDate", ""))[:10] for r in rows if r.get("expirDate"))
+                        if expiries:
+                            chosen = min(expiries, key=lambda e: abs((dt.date.fromisoformat(e) - target_friday).days))
+                            filtered = [r for r in rows if str(r.get("expirDate", ""))[:10] == chosen]
+                            if len(filtered) > 10:
+                                strikes = filtered
+                                expiry_used = chosen
+                                data_source = f"eod:{check_date.isoformat()}"
+                                LOG.info(f"Using EOD {symbol} strikes from {check_date} ({len(strikes)} rows)")
+                                break
+                except Exception as e:
+                    LOG.debug(f"EOD strikes for {symbol} on {check_date} failed: {e}")
+                    continue
+            
+            if strikes and len(strikes) > 10:
+                break
+    
+    # Process the strikes if we have them
+    if not strikes or len(strikes) < 10:
+        return {
+            "available": False,
+            "environment": "unknown",
+            "recommendation": "Gamma context unavailable.",
+            "warnings": [f"Could not fetch gamma data for {symbols}."],
+        }
+    
+    gamma = compute_dealer_gamma_context(strikes, expiry=expiry_used)
+    
+    # Add environment classification for continuation setups
+    net_sign = gamma.get("netGammaSign")
+    if net_sign == "positive":
+        gamma["environment"] = "supportive"
+        gamma["recommendation"] = "Positive gamma supports pullback continuation setups."
+    elif net_sign == "negative":
+        gamma["environment"] = "challenging"
+        gamma["recommendation"] = "Negative gamma can accelerate moves - be selective with entries."
+    else:
+        gamma["environment"] = "unknown"
+        gamma["recommendation"] = "Gamma context unclear - proceed with standard criteria."
+    
+    # Add source metadata
+    gamma["symbol"] = symbols[0] if symbols else "unknown"
+    gamma["dataSource"] = data_source
+    
+    # Add note if using historical data
+    if data_source.startswith("eod:"):
+        eod_date = data_source.split(":")[1]
+        gamma["recommendation"] = f"[EOD data from {eod_date}] " + gamma["recommendation"]
+    
+    return gamma
 
 
 # ---------------------------------------------------------------------------
