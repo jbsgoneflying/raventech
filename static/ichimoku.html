@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Engine 4 · Ichimoku Continuation</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 4 Ichimoku Cloud continuation scanner with A+ quality scoring for SP500 + Nasdaq100 (ORATS EOD)." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      /* Engine 4 specific styles */
+      .watchlistGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .signalCard {
+        padding: 14px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+        transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+        cursor: pointer;
+      }
+
+      .signalCard:hover {
+        border-color: rgba(15, 23, 42, 0.16);
+        background: rgba(255,255,255,0.88);
+        transform: translateY(-1px);
+      }
+
+      .signalCardHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .signalCardTicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .signalCardSymbol {
+        font-size: 18px;
+        font-weight: 900;
+        letter-spacing: -0.2px;
+      }
+
+      .signalCardDirection {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+
+      .signalCardDirection.bullish {
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .signalCardDirection.bearish {
+        background: rgba(255, 59, 48, 0.14);
+        border: 1px solid rgba(255, 59, 48, 0.30);
+        color: rgba(86, 17, 12, 0.96);
+      }
+
+      .signalCardGrade {
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.1px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+      }
+
+      .signalCardGrade.grade-aplus {
+        background: rgba(52, 199, 89, 0.14);
+        border-color: rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .signalCardGrade.grade-a {
+        background: rgba(0, 122, 255, 0.12);
+        border-color: rgba(0, 122, 255, 0.25);
+        color: rgba(0, 90, 200, 0.95);
+      }
+
+      .signalCardGrade.grade-b {
+        background: rgba(255, 159, 10, 0.12);
+        border-color: rgba(255, 159, 10, 0.28);
+        color: rgba(180, 100, 0, 0.95);
+      }
+
+      .signalCardGrade.grade-c {
+        background: rgba(11, 11, 15, 0.06);
+        border-color: rgba(11, 11, 15, 0.12);
+        color: rgba(11, 11, 15, 0.70);
+      }
+
+      .signalCardStatus {
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-left: 8px;
+      }
+
+      .signalCardStatus.pending {
+        background: rgba(255, 204, 0, 0.14);
+        border: 1px solid rgba(255, 204, 0, 0.30);
+        color: rgba(140, 100, 0, 0.96);
+      }
+
+      .signalCardStatus.triggered {
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .signalCardBody {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .signalCardMetric {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .signalCardMetric .k {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .signalCardMetric .v {
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .signalCardIchimoku {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+      }
+
+      .ichimokuValue {
+        text-align: center;
+        font-size: 11px;
+      }
+
+      .ichimokuValue .label {
+        color: var(--muted);
+        font-weight: 600;
+        display: block;
+      }
+
+      .ichimokuValue .value {
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .signalCardTags {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .tagChip {
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.50);
+      }
+
+      .tagChip.positive {
+        background: rgba(52, 199, 89, 0.10);
+        border-color: rgba(52, 199, 89, 0.25);
+        color: rgba(12, 70, 38, 0.90);
+      }
+
+      .tagChip.warning {
+        background: rgba(255, 149, 0, 0.10);
+        border-color: rgba(255, 149, 0, 0.25);
+        color: rgba(140, 80, 0, 0.90);
+      }
+
+      /* Gamma context panels */
+      .gammaContextGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .gammaPanel {
+        padding: 14px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+      }
+
+      .gammaPanelTitle {
+        font-size: 13px;
+        font-weight: 800;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .gammaPanelTitle .indexBadge {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        background: rgba(0, 122, 255, 0.10);
+        border: 1px solid rgba(0, 122, 255, 0.20);
+        color: rgba(0, 90, 200, 0.95);
+      }
+
+      .gammaRow {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 4px 0;
+        font-size: 12px;
+      }
+
+      .gammaRow .label {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .gammaPositive {
+        color: rgba(52, 199, 89, 0.95);
+        font-weight: 700;
+      }
+
+      .gammaNegative {
+        color: rgba(255, 59, 48, 0.95);
+        font-weight: 700;
+      }
+
+      .gammaEnvSupportive {
+        color: rgba(52, 199, 89, 0.95);
+        font-weight: 700;
+      }
+
+      .gammaEnvChallenging {
+        color: rgba(255, 149, 0, 0.95);
+        font-weight: 700;
+      }
+
+      /* Stats bar */
+      .statsBar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        padding: 12px 16px;
+        background: rgba(255,255,255,0.60);
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        margin-bottom: 16px;
+      }
+
+      .statItem {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .statItem .label {
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .statItem .value {
+        font-size: 18px;
+        font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      /* Empty state */
+      .emptyState {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--muted);
+      }
+
+      .emptyState h3 {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .emptyState p {
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topNav">
+      <a href="/" class="logoLink">
+        <img src="/static/RavenONLY.png" alt="Raven" class="logoImg" />
+        <span class="logoText">Raven-Tech.co</span>
+      </a>
+      <nav class="navLinks">
+        <a href="/">Engine 1</a>
+        <a href="/spx">Engine 2</a>
+        <a href="/red-dog">Engine 3</a>
+        <a href="/ichimoku" class="active">Engine 4</a>
+      </nav>
+    </header>
+
+    <main class="container">
+      <section class="hero">
+        <h1>Engine 4: Ichimoku Continuation</h1>
+        <p class="subtitle">
+          EOD scanner for Ichimoku Cloud continuation setups (Kijun pullback + Tenkan reclaim)
+          across SP500 + Nasdaq100 with A+ quality scoring.
+        </p>
+      </section>
+
+      <!-- Control Bar -->
+      <section class="controlBar surface">
+        <div class="controlRow">
+          <div class="controlGroup">
+            <label for="directionSelect">Direction</label>
+            <select id="directionSelect">
+              <option value="">All</option>
+              <option value="bullish">Bullish</option>
+              <option value="bearish">Bearish</option>
+            </select>
+          </div>
+          <div class="controlGroup">
+            <label for="minScoreInput">Min Score</label>
+            <input type="number" id="minScoreInput" value="50" min="0" max="100" step="5" />
+          </div>
+          <button id="runBtn" class="btnPrimary">Scan Universe</button>
+        </div>
+        <p id="status" class="status isOk">Ready to scan.</p>
+      </section>
+
+      <!-- Stats Bar -->
+      <section id="statsSection" class="statsBar" style="display: none;">
+        <div class="statItem">
+          <span class="label">Scanned</span>
+          <span id="statScanned" class="value">—</span>
+        </div>
+        <div class="statItem">
+          <span class="label">Setups Found</span>
+          <span id="statSetups" class="value">—</span>
+        </div>
+        <div class="statItem">
+          <span class="label">A+ Setups</span>
+          <span id="statAPlus" class="value">—</span>
+        </div>
+        <div class="statItem">
+          <span class="label">Scan Time</span>
+          <span id="statDuration" class="value">—</span>
+        </div>
+        <div class="statItem" style="margin-left: auto;">
+          <span class="label">As Of</span>
+          <span id="statsMeta" class="value" style="font-size: 13px;">—</span>
+        </div>
+      </section>
+
+      <!-- Gamma Context Section -->
+      <section id="gammaSection" class="surface" style="display: none;">
+        <h2 class="sectionTitle">Market Gamma Context</h2>
+        <p class="sectionSubtitle">Dealer positioning affects continuation setup follow-through.</p>
+        <div class="gammaContextGrid">
+          <!-- SPX Gamma Panel -->
+          <div class="gammaPanel">
+            <div class="gammaPanelTitle">
+              S&P 500 Names
+              <span class="indexBadge">SPX</span>
+            </div>
+            <div class="gammaRow">
+              <span class="label">Net Gamma</span>
+              <span id="spxGammaSign">—</span>
+            </div>
+            <div class="gammaRow">
+              <span class="label">Environment</span>
+              <span id="spxGammaEnv">—</span>
+            </div>
+            <div id="spxGammaNote" class="gammaRow" style="font-size: 11px; color: var(--muted);"></div>
+          </div>
+          <!-- NDX Gamma Panel -->
+          <div class="gammaPanel">
+            <div class="gammaPanelTitle">
+              Nasdaq 100 Names
+              <span class="indexBadge">NDX</span>
+            </div>
+            <div class="gammaRow">
+              <span class="label">Net Gamma</span>
+              <span id="ndxGammaSign">—</span>
+            </div>
+            <div class="gammaRow">
+              <span class="label">Environment</span>
+              <span id="ndxGammaEnv">—</span>
+            </div>
+            <div id="ndxGammaNote" class="gammaRow" style="font-size: 11px; color: var(--muted);"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- A+ Setups Section -->
+      <section id="aplusSection" class="surface" style="display: none;">
+        <h2 class="sectionTitle">A+ Setups <span class="badge badgeGreen" id="aplusCount">0</span></h2>
+        <p class="sectionSubtitle">High-quality continuation entries scoring 75+.</p>
+        <div id="aplusGrid" class="watchlistGrid"></div>
+      </section>
+
+      <!-- Other Setups Section -->
+      <section id="othersSection" class="surface" style="display: none;">
+        <h2 class="sectionTitle">Other Setups <span class="badge" id="othersCount">0</span></h2>
+        <p class="sectionSubtitle">Setups meeting minimum score threshold.</p>
+        <div id="othersGrid" class="watchlistGrid"></div>
+      </section>
+
+      <!-- Empty State -->
+      <section id="emptySection" class="surface emptyState" style="display: none;">
+        <h3>No Setups Found</h3>
+        <p>No Ichimoku continuation setups matching your criteria were found in the current scan.</p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>&copy; 2024-2026 Raven-Tech.co. Engine 4 uses ORATS EOD data.</p>
+    </footer>
+
+    <script src="/static/ichimoku.js"></script>
+  </body>
+</html>

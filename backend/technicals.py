@@ -728,6 +728,242 @@ def compute_ichimoku_levels(bars: List[DailyBar]) -> Dict[str, Any]:
     }
 
 
+def compute_ichimoku_series(bars: List[DailyBar]) -> Dict[str, Any]:
+    """
+    Compute full Ichimoku series for historical analysis (Engine4).
+    
+    Returns complete series for:
+    - tenkan_series: 9-period midpoint series
+    - kijun_series: 26-period midpoint series
+    - span_a_series: (Tenkan + Kijun) / 2 series
+    - span_b_series: 52-period midpoint series
+    - cloud_series: Combined cloud data per bar (aligned to current date, i.e. shifted back 26)
+    - chikou_series: Close values (to be plotted 26 bars back)
+    
+    This enables pullback detection, Kijun slope analysis, and time-in-cloud measurement.
+    """
+    if not bars or len(bars) < 52:
+        return {
+            "enabled": False,
+            "notes": ["Insufficient bars for Ichimoku series (need 52+)."],
+            "tenkan_series": [],
+            "kijun_series": [],
+            "span_a_series": [],
+            "span_b_series": [],
+            "cloud_series": [],
+            "chikou_series": [],
+        }
+    
+    highs = [b.high for b in bars]
+    lows = [b.low for b in bars]
+    closes = [b.close for b in bars]
+    
+    # Require full alignment
+    if any(v is None for v in highs) or any(v is None for v in lows) or any(v is None for v in closes):
+        return {
+            "enabled": False,
+            "notes": ["Missing OHLC in bar series; cannot compute Ichimoku series reliably."],
+            "tenkan_series": [],
+            "kijun_series": [],
+            "span_a_series": [],
+            "span_b_series": [],
+            "cloud_series": [],
+            "chikou_series": [],
+        }
+    
+    hs = [float(x) for x in highs]
+    ls = [float(x) for x in lows]
+    cs = [float(x) for x in closes]
+    
+    # Compute raw series
+    tenkan_raw = _rolling_hl_mid(hs, ls, 9)
+    kijun_raw = _rolling_hl_mid(hs, ls, 26)
+    span_b_raw = _rolling_hl_mid(hs, ls, 52)
+    
+    # Span A = (Tenkan + Kijun) / 2
+    span_a_raw: List[Optional[float]] = []
+    for i in range(len(bars)):
+        if tenkan_raw[i] is None or kijun_raw[i] is None:
+            span_a_raw.append(None)
+        else:
+            span_a_raw.append((float(tenkan_raw[i]) + float(kijun_raw[i])) / 2.0)
+    
+    # Build cloud series aligned to current date (shift back 26 bars)
+    # cloud_series[i] gives the cloud values that apply to bar[i]
+    cloud_series: List[Optional[Dict[str, Any]]] = []
+    for i in range(len(bars)):
+        # The cloud at bar[i] is the span values from 26 bars earlier
+        src_idx = i - 26
+        if src_idx < 0:
+            cloud_series.append(None)
+            continue
+        a = span_a_raw[src_idx]
+        b = span_b_raw[src_idx]
+        if a is None or b is None:
+            cloud_series.append(None)
+            continue
+        top = max(float(a), float(b))
+        bot = min(float(a), float(b))
+        cloud_series.append({
+            "spanA": float(a),
+            "spanB": float(b),
+            "cloudTop": top,
+            "cloudBottom": bot,
+            "cloudBias": "bullish" if float(a) >= float(b) else "bearish",
+            "thickness": top - bot,
+        })
+    
+    # Chikou series is just the closes (plotted 26 back when charting)
+    chikou_series = cs
+    
+    return {
+        "enabled": True,
+        "barCount": len(bars),
+        "tenkan_series": tenkan_raw,
+        "kijun_series": kijun_raw,
+        "span_a_series": span_a_raw,
+        "span_b_series": span_b_raw,
+        "cloud_series": cloud_series,
+        "chikou_series": chikou_series,
+        "closes": cs,
+        "highs": hs,
+        "lows": ls,
+        "dates": [b.trade_date for b in bars],
+        "notes": [
+            "Full Ichimoku series for historical analysis.",
+            "cloud_series is aligned to bar dates (shifted back 26 from computation).",
+        ],
+    }
+
+
+def compute_volume_metrics(bars: List[DailyBar], period: int = 20) -> Dict[str, Any]:
+    """
+    Compute volume metrics for Engine4 trigger confirmation.
+    
+    Returns:
+    - avg_volume: 20-day average volume
+    - current_volume: Most recent bar's volume
+    - volume_ratio: current / avg (1.0 = average, 1.5 = 50% above average)
+    - volume_series: Full volume series
+    - volume_ratio_series: Ratio series for historical analysis
+    """
+    if not bars:
+        return {"enabled": False, "notes": ["No bars available."]}
+    
+    volumes: List[Optional[float]] = []
+    for b in bars:
+        if b.volume is not None and b.volume > 0:
+            volumes.append(float(b.volume))
+        else:
+            volumes.append(None)
+    
+    # Count valid volumes
+    valid_vols = [v for v in volumes if v is not None]
+    if len(valid_vols) < period:
+        return {
+            "enabled": False,
+            "notes": [f"Insufficient volume data (need {period}+ bars with volume)."],
+            "volume_series": volumes,
+        }
+    
+    # Compute rolling average and ratio
+    avg_series: List[Optional[float]] = []
+    ratio_series: List[Optional[float]] = []
+    
+    for i in range(len(bars)):
+        if i + 1 < period:
+            avg_series.append(None)
+            ratio_series.append(None)
+            continue
+        
+        window_vols = [v for v in volumes[i + 1 - period: i + 1] if v is not None]
+        if len(window_vols) < period * 0.8:  # Require 80% of window to have valid data
+            avg_series.append(None)
+            ratio_series.append(None)
+            continue
+        
+        avg = sum(window_vols) / len(window_vols)
+        avg_series.append(avg)
+        
+        cur = volumes[i]
+        if cur is not None and avg > 0:
+            ratio_series.append(cur / avg)
+        else:
+            ratio_series.append(None)
+    
+    # Current values
+    current_vol = volumes[-1] if volumes else None
+    avg_vol = avg_series[-1] if avg_series else None
+    ratio = ratio_series[-1] if ratio_series else None
+    
+    return {
+        "enabled": True,
+        "avgVolume": avg_vol,
+        "currentVolume": current_vol,
+        "volumeRatio": ratio,
+        "period": period,
+        "volume_series": volumes,
+        "avg_series": avg_series,
+        "ratio_series": ratio_series,
+        "notes": [f"Volume metrics computed with {period}-day average."],
+    }
+
+
+def compute_atr_series(bars: List[DailyBar], period: int = 14) -> Dict[str, Any]:
+    """
+    Compute ATR series for stop placement buffer (Engine4).
+    
+    Returns:
+    - atr: Current ATR value
+    - atr_series: Full ATR series
+    """
+    if not bars or len(bars) < period + 1:
+        return {"enabled": False, "atr": None, "atr_series": [], "notes": ["Insufficient bars for ATR."]}
+    
+    highs = [b.high for b in bars]
+    lows = [b.low for b in bars]
+    closes = [b.close for b in bars]
+    
+    if any(v is None for v in highs) or any(v is None for v in lows) or any(v is None for v in closes):
+        return {"enabled": False, "atr": None, "atr_series": [], "notes": ["Missing OHLC for ATR."]}
+    
+    hs = [float(x) for x in highs]
+    ls = [float(x) for x in lows]
+    cs = [float(x) for x in closes]
+    
+    # Compute True Range series
+    tr_series: List[float] = [hs[0] - ls[0]]  # First bar: just high - low
+    for i in range(1, len(bars)):
+        tr = max(
+            hs[i] - ls[i],
+            abs(hs[i] - cs[i - 1]),
+            abs(ls[i] - cs[i - 1])
+        )
+        tr_series.append(tr)
+    
+    # Compute ATR using Wilder smoothing
+    atr_series: List[Optional[float]] = [None] * (period - 1)
+    
+    # Initial ATR is simple average of first 'period' TR values
+    initial_atr = sum(tr_series[:period]) / period
+    atr_series.append(initial_atr)
+    
+    # Subsequent ATRs use Wilder smoothing
+    prev_atr = initial_atr
+    for i in range(period, len(bars)):
+        atr = (prev_atr * (period - 1) + tr_series[i]) / period
+        atr_series.append(atr)
+        prev_atr = atr
+    
+    return {
+        "enabled": True,
+        "atr": atr_series[-1] if atr_series else None,
+        "atr_series": atr_series,
+        "period": period,
+        "notes": [f"ATR computed with {period}-period Wilder smoothing."],
+    }
+
+
 def compute_vwap_proxy(bars: List[DailyBar], window: int = 20) -> Dict[str, Any]:
     """
     VWAP proxy (daily-only).
