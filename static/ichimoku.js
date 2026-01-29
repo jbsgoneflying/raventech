@@ -398,8 +398,8 @@ function init() {
   // Initialize tooltips
   initTooltips();
   
-  // Auto-run scan on load
-  handleScan();
+  // Don't auto-run - let user adjust filters and click Scan manually
+  setStatus("Adjust filters above and click \"Scan Universe\" to find Ichimoku continuation setups.");
 }
 
 // Run on DOM ready
