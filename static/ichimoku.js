@@ -54,7 +54,50 @@ function setStatus(msg, type = "ok") {
   const el = $("status");
   if (!el) return;
   el.textContent = msg;
-  el.className = `status is${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+  el.className = `status ${type === "error" ? "statusError" : ""}`;
+}
+
+function showResults(show) {
+  const results = $("results");
+  if (results) {
+    results.classList.toggle("hidden", !show);
+  }
+}
+
+function initTooltips() {
+  const wraps = Array.from(document.querySelectorAll(".tipWrap"));
+  const closeAll = () => {
+    wraps.forEach(w => {
+      w.classList.remove("isOpen");
+      const b = w.querySelector(".tipBtn");
+      if (b) b.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  wraps.forEach((w) => {
+    const btn = w.querySelector(".tipBtn");
+    if (!btn) return;
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const isOpen = w.classList.contains("isOpen");
+      closeAll();
+      if (!isOpen) {
+        w.classList.add("isOpen");
+        btn.setAttribute("aria-expanded", "true");
+      }
+    });
+  });
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest(".tipWrap")) return;
+    closeAll();
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeAll();
+  });
 }
 
 // -----------------------------------------------------------------------------
@@ -92,8 +135,7 @@ function renderStats(payload) {
   $("statAPlus").textContent = fmt0(aplus);
   $("statDuration").textContent = duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—";
   
-  $("statsMeta").textContent = `${payload.asOfDate || "—"}`;
-  $("statsSection").style.display = "flex";
+  $("statsMeta").textContent = `As of ${payload.asOfDate || "—"}`;
 }
 
 function renderGammaContext(payload) {
@@ -109,7 +151,7 @@ function renderGammaContext(payload) {
   } else if (spxSign === "negative") {
     spxSignEl.innerHTML = `<span class="gammaNegative">NEGATIVE</span>`;
   } else {
-    spxSignEl.textContent = "—";
+    spxSignEl.textContent = "Unknown";
   }
   
   const spxEnv = spx.environment || "unknown";
@@ -119,7 +161,7 @@ function renderGammaContext(payload) {
   } else if (spxEnv === "challenging") {
     spxEnvEl.innerHTML = `<span class="gammaEnvChallenging">Challenging</span>`;
   } else {
-    spxEnvEl.textContent = "—";
+    spxEnvEl.textContent = "Unknown";
   }
   
   $("spxGammaNote").textContent = spx.recommendation || "";
@@ -132,7 +174,7 @@ function renderGammaContext(payload) {
   } else if (ndxSign === "negative") {
     ndxSignEl.innerHTML = `<span class="gammaNegative">NEGATIVE</span>`;
   } else {
-    ndxSignEl.textContent = "—";
+    ndxSignEl.textContent = "Unknown";
   }
   
   const ndxEnv = ndx.environment || "unknown";
@@ -142,12 +184,12 @@ function renderGammaContext(payload) {
   } else if (ndxEnv === "challenging") {
     ndxEnvEl.innerHTML = `<span class="gammaEnvChallenging">Challenging</span>`;
   } else {
-    ndxEnvEl.textContent = "—";
+    ndxEnvEl.textContent = "Unknown";
   }
   
   $("ndxGammaNote").textContent = ndx.recommendation || "";
   
-  $("gammaSection").style.display = "block";
+  $("gammaMeta").textContent = "Dealer positioning by index";
 }
 
 function renderSignalCard(signal) {
@@ -188,12 +230,10 @@ function renderSignalCard(signal) {
         <div class="signalCardTicker">
           <span class="signalCardSymbol">${ticker}</span>
           <span class="signalCardDirection ${direction}">${direction}</span>
+          <span class="indexBadgeSmall">${indexBadge}</span>
           ${status !== "pending" ? `<span class="signalCardStatus ${status}">${status}</span>` : ""}
         </div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 10px; color: var(--muted); font-weight: 600;">${indexBadge}</span>
-          <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
-        </div>
+        <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
       </div>
       <div class="signalCardBody">
         <div class="signalCardMetric">
@@ -247,38 +287,41 @@ function renderSignals(payload) {
   // A+ Section
   const aplusGrid = $("aplusGrid");
   const aplusSection = $("aplusSection");
-  $("aplusCount").textContent = aplus.length;
+  const aplusMeta = $("aplusMeta");
   
   if (aplus.length > 0) {
     aplusGrid.innerHTML = aplus.map(renderSignalCard).join("");
-    aplusSection.style.display = "block";
+    aplusMeta.textContent = `${aplus.length} high-quality setup${aplus.length !== 1 ? 's' : ''}`;
+    aplusSection.classList.remove("hidden");
   } else {
-    aplusSection.style.display = "none";
+    aplusSection.classList.add("hidden");
   }
   
   // Others Section
   const othersGrid = $("othersGrid");
   const othersSection = $("othersSection");
-  $("othersCount").textContent = others.length;
+  const othersMeta = $("othersMeta");
   
   if (others.length > 0) {
     othersGrid.innerHTML = others.map(renderSignalCard).join("");
-    othersSection.style.display = "block";
+    othersMeta.textContent = `${others.length} setup${others.length !== 1 ? 's' : ''}`;
+    othersSection.classList.remove("hidden");
   } else {
-    othersSection.style.display = "none";
+    othersSection.classList.add("hidden");
   }
   
   // Empty State
   const emptySection = $("emptySection");
   if (aplus.length === 0 && others.length === 0) {
-    emptySection.style.display = "block";
+    emptySection.classList.remove("hidden");
   } else {
-    emptySection.style.display = "none";
+    emptySection.classList.add("hidden");
   }
 }
 
 function render(payload) {
   lastPayload = payload;
+  showResults(true);
   renderStats(payload);
   renderGammaContext(payload);
   renderSignals(payload);
@@ -288,12 +331,14 @@ function render(payload) {
 // Event Handlers
 // -----------------------------------------------------------------------------
 
-async function handleScan() {
-  const direction = $("directionSelect").value || "";
-  const minScore = parseInt($("minScoreInput").value, 10) || 50;
+async function handleScan(e) {
+  if (e) e.preventDefault();
+  
+  const direction = $("direction")?.value || "";
+  const minScore = parseInt($("minScore")?.value, 10) || 50;
   
   setLoading(true);
-  setStatus("Scanning universe...", "ok");
+  setStatus("Scanning universe...");
   
   try {
     const payload = await fetchScan(direction, minScore);
@@ -301,10 +346,11 @@ async function handleScan() {
     
     const total = payload.setupsFound ?? 0;
     const aplus = (payload.aPlus || []).length;
-    setStatus(`Found ${total} setups (${aplus} A+).`, "ok");
+    setStatus(`Found ${total} setups (${aplus} A+).`);
   } catch (err) {
     console.error("Scan failed:", err);
     setStatus(`Error: ${err.message}`, "error");
+    showResults(false);
   } finally {
     setLoading(false);
   }
@@ -317,7 +363,7 @@ function handleCardClick(e) {
   const ticker = card.dataset.ticker;
   if (!ticker) return;
   
-  // Open single-ticker detail (could be a modal or new page)
+  // Open single-ticker detail in new tab
   window.open(`/api/engine4-ichimoku/${ticker}`, "_blank");
 }
 
@@ -326,22 +372,23 @@ function handleCardClick(e) {
 // -----------------------------------------------------------------------------
 
 function init() {
-  // Button handler
+  // Form submission handler
+  const form = $("e4Form");
+  if (form) {
+    form.addEventListener("submit", handleScan);
+  }
+  
+  // Button handler (backup)
   const runBtn = $("runBtn");
   if (runBtn) {
     runBtn.addEventListener("click", handleScan);
   }
   
-  // Enter key in inputs
-  const minScoreInput = $("minScoreInput");
-  if (minScoreInput) {
-    minScoreInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") handleScan();
-    });
-  }
-  
   // Card click handler
   document.addEventListener("click", handleCardClick);
+  
+  // Initialize tooltips
+  initTooltips();
   
   // Auto-run scan on load
   handleScan();
