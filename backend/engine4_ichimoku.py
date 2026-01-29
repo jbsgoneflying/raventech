@@ -329,14 +329,17 @@ def detect_trend_regime(
     Determine if price is in a valid trend regime for Engine4.
     
     Bull regime:
-    - Close above cloud
-    - Cloud ahead is bullish (Span A above Span B)
-    - Kijun slope positive (or not flat for long)
+    - Close above cloud (required)
+    - Cloud ahead is bullish OR current cloud bullish (required)
+    - Kijun slope is a quality factor (not hard filter)
     
     Bear regime:
-    - Close below cloud
-    - Cloud ahead is bearish
-    - Kijun slope negative
+    - Close below cloud (required)
+    - Cloud ahead is bearish OR current cloud bearish (required)
+    - Kijun slope is a quality factor (not hard filter)
+    
+    Note: Kijun slope is used for scoring (A+ criteria), not rejection.
+    During pullbacks, Kijun may naturally have mild opposite slope.
     """
     if cloud is None:
         return {"valid": False, "direction": None, "reason": "Cloud data unavailable"}
@@ -371,27 +374,32 @@ def detect_trend_regime(
         "reason": None,
     }
     
-    # Bull regime check
+    # Bull regime check - Kijun slope is a quality factor, not a hard filter
+    # After a pullback, Kijun may have mild negative slope which is acceptable
     if position == "above":
         if future_bias == "bullish" or current_bias == "bullish":
-            if kijun_slope in ("positive", "flat"):  # Allow flat, just not negative
-                result["valid"] = True
-                result["direction"] = "bullish"
-                result["reason"] = "Price above cloud with aligned trend"
+            result["valid"] = True
+            result["direction"] = "bullish"
+            if kijun_slope == "positive":
+                result["reason"] = "Price above cloud with rising Kijun (A+ quality)"
+            elif kijun_slope == "flat":
+                result["reason"] = "Price above cloud with flat Kijun"
             else:
-                result["reason"] = "Kijun slope negative despite price above cloud"
+                result["reason"] = "Price above cloud (Kijun slope negative - monitor)"
         else:
             result["reason"] = "Cloud bias not aligned for bull trend"
     
     # Bear regime check
     elif position == "below":
         if future_bias == "bearish" or current_bias == "bearish":
-            if kijun_slope in ("negative", "flat"):
-                result["valid"] = True
-                result["direction"] = "bearish"
-                result["reason"] = "Price below cloud with aligned trend"
+            result["valid"] = True
+            result["direction"] = "bearish"
+            if kijun_slope == "negative":
+                result["reason"] = "Price below cloud with falling Kijun (A+ quality)"
+            elif kijun_slope == "flat":
+                result["reason"] = "Price below cloud with flat Kijun"
             else:
-                result["reason"] = "Kijun slope positive despite price below cloud"
+                result["reason"] = "Price below cloud (Kijun slope positive - monitor)"
         else:
             result["reason"] = "Cloud bias not aligned for bear trend"
     
@@ -512,19 +520,21 @@ def detect_pullback_state(
     result["reclaimedTenkan"] = reclaimed
     
     # Determine state
+    # Note: Shallow pullbacks (below Tenkan but not to Kijun) are still valid setups
+    # They just score lower in the A+ system. Deep pullbacks to Kijun score higher.
     if deep_penetration:
         result["state"] = "rejected_deep_penetration"
         result["notes"].append("Pullback penetrated too deep into cloud.")
     elif not closed_below_tenkan:
         result["state"] = "no_pullback"
         result["notes"].append("No pullback below Tenkan detected.")
-    elif not touched_kijun:
-        result["state"] = "pullback_shallow"
-        result["notes"].append("Pullback did not reach Kijun zone.")
     elif reclaimed:
         result["valid"] = True
         result["state"] = "trigger_ready"
-        result["notes"].append("Valid pullback with Tenkan reclaim.")
+        if touched_kijun:
+            result["notes"].append("Strong pullback to Kijun with Tenkan reclaim.")
+        else:
+            result["notes"].append("Shallow pullback with Tenkan reclaim (Kijun not touched).")
     else:
         result["state"] = "pullback_in_progress"
         result["notes"].append("Pullback ongoing, awaiting Tenkan reclaim.")
