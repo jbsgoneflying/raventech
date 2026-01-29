@@ -61,6 +61,12 @@ TIME_IN_CLOUD_THRESHOLD = 10     # > 10 of 20 days = choppy
 KIJUN_FLAT_THRESHOLD = 5         # > 5 days flat is concerning
 ATR_BUFFER_MULT = 0.25           # 0.25x ATR buffer for stops
 
+# Freshness classification thresholds (for Actionable vs Structure buckets)
+FRESHNESS_RECLAIM_MAX_BARS = 3       # Max bars since Tenkan reclaim for actionable
+FRESHNESS_KIJUN_DISTANCE_ATR = 1.5   # Max distance to Kijun in ATR units for actionable
+FRESHNESS_TENKAN_LOOKBACK = 5        # Bars to check for recent Tenkan interaction
+IMPULSE_DISPLACEMENT_MULT = 2.5      # TR > 2.5x ATR = impulse bar (hard reject)
+
 
 @dataclass(frozen=True)
 class IchimokuSignal:
@@ -135,6 +141,14 @@ class IchimokuSignal:
     
     # Index membership for gamma segmentation
     index_membership: str = "sp500"  # "sp500", "nasdaq100", "both"
+    
+    # Freshness classification (Actionable vs Structure)
+    freshness_bucket: str = "actionable"  # "actionable" or "structure"
+    freshness_reasons: List[str] = field(default_factory=list)
+    bars_since_reclaim: Optional[int] = None
+    kijun_distance_atr: Optional[float] = None
+    recent_tenkan_touch: Optional[bool] = None
+    is_impulse_bar: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +738,150 @@ def find_swing_target(
 
 
 # ---------------------------------------------------------------------------
+# Freshness Classification Functions
+# ---------------------------------------------------------------------------
+
+def count_bars_since_tenkan_reclaim(
+    closes: List[float],
+    tenkan_series: List[Optional[float]],
+    direction: str,
+) -> Optional[int]:
+    """
+    Count bars since the most recent Tenkan reclaim crossover.
+    
+    Bull: close crossed from below Tenkan to above Tenkan
+    Bear: close crossed from above Tenkan to below Tenkan
+    
+    Returns:
+        Number of bars since reclaim, or None if no reclaim found in history
+    """
+    if not closes or not tenkan_series or len(closes) < 2:
+        return None
+    
+    n = min(len(closes), len(tenkan_series))
+    
+    # Walk backwards from most recent bar
+    for i in range(n - 1, 0, -1):
+        curr_close = closes[i]
+        prev_close = closes[i - 1]
+        curr_tenkan = tenkan_series[i]
+        prev_tenkan = tenkan_series[i - 1]
+        
+        if curr_tenkan is None or prev_tenkan is None:
+            continue
+        
+        if direction == "bullish":
+            # Looking for: was below Tenkan, now above Tenkan
+            if prev_close < prev_tenkan and curr_close > curr_tenkan:
+                # Found the reclaim bar
+                bars_since = (n - 1) - i
+                return bars_since
+        else:  # bearish
+            # Looking for: was above Tenkan, now below Tenkan
+            if prev_close > prev_tenkan and curr_close < curr_tenkan:
+                bars_since = (n - 1) - i
+                return bars_since
+    
+    return None
+
+
+def compute_kijun_distance_atr(
+    close: float,
+    kijun: float,
+    atr: float,
+    direction: str,
+) -> Optional[float]:
+    """
+    Compute distance from close to Kijun in ATR units.
+    
+    Bull: (close - kijun) / ATR (positive when above)
+    Bear: (kijun - close) / ATR (positive when below)
+    
+    Returns:
+        Distance in ATR units, or None if inputs invalid
+    """
+    if atr is None or atr <= 0:
+        return None
+    
+    if direction == "bullish":
+        return (close - kijun) / atr
+    else:
+        return (kijun - close) / atr
+
+
+def check_recent_tenkan_interaction(
+    bars: List[DailyBar],
+    tenkan_series: List[Optional[float]],
+    direction: str,
+    lookback: int = 5,
+) -> bool:
+    """
+    Check if price has interacted with Tenkan in the last N bars.
+    
+    Bull: low <= tenkan OR close <= tenkan in at least one bar
+    Bear: high >= tenkan OR close >= tenkan in at least one bar
+    
+    Returns:
+        True if recent interaction found, False otherwise
+    """
+    if not bars or not tenkan_series or len(bars) < lookback:
+        return False
+    
+    n = min(len(bars), len(tenkan_series))
+    start_idx = max(0, n - lookback)
+    
+    for i in range(start_idx, n):
+        bar = bars[i]
+        tenkan = tenkan_series[i]
+        
+        if tenkan is None:
+            continue
+        
+        low = float(bar.low) if bar.low is not None else None
+        high = float(bar.high) if bar.high is not None else None
+        close = float(bar.close) if bar.close is not None else None
+        
+        if direction == "bullish":
+            # For bulls, price should have touched or dipped below Tenkan
+            if low is not None and low <= tenkan:
+                return True
+            if close is not None and close <= tenkan:
+                return True
+        else:  # bearish
+            # For bears, price should have touched or rallied above Tenkan
+            if high is not None and high >= tenkan:
+                return True
+            if close is not None and close >= tenkan:
+                return True
+    
+    return False
+
+
+def check_impulse_displacement(
+    bar: DailyBar,
+    atr: float,
+) -> bool:
+    """
+    Check if the current bar is an impulse/event candle.
+    
+    An impulse bar has true range > 2.5x ATR, indicating unusual volatility
+    that makes continuation entries unreliable.
+    
+    Returns:
+        True if impulse bar (should reject), False otherwise
+    """
+    if atr is None or atr <= 0:
+        return False
+    
+    if bar.high is None or bar.low is None:
+        return False
+    
+    true_range = float(bar.high) - float(bar.low)
+    
+    return true_range > (IMPULSE_DISPLACEMENT_MULT * atr)
+
+
+# ---------------------------------------------------------------------------
 # Main Detection Function
 # ---------------------------------------------------------------------------
 
@@ -1144,10 +1302,84 @@ def score_ichimoku_setup(
     }
 
 
+def classify_freshness(
+    bars: List[DailyBar],
+    closes: List[float],
+    tenkan_series: List[Optional[float]],
+    direction: str,
+    close: float,
+    kijun: float,
+    atr: float,
+) -> Dict[str, Any]:
+    """
+    Classify a signal into Actionable or Structure bucket based on freshness rules.
+    
+    Rules (all must pass for Actionable):
+    1. Tenkan reclaim <= 3 bars ago
+    2. Distance to Kijun <= 1.5 ATR
+    3. Recent Tenkan interaction in last 5 bars
+    4. Not an impulse displacement bar
+    
+    Returns:
+        Dict with bucket, reasons, and individual metrics
+    """
+    reasons: List[str] = []
+    
+    # Check impulse displacement first (hard reject)
+    is_impulse = check_impulse_displacement(bars[-1], atr) if bars else False
+    
+    # Check reclaim age
+    bars_since_reclaim = count_bars_since_tenkan_reclaim(closes, tenkan_series, direction)
+    
+    # Check Kijun distance in ATR
+    kijun_dist = compute_kijun_distance_atr(close, kijun, atr, direction)
+    
+    # Check recent Tenkan interaction
+    recent_touch = check_recent_tenkan_interaction(bars, tenkan_series, direction, FRESHNESS_TENKAN_LOOKBACK)
+    
+    # Determine bucket
+    bucket = "actionable"
+    
+    # Rule 4: Impulse bar is a hard reject (won't be in either bucket)
+    if is_impulse:
+        bucket = "rejected"
+        reasons.append(f"Impulse bar (TR > {IMPULSE_DISPLACEMENT_MULT}x ATR)")
+    else:
+        # Rule 1: Reclaim age
+        if bars_since_reclaim is None:
+            bucket = "structure"
+            reasons.append("No Tenkan reclaim found")
+        elif bars_since_reclaim > FRESHNESS_RECLAIM_MAX_BARS:
+            bucket = "structure"
+            reasons.append(f"Reclaim {bars_since_reclaim} bars ago (max {FRESHNESS_RECLAIM_MAX_BARS})")
+        
+        # Rule 2: Extension from Kijun
+        if kijun_dist is not None and kijun_dist > FRESHNESS_KIJUN_DISTANCE_ATR:
+            bucket = "structure"
+            reasons.append(f"Extended {kijun_dist:.1f} ATR from Kijun (max {FRESHNESS_KIJUN_DISTANCE_ATR})")
+        
+        # Rule 3: Recent Tenkan interaction
+        if not recent_touch:
+            bucket = "structure"
+            reasons.append(f"No Tenkan interaction in last {FRESHNESS_TENKAN_LOOKBACK} bars")
+    
+    return {
+        "bucket": bucket,
+        "reasons": reasons,
+        "barsSinceReclaim": bars_since_reclaim,
+        "kijunDistanceAtr": round(kijun_dist, 2) if kijun_dist is not None else None,
+        "recentTenkanTouch": recent_touch,
+        "isImpulseBar": is_impulse,
+    }
+
+
 def build_ichimoku_signal(
     *,
     ticker: str,
     detection: Dict[str, Any],
+    bars: Optional[List[DailyBar]] = None,
+    closes: Optional[List[float]] = None,
+    tenkan_series: Optional[List[Optional[float]]] = None,
     gamma_context: Optional[Dict[str, Any]] = None,
     earnings_days_ahead: Optional[int] = None,
     index_membership: str = "sp500",
@@ -1174,18 +1406,44 @@ def build_ichimoku_signal(
     notes.extend(detection.get("notes", []))
     notes.extend(scoring.get("notes", []))
     
+    # Classify freshness (Actionable vs Structure)
+    direction = signal_data.get("direction", "bullish")
+    close = signal_data.get("close", 0)
+    kijun = signal_data.get("kijun", 0)
+    atr = signal_data.get("atr")
+    
+    freshness = {
+        "bucket": "actionable",
+        "reasons": [],
+        "barsSinceReclaim": None,
+        "kijunDistanceAtr": None,
+        "recentTenkanTouch": None,
+        "isImpulseBar": None,
+    }
+    
+    if bars and closes and tenkan_series and atr:
+        freshness = classify_freshness(
+            bars=bars,
+            closes=closes,
+            tenkan_series=tenkan_series,
+            direction=direction,
+            close=close,
+            kijun=kijun,
+            atr=atr,
+        )
+    
     return IchimokuSignal(
         ticker=ticker,
         signal_date=signal_data.get("signalDate", ""),
-        direction=signal_data.get("direction", "bullish"),
+        direction=direction,
         tenkan=signal_data.get("tenkan", 0),
-        kijun=signal_data.get("kijun", 0),
+        kijun=kijun,
         chikou=signal_data.get("chikou", 0),
         cloud_top=signal_data.get("cloudTop", 0),
         cloud_bottom=signal_data.get("cloudBottom", 0),
         cloud_bias=signal_data.get("cloudBias", ""),
         cloud_thickness=signal_data.get("cloudThickness", 0),
-        close=signal_data.get("close", 0),
+        close=close,
         close_position=signal_data.get("closePosition", 0.5),
         pullback_depth=signal_data.get("pullbackDepth", 0),
         cloud_penetration_pct=signal_data.get("cloudPenetrationPct", 0),
@@ -1215,7 +1473,7 @@ def build_ichimoku_signal(
         gamma_mismatch_penalty=scoring["breakdown"].get("gammaMismatchPenalty", 0),
         rsi=signal_data.get("rsi"),
         volume_ratio=signal_data.get("volumeRatio"),
-        atr=signal_data.get("atr"),
+        atr=atr,
         kijun_slope=signal_data.get("kijunSlope"),
         time_in_cloud=signal_data.get("timeInCloud"),
         chikou_tangled=signal_data.get("chikouTangled"),
@@ -1223,6 +1481,12 @@ def build_ichimoku_signal(
         tags=scoring.get("tags", []),
         notes=notes,
         index_membership=index_membership,
+        freshness_bucket=freshness["bucket"],
+        freshness_reasons=freshness["reasons"],
+        bars_since_reclaim=freshness["barsSinceReclaim"],
+        kijun_distance_atr=freshness["kijunDistanceAtr"],
+        recent_tenkan_touch=freshness["recentTenkanTouch"],
+        is_impulse_bar=freshness["isImpulseBar"],
     )
 
 
@@ -1286,6 +1550,14 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
             "kijunSlope": signal.kijun_slope,
             "timeInCloud": signal.time_in_cloud,
             "chikouTangled": signal.chikou_tangled,
+        },
+        "freshness": {
+            "bucket": signal.freshness_bucket,
+            "reasons": list(signal.freshness_reasons) if signal.freshness_reasons else [],
+            "barsSinceReclaim": signal.bars_since_reclaim,
+            "kijunDistanceAtr": signal.kijun_distance_atr,
+            "recentTenkanTouch": signal.recent_tenkan_touch,
+            "isImpulseBar": signal.is_impulse_bar,
         },
         "tags": list(signal.tags) if signal.tags else [],
         "notes": list(signal.notes) if signal.notes else [],

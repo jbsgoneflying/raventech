@@ -104,10 +104,10 @@ function initTooltips() {
 // API
 // -----------------------------------------------------------------------------
 
-async function fetchScan(direction, minScore) {
+async function fetchScan(direction) {
   const params = new URLSearchParams();
   if (direction) params.set("direction", direction);
-  if (minScore !== undefined) params.set("min_score", minScore);
+  // Always A+ only - no min_score parameter needed
   
   const url = `/api/engine4-ichimoku?${params.toString()}`;
   const resp = await fetch(url);
@@ -126,16 +126,17 @@ async function fetchScan(direction, minScore) {
 
 function renderStats(payload) {
   const scanned = payload.scannedCount ?? 0;
-  const setups = payload.setupsFound ?? 0;
-  const aplus = (payload.aPlus || []).length;
+  const actionableCount = payload.actionableCount ?? 0;
+  const structureCount = payload.structureCount ?? 0;
+  const rejectedCount = payload.rejectedCount ?? 0;
   const duration = payload.meta?.scanDurationMs ?? 0;
   
   $("statScanned").textContent = fmt0(scanned);
-  $("statSetups").textContent = fmt0(setups);
-  $("statAPlus").textContent = fmt0(aplus);
-  $("statDuration").textContent = duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—";
+  $("statActionable").textContent = fmt0(actionableCount);
+  $("statStructure").textContent = fmt0(structureCount);
+  $("statRejected").textContent = fmt0(rejectedCount);
   
-  $("statsMeta").textContent = `As of ${payload.asOfDate || "—"}`;
+  $("statsMeta").textContent = `A+ setups only | ${payload.asOfDate || "—"} | ${duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—"}`;
 }
 
 function renderGammaContext(payload) {
@@ -198,7 +199,7 @@ function renderGammaContext(payload) {
   $("gammaMeta").textContent = spxAvailable || ndxAvailable ? "Dealer positioning by index" : "Gamma data unavailable for today";
 }
 
-function renderSignalCard(signal) {
+function renderSignalCard(signal, isStructure = false) {
   const ticker = escapeHtml(signal.ticker || "");
   const direction = signal.direction || "bullish";
   const grade = signal.quality?.grade || "C";
@@ -209,6 +210,7 @@ function renderSignalCard(signal) {
   const ichimoku = signal.ichimoku || {};
   const indicators = signal.indicators || {};
   const tags = signal.tags || [];
+  const freshness = signal.freshness || {};
   
   // Grade class
   let gradeClass = "grade-c";
@@ -230,8 +232,28 @@ function renderSignalCard(signal) {
   const indexBadge = signal.indexMembership === "nasdaq100" ? "NDX" : 
                      signal.indexMembership === "both" ? "S&P/NDX" : "S&P";
   
+  // Build freshness info
+  let freshnessHtml = "";
+  if (!isStructure) {
+    // Actionable - show positive freshness metrics
+    const reclaimBars = freshness.barsSinceReclaim;
+    const kijunDist = freshness.kijunDistanceAtr;
+    if (reclaimBars !== null && reclaimBars !== undefined) {
+      freshnessHtml += `<span class="freshBadge positive">Reclaim ${reclaimBars} bar${reclaimBars !== 1 ? 's' : ''} ago</span>`;
+    }
+    if (kijunDist !== null && kijunDist !== undefined) {
+      freshnessHtml += `<span class="freshBadge positive">${fmt2(kijunDist)} ATR from Kijun</span>`;
+    }
+  } else {
+    // Structure - show the reasons why not actionable
+    const reasons = freshness.reasons || [];
+    for (const reason of reasons.slice(0, 2)) {
+      freshnessHtml += `<span class="freshBadge warning">${escapeHtml(reason)}</span>`;
+    }
+  }
+  
   return `
-    <div class="signalCard" data-ticker="${ticker}">
+    <div class="signalCard ${isStructure ? 'structureCard' : 'actionableCard'}" data-ticker="${ticker}">
       <div class="signalCardHeader">
         <div class="signalCardTicker">
           <span class="signalCardSymbol">${ticker}</span>
@@ -241,6 +263,7 @@ function renderSignalCard(signal) {
         </div>
         <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
       </div>
+      ${freshnessHtml ? `<div class="signalCardFreshness">${freshnessHtml}</div>` : ""}
       <div class="signalCardBody">
         <div class="signalCardMetric">
           <span class="k">Entry</span>
@@ -282,43 +305,44 @@ function renderSignalCard(signal) {
         </div>
       </div>
       ${tagsHtml ? `<div class="signalCardTags">${tagsHtml}</div>` : ""}
+      ${isStructure ? '<div class="structureNote">Watch for next pullback to Kijun</div>' : ""}
     </div>
   `;
 }
 
 function renderSignals(payload) {
-  const aplus = payload.aPlus || [];
-  const others = payload.others || [];
+  const actionable = payload.actionable || [];
+  const structure = payload.structure || [];
   
-  // A+ Section
-  const aplusGrid = $("aplusGrid");
-  const aplusSection = $("aplusSection");
-  const aplusMeta = $("aplusMeta");
+  // Actionable Now Section
+  const actionableGrid = $("actionableGrid");
+  const actionableSection = $("actionableSection");
+  const actionableMeta = $("actionableMeta");
   
-  if (aplus.length > 0) {
-    aplusGrid.innerHTML = aplus.map(renderSignalCard).join("");
-    aplusMeta.textContent = `${aplus.length} high-quality setup${aplus.length !== 1 ? 's' : ''}`;
-    aplusSection.classList.remove("hidden");
+  if (actionable.length > 0) {
+    actionableGrid.innerHTML = actionable.map(s => renderSignalCard(s, false)).join("");
+    actionableMeta.textContent = `${actionable.length} fresh trigger${actionable.length !== 1 ? 's' : ''} ready to trade`;
+    actionableSection.classList.remove("hidden");
   } else {
-    aplusSection.classList.add("hidden");
+    actionableSection.classList.add("hidden");
   }
   
-  // Others Section
-  const othersGrid = $("othersGrid");
-  const othersSection = $("othersSection");
-  const othersMeta = $("othersMeta");
+  // Structure Only (Watchlist) Section
+  const structureGrid = $("structureGrid");
+  const structureSection = $("structureSection");
+  const structureMeta = $("structureMeta");
   
-  if (others.length > 0) {
-    othersGrid.innerHTML = others.map(renderSignalCard).join("");
-    othersMeta.textContent = `${others.length} setup${others.length !== 1 ? 's' : ''}`;
-    othersSection.classList.remove("hidden");
+  if (structure.length > 0) {
+    structureGrid.innerHTML = structure.map(s => renderSignalCard(s, true)).join("");
+    structureMeta.textContent = `${structure.length} setup${structure.length !== 1 ? 's' : ''} for watchlist`;
+    structureSection.classList.remove("hidden");
   } else {
-    othersSection.classList.add("hidden");
+    structureSection.classList.add("hidden");
   }
   
   // Empty State
   const emptySection = $("emptySection");
-  if (aplus.length === 0 && others.length === 0) {
+  if (actionable.length === 0 && structure.length === 0) {
     emptySection.classList.remove("hidden");
   } else {
     emptySection.classList.add("hidden");
@@ -341,18 +365,23 @@ async function handleScan(e) {
   if (e) e.preventDefault();
   
   const direction = $("direction")?.value || "";
-  const minScore = parseInt($("minScore")?.value, 10) || 50;
   
   setLoading(true);
-  setStatus("Scanning universe...");
+  setStatus("Scanning universe for A+ setups...");
   
   try {
-    const payload = await fetchScan(direction, minScore);
+    const payload = await fetchScan(direction);
     render(payload);
     
-    const total = payload.setupsFound ?? 0;
-    const aplus = (payload.aPlus || []).length;
-    setStatus(`Found ${total} setups (${aplus} A+).`);
+    const actionable = payload.actionableCount ?? 0;
+    const structure = payload.structureCount ?? 0;
+    const rejected = payload.rejectedCount ?? 0;
+    const total = actionable + structure;
+    
+    let statusMsg = `Found ${total} A+ setup${total !== 1 ? 's' : ''}`;
+    if (actionable > 0) statusMsg += ` (${actionable} actionable)`;
+    if (rejected > 0) statusMsg += `. ${rejected} rejected as impulse bars.`;
+    setStatus(statusMsg);
   } catch (err) {
     console.error("Scan failed:", err);
     setStatus(`Error: ${err.message}`, "error");

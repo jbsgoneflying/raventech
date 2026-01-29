@@ -8,7 +8,7 @@
     <meta name="description" content="Raven-Tech.co — Engine 4 Ichimoku Cloud continuation scanner with A+ quality scoring for SP500 + Nasdaq100 (ORATS EOD)." />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=2" />
+    <link rel="stylesheet" href="/static/styles.css?v=3" />
     <style>
       /* Engine 4 specific styles */
       .watchlistGrid {
@@ -367,32 +367,6 @@
               <option value="bearish">Bearish</option>
             </select>
           </div>
-          <div class="controlGroup">
-            <div class="controlLabel">
-              Min Score
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Min score help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Minimum quality score</div>
-                  <div class="tipBody">
-                    <p>Filter setups by quality score (0-100):</p>
-                    <ul>
-                      <li><b>75+</b>: A+ setups (Chikou clear, volume surge, strong close)</li>
-                      <li><b>60+</b>: A grade setups</li>
-                      <li><b>45+</b>: B grade setups</li>
-                      <li><b>0+</b>: Show all detected patterns</li>
-                    </ul>
-                  </div>
-                </div>
-              </span>
-            </div>
-            <select id="minScore" class="controlSelect">
-              <option value="75" selected>75+ (A+)</option>
-              <option value="60">60+ (A)</option>
-              <option value="50">50+ (A/B)</option>
-              <option value="0">All</option>
-            </select>
-          </div>
           <div class="controlSpacer"></div>
           <button id="runBtn" class="primaryButton" type="submit">
             <span class="btnSpinner" aria-hidden="true"></span>
@@ -413,11 +387,12 @@
                 <div class="tipPanel" role="tooltip">
                   <div class="tipTitle">Scan summary</div>
                   <div class="tipBody">
-                    <p>Overview of the current scan results:</p>
+                    <p>Overview of the current scan results (A+ setups only):</p>
                     <ul>
                       <li><b>Universe</b>: Total tickers scanned (SP500 + Nasdaq100 = 516 unique)</li>
-                      <li><b>Setups Found</b>: Ichimoku continuation patterns detected</li>
-                      <li><b>A+ Setups</b>: High-quality setups (score >= 75)</li>
+                      <li><b>Actionable Now</b>: Fresh setups ready to trade today</li>
+                      <li><b>Watchlist</b>: Great structure but not actionable yet</li>
+                      <li><b>Rejected</b>: Impulse bars (event candles) filtered out</li>
                     </ul>
                   </div>
                 </div>
@@ -432,19 +407,19 @@
               <div class="metricCaption muted">SP500 + Nasdaq100</div>
             </div>
             <div class="metricCard">
-              <div class="metricLabel">Setups Found</div>
-              <div id="statSetups" class="metricValue mono">—</div>
-              <div class="metricCaption muted">Ichimoku patterns</div>
+              <div class="metricLabel">Actionable Now</div>
+              <div id="statActionable" class="metricValue mono" style="color: var(--green);">—</div>
+              <div class="metricCaption muted">Fresh triggers</div>
             </div>
             <div class="metricCard">
-              <div class="metricLabel">A+ Setups</div>
-              <div id="statAPlus" class="metricValue mono">—</div>
-              <div class="metricCaption muted">Score >= 75</div>
+              <div class="metricLabel">Watchlist</div>
+              <div id="statStructure" class="metricValue mono" style="color: var(--amber);">—</div>
+              <div class="metricCaption muted">Structure only</div>
             </div>
             <div class="metricCard">
-              <div class="metricLabel">Scan Duration</div>
-              <div id="statDuration" class="metricValue mono">—</div>
-              <div class="metricCaption muted">Processing time</div>
+              <div class="metricLabel">Rejected</div>
+              <div id="statRejected" class="metricValue mono" style="color: var(--muted);">—</div>
+              <div class="metricCaption muted">Impulse bars</div>
             </div>
           </div>
         </section>
@@ -508,66 +483,71 @@
           </div>
         </section>
 
-        <!-- A+ Setups Section -->
-        <section class="surface" id="aplusSection">
+        <!-- Actionable Now Section -->
+        <section class="surface" id="actionableSection">
           <div class="sectionHeader">
             <h2 class="sectionTitle">
-              A+ Setups
+              Actionable Now
               <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="A+ setups help" aria-expanded="false">i</button>
+                <button class="tipBtn" type="button" aria-label="Actionable setups help" aria-expanded="false">i</button>
                 <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">A+ Ichimoku Setups (Score >= 75)</div>
+                  <div class="tipTitle">Actionable Setups</div>
                   <div class="tipBody">
-                    <p>High-quality continuation entries with multiple confirmations:</p>
+                    <p>A+ setups (score >= 75) that pass all freshness checks:</p>
                     <ul>
-                      <li><b>Chikou Clear</b>: Not tangled with prior candles</li>
-                      <li><b>Vol Surge</b>: Trigger volume > 1.25x average</li>
-                      <li><b>Strong Close</b>: Close in top/bottom 33% of range</li>
-                      <li><b>Kijun Slope</b>: Supportive direction</li>
-                      <li><b>RSI Confirm</b>: > 50 for bulls, < 50 for bears</li>
-                      <li><b>Gamma Supportive</b>: Market regime aligned</li>
+                      <li><b>Recent Reclaim</b>: Tenkan reclaim within 3 bars</li>
+                      <li><b>Not Extended</b>: Within 1.5 ATR of Kijun</li>
+                      <li><b>Tenkan Touch</b>: Price interacted with Tenkan in last 5 bars</li>
+                      <li><b>No Impulse</b>: Not an event/news candle</li>
                     </ul>
+                    <p>These setups are ready to trade today with a fresh entry trigger.</p>
                   </div>
                 </div>
               </span>
             </h2>
-            <div class="sectionMeta muted" id="aplusMeta">—</div>
+            <div class="sectionMeta muted" id="actionableMeta">—</div>
           </div>
-          <div id="aplusGrid" class="watchlistGrid"></div>
+          <div id="actionableGrid" class="watchlistGrid"></div>
         </section>
 
-        <!-- Other Setups Section -->
-        <section class="surface" id="othersSection">
+        <!-- Structure Only (Watchlist) Section -->
+        <section class="surface" id="structureSection">
           <div class="sectionHeader">
             <h2 class="sectionTitle">
-              Other Setups
+              Structure Only (Watchlist)
               <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Other setups help" aria-expanded="false">i</button>
+                <button class="tipBtn" type="button" aria-label="Structure setups help" aria-expanded="false">i</button>
                 <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Other Ichimoku Setups</div>
+                  <div class="tipTitle">Structure Only Setups</div>
                   <div class="tipBody">
-                    <p>Setups meeting minimum score threshold but below A+ grade. May be missing some confirmations or have penalties applied.</p>
+                    <p>A+ quality setups but not actionable right now. Failed one or more freshness checks:</p>
+                    <ul>
+                      <li><b>Reclaim Too Old</b>: Tenkan reclaim more than 3 bars ago</li>
+                      <li><b>Extended</b>: Price too far from Kijun (> 1.5 ATR)</li>
+                      <li><b>No Recent Touch</b>: No Tenkan interaction in last 5 bars</li>
+                    </ul>
+                    <p>Add to watchlist and wait for next pullback to Kijun.</p>
                   </div>
                 </div>
               </span>
             </h2>
-            <div class="sectionMeta muted" id="othersMeta">—</div>
+            <div class="sectionMeta muted" id="structureMeta">—</div>
           </div>
-          <div id="othersGrid" class="watchlistGrid"></div>
+          <div id="structureGrid" class="watchlistGrid"></div>
         </section>
 
         <!-- Empty State -->
         <section class="surface hidden" id="emptySection">
           <div class="emptyState">
             <div class="emptyStateTitle">No Setups Found</div>
-            <div class="emptyStateBody">No Ichimoku continuation setups matching your criteria were found in the current scan. Try lowering the minimum score or changing the direction filter.</div>
+            <div class="emptyStateBody">No A+ Ichimoku continuation setups were found in the current scan. All quality setups are either already extended, had reclaims too long ago, or were rejected as impulse bars. Try changing the direction filter or check back tomorrow.</div>
           </div>
         </section>
       </section>
     </main>
 
     <script src="/static/ui_kit.js"></script>
-    <script src="/static/ichimoku.js?v=3"></script>
+    <script src="/static/ichimoku.js?v=4"></script>
     <script src="/static/calculator.js"></script>
   </body>
 </html>

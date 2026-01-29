@@ -374,10 +374,19 @@ def scan_ticker(
         if not detection.get("hasSignal"):
             return None
         
-        # Build scored signal
+        # Compute Ichimoku series for freshness classification
+        from backend.technicals import compute_ichimoku_series
+        ich_series = compute_ichimoku_series(bars)
+        closes = ich_series.get("closes", [])
+        tenkan_series = ich_series.get("tenkan_series", [])
+        
+        # Build scored signal with freshness classification
         signal = build_ichimoku_signal(
             ticker=ticker,
             detection=detection,
+            bars=bars,
+            closes=closes,
+            tenkan_series=tenkan_series,
             gamma_context=gamma_context,
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
@@ -558,25 +567,35 @@ def run_universe_scan(
             except Exception as e:
                 errors.append(f"{ticker}: {str(e)}")
     
-    # Filter by score and direction
-    filtered = []
+    # Filter to A+ only (score >= 75) and by direction if specified
+    aplus_signals = []
     for s in signals:
-        if s.score < min_score:
+        if s.score < APLUS_THRESHOLD:
             continue
         if direction and s.direction != direction:
             continue
-        filtered.append(s)
+        aplus_signals.append(s)
     
     # Sort by score descending
-    filtered.sort(key=lambda x: x.score, reverse=True)
+    aplus_signals.sort(key=lambda x: x.score, reverse=True)
     
-    # Separate A+ from rest
-    aplus = [s for s in filtered if s.score >= APLUS_THRESHOLD]
-    others = [s for s in filtered if s.score < APLUS_THRESHOLD]
+    # Classify A+ signals into freshness buckets
+    actionable = []
+    structure = []
+    rejected_count = 0
     
-    # Update signal store
+    for s in aplus_signals:
+        if s.freshness_bucket == "actionable":
+            actionable.append(s)
+        elif s.freshness_bucket == "structure":
+            structure.append(s)
+        elif s.freshness_bucket == "rejected":
+            rejected_count += 1
+            # Don't include rejected signals in output
+    
+    # Update signal store (only actionable and structure)
     with _signal_store_lock:
-        for s in filtered:
+        for s in actionable + structure:
             key = f"{s.ticker}:{s.signal_date}"
             _signal_store[key] = signal_to_dict(s)
     
@@ -585,16 +604,18 @@ def run_universe_scan(
     result = {
         "asOfDate": as_of_str,
         "scannedCount": len(universe),
-        "setupsFound": len(filtered),
-        "aPlus": [signal_to_dict(s) for s in aplus],
-        "others": [signal_to_dict(s) for s in others],
+        "totalAPlus": len(aplus_signals),
+        "actionableCount": len(actionable),
+        "structureCount": len(structure),
+        "rejectedCount": rejected_count,
+        "actionable": [signal_to_dict(s) for s in actionable],
+        "structure": [signal_to_dict(s) for s in structure],
         "marketGamma": {
             "spx": gamma_spx,
             "ndx": gamma_ndx,
         },
         "meta": {
             "scanDurationMs": elapsed_ms,
-            "minScore": min_score,
             "direction": direction,
             "errors": errors[:10] if errors else [],
         },

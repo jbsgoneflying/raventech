@@ -3664,3 +3664,234 @@ body.landingPage {
   color: #fff;
 }
 
+/* =============================================================================
+   Engine 4: Ichimoku Continuation - Signal Cards & Freshness Badges
+   ============================================================================= */
+
+/* Signal Card Base */
+.signalCard {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.signalCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+/* Actionable Card - green accent */
+.signalCard.actionableCard {
+  border-left: 3px solid var(--green, #34C759);
+}
+
+/* Structure Card - amber accent */
+.signalCard.structureCard {
+  border-left: 3px solid var(--amber, #FF9500);
+  opacity: 0.85;
+}
+
+.signalCard.structureCard:hover {
+  opacity: 1;
+}
+
+/* Card Header */
+.signalCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.signalCardTicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.signalCardSymbol {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.signalCardDirection {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.signalCardDirection.bullish {
+  background: rgba(52, 199, 89, 0.15);
+  color: #34C759;
+}
+
+.signalCardDirection.bearish {
+  background: rgba(255, 59, 48, 0.15);
+  color: #FF3B30;
+}
+
+.signalCardGrade {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.signalCardGrade.grade-aplus {
+  background: linear-gradient(135deg, #34C759, #30D158);
+  color: #fff;
+}
+
+.signalCardGrade.grade-a {
+  background: rgba(52, 199, 89, 0.15);
+  color: #34C759;
+}
+
+.signalCardGrade.grade-b {
+  background: rgba(255, 149, 0, 0.15);
+  color: #FF9500;
+}
+
+.signalCardGrade.grade-c {
+  background: rgba(142, 142, 147, 0.15);
+  color: #8E8E93;
+}
+
+.indexBadgeSmall {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0, 122, 255, 0.10);
+  color: #007AFF;
+}
+
+/* Freshness Row */
+.signalCardFreshness {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.freshBadge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.freshBadge.positive {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34C759;
+}
+
+.freshBadge.warning {
+  background: rgba(255, 149, 0, 0.12);
+  color: #FF9500;
+}
+
+/* Card Body (Metrics Grid) */
+.signalCardBody {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.signalCardMetric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.signalCardMetric .k {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.signalCardMetric .v {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* Ichimoku Values Row */
+.signalCardIchimoku {
+  display: flex;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.ichimokuValue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ichimokuValue .label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ichimokuValue .value {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* Tags Row */
+.signalCardTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.tagChip {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(142, 142, 147, 0.12);
+  color: var(--muted);
+}
+
+.tagChip.positive {
+  background: rgba(52, 199, 89, 0.10);
+  color: #34C759;
+}
+
+.tagChip.warning {
+  background: rgba(255, 59, 48, 0.10);
+  color: #FF3B30;
+}
+
+/* Structure Note */
+.structureNote {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--amber, #FF9500);
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 149, 0, 0.25);
+}
+
