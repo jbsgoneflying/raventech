@@ -122,11 +122,12 @@ def fetch_bars_for_ticker(
     *,
     ticker: str,
     as_of_date: dt.date,
-    lookback_days: int = 90,
+    lookback_days: int = 150,
 ) -> List[DailyBar]:
     """
     Fetch daily bars for a ticker with caching.
-    Ichimoku needs 52+ bars, so we request 90 days.
+    Ichimoku needs 52+ bars for Span B, plus 26 bars for cloud projection alignment,
+    so we request 150 calendar days to ensure ~100 trading days.
     """
     as_of_str = as_of_date.isoformat()
     cache_key = _cache_key_bars(ticker, as_of_str)
