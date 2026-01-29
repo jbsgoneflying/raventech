@@ -1552,6 +1552,52 @@ a.ravenTempDisabled {
   white-space: nowrap;
 }
 
+/* Nav button tooltips */
+.navBtn {
+  position: relative;
+}
+
+.navBtn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: 8px;
+  white-space: nowrap;
+  max-width: 280px;
+  white-space: normal;
+  text-align: center;
+  z-index: 1000;
+  box-shadow: 0 8px 24px rgba(15, 20, 30, 0.25);
+  pointer-events: none;
+  animation: navTooltipFadeIn 150ms ease-out;
+}
+
+.navBtn[data-tooltip]:hover::before {
+  content: "";
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: rgba(15, 23, 42, 0.92);
+  z-index: 1001;
+  pointer-events: none;
+  animation: navTooltipFadeIn 150ms ease-out;
+}
+
+@keyframes navTooltipFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 .tradeBuilderOutputs {
   margin-top: 14px;
   display: grid;

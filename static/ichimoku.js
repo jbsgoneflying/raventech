@@ -369,8 +369,10 @@ function handleCardClick(e) {
   const ticker = card.dataset.ticker;
   if (!ticker) return;
   
-  // Open single-ticker detail in new tab
-  window.open(`/api/engine4-ichimoku/${ticker}`, "_blank");
+  // Open Engine 1 full analysis with MC enabled and 1.5x EM, auto-run
+  // This lets traders click multiple setups and have them load as new tabs
+  const url = `/breach?ticker=${encodeURIComponent(ticker)}&k=1.5&mc=1&autorun=1`;
+  window.open(url, "_blank");
 }
 
 // -----------------------------------------------------------------------------

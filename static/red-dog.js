@@ -361,8 +361,8 @@ function renderWatchlist(containerId, signals, metaId, label) {
     card.addEventListener("click", () => {
       const ticker = card.dataset.ticker;
       if (ticker) {
-        // Open Engine 1 for detailed analysis
-        window.open(`/breach?ticker=${encodeURIComponent(ticker)}`, "_blank");
+        // Open Engine 1 for detailed analysis with MC enabled and 1.5x EM, auto-run
+        window.open(`/breach?ticker=${encodeURIComponent(ticker)}&k=1.5&mc=1&autorun=1`, "_blank");
       }
     });
   });
