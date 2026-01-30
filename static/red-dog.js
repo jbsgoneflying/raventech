@@ -251,7 +251,7 @@ function getGradeClass(grade) {
   }
 }
 
-function renderSignalCard(signal) {
+function renderSignalCard(signal, isAPlus = false) {
   const ticker = escapeHtml(signal.ticker || "???");
   const direction = signal.direction || "?";
   const dirClass = direction === "bullish" ? "bullish" : "bearish";
@@ -267,7 +267,6 @@ function renderSignalCard(signal) {
   const rsi = signal.indicators?.rsi;
   const stoch = signal.indicators?.stochastics;
   const volRatio = signal.indicators?.volumeRatio;
-  const sma20Dev = signal.indicators?.sma20DeviationPct;
   
   // Trend alignment
   const trendAlign = signal.trendAlignment || {};
@@ -276,29 +275,50 @@ function renderSignalCard(signal) {
   const alignLabel = trendAlign.label || "Trend N/A";
   const alignGuidance = trendAlign.guidance || "";
   
-  // Build indicator chips
-  const chips = [];
+  // Build freshness-style badges for A+ cards
+  let freshnessHtml = "";
+  if (isAPlus) {
+    // RSI badge
+    const rsiActive = (direction === "bullish" && rsi <= 35) || (direction === "bearish" && rsi >= 65);
+    if (rsiActive) {
+      freshnessHtml += `<span class="freshBadge positive">RSI ${fmt0(rsi)}</span>`;
+    }
+    // Stoch badge
+    const stochActive = (direction === "bullish" && stoch <= 25) || (direction === "bearish" && stoch >= 75);
+    if (stochActive) {
+      freshnessHtml += `<span class="freshBadge positive">Stoch ${fmt0(stoch)}</span>`;
+    }
+    // Volume badge
+    if (volRatio >= 1.5) {
+      freshnessHtml += `<span class="freshBadge positive">Vol ${fmt2(volRatio)}x</span>`;
+    }
+    // Trend alignment badge
+    if (alignClass === "aligned") {
+      freshnessHtml += `<span class="freshBadge positive">${alignLabel}</span>`;
+    } else if (alignClass === "counter") {
+      freshnessHtml += `<span class="freshBadge warning">${alignLabel}</span>`;
+    }
+  }
   
-  // Trend alignment chip (first, most important)
-  chips.push(`<span class="trendAlignBadge ${alignClass}" title="${escapeHtml(alignGuidance)}">${alignLabel}</span>`);
+  // Build indicator chips for non-A+ cards
+  let chipsHtml = "";
+  if (!isAPlus) {
+    const chips = [];
+    chips.push(`<span class="trendAlignBadge ${alignClass}" title="${escapeHtml(alignGuidance)}">${alignLabel}</span>`);
+    const rsiActive = (direction === "bullish" && rsi <= 30) || (direction === "bearish" && rsi >= 70);
+    chips.push(`<span class="indicatorChip ${rsiActive ? 'active' : 'inactive'}">RSI ${fmt0(rsi)}</span>`);
+    const stochActive = (direction === "bullish" && stoch <= 20) || (direction === "bearish" && stoch >= 80);
+    chips.push(`<span class="indicatorChip ${stochActive ? 'active' : 'inactive'}">Stoch ${fmt0(stoch)}</span>`);
+    const volActive = volRatio >= 1.5;
+    chips.push(`<span class="indicatorChip ${volActive ? 'active' : 'inactive'}">Vol ${fmt2(volRatio)}x</span>`);
+    chipsHtml = `<div class="signalCardIndicators">${chips.join("")}</div>`;
+  }
   
-  // RSI chip
-  const rsiActive = (direction === "bullish" && rsi <= 30) || (direction === "bearish" && rsi >= 70);
-  chips.push(`<span class="indicatorChip ${rsiActive ? 'active' : 'inactive'}">RSI ${fmt0(rsi)}</span>`);
-  
-  // Stochastics chip
-  const stochActive = (direction === "bullish" && stoch <= 20) || (direction === "bearish" && stoch >= 80);
-  chips.push(`<span class="indicatorChip ${stochActive ? 'active' : 'inactive'}">Stoch ${fmt0(stoch)}</span>`);
-  
-  // Volume chip
-  const volActive = volRatio >= 1.5;
-  chips.push(`<span class="indicatorChip ${volActive ? 'active' : 'inactive'}">Vol ${fmt2(volRatio)}x</span>`);
-  
-  // Notes
-  const notes = (signal.notes || []).slice(0, 2).map(n => escapeHtml(n)).join(" · ");
+  // Card class - A+ gets green border, standard gets amber
+  const cardClass = isAPlus ? "signalCard actionableCard" : "signalCard structureCard";
   
   return `
-    <div class="signalCard" data-ticker="${ticker}">
+    <div class="${cardClass}" data-ticker="${ticker}">
       <div class="signalCardHeader">
         <div class="signalCardTicker">
           <span class="signalCardSymbol">${ticker}</span>
@@ -306,6 +326,7 @@ function renderSignalCard(signal) {
         </div>
         <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
       </div>
+      ${freshnessHtml ? `<div class="signalCardFreshness">${freshnessHtml}</div>` : ""}
       <div class="signalCardBody">
         <div class="signalCardMetric">
           <span class="k">Entry</span>
@@ -323,11 +344,16 @@ function renderSignalCard(signal) {
           <span class="k">Risk</span>
           <span class="v">${fmtMoney(risk)}</span>
         </div>
+        <div class="signalCardMetric">
+          <span class="k">RSI</span>
+          <span class="v">${fmt0(rsi)}</span>
+        </div>
+        <div class="signalCardMetric">
+          <span class="k">Vol Ratio</span>
+          <span class="v">${fmt2(volRatio)}x</span>
+        </div>
       </div>
-      <div class="signalCardIndicators">
-        ${chips.join("")}
-      </div>
-      ${notes ? `<div class="signalCardNotes">${notes}</div>` : ""}
+      ${chipsHtml}
     </div>
   `;
 }
@@ -341,7 +367,7 @@ function renderEmptyState(message) {
   `;
 }
 
-function renderWatchlist(containerId, signals, metaId, label) {
+function renderWatchlist(containerId, signals, metaId, label, isAPlus = false) {
   const container = $(containerId);
   const meta = $(metaId);
   
@@ -353,7 +379,7 @@ function renderWatchlist(containerId, signals, metaId, label) {
     return;
   }
   
-  container.innerHTML = signals.map(s => renderSignalCard(s)).join("");
+  container.innerHTML = signals.map(s => renderSignalCard(s, isAPlus)).join("");
   if (meta) meta.textContent = `${signals.length} setup${signals.length !== 1 ? "s" : ""}`;
   
   // Add click handlers for Position Calculator
@@ -362,10 +388,10 @@ function renderWatchlist(containerId, signals, metaId, label) {
       const ticker = card.dataset.ticker;
       if (!ticker || !lastPayload) return;
       
-      // Find the signal data for this ticker
+      // Find the signal data for this ticker (Engine 3 uses aPlus and standard)
       const allSignals = [
-        ...(lastPayload.bullish || []),
-        ...(lastPayload.bearish || []),
+        ...(lastPayload.aPlus || []),
+        ...(lastPayload.standard || []),
       ];
       
       const signal = allSignals.find(s => s.ticker === ticker);
@@ -394,11 +420,11 @@ function renderResults(payload) {
   // Render trend context (21 EMA)
   renderTrendContext(payload);
   
-  // Render A+ watchlist
-  renderWatchlist("aplusGrid", payload.aPlus, "aplusMeta", "A+");
+  // Render A+ watchlist (with green border styling)
+  renderWatchlist("aplusGrid", payload.aPlus, "aplusMeta", "A+", true);
   
-  // Render standard setups
-  renderWatchlist("standardGrid", payload.standard, "standardMeta", "standard");
+  // Render standard setups (with amber border styling)
+  renderWatchlist("standardGrid", payload.standard, "standardMeta", "standard", false);
 }
 
 // -----------------------------------------------------------------------------
