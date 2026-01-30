@@ -66,6 +66,8 @@ FRESHNESS_RECLAIM_MAX_BARS = 3       # Max bars since Tenkan reclaim for actiona
 FRESHNESS_KIJUN_DISTANCE_ATR = 1.5   # Max distance to Kijun in ATR units for actionable
 FRESHNESS_TENKAN_LOOKBACK = 5        # Bars to check for recent Tenkan interaction
 IMPULSE_DISPLACEMENT_MULT = 2.5      # TR > 2.5x ATR = impulse bar (hard reject)
+TENKAN_PENETRATION_ATR = 0.1         # Tenkan interaction requires 0.1 ATR penetration
+TRIGGER_RAN_ATR = 0.75               # If price ran > 0.75 ATR past reclaim bar, downgrade
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,8 @@ class IchimokuSignal:
     kijun_distance_atr: Optional[float] = None
     recent_tenkan_touch: Optional[bool] = None
     is_impulse_bar: Optional[bool] = None
+    trigger_already_ran: Optional[bool] = None
+    trigger_ran_distance_atr: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -813,19 +817,27 @@ def check_recent_tenkan_interaction(
     bars: List[DailyBar],
     tenkan_series: List[Optional[float]],
     direction: str,
+    atr: float,
     lookback: int = 5,
 ) -> bool:
     """
-    Check if price has interacted with Tenkan in the last N bars.
+    Check if price has penetrated Tenkan in the last N bars.
     
-    Bull: low <= tenkan OR close <= tenkan in at least one bar
-    Bear: high >= tenkan OR close >= tenkan in at least one bar
+    Requires actual penetration (not just touch) to filter slow grinders:
+    - Bull: low <= tenkan - 0.1 * ATR in at least one bar
+    - Bear: high >= tenkan + 0.1 * ATR in at least one bar
     
     Returns:
-        True if recent interaction found, False otherwise
+        True if recent penetration found, False otherwise
     """
     if not bars or not tenkan_series or len(bars) < lookback:
         return False
+    
+    if atr is None or atr <= 0:
+        return False
+    
+    # Penetration buffer (require 0.1 ATR beyond Tenkan)
+    penetration_buffer = TENKAN_PENETRATION_ATR * atr
     
     n = min(len(bars), len(tenkan_series))
     start_idx = max(0, n - lookback)
@@ -839,19 +851,14 @@ def check_recent_tenkan_interaction(
         
         low = float(bar.low) if bar.low is not None else None
         high = float(bar.high) if bar.high is not None else None
-        close = float(bar.close) if bar.close is not None else None
         
         if direction == "bullish":
-            # For bulls, price should have touched or dipped below Tenkan
-            if low is not None and low <= tenkan:
-                return True
-            if close is not None and close <= tenkan:
+            # For bulls, low must penetrate below Tenkan by at least 0.1 ATR
+            if low is not None and low <= (tenkan - penetration_buffer):
                 return True
         else:  # bearish
-            # For bears, price should have touched or rallied above Tenkan
-            if high is not None and high >= tenkan:
-                return True
-            if close is not None and close >= tenkan:
+            # For bears, high must penetrate above Tenkan by at least 0.1 ATR
+            if high is not None and high >= (tenkan + penetration_buffer):
                 return True
     
     return False
@@ -879,6 +886,85 @@ def check_impulse_displacement(
     true_range = float(bar.high) - float(bar.low)
     
     return true_range > (IMPULSE_DISPLACEMENT_MULT * atr)
+
+
+def check_trigger_already_ran(
+    bars: List[DailyBar],
+    closes: List[float],
+    tenkan_series: List[Optional[float]],
+    direction: str,
+    atr: float,
+) -> Tuple[bool, Optional[float]]:
+    """
+    Check if price has already run away from the reclaim bar.
+    
+    Finds the most recent Tenkan reclaim bar and checks if the current close
+    has moved too far from that bar's high/low (> 0.75 ATR):
+    - Bull: if close > reclaim_bar_high + 0.75 * ATR → trigger ran
+    - Bear: if close < reclaim_bar_low - 0.75 * ATR → trigger ran
+    
+    Returns:
+        Tuple of (trigger_ran: bool, distance_from_reclaim: Optional[float])
+    """
+    if not bars or not closes or not tenkan_series or len(closes) < 2:
+        return (False, None)
+    
+    if atr is None or atr <= 0:
+        return (False, None)
+    
+    n = min(len(bars), len(closes), len(tenkan_series))
+    current_close = closes[-1]
+    
+    # Find the reclaim bar (most recent Tenkan crossover)
+    reclaim_bar_idx = None
+    for i in range(n - 1, 0, -1):
+        curr_close = closes[i]
+        prev_close = closes[i - 1]
+        curr_tenkan = tenkan_series[i]
+        prev_tenkan = tenkan_series[i - 1]
+        
+        if curr_tenkan is None or prev_tenkan is None:
+            continue
+        
+        if direction == "bullish":
+            # Looking for: was below Tenkan, now above Tenkan
+            if prev_close < prev_tenkan and curr_close > curr_tenkan:
+                reclaim_bar_idx = i
+                break
+        else:  # bearish
+            # Looking for: was above Tenkan, now below Tenkan
+            if prev_close > prev_tenkan and curr_close < curr_tenkan:
+                reclaim_bar_idx = i
+                break
+    
+    if reclaim_bar_idx is None:
+        return (False, None)
+    
+    # Get the reclaim bar's high/low
+    reclaim_bar = bars[reclaim_bar_idx]
+    reclaim_high = float(reclaim_bar.high) if reclaim_bar.high is not None else None
+    reclaim_low = float(reclaim_bar.low) if reclaim_bar.low is not None else None
+    
+    if reclaim_high is None or reclaim_low is None:
+        return (False, None)
+    
+    # Check if price has run away
+    run_threshold = TRIGGER_RAN_ATR * atr
+    
+    if direction == "bullish":
+        # Bull: check if close > reclaim_high + 0.75 ATR
+        run_level = reclaim_high + run_threshold
+        if current_close > run_level:
+            distance = (current_close - reclaim_high) / atr
+            return (True, round(distance, 2))
+    else:  # bearish
+        # Bear: check if close < reclaim_low - 0.75 ATR
+        run_level = reclaim_low - run_threshold
+        if current_close < run_level:
+            distance = (reclaim_low - current_close) / atr
+            return (True, round(distance, 2))
+    
+    return (False, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1317,8 +1403,9 @@ def classify_freshness(
     Rules (all must pass for Actionable):
     1. Tenkan reclaim <= 3 bars ago
     2. Distance to Kijun <= 1.5 ATR
-    3. Recent Tenkan interaction in last 5 bars
+    3. Recent Tenkan penetration in last 5 bars (0.1 ATR beyond Tenkan)
     4. Not an impulse displacement bar
+    5. Trigger hasn't already run (price not > 0.75 ATR from reclaim bar)
     
     Returns:
         Dict with bucket, reasons, and individual metrics
@@ -1334,8 +1421,11 @@ def classify_freshness(
     # Check Kijun distance in ATR
     kijun_dist = compute_kijun_distance_atr(close, kijun, atr, direction)
     
-    # Check recent Tenkan interaction
-    recent_touch = check_recent_tenkan_interaction(bars, tenkan_series, direction, FRESHNESS_TENKAN_LOOKBACK)
+    # Check recent Tenkan penetration (now requires 0.1 ATR penetration)
+    recent_touch = check_recent_tenkan_interaction(bars, tenkan_series, direction, atr, FRESHNESS_TENKAN_LOOKBACK)
+    
+    # Check if trigger already ran
+    trigger_ran, trigger_ran_dist = check_trigger_already_ran(bars, closes, tenkan_series, direction, atr)
     
     # Determine bucket
     bucket = "actionable"
@@ -1358,10 +1448,15 @@ def classify_freshness(
             bucket = "structure"
             reasons.append(f"Extended {kijun_dist:.1f} ATR from Kijun (max {FRESHNESS_KIJUN_DISTANCE_ATR})")
         
-        # Rule 3: Recent Tenkan interaction
+        # Rule 3: Recent Tenkan penetration (stricter - requires 0.1 ATR beyond Tenkan)
         if not recent_touch:
             bucket = "structure"
-            reasons.append(f"No Tenkan interaction in last {FRESHNESS_TENKAN_LOOKBACK} bars")
+            reasons.append(f"No Tenkan penetration in last {FRESHNESS_TENKAN_LOOKBACK} bars")
+        
+        # Rule 5: Trigger already ran
+        if trigger_ran:
+            bucket = "structure"
+            reasons.append(f"Trigger ran {trigger_ran_dist:.1f} ATR from reclaim bar")
     
     return {
         "bucket": bucket,
@@ -1370,6 +1465,8 @@ def classify_freshness(
         "kijunDistanceAtr": round(kijun_dist, 2) if kijun_dist is not None else None,
         "recentTenkanTouch": recent_touch,
         "isImpulseBar": is_impulse,
+        "triggerAlreadyRan": trigger_ran,
+        "triggerRanDistanceAtr": trigger_ran_dist,
     }
 
 
@@ -1487,6 +1584,8 @@ def build_ichimoku_signal(
         kijun_distance_atr=freshness["kijunDistanceAtr"],
         recent_tenkan_touch=freshness["recentTenkanTouch"],
         is_impulse_bar=freshness["isImpulseBar"],
+        trigger_already_ran=freshness["triggerAlreadyRan"],
+        trigger_ran_distance_atr=freshness["triggerRanDistanceAtr"],
     )
 
 
@@ -1558,6 +1657,8 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
             "kijunDistanceAtr": signal.kijun_distance_atr,
             "recentTenkanTouch": signal.recent_tenkan_touch,
             "isImpulseBar": signal.is_impulse_bar,
+            "triggerAlreadyRan": signal.trigger_already_ran,
+            "triggerRanDistanceAtr": signal.trigger_ran_distance_atr,
         },
         "tags": list(signal.tags) if signal.tags else [],
         "notes": list(signal.notes) if signal.notes else [],
