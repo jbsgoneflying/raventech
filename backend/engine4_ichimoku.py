@@ -68,6 +68,7 @@ FRESHNESS_TENKAN_LOOKBACK = 5        # Bars to check for recent Tenkan interacti
 IMPULSE_DISPLACEMENT_MULT = 2.5      # TR > 2.5x ATR = impulse bar (hard reject)
 TENKAN_PENETRATION_ATR = 0.1         # Tenkan interaction requires 0.1 ATR penetration
 TRIGGER_RAN_ATR = 0.75               # If price ran > 0.75 ATR past reclaim bar, downgrade
+IMPULSE_RECLAIM_ATR = 1.25           # If reclaim bar range > 1.25 ATR and age=0, downgrade
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,8 @@ class IchimokuSignal:
     is_impulse_bar: Optional[bool] = None
     trigger_already_ran: Optional[bool] = None
     trigger_ran_distance_atr: Optional[float] = None
+    impulse_reclaim: Optional[bool] = None
+    reclaim_bar_range_atr: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -967,6 +970,67 @@ def check_trigger_already_ran(
     return (False, None)
 
 
+def check_impulse_reclaim(
+    bars: List[DailyBar],
+    closes: List[float],
+    tenkan_series: List[Optional[float]],
+    direction: str,
+    atr: float,
+    bars_since_reclaim: Optional[int],
+) -> Tuple[bool, Optional[float]]:
+    """
+    Check if the reclaim bar was an impulse candle that already extended.
+    
+    If reclaim age = 0 (just happened) AND the reclaim bar:
+    - Has range > 1.25 ATR
+    - Moved in the direction of the trend (bullish close > open, bearish close < open)
+    
+    → Downgrade to Structure Only (don't chase the impulse)
+    
+    Returns:
+        Tuple of (is_impulse_reclaim: bool, reclaim_bar_range_atr: Optional[float])
+    """
+    # Only applies when reclaim just happened (age = 0)
+    if bars_since_reclaim is None or bars_since_reclaim != 0:
+        return (False, None)
+    
+    if not bars or not closes or not tenkan_series or len(closes) < 2:
+        return (False, None)
+    
+    if atr is None or atr <= 0:
+        return (False, None)
+    
+    # The reclaim bar is the current bar (since bars_since_reclaim = 0)
+    reclaim_bar = bars[-1]
+    
+    if reclaim_bar.high is None or reclaim_bar.low is None:
+        return (False, None)
+    if reclaim_bar.open is None or reclaim_bar.close is None:
+        return (False, None)
+    
+    bar_range = float(reclaim_bar.high) - float(reclaim_bar.low)
+    bar_range_atr = bar_range / atr
+    
+    # Check if range exceeds threshold
+    if bar_range_atr <= IMPULSE_RECLAIM_ATR:
+        return (False, round(bar_range_atr, 2))
+    
+    # Check if candle direction aligns with trend
+    bar_open = float(reclaim_bar.open)
+    bar_close = float(reclaim_bar.close)
+    
+    if direction == "bullish":
+        # Bullish setup: check if reclaim bar was a bullish candle (close > open)
+        if bar_close > bar_open:
+            return (True, round(bar_range_atr, 2))
+    else:  # bearish
+        # Bearish setup: check if reclaim bar was a bearish candle (close < open)
+        if bar_close < bar_open:
+            return (True, round(bar_range_atr, 2))
+    
+    return (False, round(bar_range_atr, 2))
+
+
 # ---------------------------------------------------------------------------
 # Main Detection Function
 # ---------------------------------------------------------------------------
@@ -1404,8 +1468,9 @@ def classify_freshness(
     1. Tenkan reclaim <= 3 bars ago
     2. Distance to Kijun <= 1.5 ATR
     3. Recent Tenkan penetration in last 5 bars (0.1 ATR beyond Tenkan)
-    4. Not an impulse displacement bar
+    4. Not an impulse displacement bar (TR > 2.5x ATR = hard reject)
     5. Trigger hasn't already run (price not > 0.75 ATR from reclaim bar)
+    6. Reclaim bar wasn't an impulse (if age=0 and range > 1.25 ATR in trend direction)
     
     Returns:
         Dict with bucket, reasons, and individual metrics
@@ -1426,6 +1491,11 @@ def classify_freshness(
     
     # Check if trigger already ran
     trigger_ran, trigger_ran_dist = check_trigger_already_ran(bars, closes, tenkan_series, direction, atr)
+    
+    # Check if reclaim bar was an impulse (only applies when reclaim_age = 0)
+    impulse_reclaim, reclaim_bar_range = check_impulse_reclaim(
+        bars, closes, tenkan_series, direction, atr, bars_since_reclaim
+    )
     
     # Determine bucket
     bucket = "actionable"
@@ -1457,6 +1527,11 @@ def classify_freshness(
         if trigger_ran:
             bucket = "structure"
             reasons.append(f"Trigger ran {trigger_ran_dist:.1f} ATR from reclaim bar")
+        
+        # Rule 6: Impulse reclaim suppression (reclaim bar was too big)
+        if impulse_reclaim:
+            bucket = "structure"
+            reasons.append(f"Impulse reclaim ({reclaim_bar_range:.1f} ATR bar)")
     
     return {
         "bucket": bucket,
@@ -1467,6 +1542,8 @@ def classify_freshness(
         "isImpulseBar": is_impulse,
         "triggerAlreadyRan": trigger_ran,
         "triggerRanDistanceAtr": trigger_ran_dist,
+        "impulseReclaim": impulse_reclaim,
+        "reclaimBarRangeAtr": reclaim_bar_range,
     }
 
 
@@ -1586,6 +1663,8 @@ def build_ichimoku_signal(
         is_impulse_bar=freshness["isImpulseBar"],
         trigger_already_ran=freshness["triggerAlreadyRan"],
         trigger_ran_distance_atr=freshness["triggerRanDistanceAtr"],
+        impulse_reclaim=freshness["impulseReclaim"],
+        reclaim_bar_range_atr=freshness["reclaimBarRangeAtr"],
     )
 
 
@@ -1659,6 +1738,8 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
             "isImpulseBar": signal.is_impulse_bar,
             "triggerAlreadyRan": signal.trigger_already_ran,
             "triggerRanDistanceAtr": signal.trigger_ran_distance_atr,
+            "impulseReclaim": signal.impulse_reclaim,
+            "reclaimBarRangeAtr": signal.reclaim_bar_range_atr,
         },
         "tags": list(signal.tags) if signal.tags else [],
         "notes": list(signal.notes) if signal.notes else [],
