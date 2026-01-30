@@ -3665,6 +3665,322 @@ body.landingPage {
 }
 
 /* =============================================================================
+   Position Size Calculator (Engine 3 & 4)
+   ============================================================================= */
+
+.posCalc {
+  position: fixed;
+  z-index: 10000;
+  width: 320px;
+  border-radius: 16px;
+  background: rgba(28, 28, 30, 0.95);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  overflow: hidden;
+  user-select: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.posCalc.hidden {
+  display: none;
+}
+
+.posCalc.isDragging {
+  opacity: 0.92;
+  cursor: grabbing;
+}
+
+/* Header */
+.posCalcHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(58, 58, 60, 0.6);
+  cursor: grab;
+}
+
+.posCalcHeader:active {
+  cursor: grabbing;
+}
+
+.posCalcDragHandle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.posCalcTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: -0.2px;
+}
+
+.posCalcCloseBtn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.posCalcCloseBtn:hover {
+  background: rgba(255, 59, 48, 0.8);
+  color: #fff;
+}
+
+/* Body */
+.posCalcBody {
+  padding: 14px;
+}
+
+/* Signal Info */
+.posCalcSignalInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.posCalcTicker {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.posCalcDirection {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.posCalcDirection.bullish {
+  background: rgba(52, 199, 89, 0.25);
+  color: #34C759;
+}
+
+.posCalcDirection.bearish {
+  background: rgba(255, 59, 48, 0.25);
+  color: #FF3B30;
+}
+
+/* Trade Levels */
+.posCalcLevels {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.posCalcLevel {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.posCalcLevelLabel {
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.posCalcLevelValue {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.posCalcLevelValue.posCalcStop {
+  color: #FF453A;
+}
+
+.posCalcLevelValue.posCalcTarget {
+  color: #30D158;
+}
+
+/* Sections */
+.posCalcSection {
+  margin-bottom: 14px;
+}
+
+.posCalcLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+/* Risk Buttons */
+.posCalcRiskBtns {
+  display: flex;
+  gap: 6px;
+}
+
+.posCalcRiskBtn {
+  flex: 1;
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.posCalcRiskBtn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.posCalcRiskBtn.isActive {
+  background: rgba(0, 122, 255, 0.9);
+  color: #fff;
+}
+
+/* Input */
+.posCalcInput {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 18px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.posCalcInput::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.posCalcInput:focus {
+  border-color: rgba(0, 122, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+}
+
+/* Display */
+.posCalcDisplay {
+  background: #000;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  text-align: right;
+}
+
+.posCalcDisplayLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.posCalcDisplayValue {
+  font-size: 36px;
+  font-weight: 300;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+
+/* Results */
+.posCalcResults {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.posCalcResultRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.posCalcResultRow:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.posCalcResultRow--highlight {
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+.posCalcResultLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.posCalcResultValue {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.posCalcResultValue.posCalcRiskValue {
+  color: #FF453A;
+}
+
+.posCalcResultRow--highlight .posCalcResultValue {
+  font-size: 16px;
+  color: #30D158;
+}
+
+/* Analyze Button */
+.posCalcAnalyzeBtn {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.posCalcAnalyzeBtn:hover {
+  background: rgba(0, 122, 255, 0.7);
+  color: #fff;
+}
+
+/* =============================================================================
    Engine 4: Ichimoku Continuation - Signal Cards & Freshness Badges
    ============================================================================= */
 

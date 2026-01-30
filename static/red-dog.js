@@ -356,13 +356,24 @@ function renderWatchlist(containerId, signals, metaId, label) {
   container.innerHTML = signals.map(s => renderSignalCard(s)).join("");
   if (meta) meta.textContent = `${signals.length} setup${signals.length !== 1 ? "s" : ""}`;
   
-  // Add click handlers for detail view
+  // Add click handlers for Position Calculator
   container.querySelectorAll(".signalCard").forEach(card => {
-    card.addEventListener("click", () => {
+    card.addEventListener("click", (e) => {
       const ticker = card.dataset.ticker;
-      if (ticker) {
-        // Open Engine 1 for detailed analysis with MC enabled and 1.5x EM, auto-run
-        window.open(`/breach?ticker=${encodeURIComponent(ticker)}&k=1.5&mc=1&autorun=1`, "_blank");
+      if (!ticker || !lastPayload) return;
+      
+      // Find the signal data for this ticker
+      const allSignals = [
+        ...(lastPayload.bullish || []),
+        ...(lastPayload.bearish || []),
+      ];
+      
+      const signal = allSignals.find(s => s.ticker === ticker);
+      if (!signal) return;
+      
+      // Open the Position Calculator with this signal's data
+      if (window.PositionCalculator) {
+        window.PositionCalculator.open(signal, e);
       }
     });
   });

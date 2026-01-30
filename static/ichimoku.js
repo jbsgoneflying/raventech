@@ -398,10 +398,21 @@ function handleCardClick(e) {
   const ticker = card.dataset.ticker;
   if (!ticker) return;
   
-  // Open Engine 1 full analysis with MC enabled and 1.5x EM, auto-run
-  // This lets traders click multiple setups and have them load as new tabs
-  const url = `/breach?ticker=${encodeURIComponent(ticker)}&k=1.5&mc=1&autorun=1`;
-  window.open(url, "_blank");
+  // Find the signal data for this ticker
+  if (!lastPayload) return;
+  
+  const allSignals = [
+    ...(lastPayload.actionable || []),
+    ...(lastPayload.structure || []),
+  ];
+  
+  const signal = allSignals.find(s => s.ticker === ticker);
+  if (!signal) return;
+  
+  // Open the Position Calculator with this signal's data
+  if (window.PositionCalculator) {
+    window.PositionCalculator.open(signal, e);
+  }
 }
 
 // -----------------------------------------------------------------------------
