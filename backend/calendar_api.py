@@ -408,8 +408,26 @@ def build_calendar_payload(
                 debug_counts["earningsRowsFetched"] = int(len(rows))
                 debug_counts["earningsSource"] = "fmp_live"
 
-                # De-dupe (ticker+date+timing) and apply universe filter.
-                uniq: Dict[Tuple[str, str, str], dict] = {}
+                # Load ORATS snapshot for timing cross-reference (FMP often has UNK timing)
+                orats_timing_map: Dict[Tuple[str, str], str] = {}
+                if redis_store is not None:
+                    try:
+                        orats_snap = load_earnings_snapshot(redis_store)
+                        if orats_snap and isinstance(orats_snap, dict):
+                            orats_by_date = orats_snap.get("byDate") or {}
+                            for date_str, timing_groups in orats_by_date.items():
+                                if isinstance(timing_groups, dict):
+                                    for timing_key in ("BMO", "AMC"):
+                                        for ticker in (timing_groups.get(timing_key) or []):
+                                            if isinstance(ticker, str):
+                                                orats_timing_map[(ticker.upper(), date_str)] = timing_key
+                            debug_counts["oratsTimingMapSize"] = len(orats_timing_map)
+                    except Exception as e:
+                        LOG.warning(f"Calendar: failed to load ORATS timing map: {e}")
+
+                # De-dupe (ticker+date) and apply universe filter.
+                # Key by (sym, date) only - we'll determine timing later
+                uniq: Dict[Tuple[str, str], dict] = {}
                 dropped = 0
                 for r in rows:
                     if not isinstance(r, dict):
@@ -422,20 +440,31 @@ def build_calendar_payload(
                     if universe and sym not in universe:
                         dropped += 1
                         continue
-                    tm = _coerce_timing_fmp(r)
-                    uniq[(sym, _fmt_date(d), tm)] = r
+                    # Store with FMP timing, but we'll cross-ref ORATS below
+                    fmp_timing = _coerce_timing_fmp(r)
+                    uniq[(sym, _fmt_date(d))] = {"fmp_timing": fmp_timing, "row": r}
 
                 debug_counts["earningsRowsDroppedUniverse"] = int(dropped)
 
                 tickers_in_range = 0
-                for (sym, d0, tm), _r in uniq.items():
+                timing_from_orats = 0
+                for (sym, d0), data in uniq.items():
                     if d0 not in day_keys:
                         continue
-                    earnings_by_date[d0][tm].append({"ticker": sym, "time": ""})
+                    fmp_timing = data["fmp_timing"]
+                    # Cross-reference ORATS for better timing if FMP is UNK
+                    final_timing = fmp_timing
+                    if fmp_timing == "UNK":
+                        orats_timing = orats_timing_map.get((sym, d0))
+                        if orats_timing:
+                            final_timing = orats_timing
+                            timing_from_orats += 1
+                    earnings_by_date[d0][final_timing].append({"ticker": sym, "time": ""})
                     tickers_in_range += 1
 
                 debug_counts["tickersInRange"] = int(tickers_in_range)
                 debug_counts["earningsRowsUsed"] = int(tickers_in_range)
+                debug_counts["timingFromOrats"] = int(timing_from_orats)
             except FmpError as e:
                 notes.append(f"FMP earnings fetch failed: {str(e)[:180]}")
             except Exception as e:

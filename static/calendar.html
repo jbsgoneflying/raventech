@@ -11,7 +11,7 @@
     />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <link rel="stylesheet" href="/static/styles.css?v=11" />
   </head>
   <body>
     <main class="container" role="main">
@@ -35,16 +35,10 @@
 
       <section class="calTopBar surface" aria-label="Calendar controls">
         <div class="calTopBarRow">
-          <div class="calViewSeg segmented" role="group" aria-label="Calendar view">
-            <button id="viewMonth" class="segButton" type="button">Month</button>
-            <button id="viewWeek" class="segButton" type="button">Week</button>
-            <button id="viewDay" class="segButton" type="button">Day</button>
-          </div>
-
           <div class="calNav">
-            <button id="prevBtn" class="primaryButton" type="button" aria-label="Previous">‹</button>
+            <button id="prevBtn" class="primaryButton" type="button" aria-label="Previous week">‹</button>
             <button id="todayBtn" class="primaryButton" type="button">Today</button>
-            <button id="nextBtn" class="primaryButton" type="button" aria-label="Next">›</button>
+            <button id="nextBtn" class="primaryButton" type="button" aria-label="Next week">›</button>
           </div>
 
           <div class="calTitleWrap">
@@ -174,7 +168,7 @@
     </div>
 
     <script src="/static/ui_kit.js"></script>
-    <script src="/static/calendar.js?v=3"></script>
+    <script src="/static/calendar.js?v=5"></script>
   </body>
 </html>
 

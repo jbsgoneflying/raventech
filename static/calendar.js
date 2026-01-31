@@ -50,14 +50,10 @@ function startOfWeek(d) {
 
 function fmtRangeTitle(view, start, end, anchor) {
   const opts = { month: "long", day: "numeric", year: "numeric" };
+  // Week view: show date range
   const s = start.toLocaleDateString(undefined, opts);
   const e = end.toLocaleDateString(undefined, opts);
-  if (view === "day") return s;
-  if (view === "week") return `${s} – ${e}`;
-  // month: show Month YYYY from anchor (not padded start)
-  const ref = anchor || start;
-  const m = ref.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  return m;
+  return `${s} – ${e}`;
 }
 
 async function fetchJson(url, { timeoutMs = 30000 } = {}) {
@@ -277,7 +273,7 @@ function _li(lines) {
 }
 
 const state = {
-  view: "month",
+  view: "week",  // Week view only
   anchor: isoDate(new Date()),
   engine1Only: false,
   layers: { holiday: true, earlyClose: true, fed: true, econ: true, treasury: true, opex: true },
@@ -285,9 +281,9 @@ const state = {
   rankCache: {},
 };
 
-function _allocMonthCaps({ bmoN, amcN, unkN }, totalCap = 8) {
+function _allocMonthCaps({ bmoN, amcN, unkN }, totalCap = 12) {
   // Month view goal: show as many logos as space allows.
-  // With 36px logo tiles, totalCap=8 fits comfortably in each day cell.
+  // With 32px square tiles, totalCap=12 fits comfortably in each day cell.
   const cap = Math.max(0, Number(totalCap) || 0);
   const groups = [
     { k: "BMO", n: Math.max(0, Number(bmoN) || 0) },
@@ -325,12 +321,9 @@ function setStatus(msg, isError = false) {
   el.classList.toggle("isOk", !isError && !!msg);
 }
 
+// Week view is the only view - no toggle needed
 function setView(view) {
-  state.view = view;
-  ["month", "week", "day"].forEach((v) => {
-    const b = $(`view${v[0].toUpperCase()}${v.slice(1)}`);
-    if (b) b.classList.toggle("isActive", v === view);
-  });
+  state.view = "week";
 }
 
 function openSettings(open) {
@@ -412,7 +405,7 @@ function render(payload) {
 
     const chips = [];
     chips.push(state.engine1Only ? "Engine‑1 eligible only" : "All names");
-    chips.push(view === "month" ? "Month view" : view === "week" ? "Week view" : "Day view");
+    chips.push("Week view");
     if (hiMacro > 0) chips.push(`Macro events: ${hiMacro}`);
     else chips.push("Macro: quiet");
     const chipHtml = chips.slice(0, 3).map((c) => `<span class="taChip">${escapeHtml(c)}</span>`).join("");
@@ -525,10 +518,8 @@ function render(payload) {
 
   const headerCells = () => {
     const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    if (view === "week") return names.slice(0, 5);
-    // Month view: trading week only (hide weekend columns for more screen room).
-    if (view === "month") return names.slice(0, 5);
-    return [];
+    // Week view: Mon-Fri headers
+    return names.slice(0, 5);
   };
 
   const cells = [];
@@ -537,24 +528,14 @@ function render(payload) {
     cells.push(...headers.map((h) => `<div class="calHeadCell">${escapeHtml(h)}</div>`));
   }
 
-  const daysToRender = (view === "month")
-    ? days.filter((d) => {
-      const dt = parseIsoDate(d?.date);
-      if (!dt) return true;
-      const wd = dt.getDay(); // Sun=0..Sat=6
-      return wd !== 0 && wd !== 6; // Mon-Fri only
-    })
-    : days;
-
-  daysToRender.forEach((d) => {
+  // Week view: render all days returned by API (Mon-Fri)
+  days.forEach((d) => {
     const date = String(d?.date || "");
     const dt = parseIsoDate(date);
     const dow = dt ? dt.toLocaleDateString(undefined, { weekday: "short" }) : "";
     const dayNum = dt ? dt.getDate() : "";
     const isWeekend = dt ? (dt.getDay() === 0 || dt.getDay() === 6) : false;
-    const isOutsideMonth = (view === "month" && dt)
-      ? (dt.getMonth() !== anchorDt.getMonth() || dt.getFullYear() !== anchorDt.getFullYear())
-      : false;
+    const isOutsideMonth = false; // Not relevant for week view
 
     const evs = (Array.isArray(d?.events) ? d.events : []).filter(shouldShowEvent);
     const earnings = d?.earnings || {};
@@ -562,13 +543,12 @@ function render(payload) {
     const amc = Array.isArray(earnings?.AMC) ? earnings.AMC : [];
     const unk = Array.isArray(earnings?.UNK) ? earnings.UNK : [];
 
-    // With smaller 36px logo tiles, we can show more per day
-    const caps = (view === "month")
-      ? _allocMonthCaps({ bmoN: bmo.length, amcN: amc.length, unkN: unk.length }, 8)
-      : { BMO: 20, AMC: 20, UNK: 20 };
+    // Week view - show many logos per day with compact 32px square tiles
+    const caps = { BMO: 30, AMC: 30, UNK: 30 };
 
-    const evShown = (view === "month" && evs.length > 2) ? evs.slice(0, 2) : evs;
-    const evMore = (view === "month" && evs.length > 2) ? (evs.length - 2) : 0;
+    // Week view - show all events
+    const evShown = evs;
+    const evMore = 0;
     const evHtml = evs.length
       ? `<div class="calEvents">
           ${evShown.map((ev) => {
@@ -631,21 +611,27 @@ function render(payload) {
 
   // Handle broken logos (missing/404) - show ticker initial fallback
   grid.querySelectorAll(".calTileLogo").forEach((img) => {
-    img.addEventListener("error", () => {
+    const showFallback = () => {
       const btn = img.closest && img.closest(".calTile");
       const ticker = img.getAttribute("data-ticker") || btn?.getAttribute("data-ticker") || "?";
       const colorIdx = btn?.getAttribute("data-color") || "1";
       const initial = ticker.charAt(0).toUpperCase();
-      // Replace logo with colored initial
-      if (btn) {
-        img.remove();
+      if (btn && !btn.querySelector(".calTileInitial")) {
+        img.style.display = "none";
         const fallback = document.createElement("div");
         fallback.className = "calTileInitial";
         fallback.setAttribute("data-color", colorIdx);
         fallback.textContent = initial;
         btn.appendChild(fallback);
       }
-    }, { once: true });
+    };
+    
+    // Check if image already failed (for cached failures)
+    if (img.complete && img.naturalWidth === 0) {
+      showFallback();
+    } else {
+      img.addEventListener("error", showFallback, { once: true });
+    }
   });
 
   // ticker click handler (delegated)
@@ -906,24 +892,9 @@ async function refresh() {
 }
 
 function shiftAnchor(dir) {
+  // Week view only - shift by 7 days
   const a = parseIsoDate(state.anchor) || new Date();
-  if (state.view === "month") {
-    // Month shifting: clamp the day-of-month to avoid JS Date rollover
-    // (e.g. Jan 31 + 1 month => Mar 3 because Feb doesn't have 31).
-    const dt = new Date(a);
-    const origDay = dt.getDate();
-    dt.setDate(1); // safe pivot day
-    dt.setMonth(dt.getMonth() + dir);
-    const y = dt.getFullYear();
-    const m = dt.getMonth(); // 0-based
-    const lastDay = new Date(y, m + 1, 0).getDate();
-    dt.setDate(Math.min(origDay, lastDay));
-    state.anchor = isoDate(dt);
-  } else if (state.view === "week") {
-    state.anchor = isoDate(addDays(a, 7 * dir));
-  } else {
-    state.anchor = isoDate(addDays(a, dir));
-  }
+  state.anchor = isoDate(addDays(a, 7 * dir));
 }
 
 function init() {
@@ -932,11 +903,8 @@ function init() {
   initTooltips();
   try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }
 
-  setView("month");
-
-  $("viewMonth")?.addEventListener("click", () => { setView("month"); refresh(); });
-  $("viewWeek")?.addEventListener("click", () => { setView("week"); refresh(); });
-  $("viewDay")?.addEventListener("click", () => { setView("day"); refresh(); });
+  // Week view only - no view toggle needed
+  setView("week");
 
   $("prevBtn")?.addEventListener("click", () => { shiftAnchor(-1); refresh(); });
   $("nextBtn")?.addEventListener("click", () => { shiftAnchor(+1); refresh(); });
