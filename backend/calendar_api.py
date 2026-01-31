@@ -336,11 +336,29 @@ def build_calendar_payload(
     
     def _coerce_timing_ninja(row: dict) -> str:
         """Convert API Ninjas earnings_timing to BMO/AMC/UNK."""
-        timing = str(row.get("earnings_timing") or "").lower().strip()
-        if timing == "before_market":
+        # Check multiple possible field names for timing
+        timing_raw = None
+        for field in ("earnings_timing", "time", "timing", "session", "when"):
+            v = row.get(field)
+            if v is not None and str(v).strip():
+                timing_raw = str(v).strip().lower()
+                break
+        
+        if not timing_raw:
+            return "UNK"
+        
+        # Parse timing value
+        if timing_raw in ("before_market", "bmo", "pre", "premarket", "before"):
             return "BMO"
-        elif timing in ("after_market", "during_market"):
+        elif timing_raw in ("after_market", "during_market", "amc", "post", "postmarket", "after"):
             return "AMC"
+        
+        # Check for partial matches
+        if "before" in timing_raw or "pre" in timing_raw or "bmo" in timing_raw:
+            return "BMO"
+        if "after" in timing_raw or "post" in timing_raw or "amc" in timing_raw or "during" in timing_raw:
+            return "AMC"
+        
         return "UNK"
 
     def _coerce_ticker_ninja(row: dict) -> str:
@@ -378,7 +396,15 @@ def build_calendar_payload(
             )
             debug_counts["apiNinjasRowsFetched"] = len(ninja_rows)
             
+            # Log sample row fields for debugging
+            if ninja_rows:
+                sample = ninja_rows[0]
+                debug_counts["apiNinjaSampleFields"] = list(sample.keys())
+                debug_counts["apiNinjaSampleTimingField"] = sample.get("earnings_timing", "NOT_PRESENT")
+            
             dropped = 0
+            ninja_timing_breakdown = {"BMO": 0, "AMC": 0, "UNK": 0}
+            
             for r in ninja_rows:
                 if not isinstance(r, dict):
                     continue
@@ -396,6 +422,8 @@ def build_calendar_payload(
                     continue
                 
                 timing = _coerce_timing_ninja(r)
+                ninja_timing_breakdown[timing] = ninja_timing_breakdown.get(timing, 0) + 1
+                
                 key = (sym, d_str)
                 if key not in merged_earnings:
                     merged_earnings[key] = timing
@@ -403,8 +431,9 @@ def build_calendar_payload(
             
             debug_counts["apiNinjasRowsDroppedUniverse"] = dropped
             debug_counts["tickersFromApiNinjas"] = ninja_count
+            debug_counts["apiNinjasTimingBreakdown"] = ninja_timing_breakdown
             debug_counts["earningsSource"] = "api_ninjas"
-            LOG.info(f"Calendar: API Ninjas returned {ninja_count} earnings in range")
+            LOG.info(f"Calendar: API Ninjas returned {ninja_count} earnings (timing: {ninja_timing_breakdown})")
             
         except ApiNinjasError as e:
             LOG.warning(f"Calendar: API Ninjas fetch failed, falling back: {e}")
@@ -522,11 +551,22 @@ def build_calendar_payload(
     filtered_earnings = merged_earnings
     mcap_filtered_count = 0
     
+    debug_counts["minMarketCapB"] = min_market_cap_b
+    debug_counts["minMarketCapRaw"] = min_market_cap
+    debug_counts["fmpClientAvailable"] = fmp_client is not None
+    debug_counts["tickersBeforeFilter"] = len(merged_earnings)
+    
     if min_market_cap > 0 and fmp_client is not None:
         all_tickers = list(set(sym for sym, d0 in merged_earnings.keys()))
+        LOG.info(f"Calendar: Applying market cap filter (min=${min_market_cap/1e9:.1f}B) to {len(all_tickers)} tickers")
         try:
             market_caps = fmp_client.get_market_caps(all_tickers)
             debug_counts["marketCapsLoaded"] = len(market_caps)
+            
+            # Log some sample market caps for debugging
+            sample_caps = {k: f"${v/1e9:.1f}B" for k, v in list(market_caps.items())[:5]}
+            debug_counts["sampleMarketCaps"] = sample_caps
+            
             filtered_earnings = {}
             for (sym, d0), timing in merged_earnings.items():
                 mcap = market_caps.get(sym, 0)
@@ -535,10 +575,13 @@ def build_calendar_payload(
                 else:
                     mcap_filtered_count += 1
             debug_counts["filteredByMarketCap"] = mcap_filtered_count
-            debug_counts["minMarketCapB"] = min_market_cap_b
+            debug_counts["tickersAfterFilter"] = len(filtered_earnings)
+            LOG.info(f"Calendar: Market cap filter kept {len(filtered_earnings)}/{len(merged_earnings)} tickers (filtered out {mcap_filtered_count})")
         except Exception as e:
             LOG.warning(f"Calendar: market cap filter failed, showing all: {e}")
             notes.append(f"Market cap filter failed: {type(e).__name__}")
+    elif min_market_cap > 0 and fmp_client is None:
+        notes.append("Market cap filter requested but FMP client unavailable")
 
     # 4. Populate earnings_by_date from filtered data
     tickers_in_range = 0

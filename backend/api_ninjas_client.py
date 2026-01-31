@@ -288,6 +288,13 @@ class ApiNinjasClient:
                 if not batch:
                     break
                 all_rows.extend(batch)
+                
+                # Log sample row to debug fields (first page only)
+                if offset == 0 and batch:
+                    sample = batch[0]
+                    self._log.info(f"API Ninjas sample row fields: {list(sample.keys())}")
+                    self._log.info(f"API Ninjas sample earnings_timing: {sample.get('earnings_timing', 'NOT PRESENT')}")
+                
                 if len(batch) < page_size:
                     break
                 offset += page_size
@@ -299,3 +306,49 @@ class ApiNinjasClient:
             f"Fetched {len(all_rows)} upcoming earnings from {start_date} to {end_date}"
         )
         return all_rows[:max_results]
+
+    def get_market_cap(self, ticker: str) -> Optional[float]:
+        """
+        Get market cap for a single ticker.
+        
+        Args:
+            ticker: Stock symbol (e.g., AAPL)
+            
+        Returns:
+            Market cap in dollars, or None if not found
+        """
+        try:
+            resp = self.get("/marketcap", {"ticker": str(ticker).upper()})
+            if resp.rows and len(resp.rows) > 0:
+                row = resp.rows[0]
+                mcap = row.get("market_cap")
+                if mcap is not None:
+                    return float(mcap)
+        except Exception as e:
+            self._log.debug(f"Failed to get market cap for {ticker}: {e}")
+        return None
+
+    def get_market_caps_batch(self, tickers: List[str]) -> Dict[str, float]:
+        """
+        Get market caps for multiple tickers.
+        Note: API Ninjas marketcap endpoint only supports single ticker,
+        so we make parallel requests.
+        
+        Args:
+            tickers: List of stock symbols
+            
+        Returns:
+            Dict of ticker -> market cap
+        """
+        result: Dict[str, float] = {}
+        
+        # Limit to prevent too many API calls
+        tickers_to_fetch = list(set(tickers))[:200]
+        
+        for ticker in tickers_to_fetch:
+            mcap = self.get_market_cap(ticker)
+            if mcap is not None:
+                result[ticker.upper()] = mcap
+        
+        self._log.info(f"Fetched market caps for {len(result)}/{len(tickers_to_fetch)} tickers")
+        return result
