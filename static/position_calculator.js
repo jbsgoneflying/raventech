@@ -41,9 +41,11 @@
     // This gives a more realistic risk:reward for mean reversion trades
     const target1Raw = signal?.levels?.target1 || signal?.target1 || 0;
     const targetSma20 = signal?.levels?.targetSma20 || 0;
-    const target1 = (targetSma20 > 0 && targetSma20 !== target1Raw) ? targetSma20 : target1Raw;
+    const usingSma20 = (targetSma20 > 0 && targetSma20 !== target1Raw);
+    const target1 = usingSma20 ? targetSma20 : target1Raw;
     const dirClass = direction === "bullish" ? "bullish" : "bearish";
     const dirLabel = direction === "bullish" ? "LONG" : "SHORT";
+    const targetLabel = usingSma20 ? "Target (SMA20)" : "Target 1";
 
     const settings = loadSettings();
 
@@ -73,7 +75,7 @@
             <span class="posCalcLevelValue posCalcStop" id="posCalcStop">$${formatPrice(stop)}</span>
           </div>
           <div class="posCalcLevel">
-            <span class="posCalcLevelLabel">Target 1</span>
+            <span class="posCalcLevelLabel">${targetLabel}</span>
             <span class="posCalcLevelValue posCalcTarget" id="posCalcTarget">$${formatPrice(target1)}</span>
           </div>
         </div>
@@ -122,7 +124,7 @@
             <span class="posCalcResultValue" id="posCalcTradeValue">—</span>
           </div>
           <div class="posCalcResultRow posCalcResultRow--highlight">
-            <span class="posCalcResultLabel">Profit at Target 1</span>
+            <span class="posCalcResultLabel">${usingSma20 ? 'Profit at SMA20' : 'Profit at Target 1'}</span>
             <span class="posCalcResultValue" id="posCalcProfit">—</span>
           </div>
           <div class="posCalcResultRow">
