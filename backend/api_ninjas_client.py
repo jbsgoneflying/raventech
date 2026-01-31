@@ -268,21 +268,33 @@ class ApiNinjasClient:
         Returns:
             'before_market', 'after_market', 'during_market', or None
         """
+        ticker = str(ticker).upper().strip()
         try:
-            # Get last 3 earnings for this ticker
+            # Get last 10 earnings for this ticker to find one with timing
             resp = self.get("/earningscalendar", {
-                "ticker": str(ticker).upper(),
-                "limit": 3,
+                "ticker": ticker,
+                "limit": 10,
             })
             
-            for row in (resp.rows or []):
-                timing = row.get("earnings_timing")
-                if timing and str(timing).strip().lower() not in ("null", "none", ""):
-                    return str(timing).strip().lower()
+            rows = resp.rows or []
             
+            for row in rows:
+                timing = row.get("earnings_timing")
+                # Check if timing is valid (not None, not "null" string, not empty)
+                if timing is not None and str(timing).strip().lower() not in ("null", "none", ""):
+                    result = str(timing).strip().lower()
+                    self._log.debug(f"Found historical timing for {ticker}: {result}")
+                    return result
+            
+            # Log if we couldn't find timing
+            self._log.debug(f"No historical timing found for {ticker} in {len(rows)} rows")
+            return None
+            
+        except ApiNinjasError as e:
+            self._log.warning(f"API error getting historical timing for {ticker}: {e}")
             return None
         except Exception as e:
-            self._log.debug(f"Failed to get historical timing for {ticker}: {e}")
+            self._log.warning(f"Failed to get historical timing for {ticker}: {type(e).__name__}: {e}")
             return None
 
     def fetch_all_upcoming_earnings(
@@ -362,14 +374,19 @@ class ApiNinjasClient:
         
         self._log.info(f"Looking up historical timing for {len(tickers_needing_timing)} tickers")
         
-        # Step 3: Fetch historical timing in parallel (limit to 50 concurrent)
+        # Step 3: Fetch historical timing in parallel (limit concurrent to avoid rate limits)
         timing_cache: Dict[str, str] = {}
+        failed_lookups: List[str] = []
         
         if tickers_needing_timing:
-            with ThreadPoolExecutor(max_workers=15) as executor:
+            tickers_to_lookup = list(tickers_needing_timing)[:200]
+            self._log.info(f"Starting historical timing lookups for {len(tickers_to_lookup)} tickers")
+            
+            # Use fewer workers to avoid rate limiting
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = {
                     executor.submit(self.get_historical_timing, t): t 
-                    for t in list(tickers_needing_timing)[:200]  # Limit API calls
+                    for t in tickers_to_lookup
                 }
                 for future in as_completed(futures):
                     ticker = futures[future]
@@ -377,8 +394,14 @@ class ApiNinjasClient:
                         timing = future.result()
                         if timing:
                             timing_cache[ticker] = timing
+                        else:
+                            failed_lookups.append(ticker)
                     except Exception as e:
-                        self._log.debug(f"Historical timing lookup failed for {ticker}: {e}")
+                        self._log.warning(f"Historical timing lookup exception for {ticker}: {e}")
+                        failed_lookups.append(ticker)
+            
+            if failed_lookups:
+                self._log.info(f"Failed to find timing for {len(failed_lookups)} tickers: {failed_lookups[:10]}...")
         
         self._log.info(f"Found historical timing for {len(timing_cache)}/{len(tickers_needing_timing)} tickers")
         
