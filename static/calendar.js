@@ -944,12 +944,27 @@ async function openMacroPopover(ev) {
 
 async function refresh() {
   setStatus("Loading…");
+  
+  // Show Raven loading overlay (20 second expected load time for calendar)
+  if (window.RavenLoading) {
+    window.RavenLoading.show({ 
+      status: "Loading calendar...", 
+      clearResults: false,
+      expectedLoadMs: 20000 
+    });
+  }
+  
   try {
     const payload = await fetchJson(buildCalendarUrl(), { timeoutMs: 60000 });
     render(payload);
     setStatus("");
   } catch (e) {
     setStatus(String(e?.message || e), true);
+  } finally {
+    // Hide Raven loading overlay
+    if (window.RavenLoading) {
+      window.RavenLoading.hide();
+    }
   }
 }
 

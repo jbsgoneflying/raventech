@@ -469,8 +469,8 @@ window.RavenLoading = (function() {
   let currentProgress = 0;
   let startTime = 0;
   
-  // Expected load time in milliseconds (45 seconds)
-  const EXPECTED_LOAD_MS = 45000;
+  // Default expected load time in milliseconds (45 seconds)
+  let expectedLoadMs = 45000;
   // Progress ceiling before completion (don't go past 92% until actually done)
   const PROGRESS_CEILING = 92;
   // Update interval in ms
@@ -511,7 +511,7 @@ window.RavenLoading = (function() {
   
   /**
    * Start auto-progress animation
-   * Linear progress over expected 45 seconds, capped at 92%
+   * Linear progress over expected time, capped at 92%
    */
   function startAutoProgress() {
     stopAutoProgress();
@@ -526,7 +526,7 @@ window.RavenLoading = (function() {
       
       // Calculate linear progress based on elapsed time
       const elapsed = Date.now() - startTime;
-      const linearProgress = (elapsed / EXPECTED_LOAD_MS) * PROGRESS_CEILING;
+      const linearProgress = (elapsed / expectedLoadMs) * PROGRESS_CEILING;
       
       // Cap at ceiling - if load takes longer than expected, stay at 92%
       currentProgress = Math.min(PROGRESS_CEILING, linearProgress);
@@ -550,9 +550,15 @@ window.RavenLoading = (function() {
    * @param {string} options.status - Initial status message
    * @param {boolean} options.clearResults - Whether to clear #results content (default: true)
    * @param {boolean} options.autoProgress - Enable auto-progress animation (default: true)
+   * @param {number} options.expectedLoadMs - Expected load time in ms (default: 45000)
    */
   function show(options = {}) {
     create();
+    
+    // Set expected load time if provided
+    if (options.expectedLoadMs && options.expectedLoadMs > 0) {
+      expectedLoadMs = options.expectedLoadMs;
+    }
 
     // Clear previous results if specified (default: true)
     if (options.clearResults !== false) {
