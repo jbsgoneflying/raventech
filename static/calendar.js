@@ -276,6 +276,7 @@ const state = {
   view: "week",  // Week view only
   anchor: isoDate(new Date()),
   engine1Only: false,
+  minMarketCapB: 0,  // 0 = all, 100 = $100B+
   layers: { holiday: true, earlyClose: true, fed: true, econ: true, treasury: true, opex: true },
   lastPayload: null,
   rankCache: {},
@@ -345,7 +346,10 @@ function buildCalendarUrl() {
   params.set("tz", "America/New_York");
   params.set("engine1Only", state.engine1Only ? "1" : "0");
   params.set("includeEvents", "1");
-  // Earnings now merged from both ORATS and FMP for best coverage
+  // Market cap filter (in billions)
+  if (state.minMarketCapB > 0) {
+    params.set("minMarketCap", String(state.minMarketCapB));
+  }
   return `/api/calendar?${params.toString()}`;
 }
 
@@ -403,7 +407,13 @@ function render(payload) {
     const opexN = (evKinds.OPEX || 0);
 
     const chips = [];
-    chips.push(state.engine1Only ? "Engine‑1 eligible only" : "All names");
+    if (state.minMarketCapB >= 100) {
+      chips.push("Mega-cap ($100B+)");
+    } else if (state.engine1Only) {
+      chips.push("Engine‑1 eligible");
+    } else {
+      chips.push("All names");
+    }
     chips.push("Week view");
     if (hiMacro > 0) chips.push(`Macro events: ${hiMacro}`);
     else chips.push("Macro: quiet");
@@ -465,7 +475,7 @@ function render(payload) {
             <div class="taCardTop">
               <div class="taCardTitle">Universe filter</div>
             </div>
-            <div class="taCardState">${state.engine1Only ? "Engine‑1 eligible" : "All names"}</div>
+            <div class="taCardState">${state.minMarketCapB >= 100 ? "Mega-cap $100B+" : (state.engine1Only ? "Engine‑1 eligible" : "All names")}</div>
             <div class="taCardInterp">Change in Settings; affects what appears on the grid.</div>
           </div>
         </div>
@@ -917,9 +927,23 @@ function init() {
     if (ev.target && ev.target.id === "settingsModal") openSettings(false);
   });
 
-  $("engine1OnlyToggle")?.addEventListener("change", (ev) => {
-    state.engine1Only = !!ev.target.checked;
-    refresh();
+  // Universe filter radio buttons
+  const filterRadios = document.querySelectorAll('input[name="universeFilter"]');
+  filterRadios.forEach((radio) => {
+    radio.addEventListener("change", (ev) => {
+      const val = ev.target.value;
+      if (val === "megacap") {
+        state.minMarketCapB = 100;
+        state.engine1Only = false;
+      } else if (val === "engine1") {
+        state.minMarketCapB = 0;
+        state.engine1Only = true;
+      } else {
+        state.minMarketCapB = 0;
+        state.engine1Only = false;
+      }
+      refresh();
+    });
   });
 
   const bindLayer = (id, key) => {

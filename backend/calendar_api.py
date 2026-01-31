@@ -230,10 +230,14 @@ def build_calendar_payload(
     fmp_client: Optional[FmpClient],
     max_tickers: int,
     redis_store: Optional[RedisStore] = None,
+    min_market_cap_b: float = 0.0,
 ) -> Dict[str, Any]:
     v = str(view or "month").lower().strip()
     if v not in ("month", "week", "day"):
         raise ValueError("Unsupported view. Allowed: month|week|day")
+    
+    # Convert billions to raw number for filtering
+    min_market_cap = float(min_market_cap_b) * 1_000_000_000 if min_market_cap_b > 0 else 0.0
 
     a = _parse_date(anchor) or dt.date.today()
     if v == "month":
@@ -452,9 +456,37 @@ def build_calendar_payload(
     else:
         notes.append("FMP unavailable or disabled.")
 
-    # 3. Populate earnings_by_date from merged data
+    # 3. Apply market cap filter if specified
+    filtered_earnings = merged_earnings
+    mcap_filtered_count = 0
+    
+    if min_market_cap > 0 and fmp_client is not None:
+        # Get all unique tickers
+        all_tickers = list(set(sym for sym, d0 in merged_earnings.keys()))
+        
+        # Fetch market caps from FMP
+        try:
+            market_caps = fmp_client.get_market_caps(all_tickers)
+            debug_counts["marketCapsLoaded"] = len(market_caps)
+            
+            # Filter by market cap
+            filtered_earnings = {}
+            for (sym, d0), timing in merged_earnings.items():
+                mcap = market_caps.get(sym, 0)
+                if mcap >= min_market_cap:
+                    filtered_earnings[(sym, d0)] = timing
+                else:
+                    mcap_filtered_count += 1
+            
+            debug_counts["filteredByMarketCap"] = mcap_filtered_count
+            debug_counts["minMarketCapB"] = min_market_cap_b
+        except Exception as e:
+            LOG.warning(f"Calendar: market cap filter failed, showing all: {e}")
+            notes.append(f"Market cap filter failed: {type(e).__name__}")
+
+    # 4. Populate earnings_by_date from filtered data
     tickers_in_range = 0
-    for (sym, d0), timing in merged_earnings.items():
+    for (sym, d0), timing in filtered_earnings.items():
         earnings_by_date[d0][timing].append({"ticker": sym, "time": ""})
         tickers_in_range += 1
 
@@ -463,7 +495,7 @@ def build_calendar_payload(
     debug_counts["tickersFromFmp"] = fmp_count
     debug_counts["tickersInRange"] = tickers_in_range
     debug_counts["earningsRowsUsed"] = tickers_in_range
-    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, FMP: {fmp_count})")
+    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, FMP: {fmp_count}, filtered: {mcap_filtered_count})")
 
     # Stable sort per day by ticker.
     for d0 in earnings_by_date.keys():

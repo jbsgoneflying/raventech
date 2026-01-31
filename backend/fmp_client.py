@@ -114,4 +114,34 @@ class FmpClient:
             params["limit"] = int(limit)
         return self.get("/earnings-calendar", params)
 
+    def quote_batch(self, symbols: list[str]) -> FmpResponse:
+        """Fetch quotes for multiple symbols (includes marketCap)."""
+        if not symbols:
+            return FmpResponse(rows=[], raw=[])
+        # FMP quote endpoint accepts comma-separated symbols
+        syms = ",".join([str(s).strip().upper() for s in symbols[:100]])  # Limit to 100
+        return self.get(f"/quote/{syms}", {})
+    
+    def get_market_caps(self, symbols: list[str]) -> Dict[str, float]:
+        """Return dict of symbol -> marketCap for given symbols."""
+        result: Dict[str, float] = {}
+        if not symbols:
+            return result
+        try:
+            # Process in batches of 100
+            for i in range(0, len(symbols), 100):
+                batch = symbols[i:i+100]
+                resp = self.quote_batch(batch)
+                for row in resp.rows:
+                    sym = str(row.get("symbol") or "").upper()
+                    mcap = row.get("marketCap")
+                    if sym and mcap is not None:
+                        try:
+                            result[sym] = float(mcap)
+                        except (ValueError, TypeError):
+                            pass
+        except Exception as e:
+            self._log.warning(f"Failed to fetch market caps: {e}")
+        return result
+
 

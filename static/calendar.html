@@ -11,7 +11,7 @@
     />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=12" />
+    <link rel="stylesheet" href="/static/styles.css?v=13" />
   </head>
   <body>
     <main class="container" role="main">
@@ -72,10 +72,20 @@
         <div class="modalBody">
           <div class="modalSection">
             <div class="modalSectionTitle">Universe</div>
-            <label class="toggleRow">
-              <input id="engine1OnlyToggle" type="checkbox" />
-              <span class="toggleText">Engine‑1 eligible names only (limits universe)</span>
-            </label>
+            <div class="modalRadios">
+              <label class="radioRow">
+                <input type="radio" name="universeFilter" id="filterAll" value="all" checked />
+                <span>All names (SP500 + Nasdaq100)</span>
+              </label>
+              <label class="radioRow">
+                <input type="radio" name="universeFilter" id="filterMegaCap" value="megacap" />
+                <span>Mega-cap only ($100B+ market cap)</span>
+              </label>
+              <label class="radioRow">
+                <input type="radio" name="universeFilter" id="filterEngine1" value="engine1" />
+                <span>Engine‑1 eligible only</span>
+              </label>
+            </div>
           </div>
 
           <div class="modalSection">
@@ -168,7 +178,7 @@
     </div>
 
     <script src="/static/ui_kit.js"></script>
-    <script src="/static/calendar.js?v=6"></script>
+    <script src="/static/calendar.js?v=7"></script>
   </body>
 </html>
 

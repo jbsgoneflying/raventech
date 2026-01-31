@@ -1038,6 +1038,7 @@ def calendar(
     includeEvents: int = Query(1, ge=0, le=1),
     maxTickers: int = Query(12000, ge=200, le=50000),
     forceFmp: int = Query(0, ge=0, le=1, description="Force FMP live data (bypass snapshot)"),
+    minMarketCap: float = Query(0, ge=0, description="Min market cap filter in billions (e.g., 100 = $100B+)"),
 ):
     """
     Earnings calendar endpoint for the front page.
@@ -1055,6 +1056,7 @@ def calendar(
         e1 = bool(int(engine1Only))
         inc = bool(int(includeEvents))
         force_fmp = bool(int(forceFmp))
+        min_mcap_b = float(minMarketCap) if minMarketCap else 0.0
 
         flags_fp = get_flags().cache_fingerprint()
         cache_ttl_s = int(float(os.getenv("CALENDAR_CACHE_TTL_S") or 0))
@@ -1082,6 +1084,7 @@ def calendar(
             fmp_client=fmp,
             max_tickers=int(maxTickers),
             redis_store=store,
+            min_market_cap_b=min_mcap_b,
         )
         if cache_ttl_s > 0:
             with _calendar_cache_lock:

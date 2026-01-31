@@ -2536,6 +2536,28 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   color: rgba(11,11,15,0.78);
 }
 
+.modalRadios {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.radioRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(11,11,15,0.78);
+  cursor: pointer;
+}
+
+.radioRow input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+
 .modalFoot {
   padding: 14px 16px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
