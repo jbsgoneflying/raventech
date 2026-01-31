@@ -1639,17 +1639,18 @@ a.ravenTempDisabled {
   top: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  padding: 8px 12px;
-  background: rgba(15, 23, 42, 0.92);
+  padding: 10px 16px;
+  background: rgba(15, 23, 42, 0.94);
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 1.4;
-  border-radius: 8px;
-  white-space: nowrap;
-  max-width: 280px;
+  line-height: 1.5;
+  border-radius: 10px;
+  min-width: 280px;
+  max-width: 340px;
   white-space: normal;
   text-align: center;
+  z-index: 17000; /* Above header (16000) */
   z-index: 1000;
   box-shadow: 0 8px 24px rgba(15, 20, 30, 0.25);
   pointer-events: none;
@@ -1663,8 +1664,8 @@ a.ravenTempDisabled {
   left: 50%;
   transform: translateX(-50%);
   border: 6px solid transparent;
-  border-bottom-color: rgba(15, 23, 42, 0.92);
-  z-index: 1001;
+  border-bottom-color: rgba(15, 23, 42, 0.94);
+  z-index: 17000; /* Above header (16000) */
   pointer-events: none;
   animation: navTooltipFadeIn 150ms ease-out;
 }
