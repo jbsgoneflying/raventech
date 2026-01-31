@@ -2825,7 +2825,7 @@ function setStatus(text, isError = false) {
   el.classList.toggle("isOk", !isError && String(text || "").toUpperCase() === "OK");
 }
 
-function setBusy(busy) {
+function setBusy(busy, statusMsg) {
   isBusy = !!busy;
   const btn = $("submit");
   const form = $("form");
@@ -2835,6 +2835,15 @@ function setBusy(busy) {
   if (ticker) ticker.disabled = isBusy;
   if (k) k.disabled = isBusy;
   if (form) form.classList.toggle("isLoading", isBusy);
+  
+  // Raven Loading Overlay
+  if (window.RavenLoading) {
+    if (isBusy) {
+      window.RavenLoading.show({ status: statusMsg || "Analyzing ticker..." });
+    } else {
+      window.RavenLoading.hide();
+    }
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -2907,14 +2916,29 @@ document.addEventListener("DOMContentLoaded", () => {
       setStatus("Refreshing data...");
     }
 
-    setBusy(true);
+    setBusy(true, `Analyzing ${t}...`);
     if (!cached?.isStale) {
       setStatus(`Computing with k=${k}…`);
+    }
+    
+    // Progress updates
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(15, `Fetching data for ${t}...`);
     }
 
     try {
       const payload = await fetchJson(url);
+      
+      if (window.RavenLoading) {
+        window.RavenLoading.setProgress(70, "Processing results...");
+      }
+      
       render(payload);
+      
+      if (window.RavenLoading) {
+        window.RavenLoading.setProgress(90, "Loading charts...");
+      }
+      
       // Async live gamma visuals (do not block Engine 1 RUN completion)
       loadEngine1Levels(t);
       setStatus("");

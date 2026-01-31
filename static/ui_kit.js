@@ -376,4 +376,132 @@ function installGlobalApiLoading({
 // Auto-install so all pages get consistent loading UX.
 try { installGlobalApiLoading(); } catch { /* ignore */ }
 
+// ---------------------------------------------------------------------------
+// Raven Loading Overlay: Full-screen loading with spinning logo and progress
+// ---------------------------------------------------------------------------
+
+window.RavenLoading = (function() {
+  "use strict";
+
+  let overlay = null;
+  let progressFill = null;
+  let statusEl = null;
+  let isVisible = false;
+
+  function create() {
+    if (overlay) return overlay;
+
+    overlay = document.createElement("div");
+    overlay.className = "ravenLoadingOverlay";
+    overlay.setAttribute("role", "progressbar");
+    overlay.setAttribute("aria-valuemin", "0");
+    overlay.setAttribute("aria-valuemax", "100");
+    overlay.innerHTML = `
+      <img src="/static/RavenONLY.png" class="ravenLoadingLogo" alt="" aria-hidden="true" />
+      <div class="ravenLoadingProgress">
+        <div class="ravenLoadingProgressFill"></div>
+      </div>
+      <div class="ravenLoadingStatus">Loading...</div>
+    `;
+    document.body.appendChild(overlay);
+
+    progressFill = overlay.querySelector(".ravenLoadingProgressFill");
+    statusEl = overlay.querySelector(".ravenLoadingStatus");
+
+    return overlay;
+  }
+
+  /**
+   * Show the loading overlay
+   * @param {Object} options
+   * @param {string} options.status - Initial status message
+   * @param {boolean} options.clearResults - Whether to clear #results content (default: true)
+   */
+  function show(options = {}) {
+    create();
+
+    // Clear previous results if specified (default: true)
+    if (options.clearResults !== false) {
+      const resultsEl = document.getElementById("results");
+      if (resultsEl) {
+        resultsEl.classList.add("hidden");
+        // Clear grid content to prevent flash of old data on next show
+        const grids = resultsEl.querySelectorAll("[id$='Grid'], [id$='Summary'], [id$='List']");
+        grids.forEach(g => { g.innerHTML = ""; });
+      }
+    }
+
+    // Reset progress
+    if (progressFill) {
+      progressFill.style.transition = "none";
+      progressFill.style.width = "0%";
+      // Force reflow then restore transition
+      void progressFill.offsetWidth;
+      progressFill.style.transition = "";
+    }
+
+    // Set initial status
+    if (statusEl) {
+      statusEl.textContent = options.status || "Loading...";
+    }
+
+    // Update ARIA
+    overlay.setAttribute("aria-valuenow", "0");
+
+    // Show overlay
+    isVisible = true;
+    overlay.classList.add("isVisible");
+  }
+
+  /**
+   * Update progress and optionally status message
+   * @param {number} percent - Progress percentage (0-100)
+   * @param {string} status - Optional status message
+   */
+  function setProgress(percent, status) {
+    if (!overlay) return;
+
+    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+
+    if (progressFill) {
+      progressFill.style.width = `${pct}%`;
+    }
+
+    if (status && statusEl) {
+      statusEl.textContent = status;
+    }
+
+    overlay.setAttribute("aria-valuenow", String(Math.round(pct)));
+  }
+
+  /**
+   * Hide the loading overlay
+   */
+  function hide() {
+    if (!overlay || !isVisible) return;
+
+    // Set to 100% first for completion feedback
+    setProgress(100);
+
+    // Delay hide slightly so user sees completion
+    setTimeout(() => {
+      isVisible = false;
+      overlay.classList.remove("isVisible");
+    }, 180);
+  }
+
+  /**
+   * Check if overlay is currently visible
+   */
+  function visible() {
+    return isVisible;
+  }
+
+  return {
+    show,
+    hide,
+    setProgress,
+    isVisible: visible,
+  };
+})();
 

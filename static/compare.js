@@ -299,6 +299,13 @@
    * Show loading state
    */
   function showLoading(tickerCount) {
+    // Use Raven Loading Overlay
+    if (window.RavenLoading) {
+      window.RavenLoading.show({ status: `Comparing ${tickerCount} ticker${tickerCount > 1 ? "s" : ""}...` });
+      window.RavenLoading.setProgress(10, "Fetching data...");
+    }
+    
+    // Also update inline UI
     $("results").classList.remove("hidden");
     $("resultsMeta").textContent = `Analyzing ${tickerCount} ticker${tickerCount > 1 ? "s" : ""}...`;
     $("tierSummary").innerHTML = "";
@@ -354,12 +361,24 @@
 
     try {
       const payload = await fetchComparison(tickers.join(","), k);
+      
+      if (window.RavenLoading) {
+        window.RavenLoading.setProgress(75, "Ranking results...");
+      }
+      
       renderResults(payload);
+      
+      if (window.RavenLoading) {
+        window.RavenLoading.setProgress(95, "Rendering...");
+      }
     } catch (err) {
       console.error("Comparison failed:", err);
       showError(err.message || "Failed to fetch comparison data.");
     } finally {
       isBusy = false;
+      if (window.RavenLoading) {
+        window.RavenLoading.hide();
+      }
     }
   }
 

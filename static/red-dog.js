@@ -42,12 +42,21 @@ function fmtMoney(x) {
 // State
 let lastPayload = null;
 
-function setLoading(isLoading) {
+function setLoading(isLoading, statusMsg) {
   const btn = $("runBtn");
   if (!btn) return;
   btn.disabled = !!isLoading;
   btn.classList.toggle("isLoading", !!isLoading);
   document.body.classList.toggle("isApiLoading", !!isLoading);
+  
+  // Raven Loading Overlay
+  if (window.RavenLoading) {
+    if (isLoading) {
+      window.RavenLoading.show({ status: statusMsg || "Scanning universe..." });
+    } else {
+      window.RavenLoading.hide();
+    }
+  }
 }
 
 function setStatus(msg, type = "ok") {
@@ -437,12 +446,26 @@ async function handleSubmit(ev) {
   const direction = $("direction")?.value || "";
   const minScore = parseInt($("minScore")?.value || "50", 10);
   
-  setLoading(true);
+  setLoading(true, "Scanning SP500 + Nasdaq100...");
   setStatus("Scanning SP500 + Nasdaq100 (516 tickers) for Red Dog setups...", "running");
+  
+  // Progress updates
+  if (window.RavenLoading) {
+    window.RavenLoading.setProgress(10, "Scanning 516 tickers...");
+  }
   
   try {
     const payload = await fetchScan(direction, minScore);
+    
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(75, "Processing setups...");
+    }
+    
     renderResults(payload);
+    
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(95, "Rendering results...");
+    }
     
     const count = payload.setupsFound || 0;
     const aplusCount = (payload.aPlus || []).length;

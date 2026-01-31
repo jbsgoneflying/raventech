@@ -91,11 +91,21 @@ const engine2UnderlyingState = {
 let _engine2TitleTemplate = null;
 let _engine2SubtitleTemplate = null;
 
-function setLoading(isLoading) {
+function setLoading(isLoading, statusMsg) {
   const btn = $("runBtn");
   if (!btn) return;
   btn.disabled = !!isLoading;
   btn.classList.toggle("isLoading", !!isLoading);
+  document.body.classList.toggle("isApiLoading", !!isLoading);
+  
+  // Raven Loading Overlay
+  if (window.RavenLoading) {
+    if (isLoading) {
+      window.RavenLoading.show({ status: statusMsg || "Analyzing SPX..." });
+    } else {
+      window.RavenLoading.hide();
+    }
+  }
 }
 
 function initTooltips() {
@@ -1853,15 +1863,31 @@ async function run() {
   }
 
   try {
-    setLoading(true);
+    setLoading(true, "Analyzing Iron Condor setups...");
     if (!cached?.isStale && status) {
       status.textContent = "Running…";
       status.classList.remove("isError", "isOk");
       status.classList.add("isRunning");
       status.classList.remove("hidden");
     }
+    
+    // Progress updates
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(15, "Fetching market data...");
+    }
+    
     const payload = await fetchJson(url);
+    
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(70, "Processing strikes...");
+    }
+    
     render(payload);
+    
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(95, "Rendering results...");
+    }
+    
     if (status) {
       status.classList.add("hidden");
     }

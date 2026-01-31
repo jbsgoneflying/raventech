@@ -42,12 +42,21 @@ function fmtMoney(x) {
 // State
 let lastPayload = null;
 
-function setLoading(isLoading) {
+function setLoading(isLoading, statusMsg) {
   const btn = $("runBtn");
   if (!btn) return;
   btn.disabled = !!isLoading;
   btn.classList.toggle("isLoading", !!isLoading);
   document.body.classList.toggle("isApiLoading", !!isLoading);
+  
+  // Raven Loading Overlay
+  if (window.RavenLoading) {
+    if (isLoading) {
+      window.RavenLoading.show({ status: statusMsg || "Scanning universe..." });
+    } else {
+      window.RavenLoading.hide();
+    }
+  }
 }
 
 function setStatus(msg, type = "ok") {
@@ -366,12 +375,26 @@ async function handleScan(e) {
   
   const direction = $("direction")?.value || "";
   
-  setLoading(true);
+  setLoading(true, "Scanning SP500 + Nasdaq100...");
   setStatus("Scanning universe for A+ setups...");
+  
+  // Progress updates
+  if (window.RavenLoading) {
+    window.RavenLoading.setProgress(10, "Scanning 516 tickers...");
+  }
   
   try {
     const payload = await fetchScan(direction);
+    
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(75, "Classifying setups...");
+    }
+    
     render(payload);
+    
+    if (window.RavenLoading) {
+      window.RavenLoading.setProgress(95, "Rendering results...");
+    }
     
     const actionable = payload.actionableCount ?? 0;
     const structure = payload.structureCount ?? 0;
