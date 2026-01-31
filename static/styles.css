@@ -2266,86 +2266,44 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   margin-bottom: 4px;
 }
 
+/* EarningsHub-style logo grid */
 .calTiles {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .calGrid--month .calTiles {
-  /* Month grid cells are narrow; use a consistent 2-column tile layout (≈4 rows max when capped). */
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  /* Flexible logo grid - fits as many as possible */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .calGrid--week .calTiles,
 .calGrid--day .calTiles {
-  /* Match Month: 2-column tile grid. Use fixed tile widths so cards don't stretch wide. */
-  display: grid;
-  grid-template-columns: repeat(2, 112px);
-  gap: 8px;
-  justify-content: start; /* left-justify within the day cell */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.calGrid--month .calTile {
-  /* Tighten spacing so the logo can be larger (better density in month view). */
-  padding: 4px 6px;
-  gap: 3px;
-}
-
-.calGrid--month .calTileLogo {
-  width: 58px;
-  height: 58px;
-}
-
-.calGrid--month .calTileTicker {
-  font-size: 10px;
-}
-
-.calGrid--week .calTile,
-.calGrid--day .calTile {
-  /* Match month view density for visual consistency across views. */
-  padding: 6px 8px;
-  gap: 4px;
-  width: auto;           /* override base 100% so it doesn't become a wide pill */
-  min-width: 0;
-  aspect-ratio: 1 / 1;   /* keep square shape (especially when only 1 ticker exists) */
-  justify-self: start;   /* left-justify a single tile in the grid */
-}
-
-.calGrid--week .calTileLogo,
-.calGrid--day .calTileLogo {
-  width: 58px;
-  height: 58px;
-}
-
-.calGrid--week .calTileTicker,
-.calGrid--day .calTileTicker {
-  font-size: 10px;
-}
-
-.calGrid--week .calTileMore,
-.calGrid--day .calTileMore {
-  justify-self: start;
-}
-
+/* Logo-only tile (EarningsHub style) */
 .calTile {
   appearance: none;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.80);
-  color: rgba(11,11,15,0.88);
-  border-radius: 14px;
-  padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.2px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
+  border-radius: 8px;
+  padding: 0;
+  width: 36px;
+  height: 36px;
   cursor: pointer;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
-  transition: transform 80ms ease, background 140ms ease, border-color 140ms ease;
-  display: inline-flex;
-  flex-direction: column;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  transition: transform 80ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
   justify-content: center;
   gap: 6px;
   min-width: 66px;
@@ -2353,31 +2311,72 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 }
 
 .calTile:hover {
-  background: rgba(255,255,255,0.92);
-  border-color: rgba(15, 23, 42, 0.18);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0,0,0,0.12);
+  border-color: rgba(15, 23, 42, 0.15);
 }
 
-.calTile:active { transform: translateY(0.5px); }
+.calTile:active { transform: translateY(0); }
 
+/* Logo fills the tile */
 .calTileLogo {
-  width: 44px;
-  height: 44px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  border-radius: 12px;
-  /* Dark charcoal so white/transparent logos (e.g. BA, NKE) remain visible. */
-  background: var(--logoTileBg);
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  box-shadow: 0 10px 26px rgba(15, 20, 30, 0.08);
-  /* Adds contrast for light/white marks on transparent PNGs. */
-  filter: drop-shadow(0 1px 2px rgba(15, 20, 30, 0.22));
+  padding: 3px;
+  background: #fff;
 }
 
-.calTile--noLogo .calTileLogo { display: none; }
-
+/* Hide ticker text - logo only (EarningsHub style) */
 .calTileTicker {
+  display: none;
+}
+
+/* Fallback initial for missing logos */
+.calTileInitial {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  text-transform: uppercase;
+}
+
+/* Different colors for variety */
+.calTileInitial[data-color="1"] { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.calTileInitial[data-color="2"] { background: linear-gradient(135deg, #10b981, #059669); }
+.calTileInitial[data-color="3"] { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.calTileInitial[data-color="4"] { background: linear-gradient(135deg, #ef4444, #dc2626); }
+.calTileInitial[data-color="5"] { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+
+/* Tooltip for ticker name on hover */
+.calTile[data-ticker]::after {
+  content: attr(data-ticker);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
   font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.25px;
+  font-weight: 600;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 150ms ease, visibility 150ms ease;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.calTile[data-ticker]:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 .tickerInputRow {
@@ -2454,23 +2453,25 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 
 .macroBullets li { margin: 6px 0; }
 
+/* "+N more" button matches tile size */
 .calTileMore {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  padding: 8px 10px;
-  border-radius: 14px;
-  border: 1px dashed rgba(15, 23, 42, 0.18);
-  background: rgba(255,255,255,0.55);
-  font-size: 12px;
-  font-weight: 800;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px dashed rgba(15, 23, 42, 0.20);
+  background: rgba(248,250,252,0.9);
+  font-size: 11px;
+  font-weight: 700;
   color: rgba(11,11,15,0.55);
   cursor: pointer;
   appearance: none;
+  transition: background 140ms ease;
 }
 
-.calTileMore:hover { background: var(--hover); }
+.calTileMore:hover { background: rgba(241,245,249,1); }
 .calTileMore:focus { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* Modal */

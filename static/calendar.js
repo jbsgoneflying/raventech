@@ -285,9 +285,9 @@ const state = {
   rankCache: {},
 };
 
-function _allocMonthCaps({ bmoN, amcN, unkN }, totalCap = 4) {
-  // Month view goal: keep each day visually uniform for scan speed.
-  // With a 2-column tile grid, totalCap=4 ≈ 2 rows max across all timing groups.
+function _allocMonthCaps({ bmoN, amcN, unkN }, totalCap = 8) {
+  // Month view goal: show as many logos as space allows.
+  // With 36px logo tiles, totalCap=8 fits comfortably in each day cell.
   const cap = Math.max(0, Number(totalCap) || 0);
   const groups = [
     { k: "BMO", n: Math.max(0, Number(bmoN) || 0) },
@@ -560,9 +560,10 @@ function render(payload) {
     const amc = Array.isArray(earnings?.AMC) ? earnings.AMC : [];
     const unk = Array.isArray(earnings?.UNK) ? earnings.UNK : [];
 
+    // With smaller 36px logo tiles, we can show more per day
     const caps = (view === "month")
-      ? _allocMonthCaps({ bmoN: bmo.length, amcN: amc.length, unkN: unk.length }, 4)
-      : { BMO: 14, AMC: 14, UNK: 14 };
+      ? _allocMonthCaps({ bmoN: bmo.length, amcN: amc.length, unkN: unk.length }, 8)
+      : { BMO: 20, AMC: 20, UNK: 20 };
 
     const evShown = (view === "month" && evs.length > 2) ? evs.slice(0, 2) : evs;
     const evMore = (view === "month" && evs.length > 2) ? (evs.length - 2) : 0;
@@ -580,6 +581,9 @@ function render(payload) {
         </div>`
       : "";
 
+    // Helper to get a color index for ticker (for fallback initials)
+    const getColorIndex = (tk) => ((tk.charCodeAt(0) || 0) % 5) + 1;
+    
     const grp = (label, key, rows, cls, cap0) => {
       if (!rows.length) return "";
       const max = Math.max(0, Number(cap0) || 0);
@@ -592,12 +596,10 @@ function render(payload) {
             ${shown.map((r) => {
               const tk = String(r?.ticker || "").toUpperCase();
               const src = logoUrlForTicker(tk);
-              const img = src
-                ? `<img class="calTileLogo" src="${escapeHtml(src)}" alt="${escapeHtml(tk)} logo" loading="lazy" decoding="async" />`
-                : "";
-              return `<button class="calTile" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(date)}" title="${escapeHtml(tk)}" aria-label="${escapeHtml(tk)}">
-                ${img}
-                <div class="calTileTicker">${escapeHtml(tk)}</div>
+              const colorIdx = getColorIndex(tk);
+              // Logo-only tile with tooltip via data-ticker attribute
+              return `<button class="calTile" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(date)}" data-color="${colorIdx}" aria-label="${escapeHtml(tk)}">
+                <img class="calTileLogo" src="${escapeHtml(src || '')}" alt="" loading="lazy" decoding="async" data-ticker="${escapeHtml(tk)}" />
               </button>`;
             }).join("")}
             ${rest > 0 ? `<button class="calTileMore" type="button" data-date="${escapeHtml(date)}" data-group="${escapeHtml(key)}" title="Show all tickers">+${rest}</button>` : ""}
@@ -625,12 +627,22 @@ function render(payload) {
 
   grid.innerHTML = cells.join("");
 
-  // Hide broken logos (missing/404) cleanly.
+  // Handle broken logos (missing/404) - show ticker initial fallback
   grid.querySelectorAll(".calTileLogo").forEach((img) => {
     img.addEventListener("error", () => {
-      img.classList.add("hidden");
       const btn = img.closest && img.closest(".calTile");
-      if (btn) btn.classList.add("calTile--noLogo");
+      const ticker = img.getAttribute("data-ticker") || btn?.getAttribute("data-ticker") || "?";
+      const colorIdx = btn?.getAttribute("data-color") || "1";
+      const initial = ticker.charAt(0).toUpperCase();
+      // Replace logo with colored initial
+      if (btn) {
+        img.remove();
+        const fallback = document.createElement("div");
+        fallback.className = "calTileInitial";
+        fallback.setAttribute("data-color", colorIdx);
+        fallback.textContent = initial;
+        btn.appendChild(fallback);
+      }
     }, { once: true });
   });
 

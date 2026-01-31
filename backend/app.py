@@ -1076,6 +1076,7 @@ def calendar(
             benzinga_client=_get_benzinga_client_optional(),
             fmp_client=fmp,
             max_tickers=int(maxTickers),
+            redis_store=get_store_optional(),
         )
         if cache_ttl_s > 0:
             with _calendar_cache_lock:
