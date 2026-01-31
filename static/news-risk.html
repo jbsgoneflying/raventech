@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · News Risk · Weekly Event Calendar</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — News Risk engine for weekly macro events, analyst ratings, and market-moving headlines with historical SPX impact data." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      /* News Risk specific styles */
+      .weekNav {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
+      .weekNavBtn {
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease;
+      }
+
+      .weekNavBtn:hover {
+        background: rgba(255,255,255,0.90);
+        border-color: rgba(15, 23, 42, 0.18);
+      }
+
+      .weekNavBtn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .weekLabel {
+        font-size: 15px;
+        font-weight: 700;
+        min-width: 200px;
+        text-align: center;
+      }
+
+      .weekGrid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      @media (max-width: 1100px) {
+        .weekGrid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      @media (max-width: 768px) {
+        .weekGrid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .dayColumn {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        padding: 12px;
+        min-height: 200px;
+      }
+
+      .dayHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .dayName {
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: 0.02px;
+      }
+
+      .dayDate {
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .dayRiskBadge {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+
+      .dayRiskBadge.high {
+        background: rgba(255, 59, 48, 0.14);
+        border: 1px solid rgba(255, 59, 48, 0.30);
+        color: rgba(86, 17, 12, 0.96);
+      }
+
+      .dayRiskBadge.medium {
+        background: rgba(255, 159, 10, 0.14);
+        border: 1px solid rgba(255, 159, 10, 0.30);
+        color: rgba(160, 90, 0, 0.96);
+      }
+
+      .dayRiskBadge.low {
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .dayEvents {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .eventCard {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+        border-left: 3px solid var(--border);
+      }
+
+      .eventCard:hover {
+        background: rgba(255,255,255,0.92);
+        border-color: rgba(15, 23, 42, 0.18);
+        transform: translateY(-1px);
+      }
+
+      /* Event type colors */
+      .eventCard.type-fed {
+        border-left-color: #9b59b6;
+      }
+
+      .eventCard.type-treasury {
+        border-left-color: #3498db;
+      }
+
+      .eventCard.type-econ {
+        border-left-color: #e74c3c;
+      }
+
+      .eventCard.type-rating {
+        border-left-color: #1abc9c;
+      }
+
+      .eventCard.type-news {
+        border-left-color: #95a5a6;
+      }
+
+      .eventCardHeader {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .eventName {
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.3;
+        flex: 1;
+      }
+
+      .eventTime {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .eventMeta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+      }
+
+      .eventTypeBadge {
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        background: rgba(11, 11, 15, 0.06);
+        color: var(--muted);
+      }
+
+      .eventTypeBadge.fed { background: rgba(155, 89, 182, 0.12); color: #7d3c98; }
+      .eventTypeBadge.treasury { background: rgba(52, 152, 219, 0.12); color: #2574a9; }
+      .eventTypeBadge.econ { background: rgba(231, 76, 60, 0.12); color: #c0392b; }
+      .eventTypeBadge.rating { background: rgba(26, 188, 156, 0.12); color: #16a085; }
+      .eventTypeBadge.news { background: rgba(149, 165, 166, 0.15); color: #7f8c8d; }
+
+      .eventImpact {
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 9px;
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .eventImpact.volatile {
+        background: rgba(255, 159, 10, 0.15);
+        color: #d35400;
+      }
+
+      .eventImpact.up {
+        background: rgba(52, 199, 89, 0.15);
+        color: #27ae60;
+      }
+
+      .eventImpact.down {
+        background: rgba(255, 59, 48, 0.15);
+        color: #c0392b;
+      }
+
+      .importanceStars {
+        font-size: 10px;
+        letter-spacing: -1px;
+        color: #f1c40f;
+      }
+
+      .emptyDay {
+        text-align: center;
+        padding: 20px 10px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      /* Event popup/modal */
+      .eventPopup {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 90%;
+        max-width: 480px;
+        max-height: 80vh;
+        overflow-y: auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        z-index: 1000;
+        padding: 20px;
+      }
+
+      .eventPopupBackdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 999;
+      }
+
+      .eventPopupHeader {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eventPopupTitle {
+        font-size: 16px;
+        font-weight: 800;
+        line-height: 1.3;
+      }
+
+      .eventPopupClose {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+        font-size: 16px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .eventPopupClose:hover {
+        background: rgba(255,255,255,0.90);
+      }
+
+      .eventPopupSection {
+        margin-bottom: 16px;
+      }
+
+      .eventPopupSection:last-child {
+        margin-bottom: 0;
+      }
+
+      .eventPopupSectionTitle {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+      }
+
+      .eventPopupMeta {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .eventPopupMetaItem {
+        font-size: 12px;
+      }
+
+      .eventPopupMetaItem .k {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .eventPopupMetaItem .v {
+        font-weight: 700;
+        margin-left: 4px;
+      }
+
+      .eventPopupImpact {
+        padding: 12px;
+        border-radius: 8px;
+        background: rgba(11, 11, 15, 0.03);
+        border: 1px solid var(--line);
+      }
+
+      .eventPopupImpactValue {
+        font-size: 20px;
+        font-weight: 800;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .eventPopupImpactLabel {
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 600;
+        margin-top: 2px;
+      }
+
+      .eventPopupPlaybook {
+        padding: 12px;
+        border-radius: 8px;
+        background: rgba(52, 152, 219, 0.06);
+        border: 1px solid rgba(52, 152, 219, 0.15);
+      }
+
+      .eventPopupPlaybook ul {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .eventPopupPlaybook li {
+        margin-bottom: 4px;
+      }
+
+      .eventPopupRating {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .eventPopupRatingItem {
+        padding: 8px;
+        border-radius: 6px;
+        background: rgba(11, 11, 15, 0.03);
+        text-align: center;
+      }
+
+      .eventPopupRatingItem .label {
+        font-size: 10px;
+        color: var(--muted);
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .eventPopupRatingItem .value {
+        font-size: 13px;
+        font-weight: 700;
+        margin-top: 2px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">News Risk · Weekly macro events, ratings, and headlines with SPX impact</div>
+          </div>
+        </div>
+        <div class="tbInputs topNav">
+          <a class="primaryButton navBtn" href="/breach" style="text-decoration:none;" data-tooltip="Single-ticker earnings hold risk analysis with Monte Carlo simulation">Engine 1</a>
+          <a class="primaryButton navBtn" id="engine2Link" href="/spx" style="text-decoration:none;" data-tooltip="SPX/SPY 0DTE iron condor scanner with dealer gamma overlay">Engine 2</a>
+          <a class="primaryButton navBtn" href="/red-dog" style="text-decoration:none;" data-tooltip="Red Dog Reversal mean reversion scanner (failed breakout/breakdown)">Engine 3</a>
+          <a class="primaryButton navBtn" href="/ichimoku" style="text-decoration:none;" data-tooltip="Ichimoku Cloud continuation scanner (Kijun pullback + Tenkan reclaim)">Engine 4</a>
+          <a class="primaryButton navBtn" href="/compare" style="text-decoration:none;" data-tooltip="Compare multiple tickers side-by-side for earnings hold risk">Compare</a>
+          <a class="primaryButton navBtn" href="/news-risk" style="text-decoration:none; background: rgba(52, 199, 89, 0.12); border-color: rgba(52, 199, 89, 0.25);" data-tooltip="Weekly macro events, analyst ratings, and headlines with historical SPX impact">News Risk</a>
+        </div>
+      </header>
+
+      <!-- Week Navigation -->
+      <section class="surface">
+        <div class="weekNav">
+          <button class="weekNavBtn" id="prevWeekBtn" type="button">&larr; Previous Week</button>
+          <div class="weekLabel" id="weekLabel">Loading...</div>
+          <button class="weekNavBtn" id="nextWeekBtn" type="button">Next Week &rarr;</button>
+        </div>
+        <div class="sectionHeader">
+          <h2 class="sectionTitle">
+            Weekly Event Risk Calendar
+            <span class="tipWrap">
+              <button class="tipBtn" type="button" aria-label="Event risk help" aria-expanded="false">i</button>
+              <div class="tipPanel" role="tooltip">
+                <div class="tipTitle">Weekly Event Risk</div>
+                <div class="tipBody">
+                  <p>Plan your week by reviewing upcoming macro events, analyst ratings, and market-moving headlines.</p>
+                  <ul>
+                    <li><b>Macro Events</b>: CPI, NFP, FOMC, Treasury auctions, etc.</li>
+                    <li><b>Analyst Ratings</b>: Upgrades/downgrades for SP500 + Nasdaq100</li>
+                    <li><b>News Headlines</b>: WIIM (Why It's Important Markets) stories</li>
+                  </ul>
+                  <p><b>Risk Levels</b>: HIGH (red) = major catalyst day, MEDIUM (amber), LOW (green)</p>
+                  <p><b>SPX Impact</b>: Historical median absolute move on similar event days</p>
+                </div>
+              </div>
+            </span>
+          </h2>
+          <div class="sectionMeta muted" id="weekMeta">—</div>
+        </div>
+      </section>
+
+      <!-- Status -->
+      <section class="surface" id="statusSection">
+        <div id="status" class="status">Loading event data...</div>
+      </section>
+
+      <!-- Week Grid -->
+      <section class="results" id="results">
+        <div class="weekGrid" id="weekGrid">
+          <!-- Days will be rendered here -->
+        </div>
+      </section>
+
+      <!-- Event Popup (hidden by default) -->
+      <div class="eventPopupBackdrop hidden" id="popupBackdrop"></div>
+      <div class="eventPopup hidden" id="eventPopup">
+        <div class="eventPopupHeader">
+          <div class="eventPopupTitle" id="popupTitle">Event Name</div>
+          <button class="eventPopupClose" id="popupClose" type="button">&times;</button>
+        </div>
+        <div id="popupContent">
+          <!-- Dynamic content -->
+        </div>
+      </div>
+    </main>
+
+    <script src="/static/ui_kit.js?v=3"></script>
+    <script src="/static/news-risk.js?v=1"></script>
+  </body>
+</html>

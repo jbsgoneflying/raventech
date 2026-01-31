@@ -533,6 +533,15 @@ def ichimoku_page():
     return FileResponse(str(ichimoku_path))
 
 
+@app.get("/news-risk")
+def news_risk_page():
+    """News Risk Engine: Weekly event risk calendar page."""
+    news_risk_path = STATIC_DIR / "news-risk.html"
+    if not news_risk_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/news-risk.html")
+    return FileResponse(str(news_risk_path))
+
+
 @app.get("/api/spx-ic")
 def spx_ic(
     underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),
@@ -1438,6 +1447,55 @@ def macro_event_stats(
         raise
     except Exception as e:
         LOG.exception("Unhandled failure (macro-event-stats)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ---------------------------------------------------------------------------
+# News Risk Engine
+# ---------------------------------------------------------------------------
+
+_news_risk_cache: TTLCache = TTLCache(maxsize=10, ttl=30 * 60)  # 30 min TTL
+_news_risk_cache_lock = threading.Lock()
+
+
+@app.get("/api/news-risk")
+def news_risk(
+    week_offset: int = Query(0, ge=-12, le=12, description="Week offset: 0=current, 1=next, -1=last"),
+):
+    """
+    News Risk Engine: Weekly view of macro events, analyst ratings, and news headlines
+    with historical SPX impact data for event risk planning.
+    """
+    from backend.news_risk import build_news_risk_payload
+    
+    try:
+        cache_key = ("news_risk", int(week_offset))
+        with _news_risk_cache_lock:
+            cached = _news_risk_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        bz = _get_benzinga_client_optional()
+        if bz is None:
+            raise HTTPException(status_code=503, detail="Benzinga unavailable or disabled.")
+        
+        orats = _get_client_optional()
+        if orats is None:
+            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
+
+        payload = build_news_risk_payload(
+            bz=bz,
+            orats=orats,
+            week_offset=int(week_offset),
+        )
+        
+        with _news_risk_cache_lock:
+            _news_risk_cache[cache_key] = payload
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (news-risk)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
