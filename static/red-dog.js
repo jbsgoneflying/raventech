@@ -126,18 +126,29 @@ async function fetchScan(direction, minScore) {
 // Render Functions
 // -----------------------------------------------------------------------------
 
+// Safe text setter - prevents "Cannot set properties of null" errors
+function setText(id, text) {
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function setHtml(id, html) {
+  const el = $(id);
+  if (el) el.innerHTML = html;
+}
+
 function renderStats(payload) {
   const scanned = payload.scannedCount ?? 0;
   const setups = payload.setupsFound ?? 0;
   const aplus = (payload.aPlus || []).length;
   const duration = payload.meta?.scanDurationMs ?? 0;
   
-  $("statScanned").textContent = fmt0(scanned);
-  $("statSetups").textContent = fmt0(setups);
-  $("statAPlus").textContent = fmt0(aplus);
-  $("statDuration").textContent = duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—";
+  setText("statScanned", fmt0(scanned));
+  setText("statSetups", fmt0(setups));
+  setText("statAPlus", fmt0(aplus));
+  setText("statDuration", duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—");
   
-  $("statsMeta").textContent = `As of ${payload.asOfDate || "—"}`;
+  setText("statsMeta", `As of ${payload.asOfDate || "—"}`);
 }
 
 function renderGammaContext(payload) {
@@ -155,43 +166,41 @@ function renderGammaContext(payload) {
   } else if (dataSource === "live") {
     sourceLabel = " · Live";
   }
-  $("gammaMeta").textContent = available ? `${expiry}${spot}${sourceLabel}` : "Unavailable";
+  setText("gammaMeta", available ? `${expiry}${spot}${sourceLabel}` : "Unavailable");
   
   // Gamma Sign
   const sign = gamma.netGammaSign || "unknown";
-  const signEl = $("gammaSignValue");
   if (sign === "positive") {
-    signEl.innerHTML = `<span class="gammaPositive">POSITIVE ✓</span>`;
-    $("gammaSignNote").textContent = "Dealers are long gamma — they buy dips, sell rips.";
+    setHtml("gammaSignValue", `<span class="gammaPositive">POSITIVE ✓</span>`);
+    setText("gammaSignNote", "Dealers are long gamma — they buy dips, sell rips.");
   } else if (sign === "negative") {
-    signEl.innerHTML = `<span class="gammaNegative">NEGATIVE ⚠</span>`;
-    $("gammaSignNote").textContent = "Dealers are short gamma — they sell dips, buy rips.";
+    setHtml("gammaSignValue", `<span class="gammaNegative">NEGATIVE ⚠</span>`);
+    setText("gammaSignNote", "Dealers are short gamma — they sell dips, buy rips.");
   } else {
-    signEl.textContent = "—";
-    $("gammaSignNote").textContent = "Unable to determine dealer positioning.";
+    setText("gammaSignValue", "—");
+    setText("gammaSignNote", "Unable to determine dealer positioning.");
   }
   
   // Environment
   const env = gamma.environment || "unknown";
-  const envEl = $("gammaEnvValue");
   if (env === "supportive") {
-    envEl.innerHTML = `<span class="gammaEnvSupportive">Supportive ✓</span>`;
-    $("gammaEnvNote").textContent = "Mean reversion patterns have dealer flow as a tailwind.";
+    setHtml("gammaEnvValue", `<span class="gammaEnvSupportive">Supportive ✓</span>`);
+    setText("gammaEnvNote", "Mean reversion patterns have dealer flow as a tailwind.");
   } else if (env === "challenging") {
-    envEl.innerHTML = `<span class="gammaEnvChallenging">Challenging ⚠</span>`;
-    $("gammaEnvNote").textContent = "Momentum can accelerate — be more selective.";
+    setHtml("gammaEnvValue", `<span class="gammaEnvChallenging">Challenging ⚠</span>`);
+    setText("gammaEnvNote", "Momentum can accelerate — be more selective.");
   } else {
-    envEl.innerHTML = `<span class="gammaEnvUnknown">Unknown</span>`;
-    $("gammaEnvNote").textContent = "Gamma context unavailable.";
+    setHtml("gammaEnvValue", `<span class="gammaEnvUnknown">Unknown</span>`);
+    setText("gammaEnvNote", "Gamma context unavailable.");
   }
   
   // Recommendation
   const rec = gamma.recommendation || "Proceed based on pattern quality alone.";
-  $("gammaRecValue").textContent = rec;
+  setText("gammaRecValue", rec);
   
   // Note with explanation
   const explanation = gamma.explanation || "";
-  $("gammaRecNote").textContent = explanation ? `Why: ${explanation.slice(0, 200)}${explanation.length > 200 ? '...' : ''}` : "";
+  setText("gammaRecNote", explanation ? `Why: ${explanation.slice(0, 200)}${explanation.length > 200 ? '...' : ''}` : "");
 }
 
 function renderTrendContext(payload) {
@@ -209,46 +218,44 @@ function renderTrendContext(payload) {
   } else {
     sourceLabel = dataDate ? ` · ${dataDate}` : "";
   }
-  $("trendMeta").textContent = available ? `${price}${ema}${sourceLabel}` : "Unavailable";
+  setText("trendMeta", available ? `${price}${ema}${sourceLabel}` : "Unavailable");
   
   // Trend Status (above/below EMA)
   const aboveEma = trend.aboveEma;
   const distPct = trend.distancePct || 0;
-  const statusEl = $("trendStatusValue");
   
   if (aboveEma === true) {
-    statusEl.innerHTML = `<span class="trendAbove">ABOVE +${Math.abs(distPct).toFixed(1)}%</span>`;
-    $("trendStatusNote").textContent = "SPX is in an uptrend (above 21 EMA).";
+    setHtml("trendStatusValue", `<span class="trendAbove">ABOVE +${Math.abs(distPct).toFixed(1)}%</span>`);
+    setText("trendStatusNote", "SPX is in an uptrend (above 21 EMA).");
   } else if (aboveEma === false) {
-    statusEl.innerHTML = `<span class="trendBelow">BELOW −${Math.abs(distPct).toFixed(1)}%</span>`;
-    $("trendStatusNote").textContent = "SPX is in a downtrend (below 21 EMA).";
+    setHtml("trendStatusValue", `<span class="trendBelow">BELOW −${Math.abs(distPct).toFixed(1)}%</span>`);
+    setText("trendStatusNote", "SPX is in a downtrend (below 21 EMA).");
   } else {
-    statusEl.textContent = "—";
-    $("trendStatusNote").textContent = "Unable to determine trend status.";
+    setText("trendStatusValue", "—");
+    setText("trendStatusNote", "Unable to determine trend status.");
   }
   
   // Favored Direction
   const trendDir = trend.trendDirection || "unknown";
-  const favorEl = $("trendFavorValue");
   
   if (trendDir === "bullish") {
-    favorEl.innerHTML = `<span class="favorBullish">BULLISH ↑</span>`;
-    $("trendFavorNote").textContent = "Failed breakdowns (bullish setups) trade WITH the trend.";
+    setHtml("trendFavorValue", `<span class="favorBullish">BULLISH ↑</span>`);
+    setText("trendFavorNote", "Failed breakdowns (bullish setups) trade WITH the trend.");
   } else if (trendDir === "bearish") {
-    favorEl.innerHTML = `<span class="favorBearish">BEARISH ↓</span>`;
-    $("trendFavorNote").textContent = "Failed breakouts (bearish setups) trade WITH the trend.";
+    setHtml("trendFavorValue", `<span class="favorBearish">BEARISH ↓</span>`);
+    setText("trendFavorNote", "Failed breakouts (bearish setups) trade WITH the trend.");
   } else {
-    favorEl.innerHTML = `<span class="gammaEnvUnknown">Unknown</span>`;
-    $("trendFavorNote").textContent = "Trend direction unavailable.";
+    setHtml("trendFavorValue", `<span class="gammaEnvUnknown">Unknown</span>`);
+    setText("trendFavorNote", "Trend direction unavailable.");
   }
   
   // Trend Recommendation
   const rec = trend.recommendation || "Trend filter unavailable. Use pattern quality for decisions.";
-  $("trendRecValue").textContent = rec;
+  setText("trendRecValue", rec);
   
   // Note
   const explanation = trend.explanation || "";
-  $("trendRecNote").textContent = explanation ? explanation.slice(0, 250) + (explanation.length > 250 ? '...' : '') : "";
+  setText("trendRecNote", explanation ? explanation.slice(0, 250) + (explanation.length > 250 ? '...' : '') : "");
 }
 
 function getGradeClass(grade) {

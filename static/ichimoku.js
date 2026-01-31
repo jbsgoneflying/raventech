@@ -133,6 +133,17 @@ async function fetchScan(direction) {
 // Render Functions
 // -----------------------------------------------------------------------------
 
+// Safe text setter - prevents "Cannot set properties of null" errors
+function setText(id, text) {
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function setHtml(id, html) {
+  const el = $(id);
+  if (el) el.innerHTML = html;
+}
+
 function renderStats(payload) {
   const scanned = payload.scannedCount ?? 0;
   const actionableCount = payload.actionableCount ?? 0;
@@ -140,12 +151,12 @@ function renderStats(payload) {
   const rejectedCount = payload.rejectedCount ?? 0;
   const duration = payload.meta?.scanDurationMs ?? 0;
   
-  $("statScanned").textContent = fmt0(scanned);
-  $("statActionable").textContent = fmt0(actionableCount);
-  $("statStructure").textContent = fmt0(structureCount);
-  $("statRejected").textContent = fmt0(rejectedCount);
+  setText("statScanned", fmt0(scanned));
+  setText("statActionable", fmt0(actionableCount));
+  setText("statStructure", fmt0(structureCount));
+  setText("statRejected", fmt0(rejectedCount));
   
-  $("statsMeta").textContent = `A+ setups only | ${payload.asOfDate || "—"} | ${duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—"}`;
+  setText("statsMeta", `A+ setups only | ${payload.asOfDate || "—"} | ${duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—"}`);
 }
 
 function renderGammaContext(payload) {
@@ -156,56 +167,52 @@ function renderGammaContext(payload) {
   // SPX Gamma
   const spxAvailable = spx.available !== false && spx.netGammaSign;
   const spxSign = spx.netGammaSign || "unknown";
-  const spxSignEl = $("spxGammaSign");
   if (spxSign === "positive") {
-    spxSignEl.innerHTML = `<span class="gammaPositive">POSITIVE</span>`;
+    setHtml("spxGammaSign", `<span class="gammaPositive">POSITIVE</span>`);
   } else if (spxSign === "negative") {
-    spxSignEl.innerHTML = `<span class="gammaNegative">NEGATIVE</span>`;
+    setHtml("spxGammaSign", `<span class="gammaNegative">NEGATIVE</span>`);
   } else {
-    spxSignEl.innerHTML = `<span style="color: var(--muted);">Unavailable</span>`;
+    setHtml("spxGammaSign", `<span style="color: var(--muted);">Unavailable</span>`);
   }
   
   const spxEnv = spx.environment || "unknown";
-  const spxEnvEl = $("spxGammaEnv");
   if (spxEnv === "supportive") {
-    spxEnvEl.innerHTML = `<span class="gammaEnvSupportive">Supportive</span>`;
+    setHtml("spxGammaEnv", `<span class="gammaEnvSupportive">Supportive</span>`);
   } else if (spxEnv === "challenging") {
-    spxEnvEl.innerHTML = `<span class="gammaEnvChallenging">Challenging</span>`;
+    setHtml("spxGammaEnv", `<span class="gammaEnvChallenging">Challenging</span>`);
   } else {
-    spxEnvEl.innerHTML = `<span style="color: var(--muted);">—</span>`;
+    setHtml("spxGammaEnv", `<span style="color: var(--muted);">—</span>`);
   }
   
   // Show recommendation or unavailable message
   const spxNote = spx.recommendation || (spx.warnings ? spx.warnings[0] : "Gamma context unavailable.");
-  $("spxGammaNote").textContent = spxNote;
+  setText("spxGammaNote", spxNote);
   
   // NDX Gamma
   const ndxAvailable = ndx.available !== false && ndx.netGammaSign;
   const ndxSign = ndx.netGammaSign || "unknown";
-  const ndxSignEl = $("ndxGammaSign");
   if (ndxSign === "positive") {
-    ndxSignEl.innerHTML = `<span class="gammaPositive">POSITIVE</span>`;
+    setHtml("ndxGammaSign", `<span class="gammaPositive">POSITIVE</span>`);
   } else if (ndxSign === "negative") {
-    ndxSignEl.innerHTML = `<span class="gammaNegative">NEGATIVE</span>`;
+    setHtml("ndxGammaSign", `<span class="gammaNegative">NEGATIVE</span>`);
   } else {
-    ndxSignEl.innerHTML = `<span style="color: var(--muted);">Unavailable</span>`;
+    setHtml("ndxGammaSign", `<span style="color: var(--muted);">Unavailable</span>`);
   }
   
   const ndxEnv = ndx.environment || "unknown";
-  const ndxEnvEl = $("ndxGammaEnv");
   if (ndxEnv === "supportive") {
-    ndxEnvEl.innerHTML = `<span class="gammaEnvSupportive">Supportive</span>`;
+    setHtml("ndxGammaEnv", `<span class="gammaEnvSupportive">Supportive</span>`);
   } else if (ndxEnv === "challenging") {
-    ndxEnvEl.innerHTML = `<span class="gammaEnvChallenging">Challenging</span>`;
+    setHtml("ndxGammaEnv", `<span class="gammaEnvChallenging">Challenging</span>`);
   } else {
-    ndxEnvEl.innerHTML = `<span style="color: var(--muted);">—</span>`;
+    setHtml("ndxGammaEnv", `<span style="color: var(--muted);">—</span>`);
   }
   
   // Show recommendation or unavailable message
   const ndxNote = ndx.recommendation || (ndx.warnings ? ndx.warnings[0] : "Gamma context unavailable.");
-  $("ndxGammaNote").textContent = ndxNote;
+  setText("ndxGammaNote", ndxNote);
   
-  $("gammaMeta").textContent = spxAvailable || ndxAvailable ? "Dealer positioning by index" : "Gamma data unavailable for today";
+  setText("gammaMeta", spxAvailable || ndxAvailable ? "Dealer positioning by index" : "Gamma data unavailable for today");
 }
 
 function renderSignalCard(signal, isStructure = false) {

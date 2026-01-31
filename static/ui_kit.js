@@ -387,6 +387,11 @@ window.RavenLoading = (function() {
   let progressFill = null;
   let statusEl = null;
   let isVisible = false;
+  
+  // Auto-progress state
+  let autoProgressInterval = null;
+  let currentProgress = 0;
+  let targetProgress = 0;
 
   function create() {
     if (overlay) return overlay;
@@ -410,12 +415,57 @@ window.RavenLoading = (function() {
 
     return overlay;
   }
+  
+  /**
+   * Stop auto-progress animation
+   */
+  function stopAutoProgress() {
+    if (autoProgressInterval) {
+      clearInterval(autoProgressInterval);
+      autoProgressInterval = null;
+    }
+  }
+  
+  /**
+   * Start auto-progress animation
+   * Simulates progress that slows down as it approaches ceiling
+   */
+  function startAutoProgress() {
+    stopAutoProgress();
+    currentProgress = 0;
+    targetProgress = 85; // Will approach but never reach 85% until complete
+    
+    autoProgressInterval = setInterval(() => {
+      if (!isVisible) {
+        stopAutoProgress();
+        return;
+      }
+      
+      // Calculate increment - slows as we approach target
+      const remaining = targetProgress - currentProgress;
+      const increment = Math.max(0.3, remaining * 0.08); // Ease out effect
+      
+      currentProgress = Math.min(targetProgress, currentProgress + increment);
+      
+      if (progressFill) {
+        progressFill.style.width = `${currentProgress}%`;
+      }
+      
+      overlay.setAttribute("aria-valuenow", String(Math.round(currentProgress)));
+      
+      // Stop when very close to target
+      if (remaining < 0.5) {
+        stopAutoProgress();
+      }
+    }, 100); // Update every 100ms for smooth animation
+  }
 
   /**
    * Show the loading overlay
    * @param {Object} options
    * @param {string} options.status - Initial status message
    * @param {boolean} options.clearResults - Whether to clear #results content (default: true)
+   * @param {boolean} options.autoProgress - Enable auto-progress animation (default: true)
    */
   function show(options = {}) {
     create();
@@ -432,12 +482,13 @@ window.RavenLoading = (function() {
     }
 
     // Reset progress
+    currentProgress = 0;
     if (progressFill) {
       progressFill.style.transition = "none";
       progressFill.style.width = "0%";
       // Force reflow then restore transition
       void progressFill.offsetWidth;
-      progressFill.style.transition = "";
+      progressFill.style.transition = "width 0.1s ease-out";
     }
 
     // Set initial status
@@ -451,6 +502,11 @@ window.RavenLoading = (function() {
     // Show overlay
     isVisible = true;
     overlay.classList.add("isVisible");
+    
+    // Start auto-progress (default: true)
+    if (options.autoProgress !== false) {
+      startAutoProgress();
+    }
   }
 
   /**
@@ -462,6 +518,12 @@ window.RavenLoading = (function() {
     if (!overlay) return;
 
     const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+    
+    // Update target for auto-progress or set directly
+    if (pct > currentProgress) {
+      targetProgress = Math.max(targetProgress, pct);
+      currentProgress = pct;
+    }
 
     if (progressFill) {
       progressFill.style.width = `${pct}%`;
@@ -479,15 +541,21 @@ window.RavenLoading = (function() {
    */
   function hide() {
     if (!overlay || !isVisible) return;
+    
+    // Stop auto-progress
+    stopAutoProgress();
 
     // Set to 100% first for completion feedback
-    setProgress(100);
+    currentProgress = 100;
+    if (progressFill) {
+      progressFill.style.width = "100%";
+    }
 
     // Delay hide slightly so user sees completion
     setTimeout(() => {
       isVisible = false;
       overlay.classList.remove("isVisible");
-    }, 180);
+    }, 200);
   }
 
   /**
