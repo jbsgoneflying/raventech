@@ -14,6 +14,14 @@
     weekOffset: 0,
     data: null,
     loading: false,
+    popupOpen: false,
+  };
+
+  // Drag state for popup
+  const dragState = {
+    isDragging: false,
+    offsetX: 0,
+    offsetY: 0,
   };
 
   // -----------------------------------------------------------------------------
@@ -158,7 +166,7 @@
         const eventId = card.dataset.eventId;
         const event = findEventById(data, eventId);
         if (event) {
-          showEventPopup(event);
+          showEventPopup(event, e);
         }
       });
     });
@@ -174,15 +182,73 @@
   }
 
   // -----------------------------------------------------------------------------
+  // Popup Drag Functionality
+  // -----------------------------------------------------------------------------
+
+  function startDrag(e) {
+    const popup = $("eventPopup");
+    if (!popup) return;
+    if (e.target.closest(".eventPopupClose")) return;
+
+    dragState.isDragging = true;
+    popup.classList.add("isDragging");
+
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    const rect = popup.getBoundingClientRect();
+    dragState.offsetX = clientX - rect.left;
+    dragState.offsetY = clientY - rect.top;
+
+    e.preventDefault();
+  }
+
+  function doDrag(e) {
+    if (!dragState.isDragging) return;
+    
+    const popup = $("eventPopup");
+    if (!popup) return;
+
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    let newX = clientX - dragState.offsetX;
+    let newY = clientY - dragState.offsetY;
+
+    // Keep within viewport
+    const maxX = window.innerWidth - popup.offsetWidth;
+    const maxY = window.innerHeight - popup.offsetHeight;
+    newX = Math.max(0, Math.min(newX, maxX));
+    newY = Math.max(0, Math.min(newY, maxY));
+
+    popup.style.left = newX + "px";
+    popup.style.top = newY + "px";
+  }
+
+  function endDrag() {
+    if (!dragState.isDragging) return;
+    
+    const popup = $("eventPopup");
+    if (popup) popup.classList.remove("isDragging");
+    
+    dragState.isDragging = false;
+  }
+
+  // Global drag listeners
+  document.addEventListener("mousemove", doDrag);
+  document.addEventListener("mouseup", endDrag);
+  document.addEventListener("touchmove", doDrag, { passive: false });
+  document.addEventListener("touchend", endDrag);
+
+  // -----------------------------------------------------------------------------
   // Popup
   // -----------------------------------------------------------------------------
 
-  function showEventPopup(event) {
+  function showEventPopup(event, clickEvent) {
     const popup = $("eventPopup");
-    const backdrop = $("popupBackdrop");
     const content = $("popupContent");
     
-    if (!popup || !backdrop || !content) return;
+    if (!popup || !content) return;
     
     setText("popupTitle", event.name || "Event Details");
     
@@ -313,16 +379,58 @@
     
     content.innerHTML = html;
     
+    // Position popup near click or center of screen
+    if (clickEvent) {
+      const clickX = clickEvent.clientX || window.innerWidth / 2;
+      const clickY = clickEvent.clientY || window.innerHeight / 2;
+      
+      // Position to the right of click, or left if not enough room
+      let posX = clickX + 20;
+      let posY = clickY - 100;
+
+      // Ensure it stays within viewport
+      const popupWidth = 380;
+      const popupHeight = 400; // Estimate
+      if (posX + popupWidth > window.innerWidth - 20) {
+        posX = clickX - popupWidth - 20;
+      }
+      if (posX < 20) posX = 20;
+      if (posY < 20) posY = 20;
+      if (posY + popupHeight > window.innerHeight - 20) {
+        posY = window.innerHeight - popupHeight - 20;
+      }
+
+      popup.style.left = posX + "px";
+      popup.style.top = posY + "px";
+    } else {
+      // Center on screen
+      popup.style.left = "50%";
+      popup.style.top = "50%";
+      popup.style.transform = "translate(-50%, -50%)";
+    }
+    
     popup.classList.remove("hidden");
-    backdrop.classList.remove("hidden");
+    state.popupOpen = true;
+    
+    // Add drag handler to header
+    const header = $("popupHeader");
+    if (header) {
+      header.removeEventListener("mousedown", startDrag);
+      header.removeEventListener("touchstart", startDrag);
+      header.addEventListener("mousedown", startDrag);
+      header.addEventListener("touchstart", startDrag, { passive: false });
+    }
   }
 
   function hideEventPopup() {
     const popup = $("eventPopup");
-    const backdrop = $("popupBackdrop");
     
-    if (popup) popup.classList.add("hidden");
-    if (backdrop) backdrop.classList.add("hidden");
+    if (popup) {
+      popup.classList.add("hidden");
+      // Reset position for next open
+      popup.style.transform = "";
+    }
+    state.popupOpen = false;
   }
 
   // -----------------------------------------------------------------------------
@@ -427,19 +535,23 @@
     
     // Popup close
     const popupClose = $("popupClose");
-    const popupBackdrop = $("popupBackdrop");
     
     if (popupClose) {
       popupClose.addEventListener("click", hideEventPopup);
     }
     
-    if (popupBackdrop) {
-      popupBackdrop.addEventListener("click", hideEventPopup);
-    }
-    
     // Escape key closes popup
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && state.popupOpen) {
+        hideEventPopup();
+      }
+    });
+    
+    // Click outside closes popup
+    document.addEventListener("click", (e) => {
+      if (!state.popupOpen) return;
+      const popup = $("eventPopup");
+      if (popup && !popup.contains(e.target) && !e.target.closest(".eventCard")) {
         hideEventPopup();
       }
     });
