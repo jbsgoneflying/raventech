@@ -391,7 +391,14 @@ window.RavenLoading = (function() {
   // Auto-progress state
   let autoProgressInterval = null;
   let currentProgress = 0;
-  let targetProgress = 0;
+  let startTime = 0;
+  
+  // Expected load time in milliseconds (45 seconds)
+  const EXPECTED_LOAD_MS = 45000;
+  // Progress ceiling before completion (don't go past 92% until actually done)
+  const PROGRESS_CEILING = 92;
+  // Update interval in ms
+  const UPDATE_INTERVAL = 250;
 
   function create() {
     if (overlay) return overlay;
@@ -428,12 +435,12 @@ window.RavenLoading = (function() {
   
   /**
    * Start auto-progress animation
-   * Simulates progress that slows down as it approaches ceiling
+   * Linear progress over expected 45 seconds, capped at 92%
    */
   function startAutoProgress() {
     stopAutoProgress();
     currentProgress = 0;
-    targetProgress = 85; // Will approach but never reach 85% until complete
+    startTime = Date.now();
     
     autoProgressInterval = setInterval(() => {
       if (!isVisible) {
@@ -441,11 +448,12 @@ window.RavenLoading = (function() {
         return;
       }
       
-      // Calculate increment - slows as we approach target
-      const remaining = targetProgress - currentProgress;
-      const increment = Math.max(0.3, remaining * 0.08); // Ease out effect
+      // Calculate linear progress based on elapsed time
+      const elapsed = Date.now() - startTime;
+      const linearProgress = (elapsed / EXPECTED_LOAD_MS) * PROGRESS_CEILING;
       
-      currentProgress = Math.min(targetProgress, currentProgress + increment);
+      // Cap at ceiling - if load takes longer than expected, stay at 92%
+      currentProgress = Math.min(PROGRESS_CEILING, linearProgress);
       
       if (progressFill) {
         progressFill.style.width = `${currentProgress}%`;
@@ -453,11 +461,11 @@ window.RavenLoading = (function() {
       
       overlay.setAttribute("aria-valuenow", String(Math.round(currentProgress)));
       
-      // Stop when very close to target
-      if (remaining < 0.5) {
+      // Stop interval once we hit ceiling (will complete when hide() is called)
+      if (currentProgress >= PROGRESS_CEILING) {
         stopAutoProgress();
       }
-    }, 100); // Update every 100ms for smooth animation
+    }, UPDATE_INTERVAL);
   }
 
   /**
@@ -483,12 +491,13 @@ window.RavenLoading = (function() {
 
     // Reset progress
     currentProgress = 0;
+    startTime = Date.now();
     if (progressFill) {
       progressFill.style.transition = "none";
       progressFill.style.width = "0%";
       // Force reflow then restore transition
       void progressFill.offsetWidth;
-      progressFill.style.transition = "width 0.1s ease-out";
+      progressFill.style.transition = "width 0.25s linear";
     }
 
     // Set initial status
@@ -510,30 +519,17 @@ window.RavenLoading = (function() {
   }
 
   /**
-   * Update progress and optionally status message
-   * @param {number} percent - Progress percentage (0-100)
-   * @param {string} status - Optional status message
+   * Update status message (progress bar auto-animates based on time)
+   * @param {number} percent - Ignored (kept for API compatibility)
+   * @param {string} status - Status message to display
    */
   function setProgress(percent, status) {
     if (!overlay) return;
 
-    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
-    
-    // Update target for auto-progress or set directly
-    if (pct > currentProgress) {
-      targetProgress = Math.max(targetProgress, pct);
-      currentProgress = pct;
-    }
-
-    if (progressFill) {
-      progressFill.style.width = `${pct}%`;
-    }
-
+    // Only update status text - progress bar animates automatically
     if (status && statusEl) {
       statusEl.textContent = status;
     }
-
-    overlay.setAttribute("aria-valuenow", String(Math.round(pct)));
   }
 
   /**
