@@ -255,6 +255,36 @@ class ApiNinjasClient:
 
         return self.get("/earningscalendar", params)
 
+    def get_historical_timing(self, ticker: str) -> Optional[str]:
+        """
+        Get the most recent historical earnings_timing for a ticker.
+        
+        Since future earnings don't have timing info, we look at past earnings
+        to predict the timing (companies almost always stick to their BMO/AMC pattern).
+        
+        Args:
+            ticker: Stock symbol
+            
+        Returns:
+            'before_market', 'after_market', 'during_market', or None
+        """
+        try:
+            # Get last 3 earnings for this ticker
+            resp = self.get("/earningscalendar", {
+                "ticker": str(ticker).upper(),
+                "limit": 3,
+            })
+            
+            for row in (resp.rows or []):
+                timing = row.get("earnings_timing")
+                if timing and str(timing).strip().lower() not in ("null", "none", ""):
+                    return str(timing).strip().lower()
+            
+            return None
+        except Exception as e:
+            self._log.debug(f"Failed to get historical timing for {ticker}: {e}")
+            return None
+
     def fetch_all_upcoming_earnings(
         self,
         *,
@@ -264,10 +294,13 @@ class ApiNinjasClient:
         max_results: int = 1000,
     ) -> List[dict]:
         """
-        Fetch all upcoming earnings in date range.
+        Fetch all upcoming earnings in date range with historical timing lookup.
         
-        Strategy: Use /upcomingearnings for bulk fetching (Premium endpoint with date range),
-        which provides earnings_timing field.
+        Strategy: 
+        1. Use /upcomingearnings for bulk fetching upcoming dates
+        2. For each ticker, look up historical timing from /earningscalendar
+           (since future earnings have NULL timing, but past ones have real values)
+        3. Use historical timing as predictor (companies rarely change BMO/AMC pattern)
         
         Args:
             start_date: Start date YYYY-MM-DD
@@ -276,15 +309,17 @@ class ApiNinjasClient:
             max_results: Maximum total results to fetch
             
         Returns:
-            List of earnings dicts with earnings_timing field
+            List of earnings dicts with earnings_timing field populated from history
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
         all_rows: List[dict] = []
         offset = 0
-        page_size = 100  # upcomingearnings supports up to 100 per page
+        page_size = 100
 
+        # Step 1: Fetch upcoming earnings (timing will be NULL for future dates)
         while len(all_rows) < max_results:
             try:
-                # Use upcomingearnings endpoint (Premium) with date range
                 resp = self.upcoming_earnings(
                     start_date=start_date,
                     end_date=end_date,
@@ -295,20 +330,10 @@ class ApiNinjasClient:
                 batch = resp.rows or []
                 
                 if not batch:
-                    self._log.info(f"No more results at offset {offset}")
                     break
                     
                 all_rows.extend(batch)
                 
-                # Log sample row to debug fields (first page only)
-                if offset == 0 and batch:
-                    sample = batch[0]
-                    self._log.info(f"API Ninjas upcomingearnings sample fields: {list(sample.keys())}")
-                    # Check multiple possible timing field names
-                    timing_val = sample.get("earnings_timing") or sample.get("time") or sample.get("timing") or "NOT_PRESENT"
-                    self._log.info(f"API Ninjas upcomingearnings timing field value: {timing_val}")
-                
-                # If we got fewer than page_size, no more pages
                 if len(batch) < page_size:
                     break
                     
@@ -321,9 +346,57 @@ class ApiNinjasClient:
                 self._log.warning(f"Unexpected error fetching upcomingearnings: {e}")
                 break
 
-        self._log.info(
-            f"Fetched {len(all_rows)} earnings from {start_date} to {end_date} using upcomingearnings"
-        )
+        self._log.info(f"Fetched {len(all_rows)} upcoming earnings from {start_date} to {end_date}")
+        
+        if not all_rows:
+            return []
+        
+        # Step 2: Get unique tickers that need timing lookup
+        tickers_needing_timing = set()
+        for row in all_rows:
+            timing = row.get("earnings_timing")
+            if not timing or str(timing).lower() in ("null", "none", ""):
+                ticker = str(row.get("ticker") or "").upper()
+                if ticker:
+                    tickers_needing_timing.add(ticker)
+        
+        self._log.info(f"Looking up historical timing for {len(tickers_needing_timing)} tickers")
+        
+        # Step 3: Fetch historical timing in parallel (limit to 50 concurrent)
+        timing_cache: Dict[str, str] = {}
+        
+        if tickers_needing_timing:
+            with ThreadPoolExecutor(max_workers=15) as executor:
+                futures = {
+                    executor.submit(self.get_historical_timing, t): t 
+                    for t in list(tickers_needing_timing)[:200]  # Limit API calls
+                }
+                for future in as_completed(futures):
+                    ticker = futures[future]
+                    try:
+                        timing = future.result()
+                        if timing:
+                            timing_cache[ticker] = timing
+                    except Exception as e:
+                        self._log.debug(f"Historical timing lookup failed for {ticker}: {e}")
+        
+        self._log.info(f"Found historical timing for {len(timing_cache)}/{len(tickers_needing_timing)} tickers")
+        
+        # Log sample timings
+        if timing_cache:
+            samples = list(timing_cache.items())[:5]
+            self._log.info(f"Sample historical timings: {samples}")
+        
+        # Step 4: Enrich rows with historical timing
+        for row in all_rows:
+            current_timing = row.get("earnings_timing")
+            if not current_timing or str(current_timing).lower() in ("null", "none", ""):
+                ticker = str(row.get("ticker") or "").upper()
+                historical = timing_cache.get(ticker)
+                if historical:
+                    row["earnings_timing"] = historical
+                    row["timing_source"] = "historical"
+        
         return all_rows[:max_results]
 
     def get_market_cap(self, ticker: str) -> Optional[float]:

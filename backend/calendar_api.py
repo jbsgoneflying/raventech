@@ -285,6 +285,7 @@ def build_calendar_payload(
             
             dropped = 0
             ninja_timing_breakdown = {"BMO": 0, "AMC": 0, "UNK": 0}
+            historical_timing_used = 0
             
             for r in ninja_rows:
                 if not isinstance(r, dict):
@@ -305,6 +306,10 @@ def build_calendar_payload(
                 timing = _coerce_timing_ninja(r)
                 ninja_timing_breakdown[timing] = ninja_timing_breakdown.get(timing, 0) + 1
                 
+                # Track if this timing came from historical lookup
+                if r.get("timing_source") == "historical":
+                    historical_timing_used += 1
+                
                 key = (sym, d_str)
                 if key not in merged_earnings:
                     merged_earnings[key] = timing
@@ -313,6 +318,7 @@ def build_calendar_payload(
             debug_counts["apiNinjasRowsDroppedUniverse"] = dropped
             debug_counts["tickersFromApiNinjas"] = ninja_count
             debug_counts["apiNinjasTimingBreakdown"] = ninja_timing_breakdown
+            debug_counts["historicalTimingUsed"] = historical_timing_used
             debug_counts["earningsSource"] = "api_ninjas"
             LOG.info(f"Calendar: API Ninjas returned {ninja_count} earnings (timing: {ninja_timing_breakdown})")
             
