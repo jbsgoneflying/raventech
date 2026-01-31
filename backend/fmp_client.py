@@ -131,7 +131,16 @@ class FmpClient:
             # Process in batches of 100
             for i in range(0, len(symbols), 100):
                 batch = symbols[i:i+100]
+                self._log.info(f"Fetching market caps for batch {i//100 + 1}: {len(batch)} symbols")
                 resp = self.quote_batch(batch)
+                self._log.info(f"FMP quote response: {len(resp.rows)} rows returned")
+                
+                # Log sample row to debug structure
+                if resp.rows and i == 0:
+                    sample = resp.rows[0]
+                    self._log.info(f"FMP quote sample fields: {list(sample.keys())}")
+                    self._log.info(f"FMP quote sample marketCap: {sample.get('marketCap', 'NOT_PRESENT')}")
+                
                 for row in resp.rows:
                     sym = str(row.get("symbol") or "").upper()
                     mcap = row.get("marketCap")
@@ -140,8 +149,10 @@ class FmpClient:
                             result[sym] = float(mcap)
                         except (ValueError, TypeError):
                             pass
+            
+            self._log.info(f"Market caps loaded: {len(result)}/{len(symbols)} symbols")
         except Exception as e:
-            self._log.warning(f"Failed to fetch market caps: {e}")
+            self._log.warning(f"Failed to fetch market caps: {e}", exc_info=True)
         return result
 
 

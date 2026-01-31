@@ -567,16 +567,29 @@ def build_calendar_payload(
             sample_caps = {k: f"${v/1e9:.1f}B" for k, v in list(market_caps.items())[:5]}
             debug_counts["sampleMarketCaps"] = sample_caps
             
-            filtered_earnings = {}
-            for (sym, d0), timing in merged_earnings.items():
-                mcap = market_caps.get(sym, 0)
-                if mcap >= min_market_cap:
-                    filtered_earnings[(sym, d0)] = timing
-                else:
-                    mcap_filtered_count += 1
-            debug_counts["filteredByMarketCap"] = mcap_filtered_count
-            debug_counts["tickersAfterFilter"] = len(filtered_earnings)
-            LOG.info(f"Calendar: Market cap filter kept {len(filtered_earnings)}/{len(merged_earnings)} tickers (filtered out {mcap_filtered_count})")
+            # If we couldn't load any market caps, skip the filter
+            if len(market_caps) == 0:
+                LOG.warning(f"Calendar: No market caps loaded, skipping filter")
+                notes.append("Market cap filter skipped - no market cap data available")
+                debug_counts["marketCapFilterSkipped"] = True
+            else:
+                filtered_earnings = {}
+                for (sym, d0), timing in merged_earnings.items():
+                    mcap = market_caps.get(sym, 0)
+                    if mcap >= min_market_cap:
+                        filtered_earnings[(sym, d0)] = timing
+                    else:
+                        mcap_filtered_count += 1
+                debug_counts["filteredByMarketCap"] = mcap_filtered_count
+                debug_counts["tickersAfterFilter"] = len(filtered_earnings)
+                LOG.info(f"Calendar: Market cap filter kept {len(filtered_earnings)}/{len(merged_earnings)} tickers (filtered out {mcap_filtered_count})")
+                
+                # If filter resulted in 0 tickers but we had data, something is wrong - show all
+                if len(filtered_earnings) == 0 and len(merged_earnings) > 0:
+                    LOG.warning(f"Calendar: Market cap filter removed ALL tickers - showing unfiltered results")
+                    notes.append("Market cap filter returned 0 results - showing all earnings")
+                    filtered_earnings = merged_earnings
+                    debug_counts["marketCapFilterOverridden"] = True
         except Exception as e:
             LOG.warning(f"Calendar: market cap filter failed, showing all: {e}")
             notes.append(f"Market cap filter failed: {type(e).__name__}")
