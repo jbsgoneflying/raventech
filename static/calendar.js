@@ -276,7 +276,7 @@ const state = {
   view: "week",  // Week view only
   anchor: isoDate(new Date()),
   engine1Only: false,
-  minMarketCapB: 0,  // 0 = all, 100 = $100B+
+  minMarketCapB: 100,  // Default to $100B+ mega-cap names
   layers: { holiday: true, earlyClose: true, fed: true, econ: true, treasury: true, opex: true },
   lastPayload: null,
   rankCache: {},
