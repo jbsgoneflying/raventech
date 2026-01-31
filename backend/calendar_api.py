@@ -410,12 +410,69 @@ def build_calendar_payload(
         except Exception as e:
             LOG.warning(f"Calendar: failed to load ORATS snapshot: {e}")
 
-    # 2. Add FMP data (fills gaps, ORATS timing takes priority if conflict)
+    # 2. Add Benzinga earnings data (better forward-looking data than FMP)
+    benzinga_count = 0
+    if benzinga_client is not None:
+        try:
+            # Benzinga has good forward-looking earnings data
+            bz_resp = benzinga_client.calendar_earnings(
+                date_from=_fmt_date(start),
+                date_to=_fmt_date(end),
+                pagesize=1000,
+            )
+            bz_rows = bz_resp.rows or []
+            debug_counts["benzingaRowsFetched"] = len(bz_rows)
+            
+            for r in bz_rows:
+                if not isinstance(r, dict):
+                    continue
+                # Benzinga uses 'ticker' field
+                sym0 = str(r.get("ticker") or r.get("symbol") or "").strip().upper()
+                sym = _normalize_symbol_to_universe(sym0)
+                # Benzinga uses 'date' or 'date_confirmed'
+                d_str_raw = r.get("date") or r.get("date_confirmed") or ""
+                d = _parse_date(d_str_raw)
+                if not sym or d is None:
+                    continue
+                if universe and sym not in universe:
+                    continue
+                
+                d_str = _fmt_date(d)
+                if d_str not in day_keys:
+                    continue
+                
+                # Benzinga timing field
+                bz_time = str(r.get("time") or "").strip().lower()
+                if bz_time in ("amc", "after market close", "after close", "after"):
+                    bz_timing = "AMC"
+                elif bz_time in ("bmo", "before market open", "before open", "before"):
+                    bz_timing = "BMO"
+                else:
+                    bz_timing = "UNK"
+                
+                # If timing is UNK, check ORATS
+                if bz_timing == "UNK" and sym in orats_ticker_timing:
+                    bz_timing = orats_ticker_timing[sym]
+                
+                key = (sym, d_str)
+                if key not in merged_earnings:
+                    merged_earnings[key] = bz_timing
+                    benzinga_count += 1
+                elif bz_timing != "UNK" and merged_earnings[key] == "UNK":
+                    # Upgrade UNK to BMO/AMC if Benzinga has better timing
+                    merged_earnings[key] = bz_timing
+            
+            debug_counts["tickersFromBenzinga"] = benzinga_count
+        except Exception as e:
+            LOG.warning(f"Calendar: Benzinga earnings fetch failed: {e}")
+            notes.append(f"Benzinga earnings failed: {type(e).__name__}")
+
+    # 3. Add FMP data (fills gaps, ORATS timing takes priority if conflict)
     if fmp_client is not None:
         try:
             resp = fmp_client.earnings_calendar(date_from=_fmt_date(start), date_to=_fmt_date(end), limit=int(max_tickers))
             rows = resp.rows or []
-            debug_counts["earningsRowsFetched"] = int(len(rows))
+            debug_counts["fmpRowsFetched"] = int(len(rows))
             
             dropped = 0
             for r in rows:
@@ -446,9 +503,9 @@ def build_calendar_payload(
                     
                     merged_earnings[key] = final_timing
                     fmp_count += 1
-                # If already in merged_earnings from ORATS, keep ORATS timing (more reliable)
+                # If already in merged_earnings from ORATS/Benzinga, keep existing timing
             
-            debug_counts["earningsRowsDroppedUniverse"] = int(dropped)
+            debug_counts["fmpRowsDroppedUniverse"] = int(dropped)
         except FmpError as e:
             notes.append(f"FMP earnings fetch failed: {str(e)[:180]}")
         except Exception as e:
@@ -490,12 +547,13 @@ def build_calendar_payload(
         earnings_by_date[d0][timing].append({"ticker": sym, "time": ""})
         tickers_in_range += 1
 
-    debug_counts["earningsSource"] = "merged_orats_fmp"
+    debug_counts["earningsSource"] = "merged_orats_benzinga_fmp"
     debug_counts["tickersFromOrats"] = orats_count
+    debug_counts["tickersFromBenzinga"] = benzinga_count
     debug_counts["tickersFromFmp"] = fmp_count
     debug_counts["tickersInRange"] = tickers_in_range
     debug_counts["earningsRowsUsed"] = tickers_in_range
-    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, FMP: {fmp_count}, filtered: {mcap_filtered_count})")
+    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, Benzinga: {benzinga_count}, FMP: {fmp_count}, filtered: {mcap_filtered_count})")
 
     # Stable sort per day by ticker.
     for d0 in earnings_by_date.keys():
