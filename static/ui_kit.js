@@ -566,7 +566,8 @@ window.RavenLoading = (function() {
       if (resultsEl) {
         resultsEl.classList.add("hidden");
         // Clear grid content to prevent flash of old data on next show
-        const grids = resultsEl.querySelectorAll("[id$='Grid'], [id$='Summary'], [id$='List']");
+        // Exclude statsGrid which has static structure with dynamic values
+        const grids = resultsEl.querySelectorAll("[id$='Grid']:not(#statsGrid), [id$='Summary'], [id$='List']");
         grids.forEach(g => { g.innerHTML = ""; });
       }
     }
