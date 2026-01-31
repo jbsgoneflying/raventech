@@ -182,6 +182,10 @@ def build_earnings_snapshot(
             calls += 1
             if not d:
                 continue
+            # Skip estimated dates - they anchor to Wednesday and are too imprecise for calendar
+            if est:
+                est_used += 1
+                continue
             if d < today or d > end:
                 continue
             k = _fmt_date(d)
@@ -189,8 +193,6 @@ def build_earnings_snapshot(
                 by_date[k] = {"BMO": [], "AMC": [], "UNK": []}
             by_date[k][timing].append(sym)
             used += 1
-            if est:
-                est_used += 1
         except Exception:
             errors += 1
             continue
@@ -207,8 +209,8 @@ def build_earnings_snapshot(
         "universeSize": int(len(universe)),
         "oratsCalls": int(calls),
         "rowsUsed": int(used),
-        "estimatedDatesUsed": int(est_used),
-        "estimatedDatePolicy": "If ORATS nextErn is missing: use daysToNextErn (snap weekend->Mon) else wksNextErn (anchor to Wed of projected week).",
+        "estimatedDatesSkipped": int(est_used),
+        "estimatedDatePolicy": "Estimated dates (from daysToNextErn/wksNextErn) are SKIPPED - only exact nextErn dates are included.",
         "errors": int(errors),
         "horizonDays": int(horizon_days),
         "notes": notes,

@@ -333,7 +333,7 @@ def build_calendar_payload(
                 by_date = snapshot.get("byDate")
                 meta = snapshot.get("meta") or {}
                 if isinstance(by_date, dict) and by_date:
-                    # Snapshot has data - use it
+                    # Snapshot has data - count tickers in visible range
                     tickers_in_range = 0
                     for date_key in day_keys:
                         day_data = by_date.get(date_key)
@@ -346,13 +346,23 @@ def build_calendar_payload(
                                     earnings_by_date[date_key][timing].append({"ticker": ticker, "time": ""})
                                     tickers_in_range += 1
                     
-                    debug_counts["earningsSource"] = "orats_snapshot"
-                    debug_counts["snapshotUsed"] = True
-                    debug_counts["snapshotDate"] = str(meta.get("etDate") or "")[:10]
-                    debug_counts["tickersInRange"] = tickers_in_range
-                    debug_counts["earningsRowsUsed"] = tickers_in_range
-                    snapshot_used = True
-                    LOG.info(f"Calendar: loaded {tickers_in_range} earnings from ORATS snapshot (date: {debug_counts['snapshotDate']})")
+                    # Only use snapshot if it has meaningful data (at least 5 tickers in range)
+                    # Otherwise fall back to FMP which may have better coverage
+                    MIN_SNAPSHOT_TICKERS = 5
+                    if tickers_in_range >= MIN_SNAPSHOT_TICKERS:
+                        debug_counts["earningsSource"] = "orats_snapshot"
+                        debug_counts["snapshotUsed"] = True
+                        debug_counts["snapshotDate"] = str(meta.get("etDate") or "")[:10]
+                        debug_counts["tickersInRange"] = tickers_in_range
+                        debug_counts["earningsRowsUsed"] = tickers_in_range
+                        snapshot_used = True
+                        LOG.info(f"Calendar: loaded {tickers_in_range} earnings from ORATS snapshot (date: {debug_counts['snapshotDate']})")
+                    else:
+                        # Snapshot too sparse - clear and fall back to FMP
+                        for date_key in day_keys:
+                            earnings_by_date[date_key] = {"BMO": [], "AMC": [], "UNK": []}
+                        LOG.info(f"Calendar: ORATS snapshot too sparse ({tickers_in_range} tickers), falling back to FMP")
+                        notes.append(f"ORATS snapshot sparse ({tickers_in_range} tickers in range), using FMP")
         except Exception as e:
             LOG.warning(f"Calendar: failed to load ORATS snapshot: {type(e).__name__}: {str(e)[:100]}")
             notes.append(f"ORATS snapshot load failed, falling back to FMP: {type(e).__name__}")
