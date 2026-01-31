@@ -324,151 +324,146 @@ def build_calendar_payload(
                 return s2
         return s
 
-    # --- ORATS SNAPSHOT PATH (preferred) ---
-    snapshot_used = False
+    # --- MERGE BOTH FMP AND ORATS DATA SOURCES ---
+    # Strategy: Get earnings from both sources and merge for best coverage
+    # - FMP provides dates (sometimes timing)
+    # - ORATS provides reliable BMO/AMC timing
+    
+    def _coerce_ticker_fmp(row: dict) -> str:
+        for k in ("symbol", "ticker", "Symbol", "Ticker"):
+            v = row.get(k)
+            if v:
+                return str(v).strip().upper()
+        return ""
+
+    def _coerce_date_fmp(row: dict) -> Optional[dt.date]:
+        for k in ("date", "earningDate", "earningsDate", "reportedDate", "Date"):
+            v = row.get(k)
+            d = _parse_date(v)
+            if d is not None:
+                return d
+        return None
+
+    def _coerce_timing_fmp(row: dict) -> str:
+        for k in ("time", "session", "when", "timing", "timeOfDay"):
+            v = row.get(k)
+            if v is None:
+                continue
+            t = classify_timing(v)
+            if t in ("AMC", "BMO"):
+                return t
+            s = str(v).strip().lower()
+            if "after" in s or "close" in s or s in ("amc", "afterclose", "post", "pm", "postmarket", "afterhours"):
+                return "AMC"
+            if "before" in s or "open" in s or s in ("bmo", "beforeopen", "pre", "am", "premarket"):
+                return "BMO"
+        return "UNK"
+
+    # Master map: (ticker, date) -> timing
+    # Will be populated from both sources, ORATS timing takes priority
+    merged_earnings: Dict[Tuple[str, str], str] = {}
+    orats_count = 0
+    fmp_count = 0
+    
+    # ORATS ticker->timing map (ignores date - for cross-referencing FMP dates)
+    # This helps when ORATS has estimated dates that don't match FMP's exact dates
+    orats_ticker_timing: Dict[str, str] = {}
+    
+    # 1. Load ORATS snapshot (has reliable BMO/AMC timing)
     if redis_store is not None:
         try:
-            snapshot = load_earnings_snapshot(redis_store)
-            if snapshot and isinstance(snapshot, dict):
-                by_date = snapshot.get("byDate")
-                meta = snapshot.get("meta") or {}
-                if isinstance(by_date, dict) and by_date:
-                    # Snapshot has data - count tickers in visible range
-                    tickers_in_range = 0
-                    for date_key in day_keys:
-                        day_data = by_date.get(date_key)
-                        if not day_data or not isinstance(day_data, dict):
-                            continue
-                        for timing in ("BMO", "AMC", "UNK"):
-                            tickers = day_data.get(timing) or []
-                            for ticker in tickers:
+            orats_snap = load_earnings_snapshot(redis_store)
+            if orats_snap and isinstance(orats_snap, dict):
+                orats_by_date = orats_snap.get("byDate") or {}
+                debug_counts["snapshotDate"] = str((orats_snap.get("meta") or {}).get("etDate") or "")[:10]
+                
+                # Build ticker->timing map (most recent timing wins)
+                for date_str, timing_groups in orats_by_date.items():
+                    if isinstance(timing_groups, dict):
+                        for timing_key in ("BMO", "AMC"):  # Only BMO/AMC, skip UNK
+                            for ticker in (timing_groups.get(timing_key) or []):
                                 if isinstance(ticker, str) and ticker:
-                                    earnings_by_date[date_key][timing].append({"ticker": ticker, "time": ""})
-                                    tickers_in_range += 1
-                    
-                    # Only use snapshot if it has meaningful data (at least 5 tickers in range)
-                    # Otherwise fall back to FMP which may have better coverage
-                    MIN_SNAPSHOT_TICKERS = 5
-                    if tickers_in_range >= MIN_SNAPSHOT_TICKERS:
-                        debug_counts["earningsSource"] = "orats_snapshot"
-                        debug_counts["snapshotUsed"] = True
-                        debug_counts["snapshotDate"] = str(meta.get("etDate") or "")[:10]
-                        debug_counts["tickersInRange"] = tickers_in_range
-                        debug_counts["earningsRowsUsed"] = tickers_in_range
-                        snapshot_used = True
-                        LOG.info(f"Calendar: loaded {tickers_in_range} earnings from ORATS snapshot (date: {debug_counts['snapshotDate']})")
-                    else:
-                        # Snapshot too sparse - clear and fall back to FMP
-                        for date_key in day_keys:
-                            earnings_by_date[date_key] = {"BMO": [], "AMC": [], "UNK": []}
-                        LOG.info(f"Calendar: ORATS snapshot too sparse ({tickers_in_range} tickers), falling back to FMP")
-                        notes.append(f"ORATS snapshot sparse ({tickers_in_range} tickers in range), using FMP")
+                                    sym = ticker.upper()
+                                    orats_ticker_timing[sym] = timing_key
+                
+                # Also add exact-date matches to merged_earnings
+                for date_str, timing_groups in orats_by_date.items():
+                    if date_str not in day_keys:
+                        continue
+                    if isinstance(timing_groups, dict):
+                        for timing_key in ("BMO", "AMC", "UNK"):
+                            for ticker in (timing_groups.get(timing_key) or []):
+                                if isinstance(ticker, str) and ticker:
+                                    sym = _normalize_symbol_to_universe(ticker.upper())
+                                    if universe and sym not in universe:
+                                        continue
+                                    key = (sym, date_str)
+                                    if key not in merged_earnings:
+                                        merged_earnings[key] = timing_key
+                                        orats_count += 1
+                
+                debug_counts["oratsTimingMapSize"] = len(orats_ticker_timing)
         except Exception as e:
-            LOG.warning(f"Calendar: failed to load ORATS snapshot: {type(e).__name__}: {str(e)[:100]}")
-            notes.append(f"ORATS snapshot load failed, falling back to FMP: {type(e).__name__}")
+            LOG.warning(f"Calendar: failed to load ORATS snapshot: {e}")
 
-    # --- FMP LIVE FALLBACK ---
-    if not snapshot_used:
-        def _coerce_ticker_fmp(row: dict) -> str:
-            for k in ("symbol", "ticker", "Symbol", "Ticker"):
-                v = row.get(k)
-                if v:
-                    return str(v).strip().upper()
-            return ""
-
-        def _coerce_date_fmp(row: dict) -> Optional[dt.date]:
-            for k in ("date", "earningDate", "earningsDate", "reportedDate", "Date"):
-                v = row.get(k)
-                d = _parse_date(v)
-                if d is not None:
-                    return d
-            return None
-
-        def _coerce_timing_fmp(row: dict) -> str:
-            for k in ("time", "session", "when", "timing", "timeOfDay"):
-                v = row.get(k)
-                if v is None:
+    # 2. Add FMP data (fills gaps, ORATS timing takes priority if conflict)
+    if fmp_client is not None:
+        try:
+            resp = fmp_client.earnings_calendar(date_from=_fmt_date(start), date_to=_fmt_date(end), limit=int(max_tickers))
+            rows = resp.rows or []
+            debug_counts["earningsRowsFetched"] = int(len(rows))
+            
+            dropped = 0
+            for r in rows:
+                if not isinstance(r, dict):
                     continue
-                t = classify_timing(v)
-                if t in ("AMC", "BMO"):
-                    return t
-                s = str(v).strip().lower()
-                if "after" in s or "close" in s or s in ("amc", "afterclose", "post", "pm", "postmarket", "afterhours"):
-                    return "AMC"
-                if "before" in s or "open" in s or s in ("bmo", "beforeopen", "pre", "am", "premarket"):
-                    return "BMO"
-            return "UNK"
-
-        if fmp_client is None:
-            notes.append("FMP unavailable or disabled; earnings omitted.")
-        else:
-            try:
-                resp = fmp_client.earnings_calendar(date_from=_fmt_date(start), date_to=_fmt_date(end), limit=int(max_tickers))
-                rows = resp.rows or []
-                debug_counts["earningsRowsFetched"] = int(len(rows))
-                debug_counts["earningsSource"] = "fmp_live"
-
-                # Load ORATS snapshot for timing cross-reference (FMP often has UNK timing)
-                orats_timing_map: Dict[Tuple[str, str], str] = {}
-                if redis_store is not None:
-                    try:
-                        orats_snap = load_earnings_snapshot(redis_store)
-                        if orats_snap and isinstance(orats_snap, dict):
-                            orats_by_date = orats_snap.get("byDate") or {}
-                            for date_str, timing_groups in orats_by_date.items():
-                                if isinstance(timing_groups, dict):
-                                    for timing_key in ("BMO", "AMC"):
-                                        for ticker in (timing_groups.get(timing_key) or []):
-                                            if isinstance(ticker, str):
-                                                orats_timing_map[(ticker.upper(), date_str)] = timing_key
-                            debug_counts["oratsTimingMapSize"] = len(orats_timing_map)
-                    except Exception as e:
-                        LOG.warning(f"Calendar: failed to load ORATS timing map: {e}")
-
-                # De-dupe (ticker+date) and apply universe filter.
-                # Key by (sym, date) only - we'll determine timing later
-                uniq: Dict[Tuple[str, str], dict] = {}
-                dropped = 0
-                for r in rows:
-                    if not isinstance(r, dict):
-                        continue
-                    sym0 = _coerce_ticker_fmp(r)
-                    sym = _normalize_symbol_to_universe(sym0)
-                    d = _coerce_date_fmp(r)
-                    if not sym or d is None:
-                        continue
-                    if universe and sym not in universe:
-                        dropped += 1
-                        continue
-                    # Store with FMP timing, but we'll cross-ref ORATS below
+                sym0 = _coerce_ticker_fmp(r)
+                sym = _normalize_symbol_to_universe(sym0)
+                d = _coerce_date_fmp(r)
+                if not sym or d is None:
+                    continue
+                if universe and sym not in universe:
+                    dropped += 1
+                    continue
+                
+                d_str = _fmt_date(d)
+                if d_str not in day_keys:
+                    continue
+                    
+                key = (sym, d_str)
+                if key not in merged_earnings:
+                    # New ticker from FMP - check ORATS timing map first
                     fmp_timing = _coerce_timing_fmp(r)
-                    uniq[(sym, _fmt_date(d))] = {"fmp_timing": fmp_timing, "row": r}
-
-                debug_counts["earningsRowsDroppedUniverse"] = int(dropped)
-
-                tickers_in_range = 0
-                timing_from_orats = 0
-                for (sym, d0), data in uniq.items():
-                    if d0 not in day_keys:
-                        continue
-                    fmp_timing = data["fmp_timing"]
-                    # Cross-reference ORATS for better timing if FMP is UNK
                     final_timing = fmp_timing
-                    if fmp_timing == "UNK":
-                        orats_timing = orats_timing_map.get((sym, d0))
-                        if orats_timing:
-                            final_timing = orats_timing
-                            timing_from_orats += 1
-                    earnings_by_date[d0][final_timing].append({"ticker": sym, "time": ""})
-                    tickers_in_range += 1
+                    
+                    # If FMP timing is UNK, try to get timing from ORATS (by ticker only)
+                    if fmp_timing == "UNK" and sym in orats_ticker_timing:
+                        final_timing = orats_ticker_timing[sym]
+                    
+                    merged_earnings[key] = final_timing
+                    fmp_count += 1
+                # If already in merged_earnings from ORATS, keep ORATS timing (more reliable)
+            
+            debug_counts["earningsRowsDroppedUniverse"] = int(dropped)
+        except FmpError as e:
+            notes.append(f"FMP earnings fetch failed: {str(e)[:180]}")
+        except Exception as e:
+            notes.append(f"FMP earnings fetch failed: {type(e).__name__}: {str(e)[:180]}")
+    else:
+        notes.append("FMP unavailable or disabled.")
 
-                debug_counts["tickersInRange"] = int(tickers_in_range)
-                debug_counts["earningsRowsUsed"] = int(tickers_in_range)
-                debug_counts["timingFromOrats"] = int(timing_from_orats)
-            except FmpError as e:
-                notes.append(f"FMP earnings fetch failed: {str(e)[:180]}")
-            except Exception as e:
-                notes.append(f"FMP earnings fetch failed: {type(e).__name__}: {str(e)[:180]}")
+    # 3. Populate earnings_by_date from merged data
+    tickers_in_range = 0
+    for (sym, d0), timing in merged_earnings.items():
+        earnings_by_date[d0][timing].append({"ticker": sym, "time": ""})
+        tickers_in_range += 1
+
+    debug_counts["earningsSource"] = "merged_orats_fmp"
+    debug_counts["tickersFromOrats"] = orats_count
+    debug_counts["tickersFromFmp"] = fmp_count
+    debug_counts["tickersInRange"] = tickers_in_range
+    debug_counts["earningsRowsUsed"] = tickers_in_range
+    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, FMP: {fmp_count})")
 
     # Stable sort per day by ticker.
     for d0 in earnings_by_date.keys():

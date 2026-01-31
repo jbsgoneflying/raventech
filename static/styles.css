@@ -2286,11 +2286,11 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   gap: 4px;
 }
 
-/* Logo-only tile (EarningsHub style) - square tiles */
+/* Logo-only tile (EarningsHub style) - square tiles with dark background */
 .calTile {
   appearance: none;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #1e293b;  /* Dark slate background for logo visibility */
   border-radius: 6px;
   padding: 0;
   width: 32px;
@@ -2298,7 +2298,7 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   min-width: 32px;
   max-width: 32px;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
   transition: transform 80ms ease, box-shadow 140ms ease, border-color 140ms ease;
   display: flex;
   align-items: center;
@@ -2309,19 +2309,19 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 
 .calTile:hover {
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(0,0,0,0.12);
-  border-color: rgba(15, 23, 42, 0.15);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  border-color: rgba(99, 102, 241, 0.5);
 }
 
 .calTile:active { transform: translateY(0); }
 
-/* Logo fills the tile */
+/* Logo fills the tile - transparent on dark bg */
 .calTileLogo {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 3px;
-  background: #fff;
+  padding: 4px;
+  background: transparent;
 }
 
 /* Hide ticker text - logo only (EarningsHub style) */
