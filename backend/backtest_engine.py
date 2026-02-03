@@ -366,11 +366,11 @@ def detect_signals_for_date_engine3(
 def detect_signals_for_date_engine4(
     all_bars: Dict[str, List[DailyBar]],
     as_of_date: dt.date,
-    min_lookback: int = 60,
+    min_lookback: int = 100,  # Ichimoku needs 52 bars for Span B + 26 for projection + buffer
 ) -> List[Tuple[str, IchimokuSignal]]:
     """
     Detect Engine 4 Ichimoku signals for a specific date using cached bars.
-    Returns list of (ticker, signal) tuples for A+ actionable signals only.
+    Returns list of (ticker, signal) tuples for A+ signals (both actionable and structure).
     """
     signals: List[Tuple[str, IchimokuSignal]] = []
     as_of_str = as_of_date.isoformat()
@@ -393,8 +393,8 @@ def detect_signals_for_date_engine4(
                 detection=detection,
             )
             
-            # Only A+ actionable signals
-            if signal and signal.score >= E4_APLUS_THRESHOLD and signal.freshness_bucket == "actionable":
+            # A+ signals (include both actionable and structure for backtest purposes)
+            if signal and signal.score >= E4_APLUS_THRESHOLD:
                 signals.append((ticker, signal))
                 
         except Exception as e:
@@ -413,11 +413,12 @@ def simulate_trade_engine3(
     signal_date: dt.date,
     gamma_supportive: bool,
     trend_aligned: bool,
+    max_hold_days: int = 10,
 ) -> TradeRecord:
     """
     Simulate an Engine 3 trade.
     - Entry: next day if trigger hit
-    - Exit: at stop or target (using targetSma20 for mean reversion)
+    - Exit: at stop, target_1 (1R), or max hold days (whichever first)
     """
     ticker = signal.ticker
     bars = all_bars.get(ticker, [])
@@ -428,6 +429,9 @@ def simulate_trade_engine3(
         if b.trade_date and b.trade_date > signal_date.isoformat()
     ]
     
+    # Use target_1 (1R) for more realistic backtest instead of SMA20
+    target = signal.target_1
+    
     trade = TradeRecord(
         ticker=ticker,
         signal_date=signal.signal_date,
@@ -435,7 +439,7 @@ def simulate_trade_engine3(
         engine="engine3",
         entry_price=signal.entry_trigger,
         stop_price=signal.stop_loss,
-        target_price=signal.target_sma20,  # Use SMA20 target for mean reversion
+        target_price=target,
         gamma_supportive=gamma_supportive,
         trend_aligned=trend_aligned,
         score=signal.score,
@@ -463,11 +467,13 @@ def simulate_trade_engine3(
             return trade
         trade.entry_date = next_day.trade_date
     
-    # Simulate from day after entry
+    # Simulate from day after entry (with max hold limit)
+    days_held = 0
     for bar in future_bars[1:]:
         if bar.high is None or bar.low is None or bar.close is None:
             continue
         
+        days_held += 1
         h, l, c = float(bar.high), float(bar.low), float(bar.close)
         
         if is_bullish:
@@ -478,9 +484,9 @@ def simulate_trade_engine3(
                 trade.exit_reason = "stop"
                 break
             # Check target
-            if h >= signal.target_sma20:
+            if h >= target:
                 trade.exit_date = bar.trade_date
-                trade.exit_price = signal.target_sma20
+                trade.exit_price = target
                 trade.exit_reason = "target"
                 break
         else:
@@ -491,11 +497,18 @@ def simulate_trade_engine3(
                 trade.exit_reason = "stop"
                 break
             # Check target
-            if l <= signal.target_sma20:
+            if l <= target:
                 trade.exit_date = bar.trade_date
-                trade.exit_price = signal.target_sma20
+                trade.exit_price = target
                 trade.exit_reason = "target"
                 break
+        
+        # Max hold time exit at close
+        if days_held >= max_hold_days:
+            trade.exit_date = bar.trade_date
+            trade.exit_price = c
+            trade.exit_reason = "time"
+            break
     
     # Calculate P/L if trade was executed
     if trade.exit_price is not None:
@@ -518,11 +531,12 @@ def simulate_trade_engine4(
     signal_date: dt.date,
     gamma_supportive: bool,
     trend_aligned: bool,
+    max_hold_days: int = 15,
 ) -> TradeRecord:
     """
     Simulate an Engine 4 trade.
     - Entry: next day if trigger hit
-    - Exit: at stop or target_1
+    - Exit: at stop, target_1, or max hold days (whichever first)
     """
     ticker = signal.ticker
     bars = all_bars.get(ticker, [])
@@ -566,11 +580,13 @@ def simulate_trade_engine4(
             return trade
         trade.entry_date = next_day.trade_date
     
-    # Simulate from day after entry
+    # Simulate from day after entry (with max hold limit)
+    days_held = 0
     for bar in future_bars[1:]:
         if bar.high is None or bar.low is None or bar.close is None:
             continue
         
+        days_held += 1
         h, l, c = float(bar.high), float(bar.low), float(bar.close)
         
         if is_bullish:
@@ -595,6 +611,13 @@ def simulate_trade_engine4(
                 trade.exit_price = signal.target_1
                 trade.exit_reason = "target"
                 break
+        
+        # Max hold time exit at close
+        if days_held >= max_hold_days:
+            trade.exit_date = bar.trade_date
+            trade.exit_price = c
+            trade.exit_reason = "time"
+            break
     
     # Calculate P/L
     if trade.exit_price is not None:
@@ -739,8 +762,8 @@ def run_backtest(
         api_calls_estimate=len(universe) + days_scanned + 1,  # tickers + gamma + SPY
     )
     
-    # Count executed trades
-    executed = [t for t in trades if t.exit_reason in ("target", "stop")]
+    # Count executed trades (including time-based exits)
+    executed = [t for t in trades if t.exit_reason in ("target", "stop", "time")]
     not_triggered = [t for t in trades if t.exit_reason == "not_triggered"]
     
     result.total_trades = len(executed)

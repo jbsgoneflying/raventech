@@ -190,6 +190,12 @@
       const dirClass = trade.direction === "bullish" ? "bullish" : "bearish";
       const resultClass = perf.isWin ? "win" : "loss";
       
+      // Exit reason indicator
+      let exitReason = "";
+      if (exec.exitReason === "target") exitReason = " (T)";
+      else if (exec.exitReason === "stop") exitReason = " (S)";
+      else if (exec.exitReason === "time") exitReason = " (X)";
+      
       const gammaBadge = ctx.gammaSupportive
         ? `<span class="contextBadge active" title="Gamma Supportive">G</span>`
         : `<span class="contextBadge inactive" title="Gamma Not Supportive">G</span>`;
@@ -205,7 +211,7 @@
         <div>${escapeHtml(trade.signalDate || "").slice(5)}</div>
         <div><span class="tradeDirection ${dirClass}">${trade.direction === "bullish" ? "Bull" : "Bear"}</span></div>
         <div>${formatPrice(levels.entry)}</div>
-        <div>${formatPrice(exec.exitPrice)}</div>
+        <div title="${exec.exitReason || ''}">${formatPrice(exec.exitPrice)}${exitReason}</div>
         <div class="tradeResult ${resultClass}">${formatPct(perf.plPct, 2)}</div>
         <div class="tradeResult ${resultClass}">${formatR(perf.rMultiple)}</div>
         <div class="tradeContext">${gammaBadge}${trendBadge}</div>
@@ -213,7 +219,7 @@
       container.appendChild(row);
     });
     
-    setText("tradeLogMeta", `${trades.length} trades`);
+    setText("tradeLogMeta", `${trades.length} trades · T=Target S=Stop X=Time`);
   }
 
   function renderResults(data) {
