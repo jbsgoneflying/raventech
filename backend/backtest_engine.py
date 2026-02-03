@@ -375,6 +375,9 @@ def detect_signals_for_date_engine4(
     signals: List[Tuple[str, IchimokuSignal]] = []
     as_of_str = as_of_date.isoformat()
     
+    signals_with_setup = 0
+    signals_scored = 0
+    
     for ticker, bars in all_bars.items():
         # Filter bars up to as_of_date
         valid_bars = [b for b in bars if b.trade_date and b.trade_date <= as_of_str]
@@ -389,17 +392,25 @@ def detect_signals_for_date_engine4(
             if not detection.get("hasSignal"):
                 continue
             
+            signals_with_setup += 1
+            
             signal = build_ichimoku_signal(
                 ticker=ticker,
                 detection=detection,
             )
             
-            # A+ signals (include both actionable and structure for backtest purposes)
-            if signal and signal.score >= E4_APLUS_THRESHOLD:
-                signals.append((ticker, signal))
+            if signal:
+                signals_scored += 1
+                # Include all signals with score >= 50 for backtest (not just A+)
+                # This captures more data for analysis
+                if signal.score >= 50:
+                    signals.append((ticker, signal))
                 
         except Exception as e:
             LOG.debug(f"Error detecting E4 signal for {ticker}: {e}")
+    
+    if signals_with_setup > 0:
+        LOG.info(f"E4 {as_of_date}: {signals_with_setup} setups found, {signals_scored} scored, {len(signals)} passed threshold")
     
     return signals
 
@@ -675,10 +686,10 @@ def run_backtest(
     # For Engine 3 with aligned-only filtering, we need many more days
     # because only ~20-30% of signals are aligned
     if engine == "engine3":
-        est_days = max(trade_count * 8, 60)  # 8x multiplier for aligned filtering
+        est_days = max(trade_count * 5, 60)  # 5x multiplier for aligned filtering
     else:
-        est_days = max(trade_count * 2, 30)
-    lookback_days = min(est_days + 60, 365)  # Cap at 1 year, add buffer for bars
+        est_days = max(trade_count * 3, 45)  # 3x for Engine 4
+    lookback_days = min(est_days + 60, 250)  # Cap at 250 days to avoid timeout
     
     scan_start = end_date - dt.timedelta(days=lookback_days)
     
@@ -707,8 +718,14 @@ def run_backtest(
     gamma_cache: Dict[str, Dict[str, Any]] = {}
     
     current_date = end_date - dt.timedelta(days=1)  # Start from yesterday (need future bars)
+    max_runtime_seconds = 90  # Stop early to avoid nginx timeout
     
     while len(trades) < trade_count and current_date >= scan_start:
+        # Check runtime to avoid timeout
+        elapsed = time.time() - start_time
+        if elapsed > max_runtime_seconds:
+            LOG.warning(f"Backtest timeout after {elapsed:.0f}s with {len(trades)} trades")
+            break
         # Skip weekends
         if current_date.weekday() >= 5:
             current_date -= dt.timedelta(days=1)
