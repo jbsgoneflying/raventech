@@ -735,8 +735,12 @@ def run_backtest(
             direction = signal.direction
             trend_aligned, _ = get_trend_alignment(direction, spy_bars, current_date)
             
-            # Simulate trade
+            # Engine 3: ONLY trade when fully aligned (gamma + trend)
+            # This filter ensures we only take high-probability setups
             if engine == "engine3":
+                if not (gamma_supportive and trend_aligned):
+                    continue  # Skip unaligned signals
+                
                 trade = simulate_trade_engine3(
                     signal, all_bars, current_date, gamma_supportive, trend_aligned
                 )
