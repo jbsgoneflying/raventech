@@ -385,7 +385,8 @@ def detect_signals_for_date_engine4(
         try:
             detection = detect_ichimoku_setup(valid_bars, ticker=ticker)
             
-            if not detection.get("hasSetup"):
+            # Note: The function sets "hasSignal" not "hasSetup"
+            if not detection.get("hasSignal"):
                 continue
             
             signal = build_ichimoku_signal(
