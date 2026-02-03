@@ -671,8 +671,12 @@ def run_backtest(
         end_date = dt.date.today()
     
     # Estimate how far back we need to scan
-    # Conservative: assume ~2 A+ signals per day, need 2x for entry filtering
-    est_days = max(trade_count * 2, 30)
+    # For Engine 3 with aligned-only filtering, we need many more days
+    # because only ~20-30% of signals are aligned
+    if engine == "engine3":
+        est_days = max(trade_count * 8, 60)  # 8x multiplier for aligned filtering
+    else:
+        est_days = max(trade_count * 2, 30)
     lookback_days = min(est_days + 60, 365)  # Cap at 1 year, add buffer for bars
     
     scan_start = end_date - dt.timedelta(days=lookback_days)
@@ -711,18 +715,28 @@ def run_backtest(
         
         days_scanned += 1
         
-        # Fetch gamma context for this date (with caching)
+        # Detect signals for this date FIRST (cheap operation using cached bars)
+        if engine == "engine3":
+            signal_tuples = detect_signals_for_date_engine3(all_bars, current_date)
+        else:
+            signal_tuples = detect_signals_for_date_engine4(all_bars, current_date)
+        
+        # Skip if no signals found for this day (cheap check before API call)
+        if not signal_tuples:
+            current_date -= dt.timedelta(days=1)
+            continue
+        
+        # Fetch gamma context for this date (with caching) - only when we have signals
         date_str = current_date.isoformat()
         if date_str not in gamma_cache:
             gamma_cache[date_str] = fetch_historical_gamma_context(client, current_date)
         gamma_ctx = gamma_cache[date_str]
         gamma_supportive = gamma_ctx.get("supportive", False)
         
-        # Detect signals for this date
-        if engine == "engine3":
-            signal_tuples = detect_signals_for_date_engine3(all_bars, current_date)
-        else:
-            signal_tuples = detect_signals_for_date_engine4(all_bars, current_date)
+        # For Engine 3 aligned-only: skip entire day if gamma not supportive
+        if engine == "engine3" and not gamma_supportive:
+            current_date -= dt.timedelta(days=1)
+            continue
         
         signals_found += len(signal_tuples)
         
