@@ -253,16 +253,40 @@
 
   async function loadData() {
     setLoading(true);
-    pipelineStatus.textContent = "Loading...";
     hide(resultsEl);
     hide(emptyEl);
 
+    // Step 1: Trigger the pipeline refresh (fetches fresh EODHD data)
+    pipelineStatus.textContent = "Fetching global market data from EODHD...";
+    try {
+      const refreshResp = await fetch("/api/engine5/refresh", { method: "POST" });
+      if (refreshResp.ok) {
+        const refreshData = await refreshResp.json();
+        if (refreshData.ok) {
+          pipelineStatus.textContent = "Pipeline complete. Loading results...";
+        } else {
+          pipelineStatus.textContent = "Pipeline finished with warnings (exit " + refreshData.exitCode + "). Loading available data...";
+        }
+      } else if (refreshResp.status === 404) {
+        show(emptyEl);
+        pipelineStatus.textContent = "Engine 5 is not enabled. Set ENABLE_ENGINE5_LEAD_LAG=1.";
+        setLoading(false);
+        return;
+      } else {
+        pipelineStatus.textContent = "Refresh had issues; loading cached data if available...";
+      }
+    } catch (refreshErr) {
+      console.warn("Engine 5 refresh error (will try cached data):", refreshErr);
+      pipelineStatus.textContent = "Refresh unavailable; loading cached data...";
+    }
+
+    // Step 2: Load the weekly ideas from Redis
     try {
       const resp = await fetch("/api/engine5/weekly-ideas");
 
       if (resp.status === 404) {
         show(emptyEl);
-        pipelineStatus.textContent = "Engine 5 is disabled or no data available.";
+        pipelineStatus.textContent = "No data available. The pipeline may not have completed successfully.";
         return;
       }
       if (!resp.ok) {

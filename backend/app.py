@@ -1899,6 +1899,40 @@ def engine4_ichimoku_ticker(
 # ---------------------------------------------------------------------------
 
 
+@app.post("/api/engine5/refresh")
+async def engine5_refresh():
+    """Trigger the Engine 5 pipeline on-demand.
+
+    Runs the full nightly pipeline (fetch EODHD data, normalize, compute
+    lead-lag signals, classify regime, translate to US biases) and writes
+    results to Redis. Returns the pipeline result summary.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE5_LEAD_LAG:
+        raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    from backend.engine5_pipeline import run_pipeline
+    import asyncio
+
+    try:
+        # Run the blocking pipeline in a thread so we don't block the event loop
+        loop = asyncio.get_event_loop()
+        exit_code = await loop.run_in_executor(None, lambda: run_pipeline(force=True))
+
+        if exit_code == 0:
+            status = store.get_json("engine5:latest:status") or {}
+            return {"ok": True, "status": status}
+        else:
+            return {"ok": False, "exitCode": exit_code, "detail": "Pipeline completed with errors. Check server logs."}
+    except Exception as e:
+        LOG.exception("Engine 5 refresh failed")
+        raise HTTPException(status_code=500, detail=f"Pipeline error: {e}") from e
+
+
 @app.get("/api/engine5/weekly-ideas")
 async def engine5_weekly_ideas(week: str = ""):
     """Return the weekly idea output for Engine 5.
