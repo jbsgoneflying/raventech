@@ -320,7 +320,4 @@
     e.preventDefault();
     loadData();
   });
-
-  // Auto-load on page open
-  loadData();
 })();

@@ -195,7 +195,7 @@ class FeatureFlags:
     GO_FORCED_FLOW_MANUAL_RANGES: Tuple[str, ...] = ()
 
     # --- Engine 5: Global Lead-Lag Engine (default OFF) ---
-    ENABLE_ENGINE5_LEAD_LAG: bool = False
+    ENABLE_ENGINE5_LEAD_LAG: bool = True
     ENGINE5_CACHE_TTL_LATEST: int = 48 * 3600        # 48h Redis TTL for latest snapshots
     ENGINE5_CACHE_TTL_HISTORY: int = 180 * 86400      # 180d Redis TTL for durable bar history
     ENGINE5_CORR_WINDOW: int = 20                     # Rolling correlation window (trading days)
