@@ -1987,6 +1987,9 @@ async def engine5_weekly_ideas(week: str = ""):
                 note=ib.get("note", ""),
             ))
 
+    # Load ORATS data if available
+    orats_data = store.get_json("engine5:latest:orats") or {}
+
     date_str = regime_data.get("date", "")
     ideas = generate_weekly_ideas(
         date=date_str,
@@ -1995,6 +1998,7 @@ async def engine5_weekly_ideas(week: str = ""):
         sector_biases=sector_biases,
         index_biases=index_biases,
         bars=bars,
+        orats_data=orats_data,
     )
     result = ideas.to_dict()
     result["pipelineStatus"] = status_data

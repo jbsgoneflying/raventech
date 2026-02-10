@@ -14,7 +14,7 @@ import math
 import os
 import statistics
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +254,121 @@ def normalize_bars(
         results.append(bar)
 
     return results
+
+
+def normalize_bars_bulk(
+    raw_bars: Dict[str, List[dict]],
+    fx_rates: Dict[str, float],
+    existing_history: Dict[str, List[dict]],
+    universe: dict,
+) -> Tuple[List[GlobalAssetBar], Dict[str, List[dict]]]:
+    """Normalize ALL raw bars day-by-day, building up return history as we go.
+
+    Used for cold-start backfill: processes 60-90 days of bars sequentially
+    so that returns, z-scores, and correlations can be computed from day 1.
+
+    Args:
+        raw_bars: {symbol: [{"date": ..., "close": ..., "adjusted_close": ...}, ...]}
+                  Multiple days of bars per symbol.
+        fx_rates: {fx_symbol: close_rate} -- latest FX rates (used for all days as approx).
+        existing_history: Pre-existing history from Redis (may be empty).
+        universe: Loaded global_assets.json.
+
+    Returns:
+        (all_bars, updated_history)
+        - all_bars: Complete list of GlobalAssetBar across all days.
+        - updated_history: {symbol: [bar_dict, ...]} ready to write to Redis.
+    """
+    symbol_meta = {}
+    for entry in all_eod_symbols(universe):
+        symbol_meta[entry["symbol"]] = entry
+
+    # Collect all unique dates across all symbols, sorted ascending
+    all_dates: set = set()
+    for bars in raw_bars.values():
+        for b in bars:
+            d = str(b.get("date", ""))[:10]
+            if d:
+                all_dates.add(d)
+    sorted_dates = sorted(all_dates)
+
+    # Index raw bars by (symbol, date) for fast lookup
+    bar_index: Dict[Tuple[str, str], dict] = {}
+    for symbol, bars in raw_bars.items():
+        for b in bars:
+            d = str(b.get("date", ""))[:10]
+            if d:
+                bar_index[(symbol, d)] = b
+
+    # Build running history per symbol from existing history
+    running_history: Dict[str, List[dict]] = {}
+    for sym in raw_bars.keys():
+        running_history[sym] = list(existing_history.get(sym, []))
+
+    all_bars: List[GlobalAssetBar] = []
+
+    # Process day by day
+    for date_str in sorted_dates:
+        for symbol in raw_bars.keys():
+            raw_bar = bar_index.get((symbol, date_str))
+            if raw_bar is None:
+                continue
+
+            meta = symbol_meta.get(symbol, {})
+            asset_class = meta.get("asset_class", "equity_index")
+            region = meta.get("region", "")
+            currency = meta.get("currency", "USD")
+
+            close = _to_float(raw_bar.get("adjusted_close")) or _to_float(raw_bar.get("close"))
+            if close is None:
+                continue
+
+            close_usd = _convert_to_usd(close, currency, fx_rates) if asset_class != "fx" else close
+
+            # Compute return from running history
+            hist = running_history.get(symbol, [])
+            hist_closes = [_to_float(b.get("close")) for b in hist]
+            hist_closes = [c for c in hist_closes if c is not None]
+
+            prev_close = hist_closes[-1] if hist_closes else None
+            return_1d_local = _log_return(prev_close, close) if prev_close else None
+
+            return_1d_usd: Optional[float] = None
+            if return_1d_local is not None:
+                return_1d_usd = return_1d_local  # Approx (FX is second-order daily)
+
+            # Z-scores from running history
+            hist_returns: List[float] = []
+            for b in hist:
+                r = _to_float(b.get("return_1d_local"))
+                if r is not None:
+                    hist_returns.append(r)
+
+            z_20d = _z_score(return_1d_local, hist_returns[-20:]) if return_1d_local is not None and len(hist_returns) >= 15 else None
+            z_60d = _z_score(return_1d_local, hist_returns[-60:]) if return_1d_local is not None and len(hist_returns) >= 40 else None
+
+            bar = GlobalAssetBar(
+                symbol=symbol,
+                asset_class=asset_class,
+                region=region,
+                date=date_str,
+                close=round(close, 6),
+                close_usd=round(close_usd, 6) if close_usd is not None else None,
+                return_1d_local=round(return_1d_local, 6) if return_1d_local is not None else None,
+                return_1d_usd=round(return_1d_usd, 6) if return_1d_usd is not None else None,
+                z_score_20d=round(z_20d, 4) if z_20d is not None else None,
+                z_score_60d=round(z_60d, 4) if z_60d is not None else None,
+            )
+            all_bars.append(bar)
+
+            # Append to running history (dedup by date)
+            bar_dict = bar.to_dict()
+            hist = [b for b in running_history.get(symbol, []) if b.get("date") != date_str]
+            hist.append(bar_dict)
+            hist.sort(key=lambda b: str(b.get("date", "")))
+            running_history[symbol] = hist
+
+    return all_bars, running_history
 
 
 # ---------------------------------------------------------------------------
