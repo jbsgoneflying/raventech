@@ -84,6 +84,17 @@ def all_eod_symbols(universe: dict) -> List[dict]:
         out.append({"symbol": entry["symbol"], "asset_class": "commodity", "region": "global", "currency": "USD"})
     for entry in universe.get("sovereign_yields", []):
         out.append({"symbol": entry["symbol"], "fallback": entry.get("fallback"), "asset_class": "yield", "region": entry.get("region", ""), "currency": "USD"})
+    # Volatility indices with a direct EODHD ticker
+    for entry in universe.get("volatility_indices", []):
+        sym = entry.get("symbol")
+        if sym:
+            out.append({
+                "symbol": sym,
+                "fallback": entry.get("fallback_realized_from"),
+                "asset_class": "volatility_index",
+                "region": entry.get("region", ""),
+                "currency": "EUR",
+            })
     return out
 
 

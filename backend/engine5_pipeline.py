@@ -1,12 +1,14 @@
 """Engine 5 – Pipeline Runner.
 
 Core pipeline logic extracted so it can be called from:
-1. The FastAPI /api/engine5/refresh endpoint (on-demand)
+1. The FastAPI /api/engine5/weekly-ideas endpoint (auto-run on first use)
 2. The cron script scripts/refresh_engine5_snapshot.py (nightly)
 
-Two-tier Redis storage:
-- engine5:latest:*   -- TTL 48h, overwritten each run (fast reads for API)
-- engine5:history:*  -- TTL 180d, append-only per symbol+date (durable lookback)
+Storage strategy:
+- engine5:history:*             -- TTL 180d, append-only raw data cache
+- engine5:snapshot:{id}         -- TTL 14d, immutable per-run output
+- engine5:snapshots:index       -- JSON list of IDs, newest first
+- engine5:pointer:best/latest   -- snapshot ID strings
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import datetime as dt
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config import get_flags
 from backend.eodhd_client import EodhdClient, EodhdError
@@ -32,6 +34,16 @@ from backend.engine5_lead_lag import compute_lead_lag_signals
 from backend.engine5_regime import compute_regime_from_bars
 from backend.engine5_translation import translate_signals_to_us
 from backend.engine5_idea_generator import generate_weekly_ideas
+from backend.engine5_vol_leadlag import compute_vol_leadlag, VolLeadLagResult
+from backend.engine5_snapshot import (
+    SnapshotMeta,
+    compute_asof_dates,
+    compute_completeness,
+    compute_grade,
+    generate_snapshot_id,
+    persist_snapshot,
+    GRADE_LABELS,
+)
 from backend.redis_store import get_store_optional
 
 try:
@@ -150,36 +162,48 @@ def _check_freshness(
 # ---------------------------------------------------------------------------
 
 
-def run_pipeline(force: bool = False) -> int:
+def run_pipeline(
+    force: bool = False,
+    source: str = "manual",
+) -> Tuple[int, Optional[str]]:
     """Execute the full Engine 5 pipeline.
 
-    Returns 0 on success, non-zero on failure.
+    Returns ``(exit_code, snapshot_id)``.
+    - exit_code 0  = success
+    - exit_code >0 = failure  (snapshot_id will be None)
     """
+    pipeline_start = time.monotonic()
     flags = get_flags()
 
     if not flags.ENABLE_ENGINE5_LEAD_LAG:
         LOG.info("Engine 5 is disabled (ENABLE_ENGINE5_LEAD_LAG=0). Exiting.")
-        return 0
+        return 0, None
 
     store = get_store_optional()
     if store is None:
         LOG.error("Missing REDIS_URL; cannot run Engine 5 pipeline.")
-        return 2
+        return 2, None
     if not store.ping():
         LOG.error("Redis ping failed; cannot run Engine 5 pipeline.")
-        return 3
+        return 3, None
 
-    # Gate check: skip if last run < 20h ago (unless force)
+    # Gate check: skip if the latest snapshot was created < 20h ago (unless force)
     if not force:
-        last_refresh = store.get_json("engine5:last_refresh")
-        if last_refresh:
-            try:
-                last_ts = float(last_refresh.get("timestamp", 0))
-                if time.time() - last_ts < 20 * 3600:
-                    LOG.info("Skipping: last refresh was %.1fh ago", (time.time() - last_ts) / 3600)
-                    return 0
-            except Exception:
-                pass
+        latest_sid = store.get_json("engine5:pointer:latest")
+        if latest_sid and isinstance(latest_sid, str):
+            snap = store.get_json(f"engine5:snapshot:{latest_sid}")
+            if snap:
+                meta = snap.get("meta", {})
+                created = meta.get("createdAt", "")
+                if created:
+                    try:
+                        created_dt = dt.datetime.fromisoformat(created.replace("Z", "+00:00"))
+                        age_h = (dt.datetime.now(dt.timezone.utc) - created_dt).total_seconds() / 3600
+                        if age_h < 20:
+                            LOG.info("Skipping: latest snapshot %s is %.1fh old", latest_sid, age_h)
+                            return 0, latest_sid
+                    except (ValueError, TypeError):
+                        pass
 
     now = dt.datetime.now(dt.timezone.utc)
     today = now.date()
@@ -192,7 +216,7 @@ def run_pipeline(force: bool = False) -> int:
         universe = load_universe()
     except Exception as e:
         LOG.error("Failed to load universe: %s", e)
-        return 1
+        return 1, None
 
     sentinel = universe.get("sentinel_ticker", "STOXX50E.INDX")
 
@@ -201,7 +225,7 @@ def run_pipeline(force: bool = False) -> int:
         eodhd = EodhdClient.from_env()
     except EodhdError as e:
         LOG.error("EODHD client init failed: %s", e)
-        return 1
+        return 1, None
 
     # Step 2: Fetch global EOD bars
     eod_symbols = all_eod_symbols(universe)
@@ -264,14 +288,8 @@ def run_pipeline(force: bool = False) -> int:
         interval_s=retry_interval,
     )
     if not is_fresh:
-        # Still proceed with whatever data we have, but mark as stale
+        # Still proceed with whatever data we have; snapshot will be graded C
         LOG.warning("Data may be stale (sentinel check failed); proceeding with available bars.")
-        store.set_json("engine5:latest:status", {
-            "status": "STALE",
-            "expected_date": expected_date.isoformat(),
-            "timestamp": time.time(),
-            "note": "Sentinel freshness check failed; results may use prior-day data.",
-        }, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
     # Step 4: Fetch US yield curve
     LOG.info("Fetching US yield curve...")
@@ -347,13 +365,11 @@ def run_pipeline(force: bool = False) -> int:
         # Reload history with today's bars
         history = _load_history_from_redis(store, all_symbols, flags.ENGINE5_CACHE_TTL_HISTORY)
 
-    # Step 7: Write latest snapshot to Redis
-    LOG.info("Writing latest snapshot to Redis...")
+    # Step 7: Prepare latest bars (no mutable Redis key — goes into snapshot)
     latest_bars_json = [b.to_dict() for b in normalized]
-    store.set_json("engine5:latest:bars", latest_bars_json, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
+    # Append yield snapshot to durable history (raw data cache)
     if yield_snapshot:
-        store.set_json("engine5:latest:yields", yield_snapshot.to_dict(), ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
         yield_hist_key = "engine5:history:yields"
         yield_hist = store.get_json(yield_hist_key)
         if not isinstance(yield_hist, list):
@@ -414,7 +430,6 @@ def run_pipeline(force: bool = False) -> int:
     )
     LOG.info("Computed %d lead-lag signals", len(signals))
     signals_json = [s.to_dict() for s in signals]
-    store.set_json("engine5:latest:signals", signals_json, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
     # Step 8b: Fetch ORATS IV data for regime and idea generation
     spy_iv_rank = None
@@ -437,21 +452,33 @@ def run_pipeline(force: bool = False) -> int:
             except Exception as e:
                 LOG.warning("Failed to fetch SPY IV rank: %s", e)
 
-            # Per-sector ORATS data for trade idea enrichment
+            # Per-sector ORATS data for trade idea enrichment + invalidation
             sector_symbols = set()
             for entry in universe.get("equity_indices", []):
                 for t in entry.get("us_targets", []):
                     sector_symbols.add(t)
             for sym in sector_symbols:
                 try:
-                    cores_resp = orats.cores(ticker=sym, fields="orIvRk252d,orDte,orSmvVol,orFcstCl1m")
+                    cores_resp = orats.cores(
+                        ticker=sym,
+                        fields="orIvRk252d,orDte,orSmvVol,orFcstCl1m,orDlta,stkPx,orIvFcst",
+                    )
                     if cores_resp.rows:
                         r = cores_resp.rows[0]
                         iv_rk = r.get("orIvRk252d")
                         smv_vol = r.get("orSmvVol")
+                        stk_px = r.get("stkPx")
+                        or_dte = r.get("orDte")
+                        or_dlta = r.get("orDlta")
+                        or_iv = r.get("orIvFcst") or smv_vol
                         orats_data[sym] = {
                             "iv_rank": float(iv_rk) if iv_rk is not None else None,
                             "expected_move": float(smv_vol) * 100 if smv_vol is not None else None,
+                            "close": float(stk_px) if stk_px is not None else None,
+                            "dte": int(or_dte) if or_dte is not None else 5,
+                            "delta_short": float(or_dlta) if or_dlta is not None else None,
+                            "iv": float(or_iv) if or_iv is not None else None,
+                            "k_short": None,  # Not available from cores; invalidation will use EM-based level
                         }
                 except Exception as e:
                     LOG.warning("ORATS fetch for %s failed: %s", sym, e)
@@ -478,7 +505,6 @@ def run_pipeline(force: bool = False) -> int:
         transitional_threshold=flags.ENGINE5_REGIME_TRANSITIONAL_THRESHOLD,
     )
     LOG.info("Regime: %s (score=%.1f)", regime.label, regime.score)
-    store.set_json("engine5:latest:regime", regime.to_dict(), ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
     # Step 10: Translate to US bias
     LOG.info("Translating to US biases...")
@@ -494,17 +520,75 @@ def run_pipeline(force: bool = False) -> int:
         fx_bars=fx_bar_history,
     )
     LOG.info("Generated %d sector biases, %d index biases", len(sector_biases), len(index_biases))
-    store.set_json("engine5:latest:us_bias", {
-        "sectorBiases": [b.to_dict() for b in sector_biases],
-        "indexBiases": [b.to_dict() for b in index_biases],
-    }, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
-    # Store ORATS data
-    if orats_data:
-        store.set_json("engine5:latest:orats", orats_data, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
+    # Step 10b: Compute Vol Lead-Lag
+    vol_result: VolLeadLagResult | None = None
+    if flags.ENGINE5_VOL_LEADLAG_ENABLED:
+        LOG.info("Computing vol lead-lag...")
+        vol_result = compute_vol_leadlag(
+            bars_history=history,
+            universe=universe,
+            spy_iv_rank=spy_iv_rank,
+            rising_threshold=flags.ENGINE5_GLOBAL_VOL_RISING_THRESHOLD,
+            falling_threshold=flags.ENGINE5_GLOBAL_VOL_FALLING_THRESHOLD,
+            noise_floor=flags.ENGINE5_GLOBAL_VOL_NOISE_FLOOR,
+            iv_low_threshold=flags.ENGINE5_US_IV_LOW_THRESHOLD,
+            iv_high_threshold=flags.ENGINE5_US_IV_HIGH_THRESHOLD,
+            zscore_window=flags.ENGINE5_VOL_ZSCORE_WINDOW,
+        )
+        LOG.info("Vol lead-lag: state=%s, score=%.2f, suppressed=%s",
+                 vol_result.vol_lag_state, vol_result.global_vol_score, vol_result.suppressed)
+    else:
+        LOG.info("Vol lead-lag module disabled.")
 
-    # Step 11: Generate and persist the full WeeklyIdea output
+    # Step 11: Build invalidation inputs and generate weekly ideas
     LOG.info("Generating weekly ideas...")
+
+    # Build yield curve series for driver invalidation (2s10s slope history)
+    yield_curve_series: List[float] = []
+    for ys in yield_hist:
+        slope = ys.get("us_2s10s_slope")
+        if slope is not None:
+            try:
+                yield_curve_series.append(float(slope))
+            except (TypeError, ValueError):
+                pass
+
+    # Compute 3-day stress changes for driver invalidation
+    # We need current and 3-day-ago regime components. We'll use yield_hist
+    # entries as proxy timeline, but the real source is regime history stored
+    # in engine5:history:regime_components.
+    stress_3d_changes: Dict[str, float] = {}
+    regime_comp_hist_key = "engine5:history:regime_components"
+    regime_comp_hist = store.get_json(regime_comp_hist_key)
+    if not isinstance(regime_comp_hist, list):
+        regime_comp_hist = []
+
+    # Append current regime components to history
+    current_comp_entry = {
+        "date": expected_date.isoformat(),
+        **regime.components,
+    }
+    regime_comp_hist = [e for e in regime_comp_hist if e.get("date") != expected_date.isoformat()]
+    regime_comp_hist.append(current_comp_entry)
+    regime_comp_hist.sort(key=lambda e: str(e.get("date", "")))
+    if len(regime_comp_hist) > 200:
+        regime_comp_hist = regime_comp_hist[-200:]
+    store.set_json(regime_comp_hist_key, regime_comp_hist, ttl_s=flags.ENGINE5_CACHE_TTL_HISTORY)
+
+    # Calculate 3-day changes
+    if len(regime_comp_hist) >= 4:
+        three_ago = regime_comp_hist[-4]
+        for comp_key in ("fx_stress", "yield_stress", "commodity_stress", "iv_stress"):
+            cur_val = regime.components.get(comp_key)
+            old_val = three_ago.get(comp_key)
+            if cur_val is not None and old_val is not None:
+                try:
+                    stress_3d_changes[comp_key] = float(cur_val) - float(old_val)
+                except (TypeError, ValueError):
+                    pass
+    LOG.info("Stress 3D changes: %s", stress_3d_changes)
+
     ideas = generate_weekly_ideas(
         date=expected_date.isoformat(),
         signals=signals_json,
@@ -513,34 +597,60 @@ def run_pipeline(force: bool = False) -> int:
         index_biases=index_biases,
         bars=latest_bars_json,
         orats_data=orats_data,
+        yield_curve_series=yield_curve_series if yield_curve_series else None,
+        stress_3d_changes=stress_3d_changes if stress_3d_changes else None,
+        vol_leadlag=vol_result,
     )
     ideas_output = ideas.to_dict()
-
-    # Persist the full pre-generated output so it survives until the next run.
-    # This is what the API serves -- no re-computation needed at read time.
-    store.set_json("engine5:latest:weekly_ideas", ideas_output, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
-    LOG.info("Stored weekly ideas: %d trade ideas, %d sector biases",
+    LOG.info("Generated weekly ideas: %d trade ideas, %d sector biases",
              len(ideas_output.get("tradeIdeas", [])), len(ideas_output.get("sectorBiases", [])))
 
-    # Step 12: Log completion
-    completion_meta = {
-        "timestamp": time.time(),
-        "date": expected_date.isoformat(),
-        "status": "OK",
-        "signals_count": len(signals),
-        "regime_label": regime.label,
-        "regime_score": regime.score,
-        "trade_ideas_count": len(ideas_output.get("tradeIdeas", [])),
-        "sector_biases_count": len(ideas_output.get("sectorBiases", [])),
-    }
-    store.set_json("engine5:last_refresh", completion_meta, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
+    # ------------------------------------------------------------------
+    # Step 12: Build and persist immutable snapshot
+    # ------------------------------------------------------------------
+    pipeline_duration = time.monotonic() - pipeline_start
+    snapshot_id = generate_snapshot_id(now)
 
-    store.set_json("engine5:latest:status", {
-        "status": "OK",
-        "expected_date": expected_date.isoformat(),
-        "timestamp": time.time(),
-    }, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
+    # As-of dates per region
+    asof_dates = compute_asof_dates(latest_bars_json, universe)
 
-    LOG.info("Engine 5 pipeline complete. date=%s regime=%s signals=%d ideas=%d",
-             expected_date, regime.label, len(signals), len(ideas_output.get("tradeIdeas", [])))
-    return 0
+    # Freshness grade
+    grade = compute_grade(asof_dates, is_stale=not is_fresh)
+    grade_label = GRADE_LABELS.get(grade, "")
+
+    # Completeness score
+    completeness = compute_completeness(ideas_output)
+
+    meta = SnapshotMeta(
+        snapshot_id=snapshot_id,
+        created_at_utc=now.isoformat(),
+        asof_dates=asof_dates,
+        grade=grade,
+        grade_label=grade_label,
+        completeness=completeness,
+        regime_label=regime.label,
+        trade_ideas_count=len(ideas_output.get("tradeIdeas", [])),
+        is_stale=not is_fresh,
+        pipeline_duration_s=round(pipeline_duration, 2),
+        source=source,
+        warning=None if grade in ("A", "B") else "Partial data — some regions may not have fresh closes.",
+    )
+
+    ok = persist_snapshot(
+        store=store,
+        snapshot_id=snapshot_id,
+        meta=meta,
+        data=ideas_output,
+        snapshot_ttl=flags.ENGINE5_SNAPSHOT_TTL_S,
+        index_ttl=flags.ENGINE5_SNAPSHOT_INDEX_TTL_S,
+        max_index=flags.ENGINE5_SNAPSHOT_MAX_INDEX,
+    )
+
+    if not ok:
+        LOG.error("Failed to persist snapshot %s", snapshot_id)
+        return 1, None
+
+    LOG.info("Engine 5 pipeline complete. snapshot=%s grade=%s date=%s regime=%s signals=%d ideas=%d (%.1fs)",
+             snapshot_id, grade, expected_date, regime.label, len(signals),
+             len(ideas_output.get("tradeIdeas", [])), pipeline_duration)
+    return 0, snapshot_id

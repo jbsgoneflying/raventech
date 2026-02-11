@@ -2,16 +2,25 @@
 
 Combines lead-lag signals, regime state, ORATS options surface data,
 and Benzinga event filters into structured WeeklyIdea output.
+
+Now includes:
+- source_driver identification per idea (yield | fx | commodity | iv | mixed)
+- Trade invalidation rules (three-tier, two-of-three logic)
+- Regime transition triggers attached to output
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
-from backend.engine5_regime import GlobalRegime
+from backend.engine5_regime import GlobalRegime, RegimeTransitionTriggers, compute_regime_triggers
 from backend.engine5_translation import SectorBias, IndexBias
+from backend.engine5_invalidation import compute_invalidation_for_idea
+
+LOG = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -27,6 +36,7 @@ class TradeIdea:
     confidence: int                  # 0-100
     regime_context: str              # Risk-On | Risk-Off | ...
     lead_lag_source: str             # Human-readable
+    source_driver: str = "mixed"     # yield | fx | commodity | iv | mixed
     iv_rank: Optional[float] = None
     expected_move: Optional[float] = None
     max_risk_estimate: Optional[str] = None
@@ -34,6 +44,21 @@ class TradeIdea:
     roc_assumptions: Optional[Dict[str, Any]] = None
     notes: List[str] = field(default_factory=list)
     suppressed: bool = False
+    # --- Invalidation fields ---
+    invalidation_status: str = "VALID"                          # VALID | SOFT | HARD
+    invalidation_price_level: Optional[float] = None
+    invalidation_price_distance_pct: Optional[float] = None
+    invalidation_delta_threshold: Optional[float] = None
+    invalidation_driver_rule: Optional[str] = None
+    invalidation_tests_triggered: List[str] = field(default_factory=list)
+    invalidation_actions: List[str] = field(default_factory=list)
+    # --- Vol lead-lag fields ---
+    global_vol_score: Optional[float] = None
+    us_iv_rank_state: Optional[str] = None               # LOW | NEUTRAL | HIGH
+    vol_lag_state: Optional[str] = None                   # UNDERPRICED_RISK | OVERPRICED_RISK | CONFIRMED_STRESS | NORMAL
+    structure_bias_reason: Optional[str] = None
+    strike_width_multiplier: float = 1.0
+    vol_size_multiplier: float = 1.0
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -45,6 +70,7 @@ class TradeIdea:
             "confidence": d["confidence"],
             "regimeContext": d["regime_context"],
             "leadLagSource": d["lead_lag_source"],
+            "sourceDriver": d["source_driver"],
             "ivRank": d["iv_rank"],
             "expectedMove": d["expected_move"],
             "maxRiskEstimate": d["max_risk_estimate"],
@@ -52,6 +78,19 @@ class TradeIdea:
             "rocAssumptions": d["roc_assumptions"],
             "notes": d["notes"],
             "suppressed": d["suppressed"],
+            "invalidationStatus": d["invalidation_status"],
+            "invalidationPriceLevel": d["invalidation_price_level"],
+            "invalidationPriceDistancePct": d["invalidation_price_distance_pct"],
+            "invalidationDeltaThreshold": d["invalidation_delta_threshold"],
+            "invalidationDriverRule": d["invalidation_driver_rule"],
+            "invalidationTestsTriggered": d["invalidation_tests_triggered"],
+            "invalidationActions": d["invalidation_actions"],
+            "globalVolScore": d["global_vol_score"],
+            "usIvRankState": d["us_iv_rank_state"],
+            "volLagState": d["vol_lag_state"],
+            "structureBiasReason": d["structure_bias_reason"],
+            "strikeWidthMultiplier": d["strike_width_multiplier"],
+            "volSizeMultiplier": d["vol_size_multiplier"],
         }
 
 
@@ -65,6 +104,7 @@ class WeeklyIdea:
     trade_ideas: List[Dict[str, Any]]
     suppressions: List[Dict[str, Any]]
     global_signal_summary: Dict[str, Any]
+    vol_leadlag: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -72,11 +112,51 @@ class WeeklyIdea:
             "generatedAt": self.generated_at,
             "regime": self.regime,
             "globalSignalSummary": self.global_signal_summary,
+            "volLeadLag": self.vol_leadlag,
             "sectorBiases": self.sector_biases,
             "indexBiases": self.index_biases,
             "tradeIdeas": self.trade_ideas,
             "suppressions": self.suppressions,
         }
+
+
+# ---------------------------------------------------------------------------
+# Source driver inference
+# ---------------------------------------------------------------------------
+
+_FX_KEYWORDS = {"audusd", "usdjpy", "eurusd", "forex", "fx", "currency", "dxy"}
+_YIELD_KEYWORDS = {"yield", "bond", "treasury", "2s10s", "curve", "10y", "2y", "bund", "jgb", "gbond"}
+_COMMODITY_KEYWORDS = {"oil", "gold", "copper", "uso", "gld", "cper", "commodity", "wti", "brent"}
+_IV_KEYWORDS = {"iv", "vix", "volatility", "implied", "skew"}
+
+
+def _infer_source_driver(sources: List[str]) -> str:
+    """Infer the primary driver type from human-readable signal sources.
+
+    Returns one of: yield | fx | commodity | iv | mixed
+    """
+    scores = {"yield": 0, "fx": 0, "commodity": 0, "iv": 0}
+    text = " ".join(s.lower() for s in sources)
+
+    for kw in _YIELD_KEYWORDS:
+        if kw in text:
+            scores["yield"] += 1
+    for kw in _FX_KEYWORDS:
+        if kw in text:
+            scores["fx"] += 1
+    for kw in _COMMODITY_KEYWORDS:
+        if kw in text:
+            scores["commodity"] += 1
+    for kw in _IV_KEYWORDS:
+        if kw in text:
+            scores["iv"] += 1
+
+    # Pick the highest-scoring driver, or "mixed" if tied/all zero
+    max_score = max(scores.values())
+    if max_score == 0:
+        return "mixed"
+    winners = [k for k, v in scores.items() if v == max_score]
+    return winners[0] if len(winners) == 1 else "mixed"
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +340,9 @@ def generate_weekly_ideas(
     orats_data: Optional[Dict[str, dict]] = None,
     earnings_symbols: Optional[List[str]] = None,
     macro_event_flags: Optional[List[str]] = None,
+    yield_curve_series: Optional[List[float]] = None,
+    stress_3d_changes: Optional[Dict[str, float]] = None,
+    vol_leadlag: Optional[Any] = None,
 ) -> WeeklyIdea:
     """Generate the weekly idea output.
 
@@ -273,11 +356,27 @@ def generate_weekly_ideas(
         orats_data: {symbol: {"iv_rank": float, "expected_move": float, ...}}
         earnings_symbols: Symbols with earnings in the week window.
         macro_event_flags: Macro event warnings.
+        yield_curve_series: Rolling 2s10s slope values for driver invalidation.
+        stress_3d_changes: 3-day stress component changes for driver invalidation.
+        vol_leadlag: Optional VolLeadLagResult from vol lead-lag module.
     """
     orats = orats_data or {}
     earnings = earnings_symbols or []
     macro_flags = macro_event_flags or []
     regime_dict = regime.to_dict()
+
+    # Compute regime transition triggers
+    triggers = compute_regime_triggers(regime)
+    regime_dict["transitionTriggers"] = triggers.to_dict()
+
+    # Vol lead-lag data (if available and not suppressed)
+    has_vol = vol_leadlag is not None and not getattr(vol_leadlag, "suppressed", True)
+    vol_score = getattr(vol_leadlag, "global_vol_score", None) if vol_leadlag else None
+    vol_us_state = getattr(vol_leadlag, "us_iv_state", None) if vol_leadlag else None
+    vol_state = getattr(vol_leadlag, "vol_lag_state", "NORMAL") if has_vol else None
+    vol_struct_bias = getattr(vol_leadlag, "structure_bias", None) if has_vol else None
+    vol_sw_mult = getattr(vol_leadlag, "strike_width_multiplier", 1.0) if has_vol else 1.0
+    vol_sz_mult = getattr(vol_leadlag, "vol_size_multiplier", 1.0) if has_vol else 1.0
 
     # Week label
     try:
@@ -296,9 +395,16 @@ def generate_weekly_ideas(
         if bias.confidence < 30:
             continue  # Too weak
 
-        # Select structure
+        # Select structure (vol-aware: prefer iron condors for UNDERPRICED_RISK,
+        # aggressive PCS/CCS for OVERPRICED_RISK)
+        vol_adjusted_direction = bias.direction
+        if has_vol and vol_state == "UNDERPRICED_RISK" and bias.direction != "bearish":
+            vol_adjusted_direction = "neutral"  # Steers toward iron condors
+        elif has_vol and vol_state == "OVERPRICED_RISK":
+            vol_adjusted_direction = bias.direction  # Keep directional, aggressive PCS/CCS
+
         structure = _select_structure(
-            bias.direction,
+            vol_adjusted_direction,
             regime.label,
             regime.allowed_structures,
         )
@@ -309,6 +415,14 @@ def generate_weekly_ideas(
         sym_orats = orats.get(bias.sector, {})
         iv_rank = sym_orats.get("iv_rank")
         expected_move = sym_orats.get("expected_move")
+        sym_close = sym_orats.get("close")
+        sym_delta = sym_orats.get("delta_short")
+        sym_iv = sym_orats.get("iv")
+        sym_dte = sym_orats.get("dte")
+        sym_k_short = sym_orats.get("k_short")
+
+        # Infer source driver from the bias's signal sources
+        source_driver = _infer_source_driver(bias.sources)
 
         # ROC estimate
         roc_est, roc_assumptions = _estimate_roc(structure, expected_move, iv_rank)
@@ -327,11 +441,56 @@ def generate_weekly_ideas(
         else:
             notes.append(f"CAUTION: {bias.sector} has earnings this week")
 
+        # Vol lead-lag notes
+        if has_vol and vol_state and vol_state != "NORMAL":
+            if vol_state == "UNDERPRICED_RISK":
+                notes.append("Global vol rising while US IV neutral/low — wider strikes recommended")
+            elif vol_state == "OVERPRICED_RISK":
+                notes.append("US IV overpricing risk — vol decay edge, aggressive premium selling")
+            elif vol_state == "CONFIRMED_STRESS":
+                notes.append("Confirmed global stress — very wide IC or consider no trade")
+
         # Suppression check
         is_suppressed = (
             bias.sector in suppressed_symbols
             or "ALL" in suppressed_symbols
         )
+
+        # --- Invalidation ---
+        inv_status = "VALID"
+        inv_price_level = None
+        inv_price_dist = None
+        inv_delta_thresh = None
+        inv_driver_rule = None
+        inv_tests: List[str] = []
+        inv_actions: List[str] = ["Idea remains valid."]
+
+        try:
+            inv_result = compute_invalidation_for_idea(
+                S0=sym_close,
+                EM=expected_move,
+                IV=sym_iv,
+                DTE=sym_dte,
+                K_short=sym_k_short,
+                delta_short=sym_delta,
+                structure=structure,
+                regime_label=regime.label,
+                source_driver=source_driver,
+                regime_components=regime.components,
+                total_score=regime.score,
+                yield_curve_series=yield_curve_series,
+                stress_3d_changes=stress_3d_changes,
+            )
+            inv_status = inv_result.status
+            inv_price_level = inv_result.invalidation_price_level
+            inv_price_dist = inv_result.invalidation_price_distance_pct
+            inv_delta_thresh = inv_result.invalidation_delta_threshold
+            inv_driver_rule = inv_result.invalidation_driver_rule
+            inv_tests = inv_result.tests_triggered
+            inv_actions = inv_result.actions
+        except Exception as e:
+            LOG.warning("Invalidation computation failed for %s: %s", bias.sector, e)
+            notes.append("Invalidation check unavailable")
 
         idea = TradeIdea(
             symbol=bias.sector,
@@ -340,6 +499,7 @@ def generate_weekly_ideas(
             confidence=bias.confidence,
             regime_context=regime.label,
             lead_lag_source="; ".join(bias.sources[:3]),
+            source_driver=source_driver,
             iv_rank=round(iv_rank, 2) if iv_rank is not None else None,
             expected_move=round(expected_move, 2) if expected_move is not None else None,
             max_risk_estimate=f"${roc_assumptions['maxLoss'] * 100:.0f} per spread" if roc_assumptions else None,
@@ -347,6 +507,19 @@ def generate_weekly_ideas(
             roc_assumptions=roc_assumptions,
             notes=notes,
             suppressed=is_suppressed,
+            invalidation_status=inv_status,
+            invalidation_price_level=inv_price_level,
+            invalidation_price_distance_pct=inv_price_dist,
+            invalidation_delta_threshold=inv_delta_thresh,
+            invalidation_driver_rule=inv_driver_rule,
+            invalidation_tests_triggered=inv_tests,
+            invalidation_actions=inv_actions,
+            global_vol_score=round(vol_score, 4) if vol_score is not None else None,
+            us_iv_rank_state=vol_us_state,
+            vol_lag_state=vol_state,
+            structure_bias_reason=vol_struct_bias,
+            strike_width_multiplier=vol_sw_mult,
+            vol_size_multiplier=vol_sz_mult,
         )
         trade_ideas.append(idea.to_dict())
 
@@ -362,4 +535,5 @@ def generate_weekly_ideas(
         trade_ideas=trade_ideas,
         suppressions=suppressions,
         global_signal_summary=narrative,
+        vol_leadlag=vol_leadlag.to_dict() if vol_leadlag is not None else None,
     )

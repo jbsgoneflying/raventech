@@ -8,11 +8,18 @@
   "use strict";
 
   // DOM refs
-  const loadBtn = document.getElementById("loadBtn");
-  const refreshBtn = document.getElementById("refreshBtn");
+  const snapshotBtn = document.getElementById("snapshotBtn");
+  const runUpdateBtn = document.getElementById("runUpdateBtn");
   const pipelineStatus = document.getElementById("pipelineStatus");
   const resultsEl = document.getElementById("results");
   const emptyEl = document.getElementById("emptySection");
+
+  // Snapshot metadata strip
+  const snapshotMetaEl = document.getElementById("snapshotMeta");
+  const snapshotGradeEl = document.getElementById("snapshotGrade");
+  const snapshotCreatedEl = document.getElementById("snapshotCreated");
+  const snapshotAsofEl = document.getElementById("snapshotAsof");
+  const snapshotWarningEl = document.getElementById("snapshotWarning");
 
   // Regime
   const regimeBanner = document.getElementById("regimeBanner");
@@ -42,6 +49,20 @@
   const suppressionsSection = document.getElementById("suppressionsSection");
   const suppressionList = document.getElementById("suppressionList");
 
+  // Vol Lead-Lag
+  const volLeadLagSection = document.getElementById("volLeadLagSection");
+  const volScoreBarFill = document.getElementById("volScoreBarFill");
+  const volScoreVal = document.getElementById("volScoreVal");
+  const volPillRow = document.getElementById("volPillRow");
+  const volBiasText = document.getElementById("volBiasText");
+
+  // Transition triggers
+  const triggerPanel = document.getElementById("triggerPanel");
+  const triggerDriverRow = document.getElementById("triggerDriverRow");
+  const triggerFlipRow = document.getElementById("triggerFlipRow");
+  const triggerProximity = document.getElementById("triggerProximity");
+  const triggerBoundary = document.getElementById("triggerBoundary");
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -56,8 +77,8 @@
       if (spinner) spinner.style.display = on ? "inline-block" : "none";
     }
     // Disable both buttons during any operation
-    loadBtn.disabled = on;
-    refreshBtn.disabled = on;
+    if (snapshotBtn) snapshotBtn.disabled = on;
+    if (runUpdateBtn) runUpdateBtn.disabled = on;
   }
 
   function dirClass(dir) {
@@ -151,6 +172,159 @@
     }).join("");
   }
 
+  function renderTransitionTriggers(regime) {
+    var tt = regime && regime.transitionTriggers;
+    if (!tt) { hide(triggerPanel); return; }
+    show(triggerPanel);
+
+    // Top drivers
+    var drivers = tt.top_drivers || [];
+    triggerDriverRow.innerHTML = drivers.map(function (d) {
+      return "<div class='triggerDriverPill'>" +
+        "<span>" + esc(d.name) + "</span>" +
+        "<span class='driverVal' style='color:" + stressColor(d.value || 0) + "'>" + fmtNum(d.value, 1) + "</span>" +
+        "</div>";
+    }).join("");
+
+    // Flip conditions
+    var flipUp = tt.flip_up_conditions || [];
+    var flipDown = tt.flip_down_conditions || [];
+    var flipHtml = "";
+    if (flipUp.length > 0) {
+      flipHtml += "<div class='triggerFlipBox flip-up'>" +
+        "<div class='triggerFlipBoxTitle'>Flip Up</div>" +
+        "<ul>" + flipUp.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" +
+        "</div>";
+    }
+    if (flipDown.length > 0) {
+      flipHtml += "<div class='triggerFlipBox flip-down'>" +
+        "<div class='triggerFlipBoxTitle'>Flip Down</div>" +
+        "<ul>" + flipDown.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" +
+        "</div>";
+    }
+    triggerFlipRow.innerHTML = flipHtml;
+
+    // Proximity flags
+    var flags = tt.proximity_flags || [];
+    if (flags.length > 0) {
+      triggerProximity.innerHTML = flags.map(function (f) {
+        var cls = f.replace(/_/g, "-");
+        var label = f.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+        return "<span class='proximityTag " + cls + "'>" + esc(label) + "</span>";
+      }).join("");
+    } else {
+      triggerProximity.innerHTML = "";
+    }
+
+    // Boundary distances
+    var dists = tt.boundary_distances || {};
+    var distKeys = Object.keys(dists);
+    if (distKeys.length > 0) {
+      triggerBoundary.innerHTML = distKeys.map(function (k) {
+        var v = dists[k];
+        var label = k.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+        var sign = v >= 0 ? "+" : "";
+        return "<div class='boundaryDistItem'>" +
+          "<span class='bdLabel'>" + esc(label) + ":</span> " +
+          "<span class='bdVal'>" + sign + fmtNum(v, 1) + "</span>" +
+          "</div>";
+      }).join("");
+    } else {
+      triggerBoundary.innerHTML = "";
+    }
+  }
+
+  function volStateClass(state) {
+    if (state === "UNDERPRICED_RISK") return "vol-underpriced";
+    if (state === "OVERPRICED_RISK") return "vol-overpriced";
+    if (state === "CONFIRMED_STRESS") return "vol-confirmed";
+    return "vol-normal";
+  }
+
+  function volStateLabel(state) {
+    if (state === "UNDERPRICED_RISK") return "UNDERPRICED RISK";
+    if (state === "OVERPRICED_RISK") return "OVERPRICED RISK";
+    if (state === "CONFIRMED_STRESS") return "CONFIRMED STRESS";
+    return "NORMAL";
+  }
+
+  function ivStateClass(state) {
+    if (state === "LOW") return "iv-low";
+    if (state === "HIGH") return "iv-high";
+    return "iv-neutral";
+  }
+
+  function volScoreColor(score) {
+    if (score > 0.75) return "rgba(255, 59, 48, 0.85)";
+    if (score > 0.4) return "rgba(255, 149, 0, 0.85)";
+    if (score < -0.75) return "rgba(52, 199, 89, 0.85)";
+    if (score < -0.4) return "rgba(52, 199, 89, 0.65)";
+    return "rgba(11, 11, 15, 0.25)";
+  }
+
+  function renderVolLeadLag(data) {
+    var vll = data && data.volLeadLag;
+    if (!vll) { hide(volLeadLagSection); return; }
+    show(volLeadLagSection);
+
+    var score = vll.global_vol_score || 0;
+    var direction = vll.global_vol_direction || "flat";
+    var usState = vll.us_iv_state || "NEUTRAL";
+    var lagState = vll.vol_lag_state || "NORMAL";
+    var suppressed = vll.suppressed || false;
+    var bias = vll.structure_bias || "";
+    var swMult = vll.strike_width_multiplier || 1.0;
+    var szMult = vll.vol_size_multiplier || 1.0;
+    var components = vll.components || {};
+
+    // Score bar: centered at 50%, extend left (negative/compressing) or right (positive/expanding)
+    var pct = Math.min(Math.abs(score) / 3.0 * 50, 50); // 0-50% half-width
+    var color = volScoreColor(score);
+    if (score >= 0) {
+      volScoreBarFill.style.left = "50%";
+      volScoreBarFill.style.width = pct + "%";
+    } else {
+      volScoreBarFill.style.left = (50 - pct) + "%";
+      volScoreBarFill.style.width = pct + "%";
+    }
+    volScoreBarFill.style.background = color;
+    volScoreVal.textContent = (score >= 0 ? "+" : "") + fmtNum(score, 2);
+    volScoreVal.style.color = color;
+
+    // Pills row: US IV State + Vol Lag State + modifiers
+    var pills = [];
+    pills.push("<span class='volStateBadge " + (suppressed ? "vol-suppressed" : volStateClass(lagState)) + "'>" +
+      (suppressed ? "SUPPRESSED" : volStateLabel(lagState)) + "</span>");
+    pills.push("<span class='volPill'>US IV: <span class='volPillVal volIvPill " + ivStateClass(usState) + "'>" + esc(usState) + "</span></span>");
+    pills.push("<span class='volPill'>Direction: <span class='volPillVal'>" + esc(direction) + "</span></span>");
+    if (swMult !== 1.0) {
+      pills.push("<span class='volPill'>Strike Width: <span class='volPillVal'>" + fmtNum(swMult, 2) + "x</span></span>");
+    }
+    if (szMult !== 1.0) {
+      pills.push("<span class='volPill'>Size Modifier: <span class='volPillVal'>" + fmtNum(szMult, 2) + "x</span></span>");
+    }
+
+    // Component z-scores
+    var compKeys = Object.keys(components);
+    if (compKeys.length > 0) {
+      compKeys.forEach(function (k) {
+        var z = components[k];
+        pills.push("<span class='volPill'>" + esc(k) + ": <span class='volPillVal' style='color:" + volScoreColor(z) + "'>" +
+          (z >= 0 ? "+" : "") + fmtNum(z, 2) + "</span></span>");
+      });
+    }
+    volPillRow.innerHTML = pills.join("");
+
+    // Bias text
+    if (suppressed && vll.suppression_reason) {
+      volBiasText.textContent = vll.suppression_reason;
+    } else if (bias) {
+      volBiasText.textContent = bias;
+    } else {
+      volBiasText.textContent = "";
+    }
+  }
+
   function renderNarrative(summary, week) {
     if (!summary) { narrativeText.textContent = "—"; return; }
     const parts = [];
@@ -197,6 +371,18 @@
     }).join("");
   }
 
+  function invBadgeClass(status) {
+    if (status === "HARD") return "inv-hard";
+    if (status === "SOFT") return "inv-soft";
+    return "inv-valid";
+  }
+
+  function invActionsClass(status) {
+    if (status === "HARD") return "inv-actions-hard";
+    if (status === "SOFT") return "inv-actions-soft";
+    return "inv-actions-valid";
+  }
+
   function renderTradeIdeas(ideas) {
     if (!ideas || ideas.length === 0) {
       ideasGrid.innerHTML = "<div class='emptyState'><div class='emptyStateBody'>No trade ideas generated this period. This may be due to insufficient signal strength or regime suppression.</div></div>";
@@ -205,21 +391,65 @@
     }
     ideasMeta.textContent = ideas.length + " idea" + (ideas.length !== 1 ? "s" : "");
     ideasGrid.innerHTML = ideas.map(function (idea) {
+      var invStatus = idea.invalidationStatus || "VALID";
+      var ideaVolState = idea.volLagState || null;
       var suppBadge = idea.suppressed ? " <span class='suppressedBadge'>Suppressed</span>" : "";
-      var cardClass = "ideaCard" + (idea.suppressed ? " suppressed" : "");
+      var invBadge = " <span class='invBadge " + invBadgeClass(invStatus) + "'>" + esc(invStatus) + "</span>";
+      var volBadge = (ideaVolState && ideaVolState !== "NORMAL") ?
+        " <span class='volStateBadge " + volStateClass(ideaVolState) + "' style='font-size:9px;padding:2px 7px;'>" + volStateLabel(ideaVolState) + "</span>" : "";
+      var cardClass = "ideaCard" + (idea.suppressed ? " suppressed" : "") + (invStatus === "HARD" ? " inv-hard-card" : "");
 
       var rows = [];
       rows.push("<div class='ideaCardRow'><span class='k'>Direction</span><span class='v biasCardDir " + dirClass(idea.directionalLean) + "'>" + esc(idea.directionalLean) + "</span></div>");
       rows.push("<div class='ideaCardRow'><span class='k'>Confidence</span><span class='v'>" + idea.confidence + "%</span></div>");
       rows.push("<div class='ideaCardRow'><span class='k'>Regime</span><span class='v'>" + esc(idea.regimeContext) + "</span></div>");
+      if (idea.sourceDriver) rows.push("<div class='ideaCardRow'><span class='k'>Driver</span><span class='v'>" + esc(idea.sourceDriver) + "</span></div>");
       if (idea.ivRank != null) rows.push("<div class='ideaCardRow'><span class='k'>IV Rank</span><span class='v'>" + fmtPct(idea.ivRank * 100) + "</span></div>");
       if (idea.expectedMove != null) rows.push("<div class='ideaCardRow'><span class='k'>Exp Move</span><span class='v'>" + fmtPct(idea.expectedMove) + "</span></div>");
       if (idea.rocEstimateModel) rows.push("<div class='ideaCardRow'><span class='k'>ROC Est.</span><span class='v'>" + esc(idea.rocEstimateModel) + "</span></div>");
       if (idea.maxRiskEstimate) rows.push("<div class='ideaCardRow'><span class='k'>Max Risk</span><span class='v'>" + esc(idea.maxRiskEstimate) + "</span></div>");
+      if (idea.strikeWidthMultiplier != null && idea.strikeWidthMultiplier !== 1.0) rows.push("<div class='ideaCardRow'><span class='k'>Strike Width</span><span class='v'>" + fmtNum(idea.strikeWidthMultiplier, 2) + "x</span></div>");
+      if (idea.volSizeMultiplier != null && idea.volSizeMultiplier !== 1.0) rows.push("<div class='ideaCardRow'><span class='k'>Vol Size Mod</span><span class='v'>" + fmtNum(idea.volSizeMultiplier, 2) + "x</span></div>");
+
+      // Invalidation rules section
+      var invHtml = "";
+      var hasInvData = idea.invalidationPriceLevel != null || idea.invalidationDeltaThreshold != null || idea.invalidationDriverRule;
+      if (hasInvData) {
+        var invRows = [];
+        if (idea.invalidationPriceLevel != null) {
+          var distStr = idea.invalidationPriceDistancePct != null ? " (" + fmtPct(idea.invalidationPriceDistancePct * 100) + " away)" : "";
+          invRows.push("<div class='invRuleRow'><span class='invRuleLabel'>Price</span><span class='invRuleVal'>Invalidate if close " +
+            (idea.directionalLean === "bearish" ? ">= " : "<= ") +
+            fmtNum(idea.invalidationPriceLevel, 2) + distStr + "</span></div>");
+        }
+        if (idea.invalidationDeltaThreshold != null) {
+          invRows.push("<div class='invRuleRow'><span class='invRuleLabel'>Delta</span><span class='invRuleVal'>Invalidate if |delta| >= " +
+            fmtNum(idea.invalidationDeltaThreshold, 2) + "</span></div>");
+        }
+        if (idea.invalidationDriverRule) {
+          invRows.push("<div class='invRuleRow'><span class='invRuleLabel'>Driver</span><span class='invRuleVal'>" + esc(idea.invalidationDriverRule) + "</span></div>");
+        }
+        if (idea.invalidationTestsTriggered && idea.invalidationTestsTriggered.length > 0) {
+          invRows.push("<div class='invRuleRow'><span class='invRuleLabel'>Fired</span><span class='invRuleVal'>" +
+            idea.invalidationTestsTriggered.map(esc).join(", ") + "</span></div>");
+        }
+        invHtml = "<div class='invRulesSection'>" + invRows.join("") + "</div>";
+      }
+
+      // Action guidance
+      var actionsHtml = "";
+      if (idea.invalidationActions && idea.invalidationActions.length > 0) {
+        actionsHtml = "<div class='invActionsRow " + invActionsClass(invStatus) + "'>" +
+          idea.invalidationActions.map(esc).join(" ") + "</div>";
+      }
 
       var notesHtml = "";
-      if (idea.notes && idea.notes.length > 0) {
-        notesHtml = "<div class='ideaCardNotes'>" + idea.notes.map(esc).join("<br/>") + "</div>";
+      var allNotes = (idea.notes && idea.notes.length > 0) ? idea.notes.slice() : [];
+      if (idea.structureBiasReason && ideaVolState && ideaVolState !== "NORMAL") {
+        allNotes.push("Vol: " + idea.structureBiasReason);
+      }
+      if (allNotes.length > 0) {
+        notesHtml = "<div class='ideaCardNotes'>" + allNotes.map(esc).join("<br/>") + "</div>";
       }
 
       var sourceHtml = "";
@@ -229,10 +459,12 @@
 
       return "<div class='" + cardClass + "'>" +
         "<div class='ideaCardHeader'>" +
-          "<span class='ideaCardSymbol'>" + esc(idea.symbol) + suppBadge + "</span>" +
+          "<span class='ideaCardSymbol'>" + esc(idea.symbol) + suppBadge + invBadge + volBadge + "</span>" +
           "<span class='ideaCardStructure'>" + esc(structureLabel(idea.structure)) + "</span>" +
         "</div>" +
         "<div class='ideaCardBody'>" + rows.join("") + "</div>" +
+        invHtml +
+        actionsHtml +
         sourceHtml +
         notesHtml +
         "</div>";
@@ -261,8 +493,57 @@
   // Render results from API response
   // ---------------------------------------------------------------------------
 
+  function renderSnapshotMeta(meta) {
+    if (!meta || !snapshotMetaEl) return;
+    show(snapshotMetaEl);
+
+    // Grade badge
+    var grade = meta.grade || "C";
+    var gradeLabel = meta.gradeLabel || "";
+    snapshotGradeEl.className = "snapshotGradeBadge grade-" + grade;
+    snapshotGradeEl.textContent = "Grade " + grade + (gradeLabel ? " — " + gradeLabel : "");
+
+    // Created time
+    if (meta.createdAt) {
+      try {
+        var d = new Date(meta.createdAt);
+        snapshotCreatedEl.textContent = "Built " + d.toLocaleString(undefined, {
+          month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true
+        });
+      } catch (_) {
+        snapshotCreatedEl.textContent = "Built " + meta.createdAt;
+      }
+    } else {
+      snapshotCreatedEl.textContent = "";
+    }
+
+    // As-of dates
+    var asof = meta.asofDates || {};
+    var parts = [];
+    if (asof.us) parts.push("US: " + asof.us);
+    if (asof.eu) parts.push("EU: " + asof.eu);
+    if (asof.asia) parts.push("Asia: " + asof.asia);
+    if (asof.au) parts.push("AU: " + asof.au);
+    snapshotAsofEl.textContent = parts.join(" | ");
+
+    // Warning
+    if (meta.warning) {
+      snapshotWarningEl.textContent = meta.warning;
+      show(snapshotWarningEl);
+    } else {
+      hide(snapshotWarningEl);
+    }
+  }
+
   function renderAll(data) {
+    // Render snapshot metadata strip if present
+    if (data.meta) {
+      renderSnapshotMeta(data.meta);
+    }
+
     renderRegime(data.regime);
+    renderTransitionTriggers(data.regime);
+    renderVolLeadLag(data);
     renderNarrative(data.globalSignalSummary, data.week);
     renderIndexBiases(data.indexBiases);
     renderSectorBiases(data.sectorBiases);
@@ -271,110 +552,93 @@
 
     var statusParts = [];
     statusParts.push("Week: " + (data.week || "—"));
-    statusParts.push("Generated: " + (data.generatedAt ? new Date(data.generatedAt).toLocaleString() : "—"));
-    if (data.pipelineStatus) {
-      statusParts.push("Pipeline: " + (data.pipelineStatus.status || "—"));
-      if (data.pipelineStatus.expected_date) {
-        statusParts.push("Data Date: " + data.pipelineStatus.expected_date);
-      }
+    if (data.meta && data.meta.snapshotId) {
+      statusParts.push("Snapshot: " + data.meta.snapshotId);
+    }
+    if (data.generatedAt) {
+      statusParts.push("Generated: " + new Date(data.generatedAt).toLocaleString());
     }
     pipelineStatus.textContent = statusParts.join("  ·  ");
     show(resultsEl);
   }
 
   // ---------------------------------------------------------------------------
-  // Load Latest: fast read from Redis cache (no pipeline trigger)
+  // Get Snapshot: smart single-call to the API
   // ---------------------------------------------------------------------------
 
-  async function loadLatest() {
-    setLoading(true, loadBtn);
+  async function getSnapshot(view) {
+    var btn = (view === "run") ? runUpdateBtn : snapshotBtn;
+    var isRun = (view === "run");
+
+    setLoading(true, btn);
     hide(resultsEl);
     hide(emptyEl);
-    pipelineStatus.textContent = "Loading cached results...";
+    hide(snapshotMetaEl);
+    pipelineStatus.textContent = isRun ? "Running pipeline..." : "Loading snapshot...";
+
+    // For explicit run or if request takes long, show the Raven loading overlay
+    if (isRun && window.RavenLoading) {
+      window.RavenLoading.show({
+        status: "Running full pipeline...",
+        expectedLoadMs: 30000,
+        clearResults: false,
+      });
+    }
+
+    // Start a timer so if the request takes > 2s we show loading overlay
+    var slowTimer = null;
+    if (!isRun) {
+      slowTimer = setTimeout(function () {
+        if (window.RavenLoading) {
+          window.RavenLoading.show({
+            status: "Bootstrapping pipeline (first run)...",
+            expectedLoadMs: 30000,
+            clearResults: false,
+          });
+        }
+      }, 2000);
+    }
 
     try {
-      var resp = await fetch("/api/engine5/weekly-ideas");
+      var url = "/api/engine5/weekly-ideas";
+      if (view && view !== "best") {
+        url += "?view=" + encodeURIComponent(view);
+      }
+
+      var resp = await fetch(url);
+
+      // Clear the slow timer
+      if (slowTimer) clearTimeout(slowTimer);
 
       if (resp.status === 404) {
+        if (window.RavenLoading) window.RavenLoading.hide();
         show(emptyEl);
-        pipelineStatus.textContent = "No cached data. Click \"Refresh Data\" to run the pipeline for the first time.";
+        pipelineStatus.textContent = "Engine 5 is not enabled or no data available.";
         return;
       }
+
       if (!resp.ok) {
+        if (window.RavenLoading) window.RavenLoading.hide();
         var errText = await resp.text();
         pipelineStatus.textContent = "Error: " + resp.status + " — " + errText;
         show(emptyEl);
         return;
       }
 
-      renderAll(await resp.json());
-
-    } catch (err) {
-      console.error("Engine 5 load error:", err);
-      pipelineStatus.textContent = "Network error: " + err.message;
-      show(emptyEl);
-    } finally {
-      setLoading(false, loadBtn);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Refresh Data: triggers the full EODHD pipeline, then loads results
-  // ---------------------------------------------------------------------------
-
-  async function refreshData() {
-    setLoading(true, refreshBtn);
-    hide(resultsEl);
-    hide(emptyEl);
-    pipelineStatus.textContent = "Fetching global market data from EODHD (this may take 15-30s)...";
-
-    try {
-      var refreshResp = await fetch("/api/engine5/refresh", { method: "POST" });
-
-      if (refreshResp.ok) {
-        var refreshResult = await refreshResp.json();
-        if (refreshResult.ok) {
-          pipelineStatus.textContent = "Pipeline complete. Loading results...";
-        } else {
-          pipelineStatus.textContent = "Pipeline finished with warnings (exit " + refreshResult.exitCode + "). Loading available data...";
-        }
-      } else if (refreshResp.status === 404) {
-        show(emptyEl);
-        pipelineStatus.textContent = "Engine 5 is not enabled. Set ENABLE_ENGINE5_LEAD_LAG=1.";
-        setLoading(false, refreshBtn);
-        return;
-      } else {
-        pipelineStatus.textContent = "Refresh had issues; loading cached data...";
-      }
-    } catch (refreshErr) {
-      console.warn("Engine 5 refresh error:", refreshErr);
-      pipelineStatus.textContent = "Refresh failed; loading cached data if available...";
-    }
-
-    // Now load the (freshly written) results
-    try {
-      var resp = await fetch("/api/engine5/weekly-ideas");
-
-      if (resp.status === 404) {
-        show(emptyEl);
-        pipelineStatus.textContent = "Pipeline did not produce results. Check server logs.";
-        return;
-      }
-      if (!resp.ok) {
-        var errText = await resp.text();
-        pipelineStatus.textContent = "Error loading results: " + resp.status;
-        show(emptyEl);
-        return;
+      if (window.RavenLoading) {
+        window.RavenLoading.setProgress(95, "Rendering results...");
       }
 
       renderAll(await resp.json());
 
     } catch (err) {
+      if (slowTimer) clearTimeout(slowTimer);
       console.error("Engine 5 load error:", err);
       pipelineStatus.textContent = "Network error: " + err.message;
       show(emptyEl);
     } finally {
-      setLoading(false, refreshBtn);
+      if (window.RavenLoading) window.RavenLoading.hide();
+      setLoading(false, btn);
     }
   }
 
@@ -382,13 +646,17 @@
   // Init
   // ---------------------------------------------------------------------------
 
-  loadBtn.addEventListener("click", function (e) {
-    e.preventDefault();
-    loadLatest();
-  });
+  if (snapshotBtn) {
+    snapshotBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      getSnapshot("best");
+    });
+  }
 
-  refreshBtn.addEventListener("click", function (e) {
-    e.preventDefault();
-    refreshData();
-  });
+  if (runUpdateBtn) {
+    runUpdateBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      getSnapshot("run");
+    });
+  }
 })();

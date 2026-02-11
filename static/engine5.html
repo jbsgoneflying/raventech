@@ -12,6 +12,58 @@
     <style>
       /* Engine 5 specific styles */
 
+      /* Snapshot metadata strip */
+      .snapshotMeta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        background: rgba(11,11,15,0.02);
+        border-radius: var(--radius-card);
+        border: 1px solid rgba(11,11,15,0.06);
+        flex-wrap: wrap;
+      }
+      .snapshotGradeBadge {
+        display: inline-flex;
+        align-items: center;
+        font-weight: 700;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        letter-spacing: 0.02em;
+      }
+      .snapshotGradeBadge.grade-A {
+        background: rgba(52, 199, 89, 0.14);
+        color: #1b8a3e;
+      }
+      .snapshotGradeBadge.grade-B {
+        background: rgba(255, 204, 0, 0.14);
+        color: #997a00;
+      }
+      .snapshotGradeBadge.grade-C {
+        background: rgba(255, 59, 48, 0.14);
+        color: #cc2f26;
+      }
+      .snapshotMetaItem {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .snapshotMetaSep {
+        color: rgba(11,11,15,0.15);
+        font-size: 12px;
+      }
+      .snapshotWarning {
+        font-size: 11px;
+        color: #cc6600;
+        font-weight: 600;
+        padding: 2px 8px;
+        background: rgba(255, 165, 0, 0.08);
+        border-radius: 6px;
+      }
+
       /* Regime banner */
       .regimeBanner {
         display: flex;
@@ -357,6 +409,324 @@
         .statsRow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
 
+      /* Regime Transition Triggers panel */
+      .triggerPanel {
+        margin-top: 14px;
+        padding: 16px 18px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.55);
+      }
+      .triggerPanelTitle {
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: -0.2px;
+        margin-bottom: 12px;
+        color: var(--heading);
+      }
+      .triggerDriverRow {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .triggerDriverPill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+      }
+      .triggerDriverPill .driverVal {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 800;
+      }
+      .triggerFlipRow {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      @media (max-width: 720px) {
+        .triggerFlipRow { grid-template-columns: 1fr; }
+      }
+      .triggerFlipBox {
+        padding: 10px 14px;
+        border-radius: var(--radius-card);
+        font-size: 12px;
+        line-height: 1.65;
+      }
+      .triggerFlipBox.flip-up {
+        background: rgba(52, 199, 89, 0.06);
+        border: 1px solid rgba(52, 199, 89, 0.18);
+      }
+      .triggerFlipBox.flip-down {
+        background: rgba(255, 59, 48, 0.06);
+        border: 1px solid rgba(255, 59, 48, 0.18);
+      }
+      .triggerFlipBoxTitle {
+        font-weight: 800;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+      }
+      .flip-up .triggerFlipBoxTitle { color: rgba(12, 70, 38, 0.85); }
+      .flip-down .triggerFlipBoxTitle { color: rgba(86, 17, 12, 0.85); }
+      .triggerFlipBox ul {
+        margin: 0;
+        padding: 0 0 0 16px;
+        color: var(--body);
+      }
+      .triggerFlipBox li {
+        margin-bottom: 2px;
+      }
+      .proximityTags {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .proximityTag {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+      }
+      .proximityTag.near-risk-on {
+        background: rgba(52, 199, 89, 0.12);
+        border: 1px solid rgba(52, 199, 89, 0.25);
+        color: rgba(12, 70, 38, 0.85);
+      }
+      .proximityTag.near-stressed {
+        background: rgba(255, 59, 48, 0.12);
+        border: 1px solid rgba(255, 59, 48, 0.25);
+        color: rgba(86, 17, 12, 0.85);
+      }
+      .proximityTag.near-transitional {
+        background: rgba(255, 204, 0, 0.12);
+        border: 1px solid rgba(255, 204, 0, 0.25);
+        color: rgba(100, 70, 0, 0.85);
+      }
+      .boundaryDistGrid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        margin-top: 10px;
+      }
+      @media (max-width: 720px) {
+        .boundaryDistGrid { grid-template-columns: repeat(2, 1fr); }
+      }
+      .boundaryDistItem {
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(11,11,15,0.03);
+        border: 1px solid rgba(11,11,15,0.06);
+      }
+      .boundaryDistItem .bdLabel {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .boundaryDistItem .bdVal {
+        font-weight: 800;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      /* Vol Lead-Lag panel */
+      .volPanel {
+        padding: 16px 18px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.55);
+      }
+      .volPanelTitle {
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: -0.2px;
+        margin-bottom: 12px;
+        color: var(--heading);
+      }
+      .volScoreRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .volScoreBarTrack {
+        flex: 1;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(11, 11, 15, 0.06);
+        position: relative;
+        overflow: hidden;
+      }
+      .volScoreBarCenter {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        width: 1px;
+        height: 100%;
+        background: rgba(11, 11, 15, 0.20);
+      }
+      .volScoreBarFill {
+        position: absolute;
+        top: 0;
+        height: 100%;
+        border-radius: 999px;
+        transition: all 400ms ease;
+      }
+      .volScoreVal {
+        font-size: 14px;
+        font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        min-width: 50px;
+        text-align: right;
+      }
+      .volPillRow {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .volPill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+      }
+      .volPill .volPillVal {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 800;
+      }
+      .volStateBadge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+      }
+      .volStateBadge.vol-underpriced {
+        background: rgba(255, 204, 0, 0.12);
+        border: 1px solid rgba(255, 204, 0, 0.30);
+        color: rgba(100, 70, 0, 0.90);
+      }
+      .volStateBadge.vol-overpriced {
+        background: rgba(52, 199, 89, 0.12);
+        border: 1px solid rgba(52, 199, 89, 0.25);
+        color: rgba(12, 70, 38, 0.90);
+      }
+      .volStateBadge.vol-confirmed {
+        background: rgba(255, 59, 48, 0.12);
+        border: 1px solid rgba(255, 59, 48, 0.25);
+        color: rgba(86, 17, 12, 0.90);
+      }
+      .volStateBadge.vol-normal {
+        background: rgba(11, 11, 15, 0.06);
+        border: 1px solid rgba(11, 11, 15, 0.12);
+        color: rgba(11, 11, 15, 0.65);
+      }
+      .volStateBadge.vol-suppressed {
+        background: rgba(11, 11, 15, 0.04);
+        border: 1px dashed rgba(11, 11, 15, 0.15);
+        color: rgba(11, 11, 15, 0.45);
+      }
+      .volBiasText {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--body);
+        margin-top: 8px;
+        line-height: 1.5;
+      }
+      .volIvPill.iv-low { color: rgba(52, 199, 89, 0.90); }
+      .volIvPill.iv-neutral { color: rgba(255, 204, 0, 0.90); }
+      .volIvPill.iv-high { color: rgba(255, 59, 48, 0.90); }
+
+      /* Invalidation badges & rows */
+      .invBadge {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+      .invBadge.inv-valid {
+        background: rgba(52, 199, 89, 0.12);
+        border: 1px solid rgba(52, 199, 89, 0.25);
+        color: rgba(12, 70, 38, 0.90);
+      }
+      .invBadge.inv-soft {
+        background: rgba(255, 204, 0, 0.12);
+        border: 1px solid rgba(255, 204, 0, 0.30);
+        color: rgba(100, 70, 0, 0.90);
+      }
+      .invBadge.inv-hard {
+        background: rgba(255, 59, 48, 0.12);
+        border: 1px solid rgba(255, 59, 48, 0.25);
+        color: rgba(86, 17, 12, 0.90);
+      }
+      .ideaCard.inv-hard-card {
+        opacity: 0.60;
+        border-style: dashed;
+        border-color: rgba(255, 59, 48, 0.30);
+      }
+      .invRulesSection {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+        line-height: 1.6;
+      }
+      .invRulesSection .invRuleRow {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-bottom: 2px;
+      }
+      .invRulesSection .invRuleLabel {
+        color: var(--muted);
+        font-weight: 600;
+        min-width: 60px;
+      }
+      .invRulesSection .invRuleVal {
+        font-weight: 600;
+        color: var(--body);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .invActionsRow {
+        margin-top: 6px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.6;
+      }
+      .invActionsRow.inv-actions-valid {
+        background: rgba(52, 199, 89, 0.06);
+        color: rgba(12, 70, 38, 0.80);
+      }
+      .invActionsRow.inv-actions-soft {
+        background: rgba(255, 204, 0, 0.08);
+        color: rgba(100, 70, 0, 0.85);
+      }
+      .invActionsRow.inv-actions-hard {
+        background: rgba(255, 59, 48, 0.06);
+        color: rgba(86, 17, 12, 0.85);
+      }
+
       .emptyState {
         padding: 48px 20px;
         text-align: center;
@@ -398,26 +768,24 @@
       <section class="controlBar" aria-label="Engine 5 Controls">
         <div class="controlBarForm controlBarForm--engine2" style="justify-content:space-between;">
           <div style="display:flex; align-items:center; gap:10px;">
-            <button id="loadBtn" class="primaryButton" type="button">
+            <button id="snapshotBtn" class="primaryButton" type="button">
               <span class="btnSpinner" aria-hidden="true"></span>
-              Load Latest
+              Get Latest Snapshot
             </button>
-            <button id="refreshBtn" class="primaryButton" type="button" style="background: rgba(11,11,15,0.04); border-color: rgba(11,11,15,0.12); color: var(--heading);">
+            <button id="runUpdateBtn" class="primaryButton" type="button" style="background: rgba(11,11,15,0.04); border-color: rgba(11,11,15,0.12); color: var(--heading); font-size:12px; padding:6px 14px;">
               <span class="btnSpinner" aria-hidden="true"></span>
-              Refresh Data
+              Run Update
             </button>
-            <span class="tipWrap">
-              <button class="tipBtn" type="button" aria-label="Button help" aria-expanded="false">i</button>
-              <div class="tipPanel" role="tooltip">
-                <div class="tipTitle">Load vs Refresh</div>
-                <div class="tipBody">
-                  <p><b>Load Latest</b>: Instantly shows the most recent analysis from cache. Use this when the US desk opens -- overnight results are already computed.</p>
-                  <p><b>Refresh Data</b>: Re-fetches live data from EODHD/ORATS and re-runs the full pipeline. Use after market close or when you want fresh numbers. Takes 15-30 seconds.</p>
-                </div>
-              </div>
-            </span>
           </div>
-          <div id="pipelineStatus" class="status" style="text-align:right; font-size:12px;">Click "Load Latest" to view overnight analysis, or "Refresh Data" to pull fresh numbers.</div>
+          <div id="pipelineStatus" class="status" style="text-align:right; font-size:12px;">Click "Get Latest Snapshot" to view the best available analysis.</div>
+        </div>
+        <!-- Snapshot metadata strip -->
+        <div id="snapshotMeta" class="snapshotMeta hidden">
+          <span id="snapshotGrade" class="snapshotGradeBadge"></span>
+          <span id="snapshotCreated" class="snapshotMetaItem"></span>
+          <span class="snapshotMetaSep">|</span>
+          <span id="snapshotAsof" class="snapshotMetaItem"></span>
+          <span id="snapshotWarning" class="snapshotWarning hidden"></span>
         </div>
       </section>
 
@@ -443,6 +811,53 @@
           </div>
           <!-- Components -->
           <div class="componentGrid" id="componentGrid"></div>
+
+          <!-- Regime Transition Triggers -->
+          <div class="triggerPanel hidden" id="triggerPanel">
+            <div class="triggerPanelTitle">Regime Transition Triggers — What Would Change the Regime?</div>
+            <div id="triggerDriverRow" class="triggerDriverRow"></div>
+            <div id="triggerFlipRow" class="triggerFlipRow"></div>
+            <div id="triggerProximity" class="proximityTags"></div>
+            <div id="triggerBoundary" class="boundaryDistGrid"></div>
+          </div>
+        </section>
+
+        <!-- Vol Lead-Lag -->
+        <section class="surface hidden" id="volLeadLagSection" style="margin-top:16px;">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Volatility Lead-Lag
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Vol lead-lag help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Vol Lead-Lag</div>
+                  <div class="tipBody">
+                    <p>Detects when global volatility information has not yet been priced into US options. Adjusts strike width, sizing, and structure selection for weekly income trades.</p>
+                    <ul>
+                      <li><b>UNDERPRICED_RISK</b>: Global vol rising, US IV flat/low — widen strikes</li>
+                      <li><b>OVERPRICED_RISK</b>: Global vol falling, US IV high — vol decay edge</li>
+                      <li><b>CONFIRMED_STRESS</b>: Both rising — risk acknowledged</li>
+                      <li><b>NORMAL</b>: No actionable mismatch</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div id="volLeadLagPanel" class="volPanel">
+            <div class="volPanelTitle">Global Vol Score</div>
+            <div class="volScoreRow">
+              <span style="font-size:11px; font-weight:700; color:var(--muted); min-width:65px;">Compressing</span>
+              <div class="volScoreBarTrack">
+                <div class="volScoreBarCenter"></div>
+                <div id="volScoreBarFill" class="volScoreBarFill" style="left:50%; width:0%;"></div>
+              </div>
+              <span style="font-size:11px; font-weight:700; color:var(--muted); min-width:65px; text-align:right;">Expanding</span>
+              <span id="volScoreVal" class="volScoreVal">0.0</span>
+            </div>
+            <div id="volPillRow" class="volPillRow"></div>
+            <div id="volBiasText" class="volBiasText"></div>
+          </div>
         </section>
 
         <!-- Global Summary -->

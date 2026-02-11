@@ -209,6 +209,21 @@ class FeatureFlags:
     ENGINE5_FRESHNESS_RETRY_COUNT: int = 3            # Data freshness guard retries
     ENGINE5_FRESHNESS_RETRY_INTERVAL_S: int = 900     # 15 min between retries
 
+    # --- Engine 5: Immutable snapshots ---
+    ENGINE5_SNAPSHOT_TTL_S: int = 14 * 86400             # 14 days
+    ENGINE5_SNAPSHOT_INDEX_TTL_S: int = 30 * 86400        # 30 days
+    ENGINE5_SNAPSHOT_MAX_INDEX: int = 50                   # max snapshots in index
+    ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS: int = 14           # search window for view=best
+
+    # --- Engine 5: Vol Lead-Lag sub-module ---
+    ENGINE5_VOL_LEADLAG_ENABLED: bool = True
+    ENGINE5_GLOBAL_VOL_RISING_THRESHOLD: float = 0.75   # GlobalVolScore > this = rising
+    ENGINE5_GLOBAL_VOL_FALLING_THRESHOLD: float = -0.75  # GlobalVolScore < this = falling
+    ENGINE5_GLOBAL_VOL_NOISE_FLOOR: float = 0.40         # |score| < this = NORMAL
+    ENGINE5_US_IV_LOW_THRESHOLD: float = 30.0             # IV rank < this = LOW
+    ENGINE5_US_IV_HIGH_THRESHOLD: float = 60.0            # IV rank > this = HIGH
+    ENGINE5_VOL_ZSCORE_WINDOW: int = 60                   # Rolling z-score window (trading days)
+
     # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
     LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
     LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
@@ -343,6 +358,19 @@ class FeatureFlags:
             ENGINE5_LOOKBACK_DAYS=_get_int("ENGINE5_LOOKBACK_DAYS", 60),
             ENGINE5_FRESHNESS_RETRY_COUNT=_get_int("ENGINE5_FRESHNESS_RETRY_COUNT", 3),
             ENGINE5_FRESHNESS_RETRY_INTERVAL_S=_get_int("ENGINE5_FRESHNESS_RETRY_INTERVAL_S", 900),
+
+            ENGINE5_SNAPSHOT_TTL_S=_get_int("ENGINE5_SNAPSHOT_TTL_S", 14 * 86400),
+            ENGINE5_SNAPSHOT_INDEX_TTL_S=_get_int("ENGINE5_SNAPSHOT_INDEX_TTL_S", 30 * 86400),
+            ENGINE5_SNAPSHOT_MAX_INDEX=_get_int("ENGINE5_SNAPSHOT_MAX_INDEX", 50),
+            ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS=_get_int("ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS", 14),
+
+            ENGINE5_VOL_LEADLAG_ENABLED=_get_bool("ENGINE5_VOL_LEADLAG_ENABLED", True),
+            ENGINE5_GLOBAL_VOL_RISING_THRESHOLD=_get_float("ENGINE5_GLOBAL_VOL_RISING_THRESHOLD", 0.75),
+            ENGINE5_GLOBAL_VOL_FALLING_THRESHOLD=_get_float("ENGINE5_GLOBAL_VOL_FALLING_THRESHOLD", -0.75),
+            ENGINE5_GLOBAL_VOL_NOISE_FLOOR=_get_float("ENGINE5_GLOBAL_VOL_NOISE_FLOOR", 0.40),
+            ENGINE5_US_IV_LOW_THRESHOLD=_get_float("ENGINE5_US_IV_LOW_THRESHOLD", 30.0),
+            ENGINE5_US_IV_HIGH_THRESHOLD=_get_float("ENGINE5_US_IV_HIGH_THRESHOLD", 60.0),
+            ENGINE5_VOL_ZSCORE_WINDOW=_get_int("ENGINE5_VOL_ZSCORE_WINDOW", 60),
 
             LEGAL_REG_TICKER_DENYLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_DENYLIST", [])),
             LEGAL_REG_TICKER_ALLOWLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_ALLOWLIST", [])),
@@ -500,6 +528,15 @@ class FeatureFlags:
             ("ENGINE5_REGIME_TRANSITIONAL_THRESHOLD", float(self.ENGINE5_REGIME_TRANSITIONAL_THRESHOLD)),
             ("ENGINE5_MAX_LAG_DAYS", int(self.ENGINE5_MAX_LAG_DAYS)),
             ("ENGINE5_LOOKBACK_DAYS", int(self.ENGINE5_LOOKBACK_DAYS)),
+            ("ENGINE5_SNAPSHOT_TTL_S", int(self.ENGINE5_SNAPSHOT_TTL_S)),
+            ("ENGINE5_SNAPSHOT_MAX_INDEX", int(self.ENGINE5_SNAPSHOT_MAX_INDEX)),
+            ("ENGINE5_VOL_LEADLAG_ENABLED", bool(self.ENGINE5_VOL_LEADLAG_ENABLED)),
+            ("ENGINE5_GLOBAL_VOL_RISING_THRESHOLD", float(self.ENGINE5_GLOBAL_VOL_RISING_THRESHOLD)),
+            ("ENGINE5_GLOBAL_VOL_FALLING_THRESHOLD", float(self.ENGINE5_GLOBAL_VOL_FALLING_THRESHOLD)),
+            ("ENGINE5_GLOBAL_VOL_NOISE_FLOOR", float(self.ENGINE5_GLOBAL_VOL_NOISE_FLOOR)),
+            ("ENGINE5_US_IV_LOW_THRESHOLD", float(self.ENGINE5_US_IV_LOW_THRESHOLD)),
+            ("ENGINE5_US_IV_HIGH_THRESHOLD", float(self.ENGINE5_US_IV_HIGH_THRESHOLD)),
+            ("ENGINE5_VOL_ZSCORE_WINDOW", int(self.ENGINE5_VOL_ZSCORE_WINDOW)),
         )
 
 

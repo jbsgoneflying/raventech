@@ -32,7 +32,10 @@ from backend.engine5_pipeline import run_pipeline
 
 def main() -> int:
     force = "--force" in sys.argv
-    return run_pipeline(force=force)
+    exit_code, snapshot_id = run_pipeline(force=force, source="cron")
+    if snapshot_id:
+        logging.getLogger(__name__).info("Snapshot created: %s", snapshot_id)
+    return exit_code
 
 
 if __name__ == "__main__":

@@ -83,6 +83,17 @@ class RedisStore:
         except Exception:
             return None
 
+    def delete_key(self, key: str) -> bool:
+        """Delete a single key from Redis. Returns True on success."""
+        c = self._client()
+        if c is None:
+            return False
+        try:
+            c.delete(str(key))
+            return True
+        except Exception:
+            return False
+
 
 def get_store_optional() -> Optional[RedisStore]:
     url = str(os.getenv("REDIS_URL") or "").strip()

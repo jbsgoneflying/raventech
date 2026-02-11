@@ -1899,48 +1899,39 @@ def engine4_ichimoku_ticker(
 # ---------------------------------------------------------------------------
 
 
-@app.post("/api/engine5/refresh")
-async def engine5_refresh():
-    """Trigger the Engine 5 pipeline on-demand.
+def _engine5_snapshot_response(snap: dict) -> dict:
+    """Merge snapshot metadata into the data payload for the frontend."""
+    meta = snap.get("meta", {})
+    data = snap.get("data", {})
+    # Merge meta at the top level so the frontend gets everything in one response
+    data["meta"] = meta
+    return data
 
-    Runs the full nightly pipeline (fetch EODHD data, normalize, compute
-    lead-lag signals, classify regime, translate to US biases) and writes
-    results to Redis. Returns the pipeline result summary.
-    """
-    flags = get_flags()
-    if not flags.ENABLE_ENGINE5_LEAD_LAG:
-        raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
 
-    store = get_store_optional()
-    if store is None:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-
-    from backend.engine5_pipeline import run_pipeline
-    import asyncio
-
-    try:
-        # Run the blocking pipeline in a thread so we don't block the event loop
-        loop = asyncio.get_event_loop()
-        exit_code = await loop.run_in_executor(None, lambda: run_pipeline(force=True))
-
-        if exit_code == 0:
-            status = store.get_json("engine5:latest:status") or {}
-            return {"ok": True, "status": status}
-        else:
-            return {"ok": False, "exitCode": exit_code, "detail": "Pipeline completed with errors. Check server logs."}
-    except Exception as e:
-        LOG.exception("Engine 5 refresh failed")
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {e}") from e
+def _engine5_get_best_snapshot(store, flags):
+    """Return the best snapshot from cache, or None."""
+    from backend.engine5_snapshot import select_best_snapshot
+    return select_best_snapshot(
+        store,
+        max_age_days=flags.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
+        snapshot_ttl=flags.ENGINE5_SNAPSHOT_TTL_S,
+    )
 
 
 @app.get("/api/engine5/weekly-ideas")
-async def engine5_weekly_ideas(week: str = ""):
-    """Return the pre-generated weekly idea output for Engine 5.
+async def engine5_weekly_ideas(view: str = "best", date: str = ""):
+    """Smart Engine 5 endpoint with immutable snapshot selection.
 
-    Reads the persisted output from Redis (written by the pipeline).
-    No re-computation -- this is a fast read of whatever the last
-    pipeline run produced, so results survive across sessions.
+    Query parameter ``view``:
+    - **best**  (default): Return the highest-quality recent snapshot (Grade A/B).
+      If no A/B exists, return newest with a warning.  If NO snapshots exist at
+      all, auto-bootstrap and run the pipeline, then return the result.
+    - **latest**: Return the newest snapshot regardless of quality.
+    - **asof**: Return snapshot matching ``date`` (YYYY-MM-DD) as the US as-of date.
+    - **run**: Explicitly trigger a new pipeline run and return the new snapshot.
     """
+    import asyncio
+
     flags = get_flags()
     if not flags.ENABLE_ENGINE5_LEAD_LAG:
         raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
@@ -1949,24 +1940,82 @@ async def engine5_weekly_ideas(week: str = ""):
     if store is None:
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
-    # Read the pre-generated weekly ideas (stored at pipeline completion)
-    cached_ideas = store.get_json("engine5:latest:weekly_ideas")
-    status_data = store.get_json("engine5:latest:status")
+    # ---- view=run  --------------------------------------------------------
+    if view == "run":
+        from backend.engine5_pipeline import run_pipeline
 
-    if cached_ideas:
-        cached_ideas["pipelineStatus"] = status_data
-        return cached_ideas
+        try:
+            loop = asyncio.get_event_loop()
+            exit_code, snapshot_id = await loop.run_in_executor(
+                None, lambda: run_pipeline(force=True, source="manual"),
+            )
+        except Exception as e:
+            LOG.exception("Engine 5 pipeline run failed")
+            raise HTTPException(status_code=500, detail=f"Pipeline error: {e}") from e
 
-    # No cached ideas -- nothing has been generated yet
-    raise HTTPException(
-        status_code=404,
-        detail="No Engine 5 data available. Click 'Refresh Data' to run the pipeline.",
-    )
+        if exit_code != 0 or snapshot_id is None:
+            raise HTTPException(status_code=500, detail="Pipeline completed with errors. Check server logs.")
+
+        snap = store.get_json(f"engine5:snapshot:{snapshot_id}")
+        if snap is None:
+            raise HTTPException(status_code=500, detail="Pipeline succeeded but snapshot not found.")
+
+        return _engine5_snapshot_response(snap)
+
+    # ---- view=latest  -----------------------------------------------------
+    if view == "latest":
+        from backend.engine5_snapshot import select_latest_snapshot
+
+        snap = select_latest_snapshot(store)
+        if snap is not None:
+            return _engine5_snapshot_response(snap)
+        raise HTTPException(status_code=404, detail="No snapshots available yet.")
+
+    # ---- view=asof  -------------------------------------------------------
+    if view == "asof":
+        if not date:
+            raise HTTPException(status_code=400, detail="date parameter required for view=asof")
+        from backend.engine5_snapshot import select_asof_snapshot
+
+        snap = select_asof_snapshot(store, target_date=date)
+        if snap is not None:
+            return _engine5_snapshot_response(snap)
+        raise HTTPException(status_code=404, detail=f"No snapshot found for as-of date {date}")
+
+    # ---- view=best (default)  ---------------------------------------------
+    snap = _engine5_get_best_snapshot(store, flags)
+    if snap is not None:
+        return _engine5_snapshot_response(snap)
+
+    # No snapshots at all → auto-run pipeline (first-use bootstrapping)
+    LOG.info("No Engine 5 snapshots found — auto-bootstrapping pipeline...")
+    from backend.engine5_pipeline import run_pipeline
+
+    try:
+        loop = asyncio.get_event_loop()
+        exit_code, snapshot_id = await loop.run_in_executor(
+            None, lambda: run_pipeline(force=True, source="auto"),
+        )
+    except Exception as e:
+        LOG.exception("Engine 5 auto-bootstrap failed")
+        raise HTTPException(status_code=500, detail=f"Auto-bootstrap error: {e}") from e
+
+    if exit_code != 0 or snapshot_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Auto-bootstrap pipeline completed with errors. Check server logs.",
+        )
+
+    snap = store.get_json(f"engine5:snapshot:{snapshot_id}")
+    if snap is None:
+        raise HTTPException(status_code=500, detail="Pipeline succeeded but snapshot not found.")
+
+    return _engine5_snapshot_response(snap)
 
 
 @app.get("/api/engine5/regime")
 async def engine5_regime():
-    """Return the current global regime state."""
+    """Return the current global regime state from the best snapshot."""
     flags = get_flags()
     if not flags.ENABLE_ENGINE5_LEAD_LAG:
         raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
@@ -1975,16 +2024,21 @@ async def engine5_regime():
     if store is None:
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
-    regime_data = store.get_json("engine5:latest:regime")
-    if not regime_data:
+    snap = _engine5_get_best_snapshot(store, flags)
+    if snap is None:
         raise HTTPException(status_code=404, detail="No regime data available")
+
+    data = snap.get("data", {})
+    regime_data = data.get("regime")
+    if not regime_data:
+        raise HTTPException(status_code=404, detail="No regime data in snapshot")
 
     return regime_data
 
 
 @app.get("/api/engine5/signals")
 async def engine5_signals():
-    """Return the current lead-lag signals (raw, for debugging/transparency)."""
+    """Return lead-lag signals from the best snapshot (debugging/transparency)."""
     flags = get_flags()
     if not flags.ENABLE_ENGINE5_LEAD_LAG:
         raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
@@ -1993,16 +2047,19 @@ async def engine5_signals():
     if store is None:
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
-    signals_data = store.get_json("engine5:latest:signals")
-    if not signals_data:
+    snap = _engine5_get_best_snapshot(store, flags)
+    if snap is None:
         raise HTTPException(status_code=404, detail="No signal data available")
 
-    return {"signals": signals_data, "count": len(signals_data)}
+    # Signals are embedded in the WeeklyIdeas output under globalSignalSummary
+    data = snap.get("data", {})
+    summary = data.get("globalSignalSummary", {})
+    return {"signals": summary, "meta": snap.get("meta", {})}
 
 
 @app.get("/api/engine5/global-summary")
 async def engine5_global_summary():
-    """Return the latest global bar summary (returns, z-scores per asset)."""
+    """Return global bar summary from the best snapshot."""
     flags = get_flags()
     if not flags.ENABLE_ENGINE5_LEAD_LAG:
         raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
@@ -2011,18 +2068,16 @@ async def engine5_global_summary():
     if store is None:
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
-    bars_data = store.get_json("engine5:latest:bars")
-    yields_data = store.get_json("engine5:latest:yields")
-    status_data = store.get_json("engine5:latest:status")
+    snap = _engine5_get_best_snapshot(store, flags)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="No global summary available")
 
-    if not bars_data:
-        raise HTTPException(status_code=404, detail="No global bar data available")
-
+    data = snap.get("data", {})
+    meta = snap.get("meta", {})
     return {
-        "bars": bars_data,
-        "yields": yields_data,
-        "status": status_data,
-        "assetCount": len(bars_data),
+        "globalSignalSummary": data.get("globalSignalSummary", {}),
+        "regime": data.get("regime", {}),
+        "meta": meta,
     }
 
 

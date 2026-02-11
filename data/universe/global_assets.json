@@ -139,6 +139,32 @@
       "tenor": "10Y"
     }
   ],
+  "volatility_indices": [
+    {
+      "symbol": "V2TX.INDX",
+      "label": "VSTOXX",
+      "region": "europe",
+      "fallback_realized_from": "STOXX50E.INDX",
+      "weight": 0.40,
+      "_comment": "Euro Stoxx 50 Volatility index; fallback computes 20d realized vol from STOXX50E returns"
+    },
+    {
+      "symbol": null,
+      "label": "Nikkei Vol Proxy",
+      "region": "asia",
+      "fallback_realized_from": "N225.INDX",
+      "weight": 0.25,
+      "_comment": "No direct Nikkei vol index on EODHD; compute 20d realized vol from N225 returns"
+    }
+  ],
+  "fx_vol_proxies": [
+    {
+      "symbol": "USDJPY.FOREX",
+      "label": "USDJPY Absolute Move",
+      "weight": 0.35,
+      "_comment": "FX vol inferred from absolute daily return magnitude"
+    }
+  ],
   "macro_indicators": {
     "countries": ["USA", "DEU", "JPN", "AUS", "GBR", "FRA", "CHN"],
     "indicators": [
