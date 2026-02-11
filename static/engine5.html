@@ -397,13 +397,27 @@
 
       <section class="controlBar" aria-label="Engine 5 Controls">
         <div class="controlBarForm controlBarForm--engine2" style="justify-content:space-between;">
-          <div style="display:flex; align-items:center; gap:12px;">
-            <button id="refreshBtn" class="primaryButton" type="button">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button id="loadBtn" class="primaryButton" type="button">
               <span class="btnSpinner" aria-hidden="true"></span>
               Load Latest
             </button>
+            <button id="refreshBtn" class="primaryButton" type="button" style="background: rgba(11,11,15,0.04); border-color: rgba(11,11,15,0.12); color: var(--heading);">
+              <span class="btnSpinner" aria-hidden="true"></span>
+              Refresh Data
+            </button>
+            <span class="tipWrap">
+              <button class="tipBtn" type="button" aria-label="Button help" aria-expanded="false">i</button>
+              <div class="tipPanel" role="tooltip">
+                <div class="tipTitle">Load vs Refresh</div>
+                <div class="tipBody">
+                  <p><b>Load Latest</b>: Instantly shows the most recent analysis from cache. Use this when the US desk opens -- overnight results are already computed.</p>
+                  <p><b>Refresh Data</b>: Re-fetches live data from EODHD/ORATS and re-runs the full pipeline. Use after market close or when you want fresh numbers. Takes 15-30 seconds.</p>
+                </div>
+              </div>
+            </span>
           </div>
-          <div id="pipelineStatus" class="status" style="text-align:right; font-size:12px;">Click "Load Latest" to view the most recent global lead-lag analysis.</div>
+          <div id="pipelineStatus" class="status" style="text-align:right; font-size:12px;">Click "Load Latest" to view overnight analysis, or "Refresh Data" to pull fresh numbers.</div>
         </div>
       </section>
 

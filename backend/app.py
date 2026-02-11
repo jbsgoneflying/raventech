@@ -1935,9 +1935,11 @@ async def engine5_refresh():
 
 @app.get("/api/engine5/weekly-ideas")
 async def engine5_weekly_ideas(week: str = ""):
-    """Return the weekly idea output for Engine 5.
+    """Return the pre-generated weekly idea output for Engine 5.
 
-    Query param `week` is optional (format: YYYY-Wnn). Defaults to latest.
+    Reads the persisted output from Redis (written by the pipeline).
+    No re-computation -- this is a fast read of whatever the last
+    pipeline run produced, so results survive across sessions.
     """
     flags = get_flags()
     if not flags.ENABLE_ENGINE5_LEAD_LAG:
@@ -1947,62 +1949,19 @@ async def engine5_weekly_ideas(week: str = ""):
     if store is None:
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
-    # Load pre-computed components
-    regime_data = store.get_json("engine5:latest:regime")
-    signals_data = store.get_json("engine5:latest:signals")
-    us_bias_data = store.get_json("engine5:latest:us_bias")
-    bars_data = store.get_json("engine5:latest:bars")
+    # Read the pre-generated weekly ideas (stored at pipeline completion)
+    cached_ideas = store.get_json("engine5:latest:weekly_ideas")
     status_data = store.get_json("engine5:latest:status")
 
-    if not regime_data:
-        raise HTTPException(status_code=404, detail="No Engine 5 data available. Run the nightly pipeline first.")
+    if cached_ideas:
+        cached_ideas["pipelineStatus"] = status_data
+        return cached_ideas
 
-    # Import here to avoid circular imports at module level
-    from backend.engine5_regime import GlobalRegime
-    from backend.engine5_translation import SectorBias, IndexBias
-    from backend.engine5_idea_generator import generate_weekly_ideas
-
-    regime = GlobalRegime.from_dict(regime_data)
-    signals = signals_data or []
-    bars = bars_data or []
-
-    sector_biases = []
-    index_biases = []
-    if us_bias_data:
-        for sb in us_bias_data.get("sectorBiases", []):
-            sector_biases.append(SectorBias(
-                sector=sb.get("sector", ""),
-                name=sb.get("name", ""),
-                direction=sb.get("direction", "neutral"),
-                confidence=sb.get("confidence", 0),
-                sources=sb.get("sources", []),
-                vol_bias=sb.get("volBias", "neutral"),
-            ))
-        for ib in us_bias_data.get("indexBiases", []):
-            index_biases.append(IndexBias(
-                index=ib.get("index", ""),
-                direction=ib.get("direction", "neutral"),
-                confidence=ib.get("confidence", 0),
-                vol_bias=ib.get("volBias", "neutral"),
-                note=ib.get("note", ""),
-            ))
-
-    # Load ORATS data if available
-    orats_data = store.get_json("engine5:latest:orats") or {}
-
-    date_str = regime_data.get("date", "")
-    ideas = generate_weekly_ideas(
-        date=date_str,
-        signals=signals,
-        regime=regime,
-        sector_biases=sector_biases,
-        index_biases=index_biases,
-        bars=bars,
-        orats_data=orats_data,
+    # No cached ideas -- nothing has been generated yet
+    raise HTTPException(
+        status_code=404,
+        detail="No Engine 5 data available. Click 'Refresh Data' to run the pipeline.",
     )
-    result = ideas.to_dict()
-    result["pipelineStatus"] = status_data
-    return result
 
 
 @app.get("/api/engine5/regime")

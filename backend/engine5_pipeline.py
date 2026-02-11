@@ -31,6 +31,7 @@ from backend.engine5_global_intake import (
 from backend.engine5_lead_lag import compute_lead_lag_signals
 from backend.engine5_regime import compute_regime_from_bars
 from backend.engine5_translation import translate_signals_to_us
+from backend.engine5_idea_generator import generate_weekly_ideas
 from backend.redis_store import get_store_optional
 
 try:
@@ -498,19 +499,41 @@ def run_pipeline(force: bool = False) -> int:
         "indexBiases": [b.to_dict() for b in index_biases],
     }, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
-    # Store ORATS data for idea generation
+    # Store ORATS data
     if orats_data:
         store.set_json("engine5:latest:orats", orats_data, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
-    # Step 11: Log completion
-    store.set_json("engine5:last_refresh", {
+    # Step 11: Generate and persist the full WeeklyIdea output
+    LOG.info("Generating weekly ideas...")
+    ideas = generate_weekly_ideas(
+        date=expected_date.isoformat(),
+        signals=signals_json,
+        regime=regime,
+        sector_biases=sector_biases,
+        index_biases=index_biases,
+        bars=latest_bars_json,
+        orats_data=orats_data,
+    )
+    ideas_output = ideas.to_dict()
+
+    # Persist the full pre-generated output so it survives until the next run.
+    # This is what the API serves -- no re-computation needed at read time.
+    store.set_json("engine5:latest:weekly_ideas", ideas_output, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
+    LOG.info("Stored weekly ideas: %d trade ideas, %d sector biases",
+             len(ideas_output.get("tradeIdeas", [])), len(ideas_output.get("sectorBiases", [])))
+
+    # Step 12: Log completion
+    completion_meta = {
         "timestamp": time.time(),
         "date": expected_date.isoformat(),
         "status": "OK",
         "signals_count": len(signals),
         "regime_label": regime.label,
         "regime_score": regime.score,
-    }, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
+        "trade_ideas_count": len(ideas_output.get("tradeIdeas", [])),
+        "sector_biases_count": len(ideas_output.get("sectorBiases", [])),
+    }
+    store.set_json("engine5:last_refresh", completion_meta, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
     store.set_json("engine5:latest:status", {
         "status": "OK",
@@ -518,6 +541,6 @@ def run_pipeline(force: bool = False) -> int:
         "timestamp": time.time(),
     }, ttl_s=flags.ENGINE5_CACHE_TTL_LATEST)
 
-    LOG.info("Engine 5 pipeline complete. date=%s regime=%s signals=%d",
-             expected_date, regime.label, len(signals))
+    LOG.info("Engine 5 pipeline complete. date=%s regime=%s signals=%d ideas=%d",
+             expected_date, regime.label, len(signals), len(ideas_output.get("tradeIdeas", [])))
     return 0

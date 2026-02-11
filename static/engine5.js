@@ -8,6 +8,7 @@
   "use strict";
 
   // DOM refs
+  const loadBtn = document.getElementById("loadBtn");
   const refreshBtn = document.getElementById("refreshBtn");
   const pipelineStatus = document.getElementById("pipelineStatus");
   const resultsEl = document.getElementById("results");
@@ -48,10 +49,15 @@
   function show(el) { el && el.classList.remove("hidden"); }
   function hide(el) { el && el.classList.add("hidden"); }
 
-  function setLoading(on) {
+  function setLoading(on, btn) {
+    if (btn) {
+      btn.disabled = on;
+      var spinner = btn.querySelector(".btnSpinner");
+      if (spinner) spinner.style.display = on ? "inline-block" : "none";
+    }
+    // Disable both buttons during any operation
+    loadBtn.disabled = on;
     refreshBtn.disabled = on;
-    const spinner = refreshBtn.querySelector(".btnSpinner");
-    if (spinner) spinner.style.display = on ? "inline-block" : "none";
   }
 
   function dirClass(dir) {
@@ -251,88 +257,124 @@
   // Fetch & render
   // ---------------------------------------------------------------------------
 
-  async function loadData() {
-    setLoading(true);
+  // ---------------------------------------------------------------------------
+  // Render results from API response
+  // ---------------------------------------------------------------------------
+
+  function renderAll(data) {
+    renderRegime(data.regime);
+    renderNarrative(data.globalSignalSummary, data.week);
+    renderIndexBiases(data.indexBiases);
+    renderSectorBiases(data.sectorBiases);
+    renderTradeIdeas(data.tradeIdeas);
+    renderSuppressions(data.suppressions);
+
+    var statusParts = [];
+    statusParts.push("Week: " + (data.week || "—"));
+    statusParts.push("Generated: " + (data.generatedAt ? new Date(data.generatedAt).toLocaleString() : "—"));
+    if (data.pipelineStatus) {
+      statusParts.push("Pipeline: " + (data.pipelineStatus.status || "—"));
+      if (data.pipelineStatus.expected_date) {
+        statusParts.push("Data Date: " + data.pipelineStatus.expected_date);
+      }
+    }
+    pipelineStatus.textContent = statusParts.join("  ·  ");
+    show(resultsEl);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Load Latest: fast read from Redis cache (no pipeline trigger)
+  // ---------------------------------------------------------------------------
+
+  async function loadLatest() {
+    setLoading(true, loadBtn);
     hide(resultsEl);
     hide(emptyEl);
+    pipelineStatus.textContent = "Loading cached results...";
 
-    // Step 1: Trigger the pipeline refresh (fetches fresh EODHD data)
-    pipelineStatus.textContent = "Fetching global market data from EODHD...";
     try {
-      const refreshResp = await fetch("/api/engine5/refresh", { method: "POST" });
-      if (refreshResp.ok) {
-        const refreshData = await refreshResp.json();
-        if (refreshData.ok) {
-          pipelineStatus.textContent = "Pipeline complete. Loading results...";
-        } else {
-          pipelineStatus.textContent = "Pipeline finished with warnings (exit " + refreshData.exitCode + "). Loading available data...";
-        }
-      } else if (refreshResp.status === 404) {
-        show(emptyEl);
-        pipelineStatus.textContent = "Engine 5 is not enabled. Set ENABLE_ENGINE5_LEAD_LAG=1.";
-        setLoading(false);
-        return;
-      } else {
-        pipelineStatus.textContent = "Refresh had issues; loading cached data if available...";
-      }
-    } catch (refreshErr) {
-      console.warn("Engine 5 refresh error (will try cached data):", refreshErr);
-      pipelineStatus.textContent = "Refresh unavailable; loading cached data...";
-    }
-
-    // Step 2: Load the weekly ideas from Redis
-    try {
-      const resp = await fetch("/api/engine5/weekly-ideas");
+      var resp = await fetch("/api/engine5/weekly-ideas");
 
       if (resp.status === 404) {
         show(emptyEl);
-        pipelineStatus.textContent = "No data available. The pipeline may not have completed successfully.";
+        pipelineStatus.textContent = "No cached data. Click \"Refresh Data\" to run the pipeline for the first time.";
         return;
       }
       if (!resp.ok) {
-        const errText = await resp.text();
+        var errText = await resp.text();
         pipelineStatus.textContent = "Error: " + resp.status + " — " + errText;
         show(emptyEl);
         return;
       }
 
-      const data = await resp.json();
-
-      // Render regime
-      renderRegime(data.regime);
-
-      // Render narrative
-      renderNarrative(data.globalSignalSummary, data.week);
-
-      // Render index biases
-      renderIndexBiases(data.indexBiases);
-
-      // Render sector biases
-      renderSectorBiases(data.sectorBiases);
-
-      // Render trade ideas
-      renderTradeIdeas(data.tradeIdeas);
-
-      // Render suppressions
-      renderSuppressions(data.suppressions);
-
-      // Pipeline status
-      var statusParts = [];
-      statusParts.push("Week: " + (data.week || "—"));
-      statusParts.push("Generated: " + (data.generatedAt ? new Date(data.generatedAt).toLocaleString() : "—"));
-      if (data.pipelineStatus) {
-        statusParts.push("Pipeline: " + (data.pipelineStatus.status || "—"));
-      }
-      pipelineStatus.textContent = statusParts.join("  ·  ");
-
-      show(resultsEl);
+      renderAll(await resp.json());
 
     } catch (err) {
       console.error("Engine 5 load error:", err);
       pipelineStatus.textContent = "Network error: " + err.message;
       show(emptyEl);
     } finally {
-      setLoading(false);
+      setLoading(false, loadBtn);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Refresh Data: triggers the full EODHD pipeline, then loads results
+  // ---------------------------------------------------------------------------
+
+  async function refreshData() {
+    setLoading(true, refreshBtn);
+    hide(resultsEl);
+    hide(emptyEl);
+    pipelineStatus.textContent = "Fetching global market data from EODHD (this may take 15-30s)...";
+
+    try {
+      var refreshResp = await fetch("/api/engine5/refresh", { method: "POST" });
+
+      if (refreshResp.ok) {
+        var refreshResult = await refreshResp.json();
+        if (refreshResult.ok) {
+          pipelineStatus.textContent = "Pipeline complete. Loading results...";
+        } else {
+          pipelineStatus.textContent = "Pipeline finished with warnings (exit " + refreshResult.exitCode + "). Loading available data...";
+        }
+      } else if (refreshResp.status === 404) {
+        show(emptyEl);
+        pipelineStatus.textContent = "Engine 5 is not enabled. Set ENABLE_ENGINE5_LEAD_LAG=1.";
+        setLoading(false, refreshBtn);
+        return;
+      } else {
+        pipelineStatus.textContent = "Refresh had issues; loading cached data...";
+      }
+    } catch (refreshErr) {
+      console.warn("Engine 5 refresh error:", refreshErr);
+      pipelineStatus.textContent = "Refresh failed; loading cached data if available...";
+    }
+
+    // Now load the (freshly written) results
+    try {
+      var resp = await fetch("/api/engine5/weekly-ideas");
+
+      if (resp.status === 404) {
+        show(emptyEl);
+        pipelineStatus.textContent = "Pipeline did not produce results. Check server logs.";
+        return;
+      }
+      if (!resp.ok) {
+        var errText = await resp.text();
+        pipelineStatus.textContent = "Error loading results: " + resp.status;
+        show(emptyEl);
+        return;
+      }
+
+      renderAll(await resp.json());
+
+    } catch (err) {
+      console.error("Engine 5 load error:", err);
+      pipelineStatus.textContent = "Network error: " + err.message;
+      show(emptyEl);
+    } finally {
+      setLoading(false, refreshBtn);
     }
   }
 
@@ -340,8 +382,13 @@
   // Init
   // ---------------------------------------------------------------------------
 
+  loadBtn.addEventListener("click", function (e) {
+    e.preventDefault();
+    loadLatest();
+  });
+
   refreshBtn.addEventListener("click", function (e) {
     e.preventDefault();
-    loadData();
+    refreshData();
   });
 })();
