@@ -448,18 +448,19 @@ def index(request: Request):
     """
     Host-based routing:
       - raven-tech.co / www.raven-tech.co -> marketing landing page
-      - all other hosts (e.g. app.raven-tech.co) -> Engine 1 (breach page)
+      - all other hosts (e.g. app.raven-tech.co) -> app home/dashboard page
     """
-    from fastapi.responses import RedirectResponse
-    
     if _is_root_domain_host(request.headers.get("host")):
         landing_path = STATIC_DIR / "landing.html"
         if not landing_path.exists():
             raise HTTPException(status_code=500, detail="Missing static/landing.html")
         return FileResponse(str(landing_path))
 
-    # Redirect to Engine 1 (breach page)
-    return RedirectResponse(url="/breach", status_code=302)
+    # App subdomain -> home dashboard
+    home_path = STATIC_DIR / "home.html"
+    if not home_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/home.html")
+    return FileResponse(str(home_path))
 
 
 @app.get("/breach")
@@ -468,6 +469,14 @@ def breach_page():
     if not index_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/index.html")
     return FileResponse(str(index_path))
+
+
+@app.get("/calendar")
+def calendar_page():
+    cal_path = STATIC_DIR / "calendar.html"
+    if not cal_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/calendar.html")
+    return FileResponse(str(cal_path))
 
 
 @app.get("/api/health")

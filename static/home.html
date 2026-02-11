@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Quantitative Desk Intelligence</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — EOD quantitative intelligence for weekly income harvesting, regime analysis, and risk management." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      /* Home page specific styles */
+      .homeHero {
+        text-align: center;
+        padding: 40px 20px 32px;
+      }
+      .homeHeroTitle {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--heading);
+        letter-spacing: -0.02em;
+        margin: 0 0 8px;
+      }
+      .homeHeroSub {
+        font-size: 15px;
+        color: var(--muted);
+        max-width: 640px;
+        margin: 0 auto;
+        line-height: 1.55;
+      }
+      .homePillRow {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+      .homePill {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 12px;
+        border-radius: 20px;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      .homePill--eod {
+        background: rgba(52, 199, 89, 0.12);
+        color: #1b8a3e;
+      }
+      .homePill--weekly {
+        background: rgba(0, 122, 255, 0.10);
+        color: #0060cc;
+      }
+      .homePill--no-trade {
+        background: rgba(255, 149, 0, 0.10);
+        color: #995c00;
+      }
+
+      .homeSectionTitle {
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 0 0 14px;
+        padding: 0 4px;
+      }
+
+      /* Engine cards grid */
+      .engineGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 14px;
+      }
+      .engineCard {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        padding: 20px;
+        transition: box-shadow 0.15s, border-color 0.15s;
+        text-decoration: none;
+        color: inherit;
+        display: flex;
+        flex-direction: column;
+      }
+      .engineCard:hover {
+        border-color: rgba(52, 199, 89, 0.35);
+        box-shadow: 0 2px 12px rgba(52, 199, 89, 0.08);
+      }
+      .engineCardHeader {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .engineCardNum {
+        font-size: 11px;
+        font-weight: 800;
+        color: #fff;
+        background: var(--heading);
+        border-radius: 6px;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        letter-spacing: 0.02em;
+      }
+      .engineCardNum--green {
+        background: rgba(52, 199, 89, 0.9);
+      }
+      .engineCardNum--blue {
+        background: rgba(0, 122, 255, 0.85);
+      }
+      .engineCardNum--orange {
+        background: rgba(255, 149, 0, 0.85);
+      }
+      .engineCardNum--purple {
+        background: rgba(175, 82, 222, 0.85);
+      }
+      .engineCardName {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--heading);
+      }
+      .engineCardSub {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+      .engineCardBody {
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.55;
+        flex: 1;
+      }
+      .engineCardTags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 12px;
+      }
+      .engineCardTag {
+        font-size: 10px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: rgba(11, 11, 15, 0.04);
+        color: var(--muted);
+        letter-spacing: 0.02em;
+      }
+
+      /* Principles row */
+      .principlesGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 14px;
+      }
+      .principleCard {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        padding: 18px;
+      }
+      .principleTitle {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--heading);
+        margin-bottom: 6px;
+      }
+      .principleBody {
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.5;
+      }
+
+      /* Data sources strip */
+      .dataSourceStrip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+        padding: 16px 0 0;
+      }
+      .dataSourceChip {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        padding: 6px 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      /* CTA bar */
+      .homeCta {
+        text-align: center;
+        padding: 32px 0;
+      }
+      .homeCtaText {
+        font-size: 14px;
+        color: var(--muted);
+        margin-bottom: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Quantitative Desk Intelligence</div>
+          </div>
+        </div>
+        <div class="tbInputs topNav">
+          <a class="primaryButton navBtn" href="/" style="text-decoration:none; background: rgba(52, 199, 89, 0.12); border-color: rgba(52, 199, 89, 0.25);" data-tooltip="Platform overview and engine directory">Home</a>
+          <a class="primaryButton navBtn" href="/calendar" style="text-decoration:none;" data-tooltip="Earnings calendar with breach probability rankings">Calendar</a>
+          <a class="primaryButton navBtn" href="/breach" style="text-decoration:none;" data-tooltip="Single-ticker earnings hold risk analysis with Monte Carlo simulation">Engine 1</a>
+          <a class="primaryButton navBtn" id="engine2Link" href="/spx" style="text-decoration:none;" data-tooltip="SPX/SPY 0DTE iron condor scanner with dealer gamma overlay">Engine 2</a>
+          <a class="primaryButton navBtn" href="/compare" style="text-decoration:none;" data-tooltip="Compare multiple tickers side-by-side for earnings hold risk">Compare</a>
+          <a class="primaryButton navBtn" href="/news-risk" style="text-decoration:none;" data-tooltip="Weekly macro events, analyst ratings, and headlines with historical SPX impact">News Risk</a>
+          <a class="primaryButton navBtn" href="/lead-lag" style="text-decoration:none;" data-tooltip="Global lead-lag regime intelligence and weekly options income ideas">Lead-Lag</a>
+          <a class="primaryButton navBtn" href="/red-dog" style="text-decoration:none;" data-tooltip="Red Dog Reversal scanner for mean-reversion setups on SP500 and Nasdaq100">Red Dog</a>
+          <a class="primaryButton navBtn" href="/ichimoku" style="text-decoration:none;" data-tooltip="Ichimoku Cloud continuation scanner for trend-following setups">Ichimoku</a>
+        </div>
+      </header>
+
+      <!-- Hero -->
+      <section class="homeHero">
+        <h1 class="homeHeroTitle">EOD Intelligence for Weekly Income Desks</h1>
+        <p class="homeHeroSub">
+          Raven Tech is a multi-engine quantitative system built for premium sellers.
+          Every signal is end-of-day. Every output is structured for weekly income harvesting using US options.
+          No intraday noise. No auto-execution. Just clean, reproducible intelligence that survives overnight.
+        </p>
+        <div class="homePillRow">
+          <span class="homePill homePill--eod">EOD data only</span>
+          <span class="homePill homePill--weekly">Weekly horizon</span>
+          <span class="homePill homePill--no-trade">Idea generation, not execution</span>
+        </div>
+      </section>
+
+      <!-- Engines -->
+      <section class="surface" style="padding: 24px;">
+        <div class="homeSectionTitle">Trading Engines</div>
+        <div class="engineGrid">
+
+          <a class="engineCard" href="/calendar">
+            <div class="engineCardHeader">
+              <div class="engineCardNum engineCardNum--green">CAL</div>
+              <div>
+                <div class="engineCardName">Earnings Calendar</div>
+                <div class="engineCardSub">Volatility-first event planning</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Calendar-first workflow for identifying upcoming earnings events, verifying eligibility,
+              and ranking tickers by breach probability. Designed for planning weekly premium sells
+              around event risk with pre-computed hold risk rankings.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">FMP Snapshot</span>
+              <span class="engineCardTag">Breach Ranking</span>
+              <span class="engineCardTag">Event Planning</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/breach">
+            <div class="engineCardHeader">
+              <div class="engineCardNum">E1</div>
+              <div>
+                <div class="engineCardName">Earnings Breach</div>
+                <div class="engineCardSub">Single-name earnings hold risk</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Studies the last ~20 earnings events per ticker and compares realized close-to-open moves against implied
+              earnings moves. Quantifies breach probability, tail risk, and wing distance guidance with regime-aware
+              overlays and Monte Carlo simulation.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">ORATS EOD</span>
+              <span class="engineCardTag">Monte Carlo</span>
+              <span class="engineCardTag">Dealer Gamma</span>
+              <span class="engineCardTag">Wing Builder</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/spx">
+            <div class="engineCardHeader">
+              <div class="engineCardNum engineCardNum--blue">E2</div>
+              <div>
+                <div class="engineCardName">SPX Iron Condor</div>
+                <div class="engineCardSub">0DTE iron condor scanner</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Scans SPX/SPY expected move multiples for 0DTE and weekly iron condor opportunities.
+              Overlays dealer gamma positioning, macro event proximity, and regime context to produce
+              desk-ready structure recommendations with risk-adjusted sizing.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">ORATS Live</span>
+              <span class="engineCardTag">Macro Calendar</span>
+              <span class="engineCardTag">Regime Scoring</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/lead-lag">
+            <div class="engineCardHeader">
+              <div class="engineCardNum engineCardNum--green">E5</div>
+              <div>
+                <div class="engineCardName">Global Lead-Lag</div>
+                <div class="engineCardSub">Cross-market regime intelligence</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Ingests EOD data from 9 global equity indices, 3 FX pairs, commodities, and sovereign yields
+              to compute lead-lag signals, classify the global regime, detect volatility mispricings between
+              global and US markets, and generate structured weekly income trade ideas with invalidation rules.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">EODHD Global</span>
+              <span class="engineCardTag">Vol Lead-Lag</span>
+              <span class="engineCardTag">Regime Transitions</span>
+              <span class="engineCardTag">Trade Invalidation</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/red-dog">
+            <div class="engineCardHeader">
+              <div class="engineCardNum engineCardNum--orange">E3</div>
+              <div>
+                <div class="engineCardName">Red Dog Reversal</div>
+                <div class="engineCardSub">Mean-reversion scanner</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Scans SP500 and Nasdaq 100 for Red Dog Reversal setups -- mean-reversion patterns
+              where an overextended move creates a high-probability snapback opportunity.
+              Scores and ranks signals with ORATS IV context for premium-selling overlays.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">SP500 + Nasdaq 100</span>
+              <span class="engineCardTag">Mean Reversion</span>
+              <span class="engineCardTag">ORATS IV</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/ichimoku">
+            <div class="engineCardHeader">
+              <div class="engineCardNum engineCardNum--purple">E4</div>
+              <div>
+                <div class="engineCardName">Ichimoku Cloud</div>
+                <div class="engineCardSub">Continuation scanner</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Scans SP500 and Nasdaq 100 for Ichimoku Cloud continuation setups -- Kijun pullback
+              and Tenkan reclaim patterns that identify trend continuation entries.
+              Layered with ORATS options data for IV-aware structure selection.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">SP500 + Nasdaq 100</span>
+              <span class="engineCardTag">Trend Continuation</span>
+              <span class="engineCardTag">ORATS IV</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/compare">
+            <div class="engineCardHeader">
+              <div class="engineCardNum">CMP</div>
+              <div>
+                <div class="engineCardName">Multi-Ticker Compare</div>
+                <div class="engineCardSub">Side-by-side breach analysis</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Compare up to 10 tickers side-by-side for earnings hold risk. Quickly identify which names
+              are clean to sell premium into and which carry outsized tail risk relative to the implied move.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">Batch Analysis</span>
+              <span class="engineCardTag">Relative Risk</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/news-risk">
+            <div class="engineCardHeader">
+              <div class="engineCardNum">NR</div>
+              <div>
+                <div class="engineCardName">News Risk</div>
+                <div class="engineCardSub">Macro event and headline overlay</div>
+              </div>
+            </div>
+            <div class="engineCardBody">
+              Weekly macro events, analyst ratings, and headline sentiment with historical SPX impact context.
+              Designed as a guardrail layer -- flags when external catalysts could override technical setups.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">Benzinga</span>
+              <span class="engineCardTag">Macro Calendar</span>
+              <span class="engineCardTag">Event Scoring</span>
+            </div>
+          </a>
+
+        </div>
+      </section>
+
+      <!-- Design Principles -->
+      <section class="surface" style="padding: 24px; margin-top: 14px;">
+        <div class="homeSectionTitle">How We Build</div>
+        <div class="principlesGrid">
+
+          <div class="principleCard">
+            <div class="principleTitle">EOD-Only Architecture</div>
+            <div class="principleBody">
+              Every signal, every computation, every output is derived from end-of-day data.
+              No tick-level feeds, no intraday recalculation. Results are deterministic and
+              reproducible -- the same inputs always produce the same outputs.
+            </div>
+          </div>
+
+          <div class="principleCard">
+            <div class="principleTitle">Immutable Snapshots</div>
+            <div class="principleBody">
+              Pipeline runs produce immutable, graded snapshots that cannot be overwritten by mid-session
+              clicks. Every snapshot carries freshness metadata (Grade A/B/C), as-of dates per region,
+              and completeness scores for full auditability.
+            </div>
+          </div>
+
+          <div class="principleCard">
+            <div class="principleTitle">Idea Generation, Not Execution</div>
+            <div class="principleBody">
+              Raven Tech outputs structured trade ideas with confidence scores, regime context,
+              and suppression flags. It never executes, never sends orders, and never overrides
+              human judgment. The desk always decides.
+            </div>
+          </div>
+
+          <div class="principleCard">
+            <div class="principleTitle">Math-Grounded Invalidation</div>
+            <div class="principleBody">
+              Every trade idea carries three-tier invalidation rules: underlying price (EM-based),
+              driver reversal (source-aware), and position delta. Two-of-three triggers produce
+              hard invalidation -- no arbitrary overrides.
+            </div>
+          </div>
+
+          <div class="principleCard">
+            <div class="principleTitle">Global Regime Awareness</div>
+            <div class="principleBody">
+              Cross-market signals from Europe, Asia, and FX flow through lead-lag analysis,
+              regime classification, and volatility mismatch detection before any US trade idea
+              is generated. Global context shapes every recommendation.
+            </div>
+          </div>
+
+          <div class="principleCard">
+            <div class="principleTitle">Silence Is Valid</div>
+            <div class="principleBody">
+              When conditions are unclear, regime is stressed, or data is insufficient, the system
+              suppresses output rather than forcing a trade. Missing data degrades confidence,
+              never gets coerced to zero.
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Data Sources -->
+      <section class="surface" style="padding: 24px; margin-top: 14px;">
+        <div class="homeSectionTitle">Data Sources</div>
+        <div class="dataSourceStrip">
+          <span class="dataSourceChip">ORATS LiveData API — US options surfaces, IV, expected move, skew, greeks</span>
+          <span class="dataSourceChip">EODHD All-In-One — Global EOD equities, FX, commodities, sovereign yields, macro</span>
+          <span class="dataSourceChip">Benzinga API — News, event risk, analyst ratings, macro calendar</span>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="homeCta">
+        <div class="homeCtaText">Select an engine above to begin, or start with the Lead-Lag engine for a global market overview.</div>
+        <a class="primaryButton" href="/lead-lag" style="text-decoration:none;">Open Lead-Lag Engine</a>
+      </section>
+
+    </main>
+  </body>
+</html>
