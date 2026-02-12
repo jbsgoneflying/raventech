@@ -82,12 +82,19 @@ def _bare_ticker(eodhd_symbol: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Canonical DailyBar  (re-export from technicals for convenience)
-#
-# We import the existing DailyBar so every consumer uses the same type.
+# Canonical DailyBar  (defined here to avoid circular imports with technicals.py)
 # ---------------------------------------------------------------------------
 
-from backend.technicals import DailyBar  # noqa: E402
+
+@dataclass(frozen=True)
+class DailyBar:
+    trade_date: str
+    open: Optional[float]
+    high: Optional[float]
+    low: Optional[float]
+    close: Optional[float]
+    volume: Optional[float]
+    vwap: Optional[float]
 
 
 def _rows_to_bars(rows: list[dict]) -> List[DailyBar]:
