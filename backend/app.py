@@ -1130,7 +1130,7 @@ async def earnings_calendar_api(
 ):
     """Earnings calendar for $100B+ market-cap companies (EODHD-only)."""
     import calendar as _cal
-    from backend.earnings_calendar import get_earnings_calendar
+    from backend.eodhd_earnings_calendar import get_earnings_calendar
 
     today = dt.date.today()
     try:
