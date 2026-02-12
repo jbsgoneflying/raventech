@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co &middot; Earnings Calendar</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Mega-cap earnings calendar with compare workflow." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      /* ── Earnings Calendar ───────────────────────────────────── */
+      .calControlBar {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; flex-wrap: wrap;
+        padding: 12px 16px; margin-bottom: 16px;
+        background: var(--surfaceElev);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+        backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+      }
+      .calControls { display: flex; align-items: center; gap: 8px; }
+      .calNav {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px; border-radius: 10px;
+        border: 1px solid var(--border); background: var(--bg2);
+        cursor: pointer; font-size: 16px; color: var(--text);
+        transition: background .15s;
+      }
+      .calNav:hover { background: var(--hover); }
+      .calLabel {
+        font-size: 16px; font-weight: 700; color: var(--text);
+        min-width: 160px; text-align: center;
+      }
+      .calViewToggle {
+        display: inline-flex; border-radius: 10px; overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      .calViewBtn {
+        padding: 6px 16px; font-size: 13px; font-weight: 600;
+        border: none; background: var(--bg2); color: var(--muted);
+        cursor: pointer; transition: all .15s;
+      }
+      .calViewBtn.active {
+        background: var(--blue); color: #fff;
+      }
+      .calCompareBtn {
+        padding: 8px 18px; border-radius: 10px; border: none;
+        background: var(--blue); color: #fff; font-size: 13px; font-weight: 700;
+        cursor: pointer; opacity: 0.4; pointer-events: none;
+        transition: opacity .2s;
+      }
+      .calCompareBtn.enabled { opacity: 1; pointer-events: auto; }
+      .calCompareBtn.enabled:hover { filter: brightness(1.08); }
+
+      /* ── Month Grid ──────────────────────────────────────────── */
+      .monthGrid {
+        display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
+        background: var(--border); border-radius: var(--radius-card);
+        overflow: hidden;
+      }
+      .monthDayHeader {
+        padding: 8px 4px; text-align: center; font-size: 11px;
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+        color: var(--muted); background: var(--surfaceElev);
+      }
+      .monthCell {
+        min-height: 110px; padding: 6px; background: var(--bg2);
+        display: flex; flex-direction: column; position: relative;
+      }
+      .monthCell.outside { background: var(--bg); opacity: 0.5; }
+      .monthCell.today { box-shadow: inset 0 0 0 2px var(--blue); }
+      .monthCellDate {
+        font-size: 12px; font-weight: 700; color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .monthCellDate.today { color: var(--blue); }
+      .monthCellEarnings {
+        display: flex; flex-direction: column; gap: 3px; flex: 1;
+        overflow: hidden;
+      }
+      .monthPill {
+        display: flex; align-items: center; gap: 5px;
+        padding: 3px 6px; border-radius: 8px;
+        background: var(--surface); cursor: pointer;
+        transition: background .12s; font-size: 11px;
+        border: 2px solid transparent;
+      }
+      .monthPill:hover { background: var(--hover); }
+      .monthPill.selected { border-color: var(--blue); background: rgba(0,122,255,0.06); }
+      .monthPillLogo {
+        width: 20px; height: 20px; border-radius: 5px;
+        object-fit: contain; background: var(--bg);
+        flex-shrink: 0;
+      }
+      .monthPillFallback {
+        width: 20px; height: 20px; border-radius: 5px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 9px; font-weight: 800; color: #fff; flex-shrink: 0;
+      }
+      .monthPillTicker { font-weight: 700; color: var(--text); }
+      .monthPillTiming {
+        font-size: 9px; font-weight: 700; border-radius: 4px;
+        padding: 1px 4px; margin-left: auto; flex-shrink: 0;
+      }
+      .timing-BMO { background: rgba(255,159,10,0.15); color: #a06200; }
+      .timing-AMC { background: rgba(0,122,255,0.12); color: #003d80; }
+      .timing-TBD { background: rgba(11,11,15,0.06); color: var(--muted); }
+      .monthMore {
+        font-size: 10px; color: var(--blue); font-weight: 600;
+        cursor: pointer; padding: 2px 0; margin-top: 2px;
+      }
+
+      /* ── Week View ───────────────────────────────────────────── */
+      .weekGrid {
+        display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
+      }
+      .weekCol {
+        background: var(--bg2); border: 1px solid var(--border);
+        border-radius: var(--radius-card); overflow: hidden;
+      }
+      .weekColHeader {
+        padding: 10px 12px; background: var(--surfaceElev);
+        border-bottom: 1px solid var(--border);
+        font-size: 13px; font-weight: 700; color: var(--text);
+      }
+      .weekColHeader.today { color: var(--blue); }
+      .weekColBody { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+      .weekCard {
+        padding: 10px; border-radius: 12px;
+        background: var(--surface); cursor: pointer;
+        border: 2px solid transparent;
+        transition: border-color .15s, background .15s;
+      }
+      .weekCard:hover { background: var(--hover); }
+      .weekCard.selected { border-color: var(--blue); background: rgba(0,122,255,0.04); }
+      .weekCardTop {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+      }
+      .weekCardLogo {
+        width: 36px; height: 36px; border-radius: 10px;
+        object-fit: contain; background: var(--bg);
+        flex-shrink: 0;
+      }
+      .weekCardFallback {
+        width: 36px; height: 36px; border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; font-weight: 800; color: #fff; flex-shrink: 0;
+      }
+      .weekCardInfo { flex: 1; min-width: 0; }
+      .weekCardName {
+        font-size: 13px; font-weight: 700; color: var(--text);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .weekCardTicker { font-size: 11px; color: var(--muted); font-weight: 600; }
+      .weekCardCheck {
+        width: 22px; height: 22px; border-radius: 6px;
+        border: 2px solid var(--border); background: #fff;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; transition: all .15s;
+      }
+      .weekCard.selected .weekCardCheck {
+        border-color: var(--blue); background: var(--blue);
+      }
+      .weekCardMeta {
+        display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+      }
+      .weekCardBadge {
+        font-size: 10px; font-weight: 700; border-radius: 5px;
+        padding: 2px 6px; display: inline-flex; align-items: center; gap: 3px;
+      }
+      .weekCardEps {
+        font-size: 11px; color: var(--muted); font-weight: 600;
+      }
+      .weekCardMcap {
+        font-size: 10px; color: var(--muted2); margin-left: auto;
+      }
+      .weekCardSurprise {
+        font-size: 10px; font-weight: 700; padding: 1px 5px;
+        border-radius: 4px;
+      }
+      .surprise-beat { background: rgba(52,199,89,0.12); color: #0c4626; }
+      .surprise-miss { background: rgba(255,59,48,0.12); color: #b42823; }
+
+      /* ── Selection Bar ───────────────────────────────────────── */
+      .selectionBar {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: var(--surfaceSolid);
+        border-top: 1px solid var(--border);
+        padding: 10px 20px; display: flex; align-items: center;
+        gap: 10px; z-index: 9000;
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.06);
+        transform: translateY(100%);
+        transition: transform .25s ease;
+      }
+      .selectionBar.visible { transform: translateY(0); }
+      .selChips {
+        display: flex; gap: 6px; flex-wrap: wrap; flex: 1;
+        overflow: hidden; max-height: 34px;
+      }
+      .selChip {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 4px 10px; border-radius: 8px; font-size: 12px;
+        font-weight: 700; background: rgba(0,122,255,0.1);
+        color: var(--blue);
+      }
+      .selChipX {
+        cursor: pointer; font-size: 14px; line-height: 1;
+        opacity: 0.6; margin-left: 2px;
+      }
+      .selChipX:hover { opacity: 1; }
+      .selCount {
+        font-size: 12px; font-weight: 700; color: var(--muted);
+        white-space: nowrap;
+      }
+      .selCompareBtn {
+        padding: 8px 22px; border-radius: 10px; border: none;
+        background: var(--blue); color: #fff; font-size: 13px;
+        font-weight: 700; cursor: pointer; white-space: nowrap;
+        transition: filter .15s;
+      }
+      .selCompareBtn:hover { filter: brightness(1.08); }
+
+      /* ── Empty state ─────────────────────────────────────────── */
+      .calEmpty {
+        text-align: center; padding: 60px 20px;
+        color: var(--muted); font-size: 15px;
+      }
+      .calLoading { text-align: center; padding: 80px 20px; color: var(--muted); }
+
+      /* ── Responsive ──────────────────────────────────────────── */
+      @media (max-width: 900px) {
+        .weekGrid { grid-template-columns: 1fr; }
+        .monthGrid { font-size: 10px; }
+        .monthCell { min-height: 80px; }
+      }
+      @media (max-width: 640px) {
+        .calControlBar { flex-direction: column; align-items: stretch; }
+        .calControls { justify-content: center; }
+        .calLabel { min-width: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <header class="appHeader">
+        <a class="appBrand" href="/">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech" />
+          <div>
+            <div style="font-size:18px; font-weight:800; letter-spacing:-0.02em;">Raven-Tech.co</div>
+            <div style="font-size:11px; color:var(--muted); font-weight:600;">Earnings Calendar</div>
+          </div>
+        </a>
+      </header>
+
+      <!-- Control Bar -->
+      <div class="calControlBar">
+        <div class="calControls">
+          <button class="calNav" id="prevBtn" title="Previous">&larr;</button>
+          <div class="calLabel" id="periodLabel">Loading...</div>
+          <button class="calNav" id="nextBtn" title="Next">&rarr;</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="calViewToggle">
+            <button class="calViewBtn active" data-view="month">Month</button>
+            <button class="calViewBtn" data-view="week">Week</button>
+          </div>
+          <button class="calCompareBtn" id="compareBtn">Send to Compare</button>
+        </div>
+      </div>
+
+      <!-- Calendar body -->
+      <div id="calBody">
+        <div class="calLoading">Loading earnings data...</div>
+      </div>
+    </div>
+
+    <!-- Selection bar (fixed bottom) -->
+    <div class="selectionBar" id="selectionBar">
+      <div class="selChips" id="selChips"></div>
+      <div class="selCount" id="selCount">0/10</div>
+      <button class="selCompareBtn" id="selCompareBtn">Send to Compare &rarr;</button>
+    </div>
+
+    <script src="/static/earnings-calendar.js?v=1"></script>
+    <script src="/static/nav.js?v=10"></script>
+  </body>
+</html>

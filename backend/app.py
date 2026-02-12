@@ -483,9 +483,9 @@ def breach_page():
 
 @app.get("/calendar")
 def calendar_page():
-    cal_path = STATIC_DIR / "calendar.html"
+    cal_path = STATIC_DIR / "earnings-calendar.html"
     if not cal_path.exists():
-        raise HTTPException(status_code=500, detail="Missing static/calendar.html")
+        raise HTTPException(status_code=500, detail="Missing static/earnings-calendar.html")
     return FileResponse(str(cal_path))
 
 
@@ -1117,6 +1117,59 @@ def serve_compare():
     if not compare_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/compare.html")
     return FileResponse(str(compare_path))
+
+
+# ---------------------------------------------------------------------------
+# EODHD Earnings Calendar  (mega-cap $100 B+)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/earnings-calendar")
+async def earnings_calendar_api(
+    view: str = Query("month", description="month|week"),
+    anchor: str = Query("", description="YYYY-MM-DD anchor date"),
+):
+    """Earnings calendar for $100B+ market-cap companies (EODHD-only)."""
+    import calendar as _cal
+    from backend.earnings_calendar import get_earnings_calendar
+
+    today = dt.date.today()
+    try:
+        anchor_date = dt.date.fromisoformat(anchor[:10]) if anchor else today
+    except Exception:
+        anchor_date = today
+
+    if view == "week":
+        # Start from the Monday of the anchor week
+        monday = anchor_date - dt.timedelta(days=anchor_date.weekday())
+        start = monday
+        end = monday + dt.timedelta(days=6)  # through Sunday
+        label = f"Week of {start.strftime('%b %d, %Y')}"
+    else:
+        # Full calendar month (include leading/trailing days for the grid)
+        first_of_month = anchor_date.replace(day=1)
+        _, days_in_month = _cal.monthrange(first_of_month.year, first_of_month.month)
+        last_of_month = first_of_month.replace(day=days_in_month)
+        # Extend to fill the 7-column grid (Mon=0)
+        start = first_of_month - dt.timedelta(days=first_of_month.weekday())
+        end = last_of_month + dt.timedelta(days=6 - last_of_month.weekday())
+        label = first_of_month.strftime("%B %Y")
+
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        days = await loop.run_in_executor(None, lambda: get_earnings_calendar(start, end))
+    except Exception as exc:
+        LOG.exception("Earnings calendar failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "view": view,
+        "anchor": anchor_date.isoformat(),
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "label": label,
+        "days": days,
+    }
 
 
 @app.get("/api/calendar")

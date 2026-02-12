@@ -12,6 +12,7 @@
     { href: "/lead-lag",        label: "Engine 5",        desc: "Global lead-lag regime intelligence" },
     { href: "/red-dog",         label: "Red Dog",         desc: "Mean-reversion scanner (SP500 + NDX)" },
     { href: "/ichimoku",        label: "Ichimoku",        desc: "Trend-continuation scanner" },
+    { href: "/calendar",        label: "Earnings Calendar", desc: "Mega-cap earnings dates and compare workflow" },
     { href: "/compare",         label: "Compare",         desc: "Multi-ticker side-by-side" },
     { href: "/news-risk",       label: "News Risk",       desc: "Macro events and headline risk" },
     { href: "/backtest",        label: "Backtest",        desc: "Historical engine back-testing" },

@@ -312,3 +312,83 @@ class EodhdClient:
         url = f"{self._base_url}/macro-indicator/{country}"
         params: Dict[str, Any] = {"fmt": "json", "indicator": indicator}
         return self._get(url, params)
+
+    # -----------------------------------------------------------------------
+    # Public API: Calendar (Earnings, IPOs, Splits)
+    # -----------------------------------------------------------------------
+
+    def get_calendar_earnings(
+        self,
+        *,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        symbols: Optional[str] = None,
+    ) -> EodhdResponse:
+        """Fetch historical and upcoming earnings dates.
+
+        Query by date window (from/to) **or** by symbols (comma-separated
+        EODHD tickers like ``AAPL.US,MSFT.US``).  1 API call per request.
+
+        Each row includes: code, report_date, date, before_after_market,
+        currency, actual, estimate, difference, percent.
+        """
+        url = f"{self._base_url}/calendar/earnings"
+        params: Dict[str, Any] = {"fmt": "json"}
+        if symbols:
+            params["symbols"] = symbols
+        else:
+            if from_date:
+                params["from"] = from_date
+            if to_date:
+                params["to"] = to_date
+        return self._get(url, params)
+
+    def get_calendar_trends(self, *, symbols: str) -> EodhdResponse:
+        """Forward-looking earnings trends (consensus EPS, revenue estimates).
+
+        symbols: comma-separated EODHD tickers (e.g. ``AAPL.US,MSFT.US``).
+        1 API call per request.  JSON-only.
+
+        Returns nested structure: { type, description, symbols, trends: [[...], ...] }
+        where each inner list corresponds to a requested symbol.
+        """
+        url = f"{self._base_url}/calendar/trends"
+        params: Dict[str, Any] = {"fmt": "json", "symbols": symbols}
+        return self._get(url, params)
+
+    # -----------------------------------------------------------------------
+    # Public API: Stock Market Screener
+    # -----------------------------------------------------------------------
+
+    def get_screener(
+        self,
+        *,
+        filters: Optional[str] = None,
+        signals: Optional[str] = None,
+        sort: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> EodhdResponse:
+        """Screen stocks by fundamental and technical criteria.
+
+        filters: JSON-encoded list of filter triples, e.g.
+            '[["market_capitalization",">",100000000000],["exchange","=","us"]]'
+        signals: comma-separated signal names (e.g. "200d_new_hi")
+        sort: field_name.asc or field_name.desc
+        limit: 1-100 (default 50)
+        offset: 0-999
+
+        Each request consumes 5 API calls.
+        """
+        url = f"{self._base_url}/screener"
+        params: Dict[str, Any] = {
+            "limit": min(max(int(limit), 1), 100),
+            "offset": max(int(offset), 0),
+        }
+        if filters:
+            params["filters"] = filters
+        if signals:
+            params["signals"] = signals
+        if sort:
+            params["sort"] = sort
+        return self._get(url, params)
