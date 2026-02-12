@@ -9,81 +9,48 @@
     <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
     <link rel="stylesheet" href="/static/styles.css?v=9" />
     <style>
-      /* ── Command Center Layout ──────────────────────── */
-      .ccGrid { display: grid; gap: 12px; }
-      .ccTopRow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-      .ccMiddle { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; }
-      .ccBottom { margin-top: 4px; }
-      .ccRail { position: sticky; top: 16px; }
+      /* ── Command Center (using existing app tokens) ────────── */
 
-      /* ── Cards ──────────────────────────────────────── */
-      .ccCard {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-card);
-        padding: 16px;
+      /* 3-up metrics row */
+      .ccTopRow {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
       }
-      .ccCard--fp { border-left: 4px solid var(--green); }
-      .ccCard--regime { border-left: 4px solid var(--blue); }
-      .ccCard--vol { border-left: 4px solid var(--amber); }
-      .ccCardLabel {
-        font-size: 10px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--muted);
-        margin-bottom: 6px;
+
+      /* 2-col middle row */
+      .ccMiddle {
+        display: grid;
+        grid-template-columns: 3fr 2fr;
+        gap: 12px;
       }
-      .ccCardBig {
-        font-size: 22px;
-        font-weight: 800;
-        letter-spacing: -0.02em;
-      }
-      .ccCardScore {
+
+      /* Accent stripes (thin left border on top cards) */
+      .ccStripe--green { border-left: 4px solid var(--green); }
+      .ccStripe--blue  { border-left: 4px solid var(--blue); }
+      .ccStripe--amber { border-left: 4px solid var(--amber); }
+
+      /* Big score */
+      .ccBigScore {
         font-size: 32px;
         font-weight: 800;
+        letter-spacing: -0.02em;
         margin-right: 10px;
       }
-      .ccCardRow {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-top: 4px;
-      }
-      .ccSubBar {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        margin-top: 10px;
-      }
-      .ccSubBarItem {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 11px;
-      }
+
+      /* Sub-component bars */
+      .ccSubBar { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+      .ccSubBarItem { display: flex; align-items: center; gap: 8px; font-size: 11px; }
       .ccSubBarItem .label { color: var(--muted); min-width: 140px; }
       .ccSubBarItem .bar {
         flex: 1; height: 6px; border-radius: 3px;
-        background: var(--border);
-        overflow: hidden;
+        background: var(--border); overflow: hidden;
       }
-      .ccSubBarItem .bar .fill {
-        height: 100%; border-radius: 3px;
-        transition: width 0.3s;
-      }
+      .ccSubBarItem .bar .fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
       .ccSubBarItem .val { font-weight: 700; min-width: 30px; text-align: right; font-size: 11px; }
 
-      /* Status pills */
-      .pill {
-        display: inline-block;
-        font-size: 10px;
-        font-weight: 800;
-        padding: 3px 10px;
-        border-radius: 20px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
+      /* CC pill variants (extend global .pill) */
       .pill--green { background: rgba(52,199,89,0.14); color: #1b8a3e; }
       .pill--amber { background: rgba(255,149,0,0.14); color: #995c00; }
       .pill--red   { background: rgba(255,59,48,0.14); color: #cc2f26; }
@@ -91,232 +58,248 @@
 
       /* Change arrow */
       .ccChange { font-size: 11px; font-weight: 700; }
-      .ccChange--up { color: var(--green); }
+      .ccChange--up   { color: var(--green); }
       .ccChange--down { color: var(--red); }
       .ccChange--flat { color: var(--muted); }
 
-      /* ── Sequencer Timeline ─────────────────────────── */
-      .seqTimeline {
-        display: flex;
-        gap: 8px;
-        min-height: 80px;
-        padding: 8px 0;
-      }
+      /* ── Sequencer ──────────────────────────────────── */
+      .seqTimeline { display: flex; gap: 8px; min-height: 80px; padding: 8px 0; }
       .seqDay {
-        flex: 1;
-        text-align: center;
-        background: var(--hover);
-        border-radius: 10px;
-        padding: 8px 4px;
-        min-width: 80px;
+        flex: 1; text-align: center;
+        background: var(--hover); border-radius: 10px;
+        padding: 8px 4px; min-width: 80px;
       }
       .seqDayLabel {
-        font-size: 10px;
-        font-weight: 800;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin-bottom: 4px;
+        font-size: 10px; font-weight: 800; text-transform: uppercase;
+        color: var(--muted); margin-bottom: 4px;
       }
       .seqChip {
-        display: inline-block;
-        font-size: 9px;
-        font-weight: 700;
-        padding: 2px 7px;
-        border-radius: 6px;
-        margin: 2px 1px;
-        cursor: pointer;
-        background: rgba(0,122,255,0.10);
-        color: #0060cc;
+        display: inline-block; font-size: 9px; font-weight: 700;
+        padding: 2px 7px; border-radius: 6px; margin: 2px 1px;
+        background: rgba(0,122,255,0.10); color: #0060cc; cursor: pointer;
       }
-      .seqChip:hover {
-        background: rgba(0,122,255,0.20);
-      }
+      .seqChip:hover { background: rgba(0,122,255,0.20); }
       .seqPatternMatch {
-        margin-top: 8px;
-        padding: 10px;
-        background: var(--hover);
-        border-radius: 10px;
+        margin-top: 8px; padding: 10px;
+        background: var(--hover); border-radius: 10px;
       }
-      .seqPatternName {
-        font-size: 13px;
-        font-weight: 800;
-      }
-      .seqPatternConf {
-        font-size: 11px;
-        color: var(--muted);
-        margin-top: 2px;
-      }
+      .seqPatternName { font-size: 13px; font-weight: 800; }
+      .seqPatternConf { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-      /* ── Pattern Library ────────────────────────────── */
+      /* ── Pattern library ────────────────────────────── */
       .patternList { display: flex; flex-direction: column; gap: 6px; }
-      .patternItem {
-        padding: 8px 10px;
-        border-radius: 8px;
-        background: var(--hover);
-        font-size: 12px;
-      }
+      .patternItem { padding: 8px 10px; border-radius: 8px; background: var(--hover); font-size: 12px; }
       .patternItem .name { font-weight: 800; }
       .patternItem .desc { color: var(--muted); font-size: 11px; margin-top: 2px; }
 
-      /* ── Tradable Ideas Table ───────────────────────── */
-      .ideasTable {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-      }
+      /* ── Ideas table (reuses app dataTable tokens) ── */
+      .ideasTable { width: 100%; border-collapse: collapse; font-size: 12px; }
       .ideasTable th {
-        text-align: left;
-        font-size: 10px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--muted);
-        padding: 6px 8px;
-        border-bottom: 1px solid var(--border);
+        text-align: left; font-size: 10px; font-weight: 800;
+        text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+        padding: 6px 8px; border-bottom: 1px solid var(--border);
       }
-      .ideasTable td {
-        padding: 8px;
-        border-bottom: 1px solid var(--line);
-        vertical-align: middle;
-      }
+      .ideasTable td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
       .ideasTable tr:hover { background: var(--hover); }
 
-      /* ── Desk Brief ─────────────────────────────────── */
-      .briefItem {
-        margin-bottom: 8px;
-        font-size: 12px;
-        line-height: 1.5;
-      }
+      /* ── Brief ──────────────────────────────────────── */
+      .briefItem { margin-bottom: 8px; font-size: 12px; line-height: 1.5; }
       .briefLabel {
-        font-size: 10px;
-        font-weight: 800;
-        text-transform: uppercase;
-        color: var(--muted);
-        letter-spacing: 0.06em;
+        font-size: 10px; font-weight: 800; text-transform: uppercase;
+        color: var(--muted); letter-spacing: 0.06em;
       }
 
       /* ── Responsive ─────────────────────────────────── */
-      @media (max-width: 1100px) {
-        .ccTopRow { grid-template-columns: 1fr; }
-        .ccMiddle { grid-template-columns: 1fr; }
-      }
-      @media (max-width: 640px) {
-        .seqTimeline { flex-wrap: wrap; }
-      }
+      @media (max-width: 1100px) { .ccTopRow { grid-template-columns: 1fr; } .ccMiddle { grid-template-columns: 1fr; } }
+      @media (max-width: 640px) { .seqTimeline { flex-wrap: wrap; } }
     </style>
   </head>
   <body>
+    <!-- Raven loading overlay (matches other engines) -->
+    <div class="ravenLoadingOverlay" id="ravenOverlay">
+      <img class="ravenLoadingLogo" src="/static/RavenONLY.png" alt="" />
+      <div class="ravenLoadingProgress"><div class="ravenLoadingProgressFill" id="ravenProgressFill"></div></div>
+      <div class="ravenLoadingStatus" id="ravenStatus">Bootstrapping engines…</div>
+    </div>
+
+    <div id="ravenTopLoader"></div>
+
     <main class="container" role="main">
       <header class="appHeader">
         <div class="appBrand">
           <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
           <div class="appHeaderText">
             <div class="appTitle">Raven-Tech.co</div>
-            <div class="appSubtitle">Command Center</div>
+            <div class="appSubtitle">Command Center · Weekly planning and intraday monitoring</div>
           </div>
         </div>
       </header>
 
-      <div class="ccGrid">
-        <!-- Top Row: Flow Pressure, Regime, Vol State -->
+      <!-- ── Control Bar (matches Engine 1/3/4 pattern) ───────── -->
+      <section class="controlBar" aria-label="Command Center Controls">
+        <form id="ccForm" class="controlBarForm">
+          <div class="controlGroup">
+            <label class="controlLabel">
+              Command Center
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Command Center help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Command Center</div>
+                  <div class="tipBody">
+                    <p>Aggregates all engines into a unified weekly planning view.</p>
+                    <ul>
+                      <li><b>Flow Pressure</b>: Composite 0–100 score across 5 sub-components.</li>
+                      <li><b>Regime &amp; Vol</b>: Engine 5 global regime and vol lead-lag state.</li>
+                      <li><b>Tradable Ideas</b>: Auto-scans Engine 3 (Red Dog) and Engine 4 (Ichimoku) for tradable setups with gate status.</li>
+                      <li><b>Desk Brief</b>: LLM-generated narrative compression of the current market state.</li>
+                    </ul>
+                    <p><b>Desk view</b>: Click "Run Command Center" to bootstrap all engines and populate every panel.</p>
+                  </div>
+                </div>
+              </span>
+            </label>
+          </div>
+
+          <div class="controlSpacer"></div>
+
+          <button id="runBtn" type="button" class="primaryButton">
+            <span class="btnSpinner" aria-hidden="true"></span>
+            <span class="btnLabel">Run Command Center</span>
+          </button>
+        </form>
+        <div id="status" class="status" aria-live="polite">Click "Run Command Center" to bootstrap engines and load all panels.</div>
+      </section>
+
+      <!-- ── Results (hidden until Run) ──────────────────────── -->
+      <section id="results" class="results hidden" aria-label="Command Center Results">
+
+        <!-- Top Row: Flow Pressure · Regime · Vol State -->
         <div class="ccTopRow">
-          <div class="ccCard ccCard--fp" id="fpCard">
-            <div class="ccCardLabel">Flow Pressure</div>
-            <div class="ccCardRow">
-              <span class="ccCardScore" id="fpScore">--</span>
-              <span class="pill pill--amber" id="fpPill">Loading</span>
+          <div class="surface ccStripe--green" id="fpCard">
+            <div class="sectionHeader">
+              <h2 class="sectionTitle" style="font-size:12px;">Flow Pressure</h2>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:4px;">
+              <span class="ccBigScore" id="fpScore">--</span>
+              <span class="pill pill--amber" id="fpPill">—</span>
               <span class="ccChange ccChange--flat" id="fpChange"></span>
             </div>
             <div class="ccSubBar" id="fpSubBars"></div>
           </div>
 
-          <div class="ccCard ccCard--regime" id="regimeCard">
-            <div class="ccCardLabel">Global Regime</div>
-            <div class="ccCardRow">
-              <span class="ccCardBig" id="regimeLabel">--</span>
+          <div class="surface ccStripe--blue" id="regimeCard">
+            <div class="sectionHeader">
+              <h2 class="sectionTitle" style="font-size:12px;">Global Regime</h2>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:4px;">
+              <span class="metricValue" id="regimeLabel" style="font-size:22px;">--</span>
               <span class="pill pill--blue" id="regimePill"></span>
             </div>
             <div id="regimeDrivers" style="margin-top:8px; font-size:11px; color:var(--muted);"></div>
           </div>
 
-          <div class="ccCard ccCard--vol" id="volCard">
-            <div class="ccCardLabel">Vol State</div>
-            <div class="ccCardRow">
-              <span class="ccCardBig" id="volDirection">--</span>
+          <div class="surface ccStripe--amber" id="volCard">
+            <div class="sectionHeader">
+              <h2 class="sectionTitle" style="font-size:12px;">Vol State</h2>
+            </div>
+            <div style="margin-top:4px;">
+              <span class="metricValue" id="volDirection" style="font-size:22px;">--</span>
             </div>
             <div id="volDetails" style="margin-top:8px; font-size:11px; color:var(--muted);"></div>
           </div>
         </div>
 
-        <!-- Middle: Sequencer Timeline + Pattern Library -->
-        <div class="ccMiddle">
-          <div class="ccCard">
-            <div class="ccCardLabel">Weekly Signal Sequencer</div>
+        <!-- Middle: Sequencer + Pattern Library -->
+        <div class="ccMiddle" style="margin-top:12px;">
+          <div class="surface">
+            <div class="sectionHeader">
+              <h2 class="sectionTitle">Weekly Signal Sequencer</h2>
+            </div>
             <div class="seqTimeline" id="seqTimeline"></div>
             <div class="seqPatternMatch" id="seqPattern">
-              <div class="seqPatternName" id="seqPatternName">Detecting pattern...</div>
+              <div class="seqPatternName" id="seqPatternName">Detecting pattern…</div>
               <div class="seqPatternConf" id="seqPatternConf"></div>
             </div>
           </div>
 
-          <div class="ccCard">
-            <div class="ccCardLabel">Pattern Library</div>
+          <div class="surface">
+            <div class="sectionHeader">
+              <h2 class="sectionTitle">Pattern Library</h2>
+            </div>
             <div class="patternList" id="patternList"></div>
           </div>
         </div>
 
-        <!-- Bottom: Tradable Ideas Queue -->
-        <div class="ccCard ccBottom">
-          <div class="ccCardLabel">Tradable Ideas Queue</div>
+        <!-- Tradable Ideas Queue -->
+        <div class="surface" style="margin-top:12px;">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Tradable Ideas Queue
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Ideas help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Tradable Ideas Queue</div>
+                  <div class="tipBody">
+                    <p>Aggregated setups from Engine 3 (Red Dog) and Engine 4 (Ichimoku), ranked by score and filtered through the gating system.</p>
+                    <ul>
+                      <li><b>TRADABLE</b>: Regime and vol support the trade — full position sizing.</li>
+                      <li><b>WATCH</b>: Conditional issues — reduced sizing or wait for resolution.</li>
+                      <li><b>SUPPRESS</b>: Environment is hostile to this setup type.</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
           <table class="ideasTable" id="ideasTable">
             <thead>
               <tr>
-                <th>Ticker</th>
-                <th>Engine</th>
-                <th>Setup</th>
-                <th>Direction</th>
-                <th>Gate</th>
-                <th>Score</th>
-                <th>Why Now</th>
-                <th>What Breaks It</th>
+                <th>Ticker</th><th>Engine</th><th>Setup</th><th>Direction</th>
+                <th>Gate</th><th>Score</th><th>Why Now</th><th>What Breaks It</th>
               </tr>
             </thead>
             <tbody id="ideasBody"></tbody>
           </table>
           <div id="ideasEmpty" style="text-align:center; padding:20px; color:var(--muted); font-size:13px; display:none;">
-            No tradable ideas available. Run Engine 3 or Engine 4 scans to populate.
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Rail (Desk Brief) - shown inline on mobile -->
-      <div style="margin-top:12px; display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:12px;">
-        <div class="ccCard">
-          <div class="ccCardLabel">Desk Brief</div>
-          <div id="deskBrief">
-            <div class="briefItem">
-              <div class="briefLabel">Market State</div>
-              <div id="briefMarket">Loading...</div>
-            </div>
-            <div class="briefItem">
-              <div class="briefLabel">Weekly Bias</div>
-              <div id="briefBias">Loading...</div>
-            </div>
-            <div class="briefItem">
-              <div class="briefLabel">Top Risks</div>
-              <div id="briefRisks">Loading...</div>
-            </div>
+            No tradable ideas available. Click "Run Command Center" to scan engines.
           </div>
         </div>
 
-        <div class="ccCard">
-          <div class="ccCardLabel">Alerts (State Flips)</div>
-          <div id="alertsFeed" style="font-size:12px; color:var(--muted);">
-            No state flips detected this session.
+        <!-- Desk Brief + Alerts -->
+        <div style="margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px;">
+          <div class="surface">
+            <div class="sectionHeader">
+              <h2 class="sectionTitle">Desk Brief</h2>
+            </div>
+            <div id="deskBrief">
+              <div class="briefItem">
+                <div class="briefLabel">Market State</div>
+                <div id="briefMarket">—</div>
+              </div>
+              <div class="briefItem">
+                <div class="briefLabel">Weekly Bias</div>
+                <div id="briefBias">—</div>
+              </div>
+              <div class="briefItem">
+                <div class="briefLabel">Top Risks</div>
+                <div id="briefRisks">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="surface">
+            <div class="sectionHeader">
+              <h2 class="sectionTitle">Alerts (State Flips)</h2>
+            </div>
+            <div id="alertsFeed" style="font-size:12px; color:var(--muted);">
+              No state flips detected this session.
+            </div>
           </div>
         </div>
-      </div>
+      </section>
     </main>
+
+    <script src="/static/ui_kit.js?v=3"></script>
     <script src="/static/command-center.js"></script>
     <script src="/static/nav.js"></script>
   </body>

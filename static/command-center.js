@@ -26,6 +26,27 @@
     return { cls: "ccChange--flat", text: "—" };
   }
 
+  /* ── Loading overlay helpers ────────────────────────────────── */
+
+  const overlay = $("#ravenOverlay");
+  const progressFill = $("#ravenProgressFill");
+  const statusText = $("#ravenStatus");
+
+  function showOverlay() {
+    if (overlay) overlay.classList.add("isVisible");
+  }
+  function hideOverlay() {
+    if (overlay) overlay.classList.remove("isVisible");
+  }
+  function setProgress(pct, msg) {
+    if (progressFill) progressFill.style.width = pct + "%";
+    if (statusText) statusText.textContent = msg || "";
+  }
+
+  function setApiLoading(on) {
+    document.body.classList.toggle("isApiLoading", on);
+  }
+
   /* ── Flow Pressure ─────────────────────────────────────────── */
 
   async function loadFlowPressure() {
@@ -58,64 +79,53 @@
       const subBars = $("#fpSubBars");
       subBars.innerHTML = "";
       const labels = {
-        dealer_gamma_support: "Dealer Gamma",
-        vol_term_structure_drift: "Vol Term Structure",
-        em_richness_skew: "EM Richness",
-        liquidity_tape_stress: "Liquidity",
-        macro_event_density: "Macro Density",
+        dealer_gamma: "Dealer Gamma",
+        vol_term_structure: "Vol Term Structure",
+        em_richness: "EM Richness",
+        liquidity: "Liquidity",
+        macro_density: "Macro Density",
       };
       for (const [key, lbl] of Object.entries(labels)) {
-        const val = components[key] != null ? components[key] : 50;
+        const val = components[key] ?? 50;
         const item = document.createElement("div");
         item.className = "ccSubBarItem";
         item.innerHTML = `
           <span class="label">${lbl}</span>
-          <div class="bar"><div class="fill" style="width:${val}%;background:${barColor(val)}"></div></div>
-          <span class="val">${Math.round(val)}</span>
-        `;
+          <span class="bar"><span class="fill" style="width:${val}%;background:${barColor(val)}"></span></span>
+          <span class="val">${Math.round(val)}</span>`;
         subBars.appendChild(item);
       }
 
-      // Card border color
-      const fpCard = $("#fpCard");
-      if (label === "Risk-On") fpCard.style.borderLeftColor = "var(--green)";
-      else if (label === "Risk-Off") fpCard.style.borderLeftColor = "var(--red)";
-      else fpCard.style.borderLeftColor = "var(--amber)";
-
-      // Regime card
+      // Regime
       const regime = data.regime || {};
-      const regimeLabel = regime.label || regime.current_label || "—";
-      const regimeScore = regime.score != null ? Math.round(regime.score) : "";
-      $("#regimeLabel").textContent = regimeLabel;
-      const rPill = $("#regimePill");
-      rPill.textContent = regimeScore ? `Score: ${regimeScore}` : "";
-      rPill.className = "pill " + pillClass(regimeLabel);
+      $("#regimeLabel").textContent = regime.label || "—";
+      const regimePill = $("#regimePill");
+      if (regime.score != null) {
+        regimePill.textContent = "Score: " + regime.score;
+        regimePill.className = "pill " + pillClass(regime.label);
+      }
+      const drivers = [];
+      if (regime.fx_stress != null) drivers.push("fx stress: " + regime.fx_stress);
+      if (regime.iv_stress != null) drivers.push("iv stress: " + regime.iv_stress);
+      $("#regimeDrivers").textContent = drivers.join(" · ");
 
-      const drivers = regime.components || {};
-      const driverHtml = Object.entries(drivers)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 2)
-        .map(([k, v]) => `<span>${k.replace(/_/g, " ")}: ${Math.round(v)}</span>`)
-        .join(" · ");
-      $("#regimeDrivers").innerHTML = driverHtml || "No driver data";
-
-      // Vol state card
+      // Vol state
       const vol = data.volState || {};
-      const volDir = vol.global_vol_direction || vol.globalVolDirection || "—";
-      $("#volDirection").textContent = volDir.charAt(0).toUpperCase() + volDir.slice(1);
-      const volDetails = [];
-      if (vol.us_iv_state || vol.usIvState) volDetails.push(`US IV: ${vol.us_iv_state || vol.usIvState}`);
-      if (vol.vol_lag_state || vol.volLagState) volDetails.push(`Lag: ${vol.vol_lag_state || vol.volLagState}`);
-      if (vol.structure_bias || vol.structureBias) volDetails.push(`Bias: ${vol.structure_bias || vol.structureBias}`);
-      $("#volDetails").innerHTML = volDetails.join(" · ") || "No vol data available";
-
+      const volDir = vol.direction || vol.vol_direction || "—";
+      $("#volDirection").textContent = volDir;
+      const volParts = [];
+      if (vol.us_iv) volParts.push("US IV: " + vol.us_iv);
+      if (vol.lag) volParts.push("Lag: " + vol.lag);
+      if (vol.bias) volParts.push("Bias: " + vol.bias);
+      const volNote = volParts.length ? volParts.join(" · ") : "";
+      const volInterp = vol.interpretation || "";
+      $("#volDetails").textContent = [volNote, volInterp].filter(Boolean).join(" — ");
     } catch (e) {
       console.error("Flow pressure load failed:", e);
-      $("#fpScore").textContent = "!";
     }
   }
 
-  /* ── Sequencer ─────────────────────────────────────────────── */
+  /* ── Sequencer ──────────────────────────────────────────────── */
 
   async function loadSequencer() {
     try {
@@ -125,94 +135,69 @@
 
       const days = data.tradingDays || [];
       const seq = data.sequence || {};
-      const events = seq.events || [];
-      const patterns = data.patterns || {};
+      const timeline = seq.timeline || {};
+      const patternMatch = seq.matched_pattern || {};
 
-      // Build timeline
-      const timeline = $("#seqTimeline");
-      timeline.innerHTML = "";
-      const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
-      const today = new Date().toISOString().slice(0, 10);
-
+      const container = $("#seqTimeline");
+      container.innerHTML = "";
+      const dayLabels = ["MON", "TUE", "WED", "THU", "FRI"];
       days.forEach((d, i) => {
-        const dayEl = document.createElement("div");
-        dayEl.className = "seqDay";
-        if (d === today) dayEl.style.background = "rgba(0,122,255,0.06)";
-
-        const label = document.createElement("div");
-        label.className = "seqDayLabel";
-        label.textContent = dayNames[i] || d.slice(5);
-        dayEl.appendChild(label);
-
-        // Find events for this day
-        const dayEvents = events.filter((e) => e.date === d);
-        if (dayEvents.length === 0) {
-          const noEv = document.createElement("div");
-          noEv.style.cssText = "font-size:10px; color:var(--muted2); margin-top:8px;";
-          noEv.textContent = "—";
-          dayEl.appendChild(noEv);
-        } else {
-          dayEvents.forEach((ev) => {
-            const chip = document.createElement("div");
-            chip.className = "seqChip";
-            chip.textContent = (ev.event_type || "").replace(/_/g, " ").toLowerCase();
-            chip.title = ev.summary || "";
-            dayEl.appendChild(chip);
-          });
-        }
-        timeline.appendChild(dayEl);
+        const events = timeline[d] || [];
+        const div = document.createElement("div");
+        div.className = "seqDay";
+        const chips = events.length
+          ? events.map((e) => `<span class="seqChip">${e.label || e.field || "?"}</span>`).join("")
+          : '<span style="color:var(--muted);font-size:11px;">—</span>';
+        div.innerHTML = `<div class="seqDayLabel">${dayLabels[i] || d}</div>${chips}`;
+        container.appendChild(div);
       });
 
       // Pattern match
-      const pName = seq.pattern_match;
-      const pConf = seq.pattern_confidence || 0;
-      const tmpl = patterns[pName] || {};
-      if (pName) {
-        $("#seqPatternName").textContent = tmpl.label || pName.replace(/_/g, " ");
-        $("#seqPatternConf").textContent = `Confidence: ${Math.round(pConf * 100)}% · ${seq.primary_risk || ""}`;
-      } else {
-        $("#seqPatternName").textContent = "No pattern matched yet";
-        $("#seqPatternConf").textContent = events.length === 0 ? "No signal flips this week" : "Sequence in progress";
+      if (patternMatch.label) {
+        $("#seqPatternName").textContent = patternMatch.label;
+        const conf = patternMatch.confidence;
+        const caveat = patternMatch.caveat || "";
+        $("#seqPatternConf").textContent =
+          (conf != null ? "Confidence: " + conf + "%" : "") +
+          (caveat ? " - " + caveat : "");
       }
 
       // Pattern library
+      const patterns = data.patterns || {};
       const list = $("#patternList");
       list.innerHTML = "";
-      for (const [key, pat] of Object.entries(patterns)) {
-        const item = document.createElement("div");
-        item.className = "patternItem";
-        const isMatch = key === pName;
-        if (isMatch) item.style.background = "rgba(52,199,89,0.06)";
-        item.innerHTML = `
-          <div class="name">${pat.label || key}${isMatch ? ' <span class="pill pill--green" style="font-size:8px;">MATCH</span>' : ""}</div>
-          <div class="desc">${pat.description || ""}</div>
-        `;
-        list.appendChild(item);
+      for (const [key, p] of Object.entries(patterns)) {
+        const isMatch = patternMatch.key === key;
+        const el = document.createElement("div");
+        el.className = "patternItem";
+        el.innerHTML = `
+          <div class="name">${p.label}${isMatch ? ' <span class="pill pill--green" style="font-size:9px;">MATCH</span>' : ""}</div>
+          <div class="desc">${p.description || ""}</div>`;
+        list.appendChild(el);
       }
-
     } catch (e) {
       console.error("Sequencer load failed:", e);
     }
   }
 
-  /* ── Tradable Ideas ────────────────────────────────────────── */
+  /* ── Tradable Ideas ─────────────────────────────────────────── */
 
   async function loadIdeas() {
     try {
       const res = await fetch("/api/command-center/tradable-ideas");
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
-      const ideas = data.ideas || [];
 
+      const ideas = data.ideas || [];
       const tbody = $("#ideasBody");
-      const empty = $("#ideasEmpty");
+      const emptyEl = $("#ideasEmpty");
       tbody.innerHTML = "";
 
-      if (ideas.length === 0) {
-        empty.style.display = "block";
+      if (!ideas.length) {
+        emptyEl.style.display = "block";
         return;
       }
-      empty.style.display = "none";
+      emptyEl.style.display = "none";
 
       ideas.forEach((idea) => {
         const gate = idea.gate || {};
@@ -255,102 +240,109 @@
     }
   }
 
-  /* ── Bootstrap banner ─────────────────────────────────────── */
+  /* ── Run Command Center ─────────────────────────────────────── */
 
-  function showBootstrapBanner(msg) {
-    let banner = document.getElementById("ccBootstrapBanner");
-    if (!banner) {
-      banner = document.createElement("div");
-      banner.id = "ccBootstrapBanner";
-      banner.style.cssText =
-        "position:fixed;top:0;left:0;right:0;z-index:9999;padding:10px 20px;" +
-        "background:var(--amber,#f5a623);color:#000;text-align:center;font-size:13px;" +
-        "font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.15);transition:opacity .3s;";
-      document.body.prepend(banner);
-    }
-    banner.textContent = msg;
-    banner.style.display = "block";
-    banner.style.opacity = "1";
-  }
+  let isRunning = false;
 
-  function hideBootstrapBanner() {
-    const banner = document.getElementById("ccBootstrapBanner");
-    if (banner) {
-      banner.style.opacity = "0";
-      setTimeout(() => { banner.style.display = "none"; }, 400);
-    }
-  }
+  async function runCommandCenter() {
+    if (isRunning) return;
+    isRunning = true;
 
-  /* ── Init ──────────────────────────────────────────────────── */
+    const runBtn = $("#runBtn");
+    const statusEl = $("#status");
+    const resultsEl = $("#results");
 
-  async function init() {
-    // Kick off background engine bootstrap (non-blocking)
-    showBootstrapBanner("Initializing engines… data will refresh automatically.");
+    // UI: loading state
+    runBtn.classList.add("isLoading");
+    runBtn.disabled = true;
+    setApiLoading(true);
+    showOverlay();
+    setProgress(5, "Bootstrapping engines…");
+    statusEl.className = "status isRunning";
+    statusEl.textContent = "Initializing engines — this may take a moment…";
 
-    fetch("/api/command-center/init")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.status === "initializing") {
-          // Engines are bootstrapping; poll for data readiness
-          pollForData();
-        } else {
-          // Already running or instant – just load
-          hideBootstrapBanner();
-        }
-      })
-      .catch(() => { hideBootstrapBanner(); });
+    try {
+      // Step 1: Kick off engine bootstrap
+      setProgress(10, "Starting Engine 5 (regime + vol)…");
+      await fetch("/api/command-center/init");
 
-    // Load whatever data is available right now
-    await Promise.all([
-      loadFlowPressure(),
-      loadSequencer(),
-      loadIdeas(),
-      loadDeskBrief(),
-    ]);
-  }
+      // Step 2: Poll and load data in stages
+      setProgress(20, "Loading Flow Pressure…");
+      await loadFlowPressure();
 
-  /** Re-load data sections periodically until tradable ideas appear
-   *  (indicates engines have finished scanning). */
-  function pollForData() {
-    let attempts = 0;
-    const maxAttempts = 20;  // ~5 min max polling
-    const interval = 15000; // 15 seconds between polls
+      setProgress(35, "Loading Sequencer…");
+      await loadSequencer();
 
-    const timer = setInterval(async () => {
-      attempts++;
-      try {
-        const [ideasRes, fpRes] = await Promise.all([
-          fetch("/api/command-center/tradable-ideas").then((r) => r.json()),
-          fetch("/api/command-center/flow-pressure").then((r) => r.json()),
-        ]);
+      setProgress(50, "Loading Desk Brief…");
+      await loadDeskBrief();
 
-        // Refresh all sections
-        await Promise.all([
-          loadFlowPressure(),
-          loadSequencer(),
-          loadIdeas(),
-          loadDeskBrief(),
-        ]);
+      // Step 3: Wait for Engine 3/4 scans to populate (poll tradable ideas)
+      setProgress(60, "Waiting for Engine 3 & 4 scans…");
+      let ideasLoaded = false;
+      for (let attempt = 0; attempt < 24; attempt++) {
+        try {
+          const ideasRes = await fetch("/api/command-center/tradable-ideas");
+          const ideasData = await ideasRes.json();
+          if ((ideasData.ideas || []).length > 0) {
+            ideasLoaded = true;
+            break;
+          }
+        } catch (_) { /* ignore */ }
 
-        const hasIdeas = (ideasRes.ideas || []).length > 0;
-        const hasRegime = fpRes.regime && Object.keys(fpRes.regime).length > 0;
-
-        if ((hasIdeas && hasRegime) || attempts >= maxAttempts) {
-          clearInterval(timer);
-          hideBootstrapBanner();
-        } else {
-          showBootstrapBanner(
-            `Engines loading… refreshing data (${attempts}/${maxAttempts})`
-          );
-        }
-      } catch (e) {
-        console.warn("Poll error:", e);
-        if (attempts >= maxAttempts) {
-          clearInterval(timer);
-          hideBootstrapBanner();
-        }
+        const pct = 60 + Math.min(attempt * 1.5, 30);
+        setProgress(pct, `Scanning universes… (${attempt + 1}/24)`);
+        await new Promise((r) => setTimeout(r, 10000));
       }
-    }, interval);
+
+      // Step 4: Final load of all panels
+      setProgress(92, "Refreshing all panels…");
+      await Promise.all([
+        loadFlowPressure(),
+        loadSequencer(),
+        loadIdeas(),
+        loadDeskBrief(),
+      ]);
+
+      setProgress(100, "Done");
+
+      // Show results
+      resultsEl.classList.remove("hidden");
+      statusEl.className = "status isOk";
+      statusEl.textContent = ideasLoaded
+        ? "Command Center loaded — all engines reporting."
+        : "Command Center loaded — tradable ideas may still be populating.";
+    } catch (e) {
+      console.error("Command Center run failed:", e);
+      statusEl.className = "status isError";
+      statusEl.textContent = "Error: " + (e.message || "Unknown error");
+    } finally {
+      hideOverlay();
+      setApiLoading(false);
+      runBtn.classList.remove("isLoading");
+      runBtn.disabled = false;
+      isRunning = false;
+    }
+  }
+
+  /* ── Init (button-triggered only) ───────────────────────────── */
+
+  function init() {
+    const runBtn = $("#runBtn");
+    if (runBtn) {
+      runBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        runCommandCenter();
+      });
+    }
+
+    // Also allow form submit
+    const form = $("#ccForm");
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        runCommandCenter();
+      });
+    }
   }
 
   if (document.readyState === "loading") {
