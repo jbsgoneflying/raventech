@@ -2588,17 +2588,34 @@ def api_flow_pressure():
                             shared_iv30 = float(v) * 100.0
                             break
 
-            # Derive rv10 from Engine 5 vol data if available
-            if vol_data:
-                # Engine 5 vol data may contain realized vol
-                rv_raw = vol_data.get("us_rv10") or vol_data.get("rv10")
-                if rv_raw is not None:
-                    shared_rv10 = float(rv_raw)
-
             # ADV from SPY volume (liquid enough to always be high)
             shared_adv = 5_000_000_000.0  # SPY trades ~$30B/day
     except Exception as e:
         LOG.debug("Flow Pressure: ORATS cores fetch failed: %s", e)
+
+    # Fallback: derive vol metrics from Engine 5 data when ORATS is unavailable
+    if vol_data:
+        if shared_rv10 is None:
+            rv_raw = vol_data.get("us_rv10") or vol_data.get("rv10")
+            if rv_raw is not None:
+                try:
+                    shared_rv10 = float(rv_raw)
+                except (ValueError, TypeError):
+                    pass
+        # If Engine 5 has US IV state, derive approximate iv7/iv30
+        if shared_iv7 is None:
+            us_iv = vol_data.get("us_iv_state", "").upper()
+            # Map Engine 5 states to approximate IV levels for scoring
+            _iv_approx = {"ELEVATED": 25.0, "HIGH": 30.0, "NORMAL": 16.0, "NEUTRAL": 16.0, "LOW": 12.0}
+            if us_iv in _iv_approx:
+                shared_iv7 = _iv_approx[us_iv]
+        if shared_iv30 is None and shared_iv7 is not None:
+            # Approximate IV30 based on typical term structure
+            vol_dir = vol_data.get("global_vol_direction", "").lower()
+            if vol_dir in ("rising", "expanding"):
+                shared_iv30 = shared_iv7 * 0.90  # Inverted term structure
+            else:
+                shared_iv30 = shared_iv7 * 1.10  # Normal contango
 
     # Fetch macro event density from Benzinga
     event_count_5d = 0
@@ -2737,27 +2754,76 @@ def api_sequencer():
     }
 
 
-@app.get("/api/command-center/desk-brief")
-def api_desk_brief():
-    """Desk Brief: LLM-generated narrative compression."""
-    flags = get_flags()
-    if not flags.ENABLE_LLM_NARRATIVE:
-        return {
-            "enabled": False,
-            "brief": {
-                "market_state": "LLM narrative is disabled. Review metrics cards directly.",
-                "weekly_bias": "Consult Flow Pressure and Regime cards for current bias.",
-                "top_risks": "Check Macro Event Density panel for upcoming catalysts.",
-            },
-        }
+def _build_deterministic_desk_brief(context: dict) -> dict:
+    """Build a data-driven Desk Brief from available engine data.
 
-    with _desk_brief_cache_lock:
-        cached = _desk_brief_cache.get("latest")
-    if cached is not None:
-        return cached
+    Used when LLM is disabled, API key is missing, or LLM call fails.
+    Produces three concise sentences from the actual numbers.
+    """
+    # Market State
+    fp = context.get("flow_pressure", {})
+    regime = context.get("regime", {})
+    vol = context.get("vol_state", {})
+    fp_label = fp.get("composite_label", "Unknown")
+    fp_score = fp.get("composite_score")
+    regime_label = regime.get("label", "Unknown")
+    vol_dir = vol.get("direction") or "unknown"
 
-    # Gather rich context for LLM (per plan: regime, flow pressure, vol state,
-    # dealer gamma context, sequencer events, gate summary, macro events)
+    state_parts = []
+    if regime_label and regime_label != "Unknown":
+        state_parts.append(f"Regime is {regime_label}")
+    if fp_label and fp_label != "Unknown" and fp_score is not None:
+        state_parts.append(f"Flow Pressure {fp_label} ({fp_score:.0f})")
+    if vol_dir and vol_dir != "unknown":
+        state_parts.append(f"vol {vol_dir}")
+    market_state = ", ".join(state_parts) + "." if state_parts else "Awaiting engine data."
+
+    # Weekly Bias
+    pattern = context.get("matched_pattern")
+    gate_summary = context.get("gate_summary", {})
+    tradable_ct = gate_summary.get("TRADABLE", 0)
+    watch_ct = gate_summary.get("WATCH", 0)
+    suppress_ct = gate_summary.get("SUPPRESS", 0)
+    total_ideas = context.get("tradable_ideas_count", 0)
+
+    bias_parts = []
+    if pattern:
+        bias_parts.append(f"Pattern: {pattern}")
+    if fp_label == "Risk-On":
+        bias_parts.append("continuation and premium selling favored")
+    elif fp_label == "Risk-Off":
+        bias_parts.append("mean reversion and defined risk favored")
+    elif fp_label == "Neutral":
+        bias_parts.append("selectivity — higher quality setups only")
+    if tradable_ct > 0:
+        bias_parts.append(f"{tradable_ct} tradable idea(s)")
+    if watch_ct > 0:
+        bias_parts.append(f"{watch_ct} on watch")
+    weekly_bias = "; ".join(bias_parts) + "." if bias_parts else "No clear bias — await more data."
+
+    # Top Risks
+    risk_parts = []
+    macro = context.get("macro_events_next_5d", [])
+    if macro and macro[0] != "No high-impact events":
+        risk_parts.append(f"Macro: {macro[0]}")
+    gamma = context.get("dealer_gamma", {})
+    if gamma.get("sign") == "negative" and gamma.get("magnitude") in ("high", "medium"):
+        risk_parts.append("dealer gamma hostile")
+    if suppress_ct > 0:
+        risk_parts.append(f"{suppress_ct} setup(s) suppressed by environment")
+    if regime_label in ("Stressed", "Risk-Off"):
+        risk_parts.append(f"regime at {regime_label}")
+    top_risks = "; ".join(risk_parts) + "." if risk_parts else "No elevated risks detected."
+
+    return {
+        "market_state": market_state,
+        "weekly_bias": weekly_bias,
+        "top_risks": top_risks,
+    }
+
+
+def _gather_desk_brief_context() -> dict:
+    """Gather rich context for the Desk Brief from all available sources."""
     context = {}
     try:
         fp_data = api_flow_pressure()
@@ -2840,8 +2906,32 @@ def api_desk_brief():
     except Exception:
         pass
 
-    brief = generate_desk_brief(context)
-    payload = {"enabled": True, "brief": brief}
+    return context
+
+
+@app.get("/api/command-center/desk-brief")
+def api_desk_brief():
+    """Desk Brief: LLM-generated narrative or deterministic synthesis."""
+    with _desk_brief_cache_lock:
+        cached = _desk_brief_cache.get("latest")
+    if cached is not None:
+        return cached
+
+    context = _gather_desk_brief_context()
+
+    flags = get_flags()
+    if flags.ENABLE_LLM_NARRATIVE:
+        # Try LLM first, fall back to deterministic
+        brief = generate_desk_brief(context)
+        # Check if LLM returned the generic fallback (meaning it failed)
+        is_fallback = brief.get("market_state", "").startswith("Market data is being processed")
+        if is_fallback:
+            brief = _build_deterministic_desk_brief(context)
+        payload = {"enabled": True, "brief": brief}
+    else:
+        # LLM disabled — use deterministic synthesis from actual data
+        brief = _build_deterministic_desk_brief(context)
+        payload = {"enabled": False, "brief": brief}
 
     with _desk_brief_cache_lock:
         _desk_brief_cache["latest"] = payload
@@ -2849,7 +2939,7 @@ def api_desk_brief():
 
 
 def _build_red_dog_why_now(s: dict) -> str:
-    """Build a contextual 'Why Now' explanation from Red Dog setup fields."""
+    """Build a short 'Why Now' from Red Dog setup fields (max ~3 items)."""
     parts = []
     direction = s.get("direction", "")
     quality = s.get("quality", {})
@@ -2858,114 +2948,94 @@ def _build_red_dog_why_now(s: dict) -> str:
 
     grade = quality.get("grade", "")
     if grade:
-        parts.append(f"{grade} grade")
+        parts.append(grade)
 
     rsi = indicators.get("rsi")
     if rsi is not None:
         if direction == "bullish" and rsi < 35:
-            parts.append(f"RSI oversold at {rsi:.0f}")
+            parts.append(f"RSI {rsi:.0f}")
         elif direction == "bearish" and rsi > 65:
-            parts.append(f"RSI overbought at {rsi:.0f}")
+            parts.append(f"RSI {rsi:.0f}")
 
     sma_dev = indicators.get("sma20DeviationPct")
     if sma_dev is not None and abs(sma_dev) > 3:
-        parts.append(f"{abs(sma_dev):.1f}% from SMA20")
+        parts.append(f"{abs(sma_dev):.1f}% from 20MA")
 
     vol_ratio = indicators.get("volumeRatio")
     if vol_ratio is not None and vol_ratio > 1.3:
-        parts.append(f"volume {vol_ratio:.1f}x avg")
+        parts.append(f"Vol {vol_ratio:.1f}x")
 
     alignment = trend.get("alignment", "")
     if alignment == "aligned":
-        parts.append("trend-aligned")
-    elif alignment == "counter":
-        parts.append("counter-trend")
+        parts.append("w/ trend")
+    elif not s.get("gammaAligned", True):
+        parts.append("gamma hostile")
 
     if not parts:
-        score = quality.get("score", 0)
-        return f"Red Dog reversal signal (score {score})"
-    return "; ".join(parts)
+        return "Reversal signal"
+    return ", ".join(parts[:4])
 
 
 def _build_red_dog_what_breaks(s: dict) -> str:
-    """Build a contextual 'What Breaks It' from Red Dog invalidation levels."""
+    """Build a short 'What Breaks It' from Red Dog levels."""
     levels = s.get("levels", {})
     direction = s.get("direction", "")
     stop = levels.get("stopLoss")
     if stop is not None:
-        if direction == "bullish":
-            return f"Price breaks below stop at ${stop:.2f}"
-        else:
-            return f"Price breaks above stop at ${stop:.2f}"
-    return "Price exceeds stop level"
+        return f"Stop ${stop:.2f}"
+    return "Below stop level"
 
 
 def _build_ichimoku_why_now(s: dict) -> str:
-    """Build a contextual 'Why Now' explanation from Ichimoku setup fields."""
+    """Build a short 'Why Now' from Ichimoku setup fields (max ~3 items)."""
     parts = []
     quality = s.get("quality", {})
     ichimoku = s.get("ichimoku", {})
     indicators = s.get("indicators", {})
     freshness = s.get("freshness", {})
-    tags = s.get("tags", [])
 
     grade = quality.get("grade", "")
     if grade:
-        parts.append(f"{grade} grade")
+        parts.append(grade)
 
     cloud_bias = ichimoku.get("cloudBias", "")
-    if cloud_bias:
-        parts.append(f"cloud {cloud_bias}")
-
     kijun_slope = indicators.get("kijunSlope", "")
-    if kijun_slope and kijun_slope != "flat":
-        parts.append(f"Kijun {kijun_slope}")
+    if cloud_bias and kijun_slope and kijun_slope != "flat":
+        parts.append(f"cloud {cloud_bias}, Kijun {kijun_slope}")
+    elif cloud_bias:
+        parts.append(f"cloud {cloud_bias}")
 
     bars_since = freshness.get("barsSinceReclaim")
     if bars_since is not None and bars_since <= 3:
-        parts.append(f"fresh reclaim ({bars_since}d)")
+        parts.append(f"fresh ({bars_since}d)")
 
     vol_ratio = indicators.get("volumeRatio")
     if vol_ratio is not None and vol_ratio > 1.25:
-        parts.append(f"volume {vol_ratio:.1f}x avg")
-
-    rsi = indicators.get("rsi")
-    if rsi is not None:
-        if rsi > 50 and s.get("direction") == "bullish":
-            parts.append(f"RSI {rsi:.0f}")
-        elif rsi < 50 and s.get("direction") == "bearish":
-            parts.append(f"RSI {rsi:.0f}")
+        parts.append(f"Vol {vol_ratio:.1f}x")
 
     chikou_tangled = indicators.get("chikouTangled")
     if chikou_tangled is False:
         parts.append("Chikou clear")
 
     if not parts:
-        score = quality.get("score", 0)
-        return f"Ichimoku continuation signal (score {score})"
-    return "; ".join(parts)
+        return "Continuation signal"
+    return ", ".join(parts[:3])
 
 
 def _build_ichimoku_what_breaks(s: dict) -> str:
-    """Build a contextual 'What Breaks It' from Ichimoku invalidation levels."""
-    levels = s.get("levels", {})
+    """Build a short 'What Breaks It' from Ichimoku levels."""
     ichimoku = s.get("ichimoku", {})
+    levels = s.get("levels", {})
     direction = s.get("direction", "")
-    stop = levels.get("stopLoss")
     kijun = ichimoku.get("kijun")
+    stop = levels.get("stopLoss")
 
-    parts = []
-    if stop is not None:
-        parts.append(f"stop at ${stop:.2f}")
     if kijun is not None:
-        if direction == "bullish":
-            parts.append(f"close below Kijun ${kijun:.2f}")
-        else:
-            parts.append(f"close above Kijun ${kijun:.2f}")
-
-    if parts:
-        return "Breaks if " + " or ".join(parts)
-    return "Price breaks below Kijun"
+        verb = "below" if direction == "bullish" else "above"
+        return f"Kijun ${kijun:.2f}"
+    if stop is not None:
+        return f"Stop ${stop:.2f}"
+    return "Below Kijun"
 
 
 @app.get("/api/command-center/tradable-ideas")
@@ -3043,7 +3113,18 @@ def api_tradable_ideas():
     # Sort by score descending
     ideas.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-    return {"ideas": ideas, "count": len(ideas)}
+    # Count by engine for the frontend
+    rd_count = sum(1 for i in ideas if "Red Dog" in i.get("engine", ""))
+    ich_count = sum(1 for i in ideas if "Ichimoku" in i.get("engine", ""))
+
+    return {
+        "ideas": ideas,
+        "count": len(ideas),
+        "engines": {
+            "red_dog": {"count": rd_count, "enabled": flags.ENABLE_ENGINE3_RED_DOG},
+            "ichimoku": {"count": ich_count, "enabled": flags.ENABLE_ENGINE4_ICHIMOKU},
+        },
+    }
 
 
 @app.get("/api/command-center/alerts")

@@ -165,14 +165,29 @@
         container.appendChild(div);
       });
 
-      // Pattern match
+      // Pattern match with guidance
+      var guidanceEl = $("#seqPatternGuidance");
       if (patternMatch.label) {
         $("#seqPatternName").textContent = patternMatch.label;
-        const conf = patternMatch.confidence;
-        const caveat = patternMatch.caveat || "";
-        $("#seqPatternConf").textContent =
-          (conf != null ? "Confidence: " + conf + "%" : "") +
-          (caveat ? " - " + caveat : "");
+        var conf = patternMatch.confidence;
+        $("#seqPatternConf").textContent = conf != null ? "Confidence: " + conf + "%" : "";
+
+        // Show favored play types and primary risk as actionable guidance
+        var guidanceParts = [];
+        var favored = patternMatch.favored_play_types || [];
+        if (favored.length > 0) {
+          guidanceParts.push("Favored: " + favored.map(function (f) { return f.replace(/_/g, " "); }).join(", "));
+        }
+        if (patternMatch.primary_risk) {
+          guidanceParts.push("Risk: " + patternMatch.primary_risk);
+        }
+        if (guidanceEl) {
+          guidanceEl.textContent = guidanceParts.join(" · ");
+        }
+      } else {
+        $("#seqPatternName").textContent = "No pattern matched yet";
+        $("#seqPatternConf").textContent = "Events populate as regime and vol states change between runs.";
+        if (guidanceEl) guidanceEl.textContent = "";
       }
 
       // Pattern library
@@ -204,30 +219,51 @@
       const ideas = data.ideas || [];
       const tbody = $("#ideasBody");
       const emptyEl = $("#ideasEmpty");
+      const countEl = $("#ideasCount");
       tbody.innerHTML = "";
 
       if (!ideas.length) {
         emptyEl.style.display = "block";
+        if (countEl) countEl.textContent = "";
         return;
       }
       emptyEl.style.display = "none";
 
-      ideas.forEach((idea) => {
-        const gate = idea.gate || {};
-        const status = gate.status || "TRADABLE";
-        const reasons = (gate.reasons || []).map((r) => r.label || r.code || "").join(", ");
+      // Show engine breakdown
+      var engines = data.engines || {};
+      if (countEl) {
+        var parts = [];
+        var rdInfo = engines.red_dog || {};
+        var ichInfo = engines.ichimoku || {};
+        if (rdInfo.count > 0) parts.push(rdInfo.count + " Red Dog");
+        else if (rdInfo.enabled) parts.push("Red Dog: no setups");
+        if (ichInfo.count > 0) parts.push(ichInfo.count + " Ichimoku");
+        else if (ichInfo.enabled) parts.push("Ichimoku: no setups");
+        countEl.textContent = ideas.length + " setups" + (parts.length ? " — " + parts.join(", ") : "");
+      }
 
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td><strong>${idea.ticker || "—"}</strong></td>
-          <td>${idea.engine || "—"}</td>
-          <td>${idea.setupType || "—"}</td>
-          <td>${idea.direction || "—"}</td>
-          <td><span class="pill ${pillClass(status)}">${status}</span>${reasons ? '<br><span style="font-size:10px;color:var(--muted);">' + reasons + "</span>" : ""}</td>
-          <td>${idea.score || "—"}</td>
-          <td style="max-width:180px;">${idea.whyNow || "—"}</td>
-          <td style="max-width:180px;">${idea.whatBreaks || "—"}</td>
-        `;
+      ideas.forEach(function (idea) {
+        var gate = idea.gate || {};
+        var status = gate.status || "TRADABLE";
+        var reasons = (gate.reasons || []).map(function (r) { return r.label || r.code || ""; }).filter(Boolean);
+        var isRD = (idea.engine || "").indexOf("Red Dog") >= 0;
+        var engineBadge = isRD
+          ? '<span class="engineBadge engineBadge--rd">Red Dog</span>'
+          : '<span class="engineBadge engineBadge--ich">Ichimoku</span>';
+
+        var dirIcon = (idea.direction || "").toLowerCase() === "bullish" ? "▲" : "▼";
+        var dirColor = (idea.direction || "").toLowerCase() === "bullish" ? "var(--green)" : "var(--red)";
+
+        var tr = document.createElement("tr");
+        tr.innerHTML =
+          '<td><strong>' + (idea.ticker || "—") + "</strong></td>" +
+          "<td>" + engineBadge + "</td>" +
+          '<td style="font-weight:700;color:' + dirColor + ';">' + dirIcon + " " + (idea.direction || "—") + "</td>" +
+          '<td><span class="pill ' + pillClass(status) + '">' + status + "</span>" +
+            (reasons.length ? '<br><span style="font-size:9px;color:var(--muted);">' + reasons[0] + "</span>" : "") + "</td>" +
+          '<td style="text-align:center;"><span class="scoreBadge">' + (idea.score || "—") + "</span></td>" +
+          '<td class="cellText">' + (idea.whyNow || "—") + "</td>" +
+          '<td class="cellText">' + (idea.whatBreaks || "—") + "</td>";
         tbody.appendChild(tr);
       });
     } catch (e) {
@@ -372,6 +408,13 @@
       statusEl.textContent = ideasLoaded
         ? "Command Center loaded — all engines reporting."
         : "Command Center loaded — tradable ideas may still be populating.";
+
+      // Show timestamp
+      var tsEl = $("#ccTimestamp");
+      if (tsEl) {
+        var now = new Date();
+        tsEl.textContent = "Last refreshed: " + now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      }
     } catch (e) {
       console.error("Command Center run failed:", e);
       statusEl.className = "status isError";

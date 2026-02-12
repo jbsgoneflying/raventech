@@ -98,7 +98,14 @@ class DailyBar:
 
 
 def _rows_to_bars(rows: list[dict]) -> List[DailyBar]:
-    """Normalise EODHD EOD rows into DailyBar objects."""
+    """Normalise EODHD EOD rows into fully split-adjusted DailyBar objects.
+
+    EODHD only provides ``adjusted_close``; raw open/high/low are unadjusted.
+    We compute the adjustment ratio (adjusted_close / close) and apply it to
+    all OHLC fields so the bar is internally consistent.  This is critical for
+    any calculation that compares open-to-close on the same day or across days
+    (e.g. Engine 1 earnings breach, Red Dog reversals).
+    """
     out: List[DailyBar] = []
     for r in rows:
         if not isinstance(r, dict):
@@ -106,14 +113,34 @@ def _rows_to_bars(rows: list[dict]) -> List[DailyBar]:
         d0 = str(r.get("date") or "")[:10]
         if not d0:
             continue
-        # Prefer adjusted_close for split/dividend accuracy; fall back to close
-        c = _to_float(r.get("adjusted_close")) or _to_float(r.get("close"))
-        if c is None or c <= 0:
-            continue
-        o = _to_float(r.get("open"))
-        h = _to_float(r.get("high"))
-        lo = _to_float(r.get("low"))
+
+        raw_close = _to_float(r.get("close"))
+        adj_close = _to_float(r.get("adjusted_close"))
+
+        # Determine usable close and adjustment factor
+        if adj_close is not None and adj_close > 0:
+            c = adj_close
+            # Compute ratio to adjust open/high/low consistently
+            if raw_close is not None and raw_close > 0:
+                adj_factor = adj_close / raw_close
+            else:
+                adj_factor = 1.0
+        elif raw_close is not None and raw_close > 0:
+            c = raw_close
+            adj_factor = 1.0
+        else:
+            continue  # skip bars with no usable close
+
+        raw_o = _to_float(r.get("open"))
+        raw_h = _to_float(r.get("high"))
+        raw_lo = _to_float(r.get("low"))
         vol = _to_float(r.get("volume"))
+
+        # Apply adjustment factor to open/high/low so all OHLC are consistent
+        o = round(raw_o * adj_factor, 4) if raw_o is not None else None
+        h = round(raw_h * adj_factor, 4) if raw_h is not None else None
+        lo = round(raw_lo * adj_factor, 4) if raw_lo is not None else None
+
         out.append(DailyBar(trade_date=d0, open=o, high=h, low=lo, close=c, volume=vol, vwap=None))
     out.sort(key=lambda b: b.trade_date)
     return out
@@ -315,15 +342,29 @@ class PriceService:
             if not row:
                 result[t] = []
                 continue
-            c = _to_float(row.get("adjusted_close")) or _to_float(row.get("close"))
-            if c is None or c <= 0:
+
+            raw_close = _to_float(row.get("close"))
+            adj_close = _to_float(row.get("adjusted_close"))
+
+            if adj_close is not None and adj_close > 0:
+                c = adj_close
+                adj_factor = (adj_close / raw_close) if (raw_close and raw_close > 0) else 1.0
+            elif raw_close is not None and raw_close > 0:
+                c = raw_close
+                adj_factor = 1.0
+            else:
                 result[t] = []
                 continue
+
+            raw_o = _to_float(row.get("open"))
+            raw_h = _to_float(row.get("high"))
+            raw_lo = _to_float(row.get("low"))
+
             bar = DailyBar(
                 trade_date=str(row.get("date") or ds)[:10],
-                open=_to_float(row.get("open")),
-                high=_to_float(row.get("high")),
-                low=_to_float(row.get("low")),
+                open=round(raw_o * adj_factor, 4) if raw_o is not None else None,
+                high=round(raw_h * adj_factor, 4) if raw_h is not None else None,
+                low=round(raw_lo * adj_factor, 4) if raw_lo is not None else None,
                 close=c,
                 volume=_to_float(row.get("volume")),
                 vwap=None,

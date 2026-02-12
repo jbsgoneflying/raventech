@@ -650,32 +650,32 @@ def compute_engine3_scan(
     # Check if gamma is supportive (positive gamma = supportive for mean reversion)
     gamma_supportive = market_gamma.get("environment") == "supportive"
     
-    # Convert signals to dicts and add trend alignment
+    # Convert signals to dicts and add trend/alignment metadata
     def enrich_signal(s: RedDogSignal) -> Dict[str, Any]:
         d = signal_to_dict(s)
-        d["trendAlignment"] = get_signal_trend_alignment(s.direction, market_trend)
+        trend_info = get_signal_trend_alignment(s.direction, market_trend)
+        d["trendAlignment"] = trend_info
+        # Tag alignment status for gating — but do NOT drop signals
+        trend_aligned = trend_info.get("alignment") == "aligned"
+        d["gammaAligned"] = gamma_supportive
+        d["trendAligned"] = trend_aligned
+        d["fullyAligned"] = gamma_supportive and trend_aligned
         return d
     
-    def is_aligned(s: RedDogSignal) -> bool:
-        """Check if signal is fully aligned (gamma + trend)."""
-        if not gamma_supportive:
-            return False
-        trend_info = get_signal_trend_alignment(s.direction, market_trend)
-        return trend_info.get("alignment") == "aligned"
-    
-    # Categorize - ONLY include aligned signals
-    a_plus = [enrich_signal(s) for s in signals if s.score >= APLUS_THRESHOLD and is_aligned(s)]
-    standard = [enrich_signal(s) for s in signals if 50 <= s.score < APLUS_THRESHOLD and is_aligned(s)]
-    below_threshold = [enrich_signal(s) for s in signals if s.score < 50 and is_aligned(s)]
+    # Categorize ALL detected signals by score (alignment informs gating, not inclusion)
+    a_plus = [enrich_signal(s) for s in signals if s.score >= APLUS_THRESHOLD]
+    standard = [enrich_signal(s) for s in signals if 50 <= s.score < APLUS_THRESHOLD]
+    below_threshold = [enrich_signal(s) for s in signals if s.score < 50]
     
     duration_ms = int((time.time() - start_time) * 1000)
     
-    total_aligned = len(a_plus) + len(standard) + len(below_threshold)
+    total_setups = len(a_plus) + len(standard) + len(below_threshold)
+    aligned_count = sum(1 for s in (a_plus + standard + below_threshold) if s.get("fullyAligned"))
     
     result = ScanResult(
         as_of_date=as_of_str,
         scanned_count=len(universe),
-        setups_found=total_aligned,  # Only count aligned setups
+        setups_found=total_setups,
         a_plus=a_plus,
         standard=standard,
         below_threshold=below_threshold,
@@ -694,8 +694,9 @@ def compute_engine3_scan(
             _scan_cache[cache_key] = result_dict
     
     LOG.info(
-        f"Engine 3 scan complete: {len(signals)} raw setups, {total_aligned} aligned "
-        f"({len(a_plus)} A+, {len(standard)} standard) in {duration_ms}ms"
+        f"Engine 3 scan complete: {len(signals)} raw setups, {total_setups} scored "
+        f"({len(a_plus)} A+, {len(standard)} standard), {aligned_count} fully aligned, "
+        f"gamma={'supportive' if gamma_supportive else 'hostile'} in {duration_ms}ms"
     )
     
     return result_dict

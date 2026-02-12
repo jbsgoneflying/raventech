@@ -93,14 +93,30 @@
       .patternItem .desc { color: var(--muted); font-size: 11px; margin-top: 2px; }
 
       /* ── Ideas table (reuses app dataTable tokens) ── */
-      .ideasTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .ideasTable { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
       .ideasTable th {
         text-align: left; font-size: 10px; font-weight: 800;
         text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
         padding: 6px 8px; border-bottom: 1px solid var(--border);
       }
-      .ideasTable td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      .ideasTable td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow: hidden; text-overflow: ellipsis; }
       .ideasTable tr:hover { background: var(--hover); }
+      /* Column widths */
+      .ideasTable .colTicker { width: 60px; }
+      .ideasTable .colEngine { width: 70px; }
+      .ideasTable .colSetup { width: 0; } /* hidden */
+      .ideasTable .colDir { width: 55px; }
+      .ideasTable .colGate { width: 80px; }
+      .ideasTable .colScore { width: 45px; text-align: center; }
+      .ideasTable .colWhy { width: auto; }
+      .ideasTable .colBreaks { width: auto; }
+      .ideasTable .cellText { font-size: 11px; line-height: 1.4; color: var(--fg); word-wrap: break-word; overflow-wrap: break-word; }
+
+      /* ── Engine source badges ─────────────────────────── */
+      .engineBadge { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+      .engineBadge--rd { background: rgba(255,149,0,0.12); color: #995c00; }
+      .engineBadge--ich { background: rgba(0,122,255,0.12); color: #0060cc; }
+      .scoreBadge { display: inline-block; font-size: 13px; font-weight: 800; min-width: 28px; text-align: center; }
 
       /* ── Brief ──────────────────────────────────────── */
       .briefItem { margin-bottom: 8px; font-size: 12px; line-height: 1.5; }
@@ -168,6 +184,7 @@
           </button>
         </form>
         <div id="status" class="status" aria-live="polite">Click "Run Command Center" to bootstrap engines and load all panels.</div>
+        <div id="ccTimestamp" style="font-size:10px; color:var(--muted); margin-top:4px;"></div>
       </section>
 
       <!-- ── Results (hidden until Run) ──────────────────────── -->
@@ -219,6 +236,7 @@
             <div class="seqPatternMatch" id="seqPattern">
               <div class="seqPatternName" id="seqPatternName">Detecting pattern…</div>
               <div class="seqPatternConf" id="seqPatternConf"></div>
+              <div id="seqPatternGuidance" style="margin-top:6px; font-size:11px; color:var(--fg); line-height:1.5;"></div>
             </div>
           </div>
 
@@ -251,11 +269,17 @@
               </span>
             </h2>
           </div>
+          <div id="ideasCount" style="font-size:11px; color:var(--muted); margin-bottom:6px;"></div>
           <table class="ideasTable" id="ideasTable">
             <thead>
               <tr>
-                <th>Ticker</th><th>Engine</th><th>Setup</th><th>Direction</th>
-                <th>Gate</th><th>Score</th><th>Why Now</th><th>What Breaks It</th>
+                <th class="colTicker">Ticker</th>
+                <th class="colEngine">Engine</th>
+                <th class="colDir">Dir</th>
+                <th class="colGate">Gate</th>
+                <th class="colScore">Score</th>
+                <th class="colWhy">Why Now</th>
+                <th class="colBreaks">What Breaks It</th>
               </tr>
             </thead>
             <tbody id="ideasBody"></tbody>
