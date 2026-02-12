@@ -1494,34 +1494,50 @@ def _sniff_daily_volume(row: dict) -> Optional[float]:
 
 
 def fetch_daily_ohlc(client: OratsClient, *, ticker: str, date: dt.date) -> Optional[DailyOHLC]:
-    """
-    Best-effort OHLC fetch for a trade date.
-    Uses ORATS /hist/dailies; field names can vary by entitlement/plan.
+    """Best-effort OHLC fetch for a single trade date.
+
+    Primary: EODHD via PriceService.  Fallback: ORATS /hist/dailies.
     """
     key = ("ohlc", ticker, _fmt_date(date))
     cached = _cache_get(_ohlc_cache, _ohlc_lock, key)
     if cached is not None:
         return cached
 
-    try:
-        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,stockVolume,vwap"
-        resp = client.hist_dailies(ticker=ticker, trade_date=_fmt_date(date), fields=fields)
-        row = _first_row(resp.rows)
-    except Exception:
-        row = None
+    out: Optional[DailyOHLC] = None
 
-    if not row:
-        _cache_set(_ohlc_cache, _ohlc_lock, key, None)
-        return None
+    # Primary: EODHD via PriceService
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        try:
+            bars = ps.fetch_daily_bars(ticker, date, date)
+            if bars:
+                b = bars[0]
+                out = DailyOHLC(
+                    trade_date=b.trade_date, open=b.open, high=b.high,
+                    low=b.low, close=b.close, volume=b.volume, vwap=None,
+                )
+        except Exception:
+            pass
 
-    td = str(row.get("tradeDate") or _fmt_date(date))[:10]
-    o = _to_float(row.get("open") or row.get("opPx") or row.get("op_px"))
-    h = _to_float(row.get("hiPx") or row.get("high") or row.get("hi") or row.get("hPx"))
-    l = _to_float(row.get("loPx") or row.get("low") or row.get("lo") or row.get("lPx"))
-    c = _to_float(row.get("clsPx") or row.get("close") or row.get("cls_px"))
-    vol = _sniff_daily_volume(row)
-    vwap = _to_float(row.get("vwap"))
-    out = DailyOHLC(trade_date=td, open=o, high=h, low=l, close=c, volume=vol, vwap=vwap)
+    # Fallback: ORATS hist_dailies
+    if out is None:
+        try:
+            fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,stockVolume,vwap"
+            resp = client.hist_dailies(ticker=ticker, trade_date=_fmt_date(date), fields=fields)
+            row = _first_row(resp.rows)
+        except Exception:
+            row = None
+        if row:
+            td = str(row.get("tradeDate") or _fmt_date(date))[:10]
+            o = _to_float(row.get("open") or row.get("opPx") or row.get("op_px"))
+            h = _to_float(row.get("hiPx") or row.get("high") or row.get("hi") or row.get("hPx"))
+            l = _to_float(row.get("loPx") or row.get("low") or row.get("lo") or row.get("lPx"))
+            c = _to_float(row.get("clsPx") or row.get("close") or row.get("cls_px"))
+            vol = _sniff_daily_volume(row)
+            vwap = _to_float(row.get("vwap"))
+            out = DailyOHLC(trade_date=td, open=o, high=h, low=l, close=c, volume=vol, vwap=vwap)
+
     _cache_set(_ohlc_cache, _ohlc_lock, key, out)
     return out
 
@@ -2255,13 +2271,30 @@ def fetch_dailies_ohlc_range(
     start: dt.date,
     end: dt.date,
 ) -> List[DailyOHLC]:
-    """
-    Fast path: ORATS /hist/dailies supports tradeDate ranges of the form:
-      tradeDate=YYYY-MM-DD,YYYY-MM-DD
-    This returns many rows in one request (massively faster than per-day probing).
+    """Fetch daily OHLC bars for a date range.
+
+    Primary: EODHD via PriceService.  Fallback: ORATS /hist/dailies.
     """
     if end < start:
         return []
+
+    # Primary: EODHD via PriceService
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        try:
+            bars = ps.fetch_daily_bars(ticker, start, end)
+            return [
+                DailyOHLC(
+                    trade_date=b.trade_date, open=b.open, high=b.high,
+                    low=b.low, close=b.close, volume=b.volume, vwap=None,
+                )
+                for b in bars
+            ]
+        except Exception:
+            pass
+
+    # Fallback: ORATS hist_dailies
     try:
         td = f"{_fmt_date(start)},{_fmt_date(end)}"
         fields = "ticker,tradeDate,open,opPx,hiPx,loPx,clsPx,close,high,low,volume,vol,stockVolume,vwap"

@@ -146,14 +146,25 @@ def _fetch_dailies_range(
     start: dt.date,
     end: dt.date,
 ) -> Dict[str, DailyBar]:
-    """
-    Fetch daily bars for a date range in a single API call.
+    """Fetch daily bars for a date range.
+
     Returns a dict keyed by trade date (YYYY-MM-DD) for O(1) lookups.
-    
-    PERF: Replaces N sequential fetch_daily_bar calls with 1 range call.
+    Uses EODHD via PriceService for OHLCV; falls back to ORATS hist_dailies.
     """
     if end < start:
         return {}
+
+    # Primary path: EODHD via PriceService
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        bars = ps.fetch_daily_bars(ticker, start, end)
+        out: Dict[str, DailyBar] = {}
+        for b in bars:
+            out[b.trade_date] = DailyBar(tradeDate=b.trade_date, open=b.open, clsPx=b.close)
+        return out
+
+    # Fallback: ORATS hist_dailies
     try:
         td = f"{_fmt_date(start)},{_fmt_date(end)}"
         fields = "ticker,tradeDate,open,opPx,clsPx,close"
@@ -161,8 +172,8 @@ def _fetch_dailies_range(
         rows = resp.rows or []
     except Exception:
         rows = []
-    
-    out: Dict[str, DailyBar] = {}
+
+    out2: Dict[str, DailyBar] = {}
     for r in rows:
         if not isinstance(r, dict):
             continue
@@ -171,8 +182,8 @@ def _fetch_dailies_range(
             continue
         o = _to_float(r.get("open") or r.get("opPx") or r.get("op_px"))
         c = _to_float(r.get("clsPx") or r.get("close") or r.get("cls_px"))
-        out[td0] = DailyBar(tradeDate=td0, open=o, clsPx=c)
-    return out
+        out2[td0] = DailyBar(tradeDate=td0, open=o, clsPx=c)
+    return out2
 
 
 def _fetch_cores_range(
@@ -510,15 +521,33 @@ def _compute_live_dealer_gamma_payload_diag(
 
 
 def fetch_daily_bar(client: OratsClient, ticker: str, trade_date: str) -> Optional[DailyBar]:
-    resp = client.hist_dailies(ticker=ticker, trade_date=trade_date, fields="ticker,tradeDate,clsPx,open")
-    row = _first_row(resp.rows)
-    if not row:
+    """Fetch a single-day bar.  EODHD primary, ORATS fallback."""
+    # Primary: EODHD via PriceService
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        try:
+            d = dt.date.fromisoformat(str(trade_date)[:10])
+            bars = ps.fetch_daily_bars(ticker, d, d)
+            if bars:
+                b = bars[0]
+                return DailyBar(tradeDate=b.trade_date, open=b.open, clsPx=b.close)
+        except Exception:
+            pass
+
+    # Fallback: ORATS hist_dailies
+    try:
+        resp = client.hist_dailies(ticker=ticker, trade_date=trade_date, fields="ticker,tradeDate,clsPx,open")
+        row = _first_row(resp.rows)
+        if not row:
+            return None
+        return DailyBar(
+            tradeDate=str(row.get("tradeDate") or row.get("trade_date") or trade_date)[:10],
+            open=_to_float(row.get("open")),
+            clsPx=_to_float(row.get("clsPx") or row.get("close") or row.get("cls_px")),
+        )
+    except Exception:
         return None
-    return DailyBar(
-        tradeDate=str(row.get("tradeDate") or row.get("trade_date") or trade_date)[:10],
-        open=_to_float(row.get("open")),
-        clsPx=_to_float(row.get("clsPx") or row.get("close") or row.get("cls_px")),
-    )
 
 
 def find_trading_day(
@@ -780,9 +809,17 @@ def _current_snapshot(client: OratsClient, *, ticker: str, as_of_date: str) -> D
         except Exception:
             pass
 
-    # Live overlay (current-only): if available, prefer live spot/stock price for UI/trade builder.
+    # Live overlay (current-only): prefer latest EOD close from EODHD, fall back to ORATS.
     try:
-        if callable(getattr(client, "live_summaries", None)):
+        from backend.price_service import get_price_service
+        ps = get_price_service()
+        if ps is not None:
+            live_px = ps.fetch_live_price(ticker)
+            if live_px is not None and live_px > 0:
+                out["stockPrice"] = _round2(live_px)
+                out["source"] = "eodhd"
+                out["liveNote"] = "Latest EOD close from EODHD."
+        elif callable(getattr(client, "live_summaries", None)):
             live = client.live_summaries(ticker=ticker).rows or []
             row = _first_row(live) if live else None
             spot = _to_float(row.get("spotPrice")) if row else None

@@ -547,8 +547,14 @@ def compute_expected_move(
     # Attempt 3: Fall back to impErnMv from cores
     if not rows or spot is None:
         try:
-            # Try live summaries for spot
-            if callable(getattr(client, "live_summaries", None)):
+            # Try EODHD for latest close; fall back to ORATS live summaries
+            from backend.price_service import get_price_service
+            _ps = get_price_service()
+            if _ps is not None:
+                _live = _ps.fetch_live_price(t)
+                if _live is not None and _live > 0:
+                    spot = _live
+            elif callable(getattr(client, "live_summaries", None)):
                 resp = client.live_summaries(ticker=t)
                 if resp.rows:
                     row = resp.rows[0]

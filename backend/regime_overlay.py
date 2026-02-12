@@ -364,7 +364,22 @@ def _fetch_hist_dailies_range(
     from_date: str,
     to_date: str,
 ) -> List[dict]:
-    # Try range mode (if supported). If not supported, this will throw and callers can fallback.
+    """Fetch daily rows for a ticker.  Primary: EODHD; Fallback: ORATS."""
+    # Primary: EODHD via PriceService — returns clean dicts matching ORATS shape
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        import datetime as _dt
+        start = _dt.date.fromisoformat(str(from_date)[:10])
+        end = _dt.date.fromisoformat(str(to_date)[:10])
+        bars = ps.fetch_daily_bars(ticker, start, end)
+        # Return dicts that match the shape downstream code expects
+        return [
+            {"tradeDate": b.trade_date, "clsPx": b.close, "open": b.open}
+            for b in bars
+        ]
+
+    # Fallback: ORATS range fetch
     get_fn = getattr(client, "get", None)
     if not callable(get_fn):
         raise OratsError("Client does not support range fetch via .get()")
@@ -429,18 +444,18 @@ def compute_regime_overlay(
     spy_rows: List[dict] = []
     try:
         spy_rows = _fetch_hist_dailies_range(client, "SPY", from_date, to_date)
-    except OratsError:
-        # Fallback to sparse daily probing if range is not supported:
-        # query backward calendar days until we collect enough trading days
+    except (OratsError, Exception):
+        # Fallback to sparse daily probing if range fetch is not supported
         spy_rows = []
         cur = now
         attempts = 0
-        # In production we expect range mode to work; keep fallback bounded.
-        # (Also keeps unit tests fast with mocked clients.)
         while len(spy_rows) < 320 and attempts < 160:
-            r = client.hist_dailies("SPY", _fmt_date(cur), "ticker,tradeDate,clsPx,open").rows
-            if r:
-                spy_rows.append(r[0])
+            try:
+                r = client.hist_dailies("SPY", _fmt_date(cur), "ticker,tradeDate,clsPx,open").rows
+                if r:
+                    spy_rows.append(r[0])
+            except Exception:
+                pass
             cur = cur - dt.timedelta(days=1)
             attempts += 1
 
@@ -602,14 +617,17 @@ def compute_regime_backtest_view(
     spy_rows: List[dict] = []
     try:
         spy_rows = _fetch_hist_dailies_range(client, "SPY", from_date, to_date)
-    except OratsError:
+    except (OratsError, Exception):
         spy_rows = []
         cur = max_date
         attempts = 0
         while len(spy_rows) < 420 and attempts < 700:
-            r = client.hist_dailies("SPY", _fmt_date(cur), "ticker,tradeDate,clsPx,open").rows
-            if r:
-                spy_rows.append(r[0])
+            try:
+                r = client.hist_dailies("SPY", _fmt_date(cur), "ticker,tradeDate,clsPx,open").rows
+                if r:
+                    spy_rows.append(r[0])
+            except Exception:
+                pass
             cur = cur - dt.timedelta(days=1)
             attempts += 1
 

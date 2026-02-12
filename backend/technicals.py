@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import logging
 import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.orats_client import OratsClient
+# OratsClient import kept for call-sites that still pass it (backward compat).
+from backend.orats_client import OratsClient  # noqa: F401
+
+_LOG = logging.getLogger(__name__)
 
 
 def _fmt_date(d: dt.date) -> str:
@@ -41,45 +45,41 @@ class DailyBar:
 
 
 def fetch_daily_bars_range(
-    client: OratsClient,
+    client: Any = None,
     *,
     ticker: str,
     start: dt.date,
     end: dt.date,
 ) -> List[DailyBar]:
-    """
-    Fast path: ORATS /hist/dailies supports tradeDate ranges of the form:
-      tradeDate=YYYY-MM-DD,YYYY-MM-DD
+    """Fetch daily OHLCV bars for *ticker* over [start, end].
 
-    We request a superset of field aliases and normalize best-effort.
+    Uses EODHD via ``PriceService`` for clean, split-adjusted OHLCV data.
+    The *client* parameter is accepted for backward compatibility but ignored
+    when the EODHD-backed price service is available.
     """
     if end < start:
         return []
+
+    # Primary path: EODHD via PriceService
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        return ps.fetch_daily_bars(ticker, start, end)
+
+    # Fallback: ORATS hist_dailies (if EODHD not configured)
+    _LOG.debug("PriceService unavailable; falling back to ORATS hist_dailies for %s", ticker)
+    if client is None:
+        return []
     td = f"{_fmt_date(start)},{_fmt_date(end)}"
-    # ORATS field names vary by entitlement; request common aliases.
-    fields = ",".join(
-        [
-            "ticker",
-            "tradeDate",
-            "open",
-            "opPx",
-            "high",
-            "hiPx",
-            "low",
-            "loPx",
-            "close",
-            "clsPx",
-            "volume",
-            "vol",
-            "vwap",
-        ]
-    )
+    fields = ",".join([
+        "ticker", "tradeDate", "open", "opPx", "high", "hiPx",
+        "low", "loPx", "close", "clsPx", "volume", "vol", "vwap",
+    ])
     try:
         resp = client.hist_dailies(ticker=ticker, trade_date=td, fields=fields)
         rows = resp.rows or []
     except Exception:
         rows = []
-
     out: List[DailyBar] = []
     for r in rows:
         if not isinstance(r, dict):
@@ -100,13 +100,21 @@ def fetch_daily_bars_range(
     return out
 
 
-def fetch_live_price_optional(client: OratsClient, *, ticker: str) -> Optional[float]:
+def fetch_live_price_optional(client: Any = None, *, ticker: str) -> Optional[float]:
+    """Best-effort latest price for *ticker*.
+
+    Uses EODHD via ``PriceService`` (latest EOD close).  Falls back to ORATS
+    ``live_summaries`` if EODHD is not configured.
     """
-    Best-effort live price (spotPrice preferred). If unavailable (closed market / entitlement),
-    return None.
-    """
+    # Primary path: EODHD
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        return ps.fetch_live_price(ticker)
+
+    # Fallback: ORATS live_summaries
     try:
-        if not callable(getattr(client, "live_summaries", None)):
+        if client is None or not callable(getattr(client, "live_summaries", None)):
             return None
         resp = client.live_summaries(ticker=str(ticker).upper())
         rows = resp.rows or []

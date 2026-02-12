@@ -130,9 +130,17 @@ def _fetch_benzinga_history(
 
 
 def _fetch_spy_closes(orats: OratsClient, *, start: dt.date, end: dt.date) -> Dict[str, float]:
+    """Fetch SPY daily closes for a date range, keyed by YYYY-MM-DD.
+
+    Primary: EODHD via PriceService.  Fallback: ORATS hist_dailies.
     """
-    Fetch SPY daily closes from ORATS once for a date range, keyed by YYYY-MM-DD.
-    """
+    from backend.price_service import get_price_service
+    ps = get_price_service()
+    if ps is not None:
+        bars = ps.fetch_daily_bars("SPY", start, end)
+        return {b.trade_date: float(b.close) for b in bars if b.close is not None and b.close > 0}
+
+    # Fallback: ORATS
     fields = "ticker,tradeDate,clsPx,close"
     td = f"{_fmt_date(start)},{_fmt_date(end)}"
     rows = orats.hist_dailies("SPY", td, fields=fields).rows or []
