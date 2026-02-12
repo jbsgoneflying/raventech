@@ -207,7 +207,7 @@
         </div>
         
         <div class="rankCardActions">
-          <a class="rankCardLink" href="/breach?ticker=${ticker}&k=1.0&mc=1&autorun=1" target="_blank">
+          <a class="rankCardLink" href="/breach?ticker=${ticker}&k=1.5&mc=1&autorun=1" target="_blank">
             Full Analysis →
           </a>
           <button class="detailsToggle" onclick="toggleDetails(this)">
