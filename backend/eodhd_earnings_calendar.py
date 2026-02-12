@@ -220,6 +220,10 @@ def get_earnings_calendar(
         earnings_list = []
 
     days: Dict[str, List[dict]] = {}
+    # Track seen (report_date, ticker) pairs to deduplicate.
+    # EODHD returns multiple rows per ticker per day for different fiscal
+    # periods; we only want one calendar entry per company per day.
+    seen: set = set()
 
     for e in earnings_list:
         if not isinstance(e, dict):
@@ -235,6 +239,11 @@ def get_earnings_calendar(
         report_date = str(e.get("report_date") or "")[:10]
         if not report_date:
             continue
+
+        dedup_key = (report_date, bare)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
 
         bam = e.get("before_after_market")
         entry = EarningsEntry(

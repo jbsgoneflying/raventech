@@ -162,7 +162,7 @@
   function goToCompare() {
     if (selected.size === 0) return;
     var tickers = Array.from(selected).join(",");
-    window.location.href = "/compare?tickers=" + encodeURIComponent(tickers);
+    window.location.href = "/compare?tickers=" + encodeURIComponent(tickers) + "&k=1.5";
   }
 
   // ── Fetch ──────────────────────────────────────────────────────────
