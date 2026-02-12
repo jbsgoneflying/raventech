@@ -2245,6 +2245,166 @@ _sequencer_lock = threading.Lock()
 _sequencer_prior_state: Dict[str, str] = {}  # previous state for change detection
 
 
+_cc_init_lock = threading.Lock()
+_cc_init_running = False
+
+
+def _ensure_engine5_snapshot(flags) -> dict | None:
+    """Return the best Engine 5 snapshot, auto-bootstrapping if needed."""
+    store = get_store_optional()
+    if not store or not flags.ENABLE_ENGINE5_LEAD_LAG:
+        return None
+
+    snap = _engine5_get_best_snapshot(store, flags)
+    if snap is not None:
+        return snap
+
+    # No snapshot → auto-bootstrap pipeline (same logic as the /api/engine5/weekly-ideas endpoint)
+    try:
+        LOG.info("Command Center: auto-bootstrapping Engine 5 pipeline...")
+        from backend.engine5_pipeline import run_pipeline
+        exit_code, snapshot_id = run_pipeline(force=True, source="command_center")
+        if exit_code == 0 and snapshot_id:
+            snap = store.get_json(f"engine5:snapshot:{snapshot_id}")
+            return snap
+    except Exception as e:
+        LOG.warning("Engine 5 auto-bootstrap failed: %s", e)
+    return None
+
+
+def _ensure_engine3_cache(flags) -> None:
+    """Run Engine 3 scan if no cached results exist."""
+    if not flags.ENABLE_ENGINE3_RED_DOG:
+        return
+    with _engine3_cache_lock:
+        if len(_engine3_cache) > 0:
+            return  # already have cached results
+    try:
+        client = _get_client_optional()
+        if not client:
+            return
+        LOG.info("Command Center: auto-running Engine 3 (Red Dog) scan...")
+        result = compute_engine3_scan(
+            client,
+            as_of_date=None,
+            min_score=50,
+            direction=None,
+            max_workers=flags.ENGINE3_MAX_WORKERS,
+            use_cache=True,
+        )
+        # Inject gate decisions
+        if flags.ENABLE_GATING and isinstance(result, dict):
+            try:
+                gate_ctx = _get_gate_context(flags)
+                for key in ("aPlus", "standard", "watchlist"):
+                    setups = result.get(key)
+                    if isinstance(setups, list):
+                        gate_scan_results(scan_results=setups, engine="engine3_red_dog", **gate_ctx)
+                gs = summarize_gates((result.get("aPlus") or []) + (result.get("standard") or []))
+                result["gateSummary"] = gs
+                result["gateContext"] = gate_ctx
+            except Exception:
+                pass
+        cache_key = (None, 50, None)
+        with _engine3_cache_lock:
+            _engine3_cache[cache_key] = result
+        LOG.info("Command Center: Engine 3 scan complete (%d setups)", result.get("setupsFound", 0))
+    except Exception as e:
+        LOG.warning("Engine 3 auto-scan failed: %s", e)
+
+
+def _ensure_engine4_cache(flags) -> None:
+    """Run Engine 4 scan if no cached results exist."""
+    if not flags.ENABLE_ENGINE4_ICHIMOKU:
+        return
+    with _engine4_cache_lock:
+        if len(_engine4_cache) > 0:
+            return  # already have cached results
+    try:
+        client = _get_client_optional()
+        if not client:
+            return
+        LOG.info("Command Center: auto-running Engine 4 (Ichimoku) scan...")
+        benzinga_client = _get_benzinga_client_optional()
+        result = compute_engine4_scan(
+            client,
+            as_of_date=None,
+            min_score=50,
+            direction=None,
+            benzinga_client=benzinga_client,
+            max_workers=flags.ENGINE4_MAX_WORKERS,
+        )
+        # Inject gate decisions
+        if flags.ENABLE_GATING and isinstance(result, dict):
+            try:
+                gate_ctx = _get_gate_context(flags)
+                for key in ("actionable", "structure", "watchlist"):
+                    setups = result.get(key)
+                    if isinstance(setups, list):
+                        gate_scan_results(scan_results=setups, engine="engine4_ichimoku", **gate_ctx)
+                gs = summarize_gates((result.get("actionable") or []) + (result.get("structure") or []))
+                result["gateSummary"] = gs
+                result["gateContext"] = gate_ctx
+            except Exception:
+                pass
+        cache_key = (None, 50, None)
+        with _engine4_cache_lock:
+            _engine4_cache[cache_key] = result
+        LOG.info("Command Center: Engine 4 scan complete (%d actionable)", result.get("actionableCount", 0))
+    except Exception as e:
+        LOG.warning("Engine 4 auto-scan failed: %s", e)
+
+
+@app.get("/api/command-center/init")
+def api_command_center_init():
+    """Bootstrap all data the Command Center needs.
+
+    Runs Engine 5 (regime/vol), Engine 3 (Red Dog), and Engine 4 (Ichimoku)
+    in parallel if their caches are empty. Returns immediately with status
+    if already running from another request.
+    """
+    global _cc_init_running
+    with _cc_init_lock:
+        if _cc_init_running:
+            return {"status": "already_running"}
+        _cc_init_running = True
+
+    flags = get_flags()
+    results = {"engine5": "skipped", "engine3": "skipped", "engine4": "skipped"}
+
+    def _run():
+        global _cc_init_running
+        try:
+            # Engine 5 first (regime/vol data feeds into gating)
+            try:
+                snap = _ensure_engine5_snapshot(flags)
+                results["engine5"] = "ok" if snap else "no_data"
+            except Exception as e:
+                results["engine5"] = f"error: {e}"
+
+            # Engine 3 and 4 in parallel
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                f3 = pool.submit(_ensure_engine3_cache, flags)
+                f4 = pool.submit(_ensure_engine4_cache, flags)
+                try:
+                    f3.result(timeout=300)
+                    results["engine3"] = "ok"
+                except Exception as e:
+                    results["engine3"] = f"error: {e}"
+                try:
+                    f4.result(timeout=300)
+                    results["engine4"] = "ok"
+                except Exception as e:
+                    results["engine4"] = f"error: {e}"
+        finally:
+            with _cc_init_lock:
+                _cc_init_running = False
+
+    # Run in a background thread so the response returns immediately
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "initializing", "message": "Bootstrapping engines in background..."}
+
+
 @app.get("/api/command-center/flow-pressure")
 def api_flow_pressure():
     """Flow Pressure snapshot across SPX, QQQ, and sector ETFs."""
@@ -2256,18 +2416,16 @@ def api_flow_pressure():
     import datetime as _dt
     now = _dt.datetime.utcnow().isoformat() + "Z"
 
-    # Gather regime and vol state from Engine 5
+    # Gather regime and vol state from Engine 5 (auto-bootstrap if needed)
     regime_data = {}
     vol_data = {}
     try:
         flags = get_flags()
-        store = get_store_optional()
-        if store and flags.ENABLE_ENGINE5_LEAD_LAG:
-            snap = _engine5_get_best_snapshot(store, flags)
-            if snap:
-                data = snap.get("data", {})
-                regime_data = data.get("regime", {})
-                vol_data = data.get("volLeadLag", {})
+        snap = _ensure_engine5_snapshot(flags)
+        if snap:
+            data = snap.get("data", {})
+            regime_data = data.get("regime", {})
+            vol_data = data.get("volLeadLag", {})
     except Exception:
         pass
 
@@ -2389,10 +2547,14 @@ def api_desk_brief():
 def api_tradable_ideas():
     """Aggregated tradable ideas across all engines with gate status."""
     ideas = []
+    flags = get_flags()
+
+    # Auto-run Engine 3 and 4 scans if caches are empty
+    _ensure_engine3_cache(flags)
+    _ensure_engine4_cache(flags)
 
     # Collect from Engine 3 (Red Dog)
     try:
-        flags = get_flags()
         if flags.ENABLE_ENGINE3_RED_DOG:
             client = _get_client_optional()
             if client:

@@ -255,16 +255,102 @@
     }
   }
 
+  /* ── Bootstrap banner ─────────────────────────────────────── */
+
+  function showBootstrapBanner(msg) {
+    let banner = document.getElementById("ccBootstrapBanner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "ccBootstrapBanner";
+      banner.style.cssText =
+        "position:fixed;top:0;left:0;right:0;z-index:9999;padding:10px 20px;" +
+        "background:var(--amber,#f5a623);color:#000;text-align:center;font-size:13px;" +
+        "font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.15);transition:opacity .3s;";
+      document.body.prepend(banner);
+    }
+    banner.textContent = msg;
+    banner.style.display = "block";
+    banner.style.opacity = "1";
+  }
+
+  function hideBootstrapBanner() {
+    const banner = document.getElementById("ccBootstrapBanner");
+    if (banner) {
+      banner.style.opacity = "0";
+      setTimeout(() => { banner.style.display = "none"; }, 400);
+    }
+  }
+
   /* ── Init ──────────────────────────────────────────────────── */
 
   async function init() {
-    // Load all sections in parallel
+    // Kick off background engine bootstrap (non-blocking)
+    showBootstrapBanner("Initializing engines… data will refresh automatically.");
+
+    fetch("/api/command-center/init")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "initializing") {
+          // Engines are bootstrapping; poll for data readiness
+          pollForData();
+        } else {
+          // Already running or instant – just load
+          hideBootstrapBanner();
+        }
+      })
+      .catch(() => { hideBootstrapBanner(); });
+
+    // Load whatever data is available right now
     await Promise.all([
       loadFlowPressure(),
       loadSequencer(),
       loadIdeas(),
       loadDeskBrief(),
     ]);
+  }
+
+  /** Re-load data sections periodically until tradable ideas appear
+   *  (indicates engines have finished scanning). */
+  function pollForData() {
+    let attempts = 0;
+    const maxAttempts = 20;  // ~5 min max polling
+    const interval = 15000; // 15 seconds between polls
+
+    const timer = setInterval(async () => {
+      attempts++;
+      try {
+        const [ideasRes, fpRes] = await Promise.all([
+          fetch("/api/command-center/tradable-ideas").then((r) => r.json()),
+          fetch("/api/command-center/flow-pressure").then((r) => r.json()),
+        ]);
+
+        // Refresh all sections
+        await Promise.all([
+          loadFlowPressure(),
+          loadSequencer(),
+          loadIdeas(),
+          loadDeskBrief(),
+        ]);
+
+        const hasIdeas = (ideasRes.ideas || []).length > 0;
+        const hasRegime = fpRes.regime && Object.keys(fpRes.regime).length > 0;
+
+        if ((hasIdeas && hasRegime) || attempts >= maxAttempts) {
+          clearInterval(timer);
+          hideBootstrapBanner();
+        } else {
+          showBootstrapBanner(
+            `Engines loading… refreshing data (${attempts}/${maxAttempts})`
+          );
+        }
+      } catch (e) {
+        console.warn("Poll error:", e);
+        if (attempts >= maxAttempts) {
+          clearInterval(timer);
+          hideBootstrapBanner();
+        }
+      }
+    }, interval);
   }
 
   if (document.readyState === "loading") {
