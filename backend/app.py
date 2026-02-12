@@ -2687,10 +2687,51 @@ def api_sequencer():
     seq_events = [SequencerEvent.from_dict(e) for e in events]
     seq = build_weekly_sequence(wid, seq_events)
 
+    # Build day-grouped timeline dict for the frontend
+    trading_days = week_trading_days()
+    timeline: Dict[str, list] = {d: [] for d in trading_days}
+    _event_type_labels = {
+        "REGIME_FLIP": "Regime",
+        "FLOW_PRESSURE_FLIP": "Flow Pressure",
+        "DEALER_GAMMA_SHIFT": "Gamma",
+        "VOL_LEADLAG_FLIP": "Vol Lead-Lag",
+        "EARNINGS_DISPERSION_SPIKE": "Earnings Disp.",
+        "RED_DOG_BREADTH_CHANGE": "Red Dog",
+        "ICHIMOKU_BREADTH_CHANGE": "Ichimoku",
+    }
+    for ev_dict in seq.events:
+        ev_date = ev_dict.get("date", "")
+        if ev_date in timeline:
+            et = ev_dict.get("event_type", "")
+            timeline[ev_date].append({
+                "label": _event_type_labels.get(et, et.replace("_", " ").title()),
+                "event_type": et,
+                "from_state": ev_dict.get("from_state", ""),
+                "to_state": ev_dict.get("to_state", ""),
+                "summary": ev_dict.get("summary", ""),
+                "source_engine": ev_dict.get("source_engine", ""),
+            })
+
+    # Build matched_pattern object for the frontend
+    matched_pattern = {}
+    if seq.pattern_match and seq.pattern_match in PATTERN_TEMPLATES:
+        tmpl = PATTERN_TEMPLATES[seq.pattern_match]
+        matched_pattern = {
+            "key": seq.pattern_match,
+            "label": tmpl.get("label", seq.pattern_match),
+            "confidence": round(seq.pattern_confidence * 100),
+            "primary_risk": seq.primary_risk,
+            "favored_play_types": seq.favored_play_types,
+        }
+
+    raw_seq = seq.to_dict()
+    raw_seq["timeline"] = timeline
+    raw_seq["matched_pattern"] = matched_pattern
+
     return {
         "weekId": wid,
-        "tradingDays": week_trading_days(),
-        "sequence": seq.to_dict(),
+        "tradingDays": trading_days,
+        "sequence": raw_seq,
         "patterns": {k: {"label": v["label"], "description": v["description"]}
                      for k, v in PATTERN_TEMPLATES.items()},
     }
@@ -2715,19 +2756,87 @@ def api_desk_brief():
     if cached is not None:
         return cached
 
-    # Gather context for LLM
+    # Gather rich context for LLM (per plan: regime, flow pressure, vol state,
+    # dealer gamma context, sequencer events, gate summary, macro events)
     context = {}
     try:
         fp_data = api_flow_pressure()
-        context["flow_pressure"] = fp_data.get("flowPressure", {})
-        context["regime"] = fp_data.get("regime", {})
-        context["vol_state"] = fp_data.get("volState", {})
+        context["flow_pressure"] = {
+            "composite_score": fp_data.get("flowPressure", {}).get("composite_score"),
+            "composite_label": fp_data.get("flowPressure", {}).get("composite_label"),
+        }
+        regime = fp_data.get("regime", {})
+        context["regime"] = {
+            "label": regime.get("label"),
+            "score": regime.get("score"),
+            "components": regime.get("components", {}),
+        }
+        vol = fp_data.get("volState", {})
+        context["vol_state"] = {
+            "direction": vol.get("global_vol_direction") or vol.get("direction"),
+            "us_iv_state": vol.get("us_iv_state"),
+            "vol_lag_state": vol.get("vol_lag_state"),
+            "structure_bias": vol.get("structure_bias"),
+        }
     except Exception:
         pass
 
     try:
         seq_data = api_sequencer()
-        context["sequencer"] = seq_data.get("sequence", {})
+        seq = seq_data.get("sequence", {})
+        context["sequencer_events_this_week"] = len(seq.get("events", []))
+        context["matched_pattern"] = seq.get("matched_pattern", {}).get("label")
+        context["pattern_confidence"] = seq.get("matched_pattern", {}).get("confidence")
+    except Exception:
+        pass
+
+    # Gate summary from tradable ideas
+    try:
+        ideas_data = api_tradable_ideas()
+        ideas_list = ideas_data.get("ideas", [])
+        gate_counts = {"TRADABLE": 0, "WATCH": 0, "SUPPRESS": 0}
+        for idea in ideas_list:
+            g = idea.get("gate", {})
+            status = g.get("status", "") if isinstance(g, dict) else ""
+            if status in gate_counts:
+                gate_counts[status] += 1
+        context["gate_summary"] = gate_counts
+        context["tradable_ideas_count"] = len(ideas_list)
+    except Exception:
+        pass
+
+    # Macro events for next 5 sessions
+    try:
+        import datetime as _dt_brief
+        bz = _get_benzinga_client_optional()
+        if bz:
+            from backend.macro_events import macro_events_by_date
+            today = _dt_brief.date.today()
+            end_date = today + _dt_brief.timedelta(days=7)
+            macro_by_date, _, _ = macro_events_by_date(
+                bz=bz, start=today, end=end_date, importance_min=3,
+            )
+            macro_summary = []
+            for day_str, day_events in sorted(macro_by_date.items()):
+                high = [e for e in day_events if int(e.get("importance", 0) or 0) >= 4]
+                if high:
+                    macro_summary.append(f"{day_str}: {len(high)} high-impact event(s)")
+            context["macro_events_next_5d"] = macro_summary[:5] if macro_summary else ["No high-impact events"]
+    except Exception:
+        pass
+
+    # Dealer gamma context (SPX)
+    try:
+        cl = _get_client_optional()
+        if cl:
+            from backend.dealer_gamma_context import compute_dealer_gamma_context
+            rows = cl.live_strikes(ticker="SPXW", fields="strike,gamma,callOpenInterest,putOpenInterest,spotPrice").rows or []
+            if rows:
+                gamma = compute_dealer_gamma_context(rows)
+                context["dealer_gamma"] = {
+                    "sign": gamma.get("netGammaSign"),
+                    "magnitude": gamma.get("magnitudeBucket"),
+                }
     except Exception:
         pass
 
@@ -2737,6 +2846,126 @@ def api_desk_brief():
     with _desk_brief_cache_lock:
         _desk_brief_cache["latest"] = payload
     return payload
+
+
+def _build_red_dog_why_now(s: dict) -> str:
+    """Build a contextual 'Why Now' explanation from Red Dog setup fields."""
+    parts = []
+    direction = s.get("direction", "")
+    quality = s.get("quality", {})
+    indicators = s.get("indicators", {})
+    trend = s.get("trendAlignment", {})
+
+    grade = quality.get("grade", "")
+    if grade:
+        parts.append(f"{grade} grade")
+
+    rsi = indicators.get("rsi")
+    if rsi is not None:
+        if direction == "bullish" and rsi < 35:
+            parts.append(f"RSI oversold at {rsi:.0f}")
+        elif direction == "bearish" and rsi > 65:
+            parts.append(f"RSI overbought at {rsi:.0f}")
+
+    sma_dev = indicators.get("sma20DeviationPct")
+    if sma_dev is not None and abs(sma_dev) > 3:
+        parts.append(f"{abs(sma_dev):.1f}% from SMA20")
+
+    vol_ratio = indicators.get("volumeRatio")
+    if vol_ratio is not None and vol_ratio > 1.3:
+        parts.append(f"volume {vol_ratio:.1f}x avg")
+
+    alignment = trend.get("alignment", "")
+    if alignment == "aligned":
+        parts.append("trend-aligned")
+    elif alignment == "counter":
+        parts.append("counter-trend")
+
+    if not parts:
+        score = quality.get("score", 0)
+        return f"Red Dog reversal signal (score {score})"
+    return "; ".join(parts)
+
+
+def _build_red_dog_what_breaks(s: dict) -> str:
+    """Build a contextual 'What Breaks It' from Red Dog invalidation levels."""
+    levels = s.get("levels", {})
+    direction = s.get("direction", "")
+    stop = levels.get("stopLoss")
+    if stop is not None:
+        if direction == "bullish":
+            return f"Price breaks below stop at ${stop:.2f}"
+        else:
+            return f"Price breaks above stop at ${stop:.2f}"
+    return "Price exceeds stop level"
+
+
+def _build_ichimoku_why_now(s: dict) -> str:
+    """Build a contextual 'Why Now' explanation from Ichimoku setup fields."""
+    parts = []
+    quality = s.get("quality", {})
+    ichimoku = s.get("ichimoku", {})
+    indicators = s.get("indicators", {})
+    freshness = s.get("freshness", {})
+    tags = s.get("tags", [])
+
+    grade = quality.get("grade", "")
+    if grade:
+        parts.append(f"{grade} grade")
+
+    cloud_bias = ichimoku.get("cloudBias", "")
+    if cloud_bias:
+        parts.append(f"cloud {cloud_bias}")
+
+    kijun_slope = indicators.get("kijunSlope", "")
+    if kijun_slope and kijun_slope != "flat":
+        parts.append(f"Kijun {kijun_slope}")
+
+    bars_since = freshness.get("barsSinceReclaim")
+    if bars_since is not None and bars_since <= 3:
+        parts.append(f"fresh reclaim ({bars_since}d)")
+
+    vol_ratio = indicators.get("volumeRatio")
+    if vol_ratio is not None and vol_ratio > 1.25:
+        parts.append(f"volume {vol_ratio:.1f}x avg")
+
+    rsi = indicators.get("rsi")
+    if rsi is not None:
+        if rsi > 50 and s.get("direction") == "bullish":
+            parts.append(f"RSI {rsi:.0f}")
+        elif rsi < 50 and s.get("direction") == "bearish":
+            parts.append(f"RSI {rsi:.0f}")
+
+    chikou_tangled = indicators.get("chikouTangled")
+    if chikou_tangled is False:
+        parts.append("Chikou clear")
+
+    if not parts:
+        score = quality.get("score", 0)
+        return f"Ichimoku continuation signal (score {score})"
+    return "; ".join(parts)
+
+
+def _build_ichimoku_what_breaks(s: dict) -> str:
+    """Build a contextual 'What Breaks It' from Ichimoku invalidation levels."""
+    levels = s.get("levels", {})
+    ichimoku = s.get("ichimoku", {})
+    direction = s.get("direction", "")
+    stop = levels.get("stopLoss")
+    kijun = ichimoku.get("kijun")
+
+    parts = []
+    if stop is not None:
+        parts.append(f"stop at ${stop:.2f}")
+    if kijun is not None:
+        if direction == "bullish":
+            parts.append(f"close below Kijun ${kijun:.2f}")
+        else:
+            parts.append(f"close above Kijun ${kijun:.2f}")
+
+    if parts:
+        return "Breaks if " + " or ".join(parts)
+    return "Price breaks below Kijun"
 
 
 @app.get("/api/command-center/tradable-ideas")
@@ -2755,25 +2984,28 @@ def api_tradable_ideas():
             client = _get_client_optional()
             if client:
                 with _engine3_cache_lock:
-                    # Try to get cached scan
                     cached = None
                     for k, v in list(_engine3_cache.items()):
                         cached = v
                         break
                 if cached and isinstance(cached, dict):
-                    setups = cached.get("watchlist") or cached.get("aPlus", {}).get("setups", [])
+                    setups = cached.get("watchlist") or cached.get("aPlus") or []
                     if isinstance(setups, list):
                         for s in setups[:10]:
                             if isinstance(s, dict):
+                                quality = s.get("quality", {})
+                                score = quality.get("score") if isinstance(quality, dict) else None
+                                if score is None:
+                                    score = s.get("score", 0)
                                 ideas.append({
                                     "ticker": s.get("ticker", ""),
                                     "engine": "Engine 3 Red Dog",
                                     "setupType": "Mean Reversion",
                                     "direction": s.get("direction", ""),
-                                    "score": s.get("score", 0),
+                                    "score": score,
                                     "gate": s.get("gate", {"status": "TRADABLE", "reasons": []}),
-                                    "whyNow": f"Red Dog signal score {s.get('score', 0)}",
-                                    "whatBreaks": s.get("invalidation", "Price exceeds stop level"),
+                                    "whyNow": _build_red_dog_why_now(s),
+                                    "whatBreaks": _build_red_dog_what_breaks(s),
                                 })
     except Exception:
         pass
@@ -2787,20 +3019,23 @@ def api_tradable_ideas():
                     cached = v
                     break
             if cached and isinstance(cached, dict):
-                # Engine 4 returns "actionable" and "structure" lists (not "watchlist"/"aPlus")
                 setups = (cached.get("actionable") or []) + (cached.get("structure") or [])
                 if isinstance(setups, list):
                     for s in setups[:10]:
                         if isinstance(s, dict):
+                            quality = s.get("quality", {})
+                            score = quality.get("score") if isinstance(quality, dict) else None
+                            if score is None:
+                                score = s.get("score", 0)
                             ideas.append({
                                 "ticker": s.get("ticker", ""),
                                 "engine": "Engine 4 Ichimoku",
                                 "setupType": "Trend Continuation",
                                 "direction": s.get("direction", ""),
-                                "score": s.get("score", 0),
+                                "score": score,
                                 "gate": s.get("gate", {"status": "TRADABLE", "reasons": []}),
-                                "whyNow": f"Ichimoku signal score {s.get('score', 0)}",
-                                "whatBreaks": s.get("invalidation", "Price breaks below Kijun"),
+                                "whyNow": _build_ichimoku_why_now(s),
+                                "whatBreaks": _build_ichimoku_what_breaks(s),
                             })
     except Exception:
         pass
@@ -2809,6 +3044,62 @@ def api_tradable_ideas():
     ideas.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     return {"ideas": ideas, "count": len(ideas)}
+
+
+@app.get("/api/command-center/alerts")
+def api_alerts():
+    """Alerts feed: state flips detected this week from the Sequencer.
+
+    Returns recent SequencerEvents for the current ISO week, formatted
+    as human-readable alert cards for the Command Center Alerts panel.
+    """
+    wid = current_week_id()
+
+    events = []
+    try:
+        store = get_store_optional()
+        if store:
+            redis_events = store.get_json(f"sequencer:week:{wid}")
+            if isinstance(redis_events, list):
+                events = redis_events
+    except Exception:
+        pass
+
+    if not events:
+        with _sequencer_lock:
+            events = _sequencer_events.get(wid, [])
+
+    _alert_type_labels = {
+        "REGIME_FLIP": "Regime Flip",
+        "FLOW_PRESSURE_FLIP": "Flow Pressure Shift",
+        "DEALER_GAMMA_SHIFT": "Dealer Gamma Shift",
+        "VOL_LEADLAG_FLIP": "Vol Lead-Lag Change",
+        "EARNINGS_DISPERSION_SPIKE": "Earnings Dispersion Spike",
+        "RED_DOG_BREADTH_CHANGE": "Red Dog Breadth",
+        "ICHIMOKU_BREADTH_CHANGE": "Ichimoku Breadth",
+    }
+
+    alerts = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        et = ev.get("event_type", "")
+        alerts.append({
+            "id": ev.get("id", ""),
+            "timestamp": ev.get("timestamp", ""),
+            "date": ev.get("date", ""),
+            "type": _alert_type_labels.get(et, et.replace("_", " ").title()),
+            "event_type": et,
+            "from_state": ev.get("from_state", ""),
+            "to_state": ev.get("to_state", ""),
+            "summary": ev.get("summary", ""),
+            "source_engine": ev.get("source_engine", ""),
+        })
+
+    # Most recent first
+    alerts.sort(key=lambda a: a.get("timestamp", ""), reverse=True)
+
+    return {"alerts": alerts, "count": len(alerts), "weekId": wid}
 
 
 # ---------------------------------------------------------------------------

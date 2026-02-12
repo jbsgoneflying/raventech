@@ -242,7 +242,7 @@ class FeatureFlags:
     GATE_ICH_MACRO_PROXIMITY_DAYS: int = 1
 
     # --- Raven-Tech 2.0: LLM Integration ---
-    ENABLE_LLM_NARRATIVE: bool = False
+    ENABLE_LLM_NARRATIVE: bool = True
     ENABLE_LLM_DISCOVERY: bool = False
     LLM_NARRATIVE_CACHE_TTL_S: int = 1800         # 30 minutes
     LLM_MAX_CALLS_PER_MINUTE: int = 2

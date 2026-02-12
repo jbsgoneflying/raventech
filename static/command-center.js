@@ -79,11 +79,11 @@
       const subBars = $("#fpSubBars");
       subBars.innerHTML = "";
       const labels = {
-        dealer_gamma: "Dealer Gamma",
-        vol_term_structure: "Vol Term Structure",
-        em_richness: "EM Richness",
-        liquidity: "Liquidity",
-        macro_density: "Macro Density",
+        dealer_gamma_support: "Dealer Gamma",
+        vol_term_structure_drift: "Vol Term Structure",
+        em_richness_skew: "EM Richness",
+        liquidity_tape_stress: "Liquidity",
+        macro_event_density: "Macro Density",
       };
       for (const [key, lbl] of Object.entries(labels)) {
         const val = components[key] ?? 50;
@@ -101,12 +101,21 @@
       $("#regimeLabel").textContent = regime.label || "—";
       const regimePill = $("#regimePill");
       if (regime.score != null) {
-        regimePill.textContent = "Score: " + regime.score;
+        regimePill.textContent = "Score: " + (typeof regime.score === "number" ? regime.score.toFixed(1) : regime.score);
         regimePill.className = "pill " + pillClass(regime.label);
       }
+      const regimeComps = regime.components || {};
       const drivers = [];
-      if (regime.fx_stress != null) drivers.push("fx stress: " + regime.fx_stress);
-      if (regime.iv_stress != null) drivers.push("iv stress: " + regime.iv_stress);
+      // Check both top-level and nested components for driver data
+      var fxStress = regimeComps.fx_stress != null ? regimeComps.fx_stress : regime.fx_stress;
+      var ivStress = regimeComps.iv_stress != null ? regimeComps.iv_stress : regime.iv_stress;
+      if (fxStress != null) drivers.push("FX Stress: " + (typeof fxStress === "number" ? fxStress.toFixed(1) : fxStress));
+      if (ivStress != null) drivers.push("IV Stress: " + (typeof ivStress === "number" ? ivStress.toFixed(1) : ivStress));
+      // Also show other components if available
+      var emStress = regimeComps.em_stress != null ? regimeComps.em_stress : regime.em_stress;
+      var corrStress = regimeComps.corr_stress != null ? regimeComps.corr_stress : regime.corr_stress;
+      if (emStress != null) drivers.push("EM Stress: " + (typeof emStress === "number" ? emStress.toFixed(1) : emStress));
+      if (corrStress != null) drivers.push("Corr Stress: " + (typeof corrStress === "number" ? corrStress.toFixed(1) : corrStress));
       $("#regimeDrivers").textContent = drivers.join(" · ");
 
       // Vol state (Engine 5 volLeadLag uses: global_vol_direction, us_iv_state, vol_lag_state, structure_bias)
@@ -146,9 +155,13 @@
         const div = document.createElement("div");
         div.className = "seqDay";
         const chips = events.length
-          ? events.map((e) => `<span class="seqChip">${e.label || e.field || "?"}</span>`).join("")
+          ? events.map((e) => {
+              const chipLabel = e.label || e.event_type || "?";
+              const tooltip = e.summary || (e.from_state && e.to_state ? e.from_state + " → " + e.to_state : "");
+              return '<span class="seqChip" title="' + (tooltip || "").replace(/"/g, "&quot;") + '">' + chipLabel + "</span>";
+            }).join("")
           : '<span style="color:var(--muted);font-size:11px;">—</span>';
-        div.innerHTML = `<div class="seqDayLabel">${dayLabels[i] || d}</div>${chips}`;
+        div.innerHTML = '<div class="seqDayLabel">' + (dayLabels[i] || d) + "</div>" + chips;
         container.appendChild(div);
       });
 
@@ -240,6 +253,50 @@
     }
   }
 
+  /* ── Alerts (State Flips) ──────────────────────────────────── */
+
+  async function loadAlerts() {
+    try {
+      const res = await fetch("/api/command-center/alerts");
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+
+      const alerts = data.alerts || [];
+      const feed = $("#alertsFeed");
+      if (!feed) return;
+
+      if (!alerts.length) {
+        feed.innerHTML = '<span style="color:var(--muted);font-size:12px;">No state flips detected this week. Events appear when regime, vol, or flow pressure changes between runs.</span>';
+        return;
+      }
+
+      feed.innerHTML = "";
+      alerts.forEach(function (a) {
+        var card = document.createElement("div");
+        card.style.cssText = "padding:8px 10px;margin-bottom:6px;border-radius:8px;background:var(--hover);font-size:12px;";
+        var timeStr = "";
+        if (a.date) {
+          timeStr = a.date;
+          if (a.timestamp) {
+            try {
+              var t = new Date(a.timestamp);
+              timeStr += " " + t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            } catch (_) {}
+          }
+        }
+        var arrow = a.from_state && a.to_state ? a.from_state + " → " + a.to_state : "";
+        card.innerHTML =
+          '<div style="font-weight:700;">' + (a.type || a.event_type || "State Flip") + "</div>" +
+          (arrow ? '<div style="margin-top:2px;color:var(--muted);">' + arrow + "</div>" : "") +
+          (a.summary ? '<div style="margin-top:2px;font-size:11px;">' + a.summary + "</div>" : "") +
+          (timeStr ? '<div style="margin-top:3px;font-size:10px;color:var(--muted);">' + timeStr + "</div>" : "");
+        feed.appendChild(card);
+      });
+    } catch (e) {
+      console.error("Alerts load failed:", e);
+    }
+  }
+
   /* ── Run Command Center ─────────────────────────────────────── */
 
   let isRunning = false;
@@ -273,8 +330,11 @@
       setProgress(35, "Loading Sequencer…");
       await loadSequencer();
 
-      setProgress(50, "Loading Desk Brief…");
+      setProgress(45, "Loading Desk Brief…");
       await loadDeskBrief();
+
+      setProgress(50, "Loading Alerts…");
+      await loadAlerts();
 
       // Step 3: Wait for Engine 3/4 scans to populate (poll tradable ideas)
       setProgress(60, "Waiting for Engine 3 & 4 scans…");
@@ -301,6 +361,7 @@
         loadSequencer(),
         loadIdeas(),
         loadDeskBrief(),
+        loadAlerts(),
       ]);
 
       setProgress(100, "Done");
