@@ -96,26 +96,37 @@ def _get_client():
 _MIN_MARKET_CAP = 100_000_000_000  # $100 B
 
 
-def get_mega_cap_universe() -> Dict[str, CompanyInfo]:
-    """Return ``{bare_ticker: CompanyInfo}`` for all US stocks with
-    market cap >= $100 B.  Result is cached for 24 hours.
-    """
-    cached = _cache_get(_universe_cache, _universe_lock, "mega")
-    if cached is not None:
-        return cached
+def _is_valid_us_ticker(code: str) -> bool:
+    """Filter out OTC / pink-sheet foreign ordinaries and ADRs.
 
-    client = _get_client()
+    OTC tickers are typically 5 characters and end in F (foreign ordinary),
+    Y (unsponsored ADR), or are preferred-share suffixes.  We keep only
+    standard 1-4 character tickers plus a small set of known 5-char names
+    (like BRK-A / BRK-B which the screener returns as BRKB, BRKA).
+    """
+    t = code.split(".")[0].upper()
+    if len(t) <= 4:
+        return True
+    # Known legitimate 5-char US tickers
+    if t in ("GOOGL", "GOOG"):
+        return True
+    # 5-char tickers ending in F or Y are almost always OTC foreign
+    if len(t) == 5 and t[-1] in ("F", "Y"):
+        return False
+    # Other 5-char: allow (could be legit like BRK-B → BRKB)
+    return True
+
+
+def _fetch_exchange_universe(client: Any, exchange: str) -> List[dict]:
+    """Paginate the screener for a single exchange, returning all rows."""
     filters_json = json.dumps([
         ["market_capitalization", ">", _MIN_MARKET_CAP],
-        ["exchange", "=", "us"],
+        ["exchange", "=", exchange],
     ])
-
-    universe: Dict[str, CompanyInfo] = {}
+    all_rows: List[dict] = []
     offset = 0
     limit = 100
-    max_pages = 15  # safety: ~1500 tickers max
-
-    for _ in range(max_pages):
+    for _ in range(15):
         try:
             resp = client.get_screener(
                 filters=filters_json,
@@ -125,18 +136,39 @@ def get_mega_cap_universe() -> Dict[str, CompanyInfo]:
             )
             rows = resp.rows or []
         except Exception as exc:
-            LOG.warning("Screener page offset=%d failed: %s", offset, exc)
+            LOG.warning("Screener %s offset=%d failed: %s", exchange, offset, exc)
             break
-
         if not rows:
             break
+        all_rows.extend(rows)
+        if len(rows) < limit:
+            break
+        offset += limit
+    return all_rows
 
+
+def get_mega_cap_universe() -> Dict[str, CompanyInfo]:
+    """Return ``{bare_ticker: CompanyInfo}`` for all NYSE + NASDAQ stocks
+    with market cap >= $100 B.  OTC / pink-sheet foreign ordinaries and
+    unsponsored ADRs are excluded.  Result is cached for 24 hours.
+    """
+    cached = _cache_get(_universe_cache, _universe_lock, "mega")
+    if cached is not None:
+        return cached
+
+    client = _get_client()
+    universe: Dict[str, CompanyInfo] = {}
+
+    # Query NYSE and NASDAQ separately to exclude OTC / pink sheets
+    for exchange in ("NYSE", "NASDAQ"):
+        rows = _fetch_exchange_universe(client, exchange)
         for r in rows:
             code = str(r.get("code") or "").strip()
             if not code:
                 continue
-            # code comes back as "AAPL" (bare) from screener
             bare = code.split(".")[0].upper()
+            if not _is_valid_us_ticker(bare):
+                continue
             universe[bare] = CompanyInfo(
                 ticker=bare,
                 name=str(r.get("name") or bare),
@@ -146,11 +178,7 @@ def get_mega_cap_universe() -> Dict[str, CompanyInfo]:
                 logo_url=LOGO_URL_TEMPLATE.format(ticker=bare),
             )
 
-        if len(rows) < limit:
-            break
-        offset += limit
-
-    LOG.info("Mega-cap universe loaded: %d companies", len(universe))
+    LOG.info("Mega-cap universe loaded: %d companies (NYSE+NASDAQ only)", len(universe))
     _cache_set(_universe_cache, _universe_lock, "mega", universe)
     return universe
 
@@ -220,10 +248,14 @@ def get_earnings_calendar(
         earnings_list = []
 
     days: Dict[str, List[dict]] = {}
-    # Track seen (report_date, ticker) pairs to deduplicate.
-    # EODHD returns multiple rows per ticker per day for different fiscal
-    # periods; we only want one calendar entry per company per day.
-    seen: set = set()
+    # Track seen tickers across the ENTIRE date range.  EODHD often returns
+    # the same company on multiple adjacent days (different fiscal periods,
+    # or AMC-one-day / BMO-next-day duplication).  For a calendar view we
+    # only want ONE entry per company — the earliest report_date wins.
+    seen_tickers: set = set()
+
+    # Pre-sort by report_date so earliest date wins the dedup
+    earnings_list.sort(key=lambda x: str(x.get("report_date") or "")[:10] if isinstance(x, dict) else "")
 
     for e in earnings_list:
         if not isinstance(e, dict):
@@ -240,10 +272,10 @@ def get_earnings_calendar(
         if not report_date:
             continue
 
-        dedup_key = (report_date, bare)
-        if dedup_key in seen:
+        # One entry per ticker across the entire range
+        if bare in seen_tickers:
             continue
-        seen.add(dedup_key)
+        seen_tickers.add(bare)
 
         bam = e.get("before_after_market")
         entry = EarningsEntry(
