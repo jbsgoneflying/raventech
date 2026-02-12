@@ -61,7 +61,7 @@
       /* ── Engine cards ────────────────────────────────── */
       .engineGrid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        grid-template-columns: repeat(3, 1fr);
         gap: 12px;
       }
       .engineCard {
@@ -204,6 +204,9 @@
       /* ── Responsive ──────────────────────────────────── */
       @media (max-width: 900px) {
         .principlesGrid { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 900px) {
+        .engineGrid { grid-template-columns: repeat(2, 1fr); }
       }
       @media (max-width: 640px) {
         .engineGrid { grid-template-columns: 1fr; }
@@ -383,6 +386,24 @@
               <span class="engineCardTag">Benzinga</span>
               <span class="engineCardTag">Macro Calendar</span>
               <span class="engineCardTag">Event Scoring</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/backtest">
+            <div class="engineCardHeader">
+              <div class="engineBadge engineBadge--dark">BT</div>
+              <div class="engineCardName">Backtest</div>
+              <div class="engineCardChip">Historical</div>
+            </div>
+            <div class="engineCardBody">
+              Run historical back-tests against engine outputs to validate strategy performance
+              across past regimes and market conditions. Measures win rate, average credit captured,
+              and drawdown characteristics over configurable time windows.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">Historical Data</span>
+              <span class="engineCardTag">Strategy Validation</span>
+              <span class="engineCardTag">Regime Replay</span>
             </div>
           </a>
 
