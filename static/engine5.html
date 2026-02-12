@@ -758,6 +758,7 @@
         </div>
         <div class="tbInputs topNav">
           <a class="primaryButton navBtn" href="/" style="text-decoration:none;" data-tooltip="Platform overview and engine directory">Home</a>
+          <a class="primaryButton navBtn" href="/command-center" style="text-decoration:none;" data-tooltip="Weekly planning and intraday monitoring dashboard">Command Center</a>
           <a class="primaryButton navBtn" href="/calendar" style="text-decoration:none;" data-tooltip="Earnings calendar with breach probability rankings">Calendar</a>
           <a class="primaryButton navBtn" href="/breach" style="text-decoration:none;" data-tooltip="Single-ticker earnings hold risk analysis with Monte Carlo simulation">Engine 1</a>
           <a class="primaryButton navBtn" id="engine2Link" href="/spx" style="text-decoration:none;" data-tooltip="SPX/SPY 0DTE iron condor scanner with dealer gamma overlay">Engine 2</a>
@@ -766,6 +767,7 @@
           <a class="primaryButton navBtn" href="/lead-lag" style="text-decoration:none; background: rgba(52, 199, 89, 0.12); border-color: rgba(52, 199, 89, 0.25);" data-tooltip="Global lead-lag regime intelligence and weekly options income ideas">Lead-Lag</a>
           <a class="primaryButton navBtn" href="/red-dog" style="text-decoration:none;" data-tooltip="Red Dog Reversal scanner for mean-reversion setups on SP500 and Nasdaq100">Red Dog</a>
           <a class="primaryButton navBtn" href="/ichimoku" style="text-decoration:none;" data-tooltip="Ichimoku Cloud continuation scanner for trend-following setups">Ichimoku</a>
+          <a class="primaryButton navBtn" href="/research-lab" style="text-decoration:none;" data-tooltip="LLM feature discovery and backtest queue">Research Lab</a>
         </div>
       </header>
 
@@ -795,6 +797,17 @@
 
       <!-- Results container (hidden until data loads) -->
       <section class="results hidden" id="results">
+
+        <!-- Downstream Status (Raven-Tech 2.0) -->
+        <section class="surface" style="margin-bottom:12px; padding:12px 16px;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Downstream Consumers</span>
+            <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(52,199,89,0.10); color:#1b8a3e;">Command Center</span>
+            <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(0,122,255,0.10); color:#0060cc;">Gates (E3/E4)</span>
+            <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(175,82,222,0.10); color:#8e44ad;">Sequencer</span>
+            <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(255,149,0,0.10); color:#995c00;">Flow Pressure</span>
+          </div>
+        </section>
 
         <!-- Regime Banner -->
         <section id="regimeSection">

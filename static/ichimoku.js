@@ -268,6 +268,17 @@ function renderSignalCard(signal, isStructure = false) {
     }
   }
   
+  // Gate pill (Raven-Tech 2.0)
+  let gatePillHtml = "";
+  const gate = signal.gate || {};
+  if (gate.status) {
+    const gCls = gate.status === "TRADABLE" ? "background:rgba(52,199,89,0.14);color:#1b8a3e;" :
+                 gate.status === "SUPPRESS" ? "background:rgba(255,59,48,0.14);color:#cc2f26;" :
+                 "background:rgba(255,149,0,0.14);color:#995c00;";
+    const reasons = (gate.reasons || []).map(r => r.label || r.code).slice(0, 3).join(", ");
+    gatePillHtml = `<div style="margin:4px 0 2px;"><span style="display:inline-block;font-size:9px;font-weight:800;padding:2px 8px;border-radius:12px;text-transform:uppercase;${gCls}">${gate.status}</span>${reasons ? `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${escapeHtml(reasons)}</span>` : ""}</div>`;
+  }
+
   return `
     <div class="signalCard ${isStructure ? 'structureCard' : 'actionableCard'}" data-ticker="${ticker}">
       <div class="signalCardHeader">
@@ -279,6 +290,7 @@ function renderSignalCard(signal, isStructure = false) {
         </div>
         <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
       </div>
+      ${gatePillHtml}
       ${freshnessHtml ? `<div class="signalCardFreshness">${freshnessHtml}</div>` : ""}
       <div class="signalCardBody">
         <div class="signalCardMetric">
@@ -365,9 +377,47 @@ function renderSignals(payload) {
   }
 }
 
+function renderGateBanner(payload) {
+  const banner = $("gateBanner");
+  if (!banner) return;
+
+  const gs = payload.gateSummary;
+  if (!gs) { banner.style.display = "none"; return; }
+
+  banner.style.display = "block";
+  const total = gs.total || 0;
+  const tradable = gs.TRADABLE || 0;
+  const watch = gs.WATCH || 0;
+  const suppress = gs.SUPPRESS || 0;
+
+  const pill = (cls, text) =>
+    `<span style="display:inline-block;font-size:10px;font-weight:800;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:0.04em;${cls}">${text}</span>`;
+
+  const summaryEl = $("gateSummary");
+  if (summaryEl) {
+    summaryEl.innerHTML = [
+      tradable > 0 ? pill("background:rgba(52,199,89,0.14);color:#1b8a3e;", `${tradable} Tradable`) : "",
+      watch > 0 ? pill("background:rgba(255,149,0,0.14);color:#995c00;", `${watch} Watch`) : "",
+      suppress > 0 ? pill("background:rgba(255,59,48,0.14);color:#cc2f26;", `${suppress} Suppress`) : "",
+      pill("background:rgba(11,11,15,0.04);color:var(--muted);", `${total} Total`),
+    ].filter(Boolean).join(" ");
+  }
+
+  const reasonsEl = $("gateReasons");
+  if (reasonsEl && payload.gateContext) {
+    const ctx = payload.gateContext;
+    const parts = [];
+    if (ctx.regime_label) parts.push(`Regime: ${ctx.regime_label}`);
+    if (ctx.vol_direction) parts.push(`Vol: ${ctx.vol_direction}`);
+    if (ctx.fp_label) parts.push(`Flow Pressure: ${ctx.fp_label}`);
+    reasonsEl.textContent = parts.join(" · ") || "";
+  }
+}
+
 function render(payload) {
   lastPayload = payload;
   showResults(true);
+  renderGateBanner(payload);
   renderStats(payload);
   renderGammaContext(payload);
   renderSignals(payload);

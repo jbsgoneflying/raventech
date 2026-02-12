@@ -12,7 +12,7 @@ from pathlib import Path
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
-from typing import Optional
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, Form
@@ -45,6 +45,15 @@ from backend.engine4_screener import (
     refresh_signal_statuses as refresh_engine4_statuses,
 )
 from backend.breach_ranker import rank_tickers, summarize_tiers
+from backend.flow_pressure import compute_flow_pressure, compute_flow_pressure_snapshot, FlowPressure
+from backend.gating import gate_scan_results, summarize_gates
+from backend.earnings_gamma_context import compute_earnings_gamma_context
+from backend.sequencer import (
+    SequencerEvent, WeeklySequence, current_week_id,
+    detect_state_changes, build_weekly_sequence, week_trading_days,
+    PATTERN_TEMPLATES,
+)
+from backend.llm_client import generate_desk_brief, suggest_features
 
 
 try:
@@ -456,7 +465,11 @@ def index(request: Request):
             raise HTTPException(status_code=500, detail="Missing static/landing.html")
         return FileResponse(str(landing_path))
 
-    # App subdomain -> home dashboard
+    # App subdomain -> Command Center (Raven-Tech 2.0 default)
+    cc_path = STATIC_DIR / "command-center.html"
+    if cc_path.exists():
+        return FileResponse(str(cc_path))
+    # Fallback to home dashboard if command-center.html not found
     home_path = STATIC_DIR / "home.html"
     if not home_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/home.html")
@@ -955,6 +968,35 @@ def breach(
             next_event_override={"date": mc_event_date, "timing": mc_event_timing},
             benzinga_client=_get_benzinga_client_optional(),
         )
+
+        # Inject Earnings Gamma Context (Raven-Tech 2.0)
+        try:
+            from backend.dealer_gamma_context import compute_dealer_gamma_context
+            from backend.engine2_gamma_addons import compute_tail_ignition
+            t_upper = ticker.strip().upper()
+            rows = client.live_strikes(ticker=t_upper, fields="strike,gamma,callOpenInterest,putOpenInterest,spotPrice").rows or []
+            if rows:
+                dg = compute_dealer_gamma_context(rows)
+                ti_data = compute_tail_ignition(client, t_upper)
+                spot = None
+                for r in rows:
+                    if isinstance(r, dict) and r.get("spotPrice"):
+                        spot = float(r["spotPrice"])
+                        break
+                current = payload.get("current") or {}
+                im_pct = current.get("impliedMovePct")
+                egc = compute_earnings_gamma_context(
+                    ticker=t_upper,
+                    as_of_date=dt.date.today().isoformat(),
+                    dealer_gamma=dg,
+                    tail_ignition=ti_data,
+                    spot=spot,
+                    implied_move_pct=im_pct,
+                )
+                payload["earningsGammaContext"] = egc.to_dict()
+        except Exception as egc_err:
+            LOG.debug(f"Earnings gamma context skipped for {ticker}: {egc_err}")
+
         if not has_trade_builder:
             with _breach_cache_lock:
                 _breach_cache[key] = payload
@@ -1586,6 +1628,45 @@ def backtest_page():
 
 
 # ---------------------------------------------------------------------------
+# Raven-Tech 2.0 – Gate context helper
+# ---------------------------------------------------------------------------
+
+def _get_gate_context(flags) -> dict:
+    """Gather regime, vol, and flow pressure context for gating decisions."""
+    ctx = {
+        "regime_label": "",
+        "vol_direction": "",
+        "fp_score": None,
+        "fp_label": None,
+        "gamma_ctx": None,
+        "high_events_within_days": 0,
+    }
+    try:
+        store = get_store_optional()
+        if store and flags.ENABLE_ENGINE5_LEAD_LAG:
+            snap = _engine5_get_best_snapshot(store, flags)
+            if snap:
+                data = snap.get("data", {})
+                regime = data.get("regime", {})
+                ctx["regime_label"] = regime.get("label") or regime.get("current_label") or ""
+                vol = data.get("volLeadLag", {})
+                ctx["vol_direction"] = vol.get("global_vol_direction") or vol.get("globalVolDirection") or ""
+    except Exception:
+        pass
+    try:
+        # Try to get flow pressure from cache
+        with _fp_cache_lock:
+            fp_data = _fp_cache.get("latest")
+        if fp_data:
+            fp = fp_data.get("flowPressure", {})
+            ctx["fp_score"] = fp.get("composite_score")
+            ctx["fp_label"] = fp.get("composite_label")
+    except Exception:
+        pass
+    return ctx
+
+
+# ---------------------------------------------------------------------------
 # Engine 3: Red Dog Reversal Scanner
 # ---------------------------------------------------------------------------
 
@@ -1649,6 +1730,26 @@ def engine3_red_dog_scan(
             max_workers=flags.ENGINE3_MAX_WORKERS,
             use_cache=True,
         )
+
+        # Inject gate decisions (Raven-Tech 2.0)
+        if flags.ENABLE_GATING and isinstance(result, dict):
+            try:
+                gate_ctx = _get_gate_context(flags)
+                for key in ("aPlus", "standard", "watchlist"):
+                    setups = result.get(key)
+                    if isinstance(setups, list):
+                        gate_scan_results(
+                            scan_results=setups,
+                            engine="engine3_red_dog",
+                            **gate_ctx,
+                        )
+                gs = summarize_gates(
+                    (result.get("aPlus") or []) + (result.get("standard") or [])
+                )
+                result["gateSummary"] = gs
+                result["gateContext"] = gate_ctx
+            except Exception as gate_err:
+                LOG.warning(f"Gate injection failed for engine3: {gate_err}")
 
         with _engine3_cache_lock:
             _engine3_cache[cache_key] = result
@@ -1785,6 +1886,26 @@ def engine4_ichimoku_scan(
             benzinga_client=benzinga_client,
             max_workers=flags.ENGINE4_MAX_WORKERS,
         )
+
+        # Inject gate decisions (Raven-Tech 2.0)
+        if flags.ENABLE_GATING and isinstance(result, dict):
+            try:
+                gate_ctx = _get_gate_context(flags)
+                for key in ("actionable", "structure", "watchlist"):
+                    setups = result.get(key)
+                    if isinstance(setups, list):
+                        gate_scan_results(
+                            scan_results=setups,
+                            engine="engine4_ichimoku",
+                            **gate_ctx,
+                        )
+                gs = summarize_gates(
+                    (result.get("actionable") or []) + (result.get("structure") or [])
+                )
+                result["gateSummary"] = gs
+                result["gateContext"] = gate_ctx
+            except Exception as gate_err:
+                LOG.warning(f"Gate injection failed for engine4: {gate_err}")
 
         with _engine4_cache_lock:
             _engine4_cache[cache_key] = result
@@ -2088,5 +2209,296 @@ async def engine5_global_summary():
         "regime": data.get("regime", {}),
         "meta": meta,
     }
+
+
+# ---------------------------------------------------------------------------
+# Raven-Tech 2.0 – Command Center & Flow Pressure
+# ---------------------------------------------------------------------------
+
+
+@app.get("/command-center")
+def command_center_page():
+    """Command Center: weekly planning + intraday monitoring."""
+    cc_path = STATIC_DIR / "command-center.html"
+    if not cc_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/command-center.html")
+    return FileResponse(str(cc_path))
+
+
+@app.get("/research-lab")
+def research_lab_page():
+    """Research Lab: LLM feature discovery + backtest queue."""
+    rl_path = STATIC_DIR / "research-lab.html"
+    if not rl_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/research-lab.html")
+    return FileResponse(str(rl_path))
+
+
+_fp_cache = TTLCache(maxsize=10, ttl=60)
+_fp_cache_lock = threading.Lock()
+
+_desk_brief_cache = TTLCache(maxsize=5, ttl=30 * 60)
+_desk_brief_cache_lock = threading.Lock()
+
+_sequencer_events: Dict[str, List[dict]] = {}  # in-memory store: week_id -> events
+_sequencer_lock = threading.Lock()
+_sequencer_prior_state: Dict[str, str] = {}  # previous state for change detection
+
+
+@app.get("/api/command-center/flow-pressure")
+def api_flow_pressure():
+    """Flow Pressure snapshot across SPX, QQQ, and sector ETFs."""
+    with _fp_cache_lock:
+        cached = _fp_cache.get("latest")
+    if cached is not None:
+        return cached
+
+    import datetime as _dt
+    now = _dt.datetime.utcnow().isoformat() + "Z"
+
+    # Gather regime and vol state from Engine 5
+    regime_data = {}
+    vol_data = {}
+    try:
+        flags = get_flags()
+        store = get_store_optional()
+        if store and flags.ENABLE_ENGINE5_LEAD_LAG:
+            snap = _engine5_get_best_snapshot(store, flags)
+            if snap:
+                data = snap.get("data", {})
+                regime_data = data.get("regime", {})
+                vol_data = data.get("volLeadLag", {})
+    except Exception:
+        pass
+
+    # Build Flow Pressure for SPX (primary), QQQ, and sector ETFs
+    symbols = ["SPX", "QQQ", "XLF", "XLK", "XLE", "XLU", "XLV", "XLI"]
+    readings = []
+
+    for sym in symbols:
+        # Use gamma context from SPX for index symbols, simplified for sectors
+        gamma_ctx = None
+        try:
+            client = _get_client_optional()
+            if client and sym in ("SPX", "QQQ"):
+                from backend.dealer_gamma_context import compute_dealer_gamma_context
+                sym_for_strikes = "SPXW" if sym == "SPX" else sym
+                rows = client.live_strikes(ticker=sym_for_strikes, fields="strike,gamma,callOpenInterest,putOpenInterest,spotPrice").rows or []
+                if rows:
+                    gamma_ctx = compute_dealer_gamma_context(rows)
+        except Exception:
+            pass
+
+        fp = compute_flow_pressure(
+            symbol=sym,
+            timestamp=now,
+            gamma_ctx=gamma_ctx,
+            event_count_5d=0,
+            high_severity_count=0,
+        )
+        readings.append(fp)
+
+    snapshot = compute_flow_pressure_snapshot(readings, timestamp=now)
+    payload = {
+        "flowPressure": snapshot.to_dict(),
+        "regime": regime_data,
+        "volState": vol_data,
+    }
+
+    with _fp_cache_lock:
+        _fp_cache["latest"] = payload
+    return payload
+
+
+@app.get("/api/command-center/sequencer")
+def api_sequencer():
+    """Weekly Signal Sequencer: timeline of signal flips this week."""
+    wid = current_week_id()
+
+    # Try Redis first, fall back to in-memory
+    events = []
+    try:
+        store = get_store_optional()
+        if store:
+            redis_events = store.get_json(f"sequencer:week:{wid}")
+            if isinstance(redis_events, list):
+                events = redis_events
+    except Exception:
+        pass
+
+    if not events:
+        with _sequencer_lock:
+            events = _sequencer_events.get(wid, [])
+
+    seq_events = [SequencerEvent.from_dict(e) for e in events]
+    seq = build_weekly_sequence(wid, seq_events)
+
+    return {
+        "weekId": wid,
+        "tradingDays": week_trading_days(),
+        "sequence": seq.to_dict(),
+        "patterns": {k: {"label": v["label"], "description": v["description"]}
+                     for k, v in PATTERN_TEMPLATES.items()},
+    }
+
+
+@app.get("/api/command-center/desk-brief")
+def api_desk_brief():
+    """Desk Brief: LLM-generated narrative compression."""
+    flags = get_flags()
+    if not flags.ENABLE_LLM_NARRATIVE:
+        return {
+            "enabled": False,
+            "brief": {
+                "market_state": "LLM narrative is disabled. Review metrics cards directly.",
+                "weekly_bias": "Consult Flow Pressure and Regime cards for current bias.",
+                "top_risks": "Check Macro Event Density panel for upcoming catalysts.",
+            },
+        }
+
+    with _desk_brief_cache_lock:
+        cached = _desk_brief_cache.get("latest")
+    if cached is not None:
+        return cached
+
+    # Gather context for LLM
+    context = {}
+    try:
+        fp_data = api_flow_pressure()
+        context["flow_pressure"] = fp_data.get("flowPressure", {})
+        context["regime"] = fp_data.get("regime", {})
+        context["vol_state"] = fp_data.get("volState", {})
+    except Exception:
+        pass
+
+    try:
+        seq_data = api_sequencer()
+        context["sequencer"] = seq_data.get("sequence", {})
+    except Exception:
+        pass
+
+    brief = generate_desk_brief(context)
+    payload = {"enabled": True, "brief": brief}
+
+    with _desk_brief_cache_lock:
+        _desk_brief_cache["latest"] = payload
+    return payload
+
+
+@app.get("/api/command-center/tradable-ideas")
+def api_tradable_ideas():
+    """Aggregated tradable ideas across all engines with gate status."""
+    ideas = []
+
+    # Collect from Engine 3 (Red Dog)
+    try:
+        flags = get_flags()
+        if flags.ENABLE_ENGINE3_RED_DOG:
+            client = _get_client_optional()
+            if client:
+                with _engine3_cache_lock:
+                    # Try to get cached scan
+                    cached = None
+                    for k, v in list(_engine3_cache.items()):
+                        cached = v
+                        break
+                if cached and isinstance(cached, dict):
+                    setups = cached.get("watchlist") or cached.get("aPlus", {}).get("setups", [])
+                    if isinstance(setups, list):
+                        for s in setups[:10]:
+                            if isinstance(s, dict):
+                                ideas.append({
+                                    "ticker": s.get("ticker", ""),
+                                    "engine": "Engine 3 Red Dog",
+                                    "setupType": "Mean Reversion",
+                                    "direction": s.get("direction", ""),
+                                    "score": s.get("score", 0),
+                                    "gate": s.get("gate", {"status": "TRADABLE", "reasons": []}),
+                                    "whyNow": f"Red Dog signal score {s.get('score', 0)}",
+                                    "whatBreaks": s.get("invalidation", "Price exceeds stop level"),
+                                })
+    except Exception:
+        pass
+
+    # Collect from Engine 4 (Ichimoku)
+    try:
+        if flags.ENABLE_ENGINE4_ICHIMOKU:
+            with _engine4_cache_lock:
+                cached = None
+                for k, v in list(_engine4_cache.items()):
+                    cached = v
+                    break
+            if cached and isinstance(cached, dict):
+                setups = cached.get("watchlist") or cached.get("aPlus", {}).get("setups", [])
+                if isinstance(setups, list):
+                    for s in setups[:10]:
+                        if isinstance(s, dict):
+                            ideas.append({
+                                "ticker": s.get("ticker", ""),
+                                "engine": "Engine 4 Ichimoku",
+                                "setupType": "Trend Continuation",
+                                "direction": s.get("direction", ""),
+                                "score": s.get("score", 0),
+                                "gate": s.get("gate", {"status": "TRADABLE", "reasons": []}),
+                                "whyNow": f"Ichimoku signal score {s.get('score', 0)}",
+                                "whatBreaks": s.get("invalidation", "Price breaks below Kijun"),
+                            })
+    except Exception:
+        pass
+
+    # Sort by score descending
+    ideas.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    return {"ideas": ideas, "count": len(ideas)}
+
+
+# ---------------------------------------------------------------------------
+# Raven-Tech 2.0 – Research Lab (LLM Feature Discovery)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/research-lab/features")
+def api_research_features():
+    """Get the current feature discovery queue."""
+    store = get_store_optional()
+    if store is None:
+        return {"features": [], "count": 0}
+
+    raw = store.get_json("research:feature_queue")
+    features = raw if isinstance(raw, list) else []
+    return {"features": features, "count": len(features)}
+
+
+@app.post("/api/research-lab/suggest")
+def api_research_suggest():
+    """Trigger LLM feature discovery."""
+    flags = get_flags()
+    if not flags.ENABLE_LLM_DISCOVERY:
+        raise HTTPException(status_code=503, detail="LLM feature discovery is disabled.")
+
+    # Build context of existing features
+    context = {
+        "existing_features": [
+            "flow_pressure (0-100, 5 sub-components)",
+            "regime (Risk-On/Transitional/Risk-Off/Stressed, 4-factor)",
+            "vol_lead_lag (global_vol_score, us_iv_state, vol_lag_state)",
+            "dealer_gamma (netGex, magnitude, sign)",
+            "earnings_breach_rate, implied_move, realized_move",
+        ],
+        "data_sources": ["ORATS (IV, skew, greeks)", "EODHD (global bars)", "Benzinga (macro events)"],
+    }
+
+    features = suggest_features(context)
+
+    # Store in Redis queue
+    store = get_store_optional()
+    if store and features:
+        existing = store.get_json("research:feature_queue") or []
+        if not isinstance(existing, list):
+            existing = []
+        existing.extend(features)
+        store.set_json("research:feature_queue", existing, ttl_s=30 * 86400)
+
+    return {"suggested": features, "count": len(features)}
 
 

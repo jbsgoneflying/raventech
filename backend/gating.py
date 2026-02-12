@@ -1,0 +1,427 @@
+"""Raven-Tech 2.0 – Gating layer for Engine 3 (Red Dog) and Engine 4 (Ichimoku).
+
+Converts every scan result into one of three statuses:
+  TRADABLE – green-lit for execution consideration
+  WATCH    – conditions are marginal; watch but don't trade yet
+  SUPPRESS – one or more hard failures; do not trade
+
+All rules are config-driven, explicit, and explainable.
+Each rule emits a GateReason with severity HARD (suppress) or SOFT (watch).
+
+Resolution:
+  1. ANY HARD reason → SUPPRESS
+  2. ANY SOFT reason → WATCH
+  3. Otherwise       → TRADABLE
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import logging
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
+
+LOG = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GateReason:
+    code: str                   # e.g. REGIME_MISMATCH
+    label: str                  # human-readable
+    severity: str               # HARD | SOFT
+    detail: str                 # specific threshold info
+    source_value: Any = None    # actual value
+    threshold_value: Any = None # required value
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class GateDecision:
+    ticker: str
+    engine: str                 # engine3_red_dog | engine4_ichimoku
+    status: str                 # TRADABLE | WATCH | SUPPRESS
+    reasons: List[dict] = field(default_factory=list)
+    decided_at: str = ""
+    inputs: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Gating rule functions
+# ---------------------------------------------------------------------------
+
+def _check_regime(
+    regime_label: str,
+    allowed_labels: List[str],
+    severity: str = "HARD",
+) -> Optional[GateReason]:
+    """Check if current regime is in the allowed set."""
+    if not regime_label:
+        return GateReason(
+            code="REGIME_MISSING",
+            label="Regime data unavailable",
+            severity="SOFT",
+            detail="No regime data available for gating",
+            source_value=None,
+            threshold_value=allowed_labels,
+        )
+    if regime_label not in allowed_labels:
+        return GateReason(
+            code="REGIME_MISMATCH",
+            label="Regime mismatch",
+            severity=severity,
+            detail=f"Current regime '{regime_label}' not in allowed: {allowed_labels}",
+            source_value=regime_label,
+            threshold_value=allowed_labels,
+        )
+    return None
+
+
+def _check_vol_state(
+    vol_direction: str,
+    allowed_states: List[str],
+    severity: str = "SOFT",
+) -> Optional[GateReason]:
+    """Check if vol state is in the allowed set."""
+    if not vol_direction:
+        return None  # pass when missing
+    if vol_direction.lower() not in [s.lower() for s in allowed_states]:
+        return GateReason(
+            code="VOL_STATE_MISMATCH",
+            label="Vol state mismatch",
+            severity=severity,
+            detail=f"Current vol state '{vol_direction}' not in allowed: {allowed_states}",
+            source_value=vol_direction,
+            threshold_value=allowed_states,
+        )
+    return None
+
+
+def _check_flow_pressure_max(
+    fp_score: Optional[float],
+    max_score: float,
+) -> Optional[GateReason]:
+    """WATCH if flow pressure score exceeds max (too risk-on for mean reversion)."""
+    if fp_score is None:
+        return None
+    if fp_score > max_score:
+        return GateReason(
+            code="FLOW_PRESSURE_TOO_HIGH",
+            label="Flow Pressure conflict",
+            severity="SOFT",
+            detail=f"Flow Pressure {fp_score:.0f} > max {max_score:.0f} for this strategy",
+            source_value=fp_score,
+            threshold_value=max_score,
+        )
+    return None
+
+
+def _check_flow_pressure_min(
+    fp_score: Optional[float],
+    min_score: float,
+) -> Optional[GateReason]:
+    """WATCH if flow pressure score is below min (too risk-off for trend continuation)."""
+    if fp_score is None:
+        return None
+    if fp_score < min_score:
+        return GateReason(
+            code="FLOW_PRESSURE_TOO_LOW",
+            label="Flow Pressure conflict",
+            severity="SOFT",
+            detail=f"Flow Pressure {fp_score:.0f} < min {min_score:.0f} for this strategy",
+            source_value=fp_score,
+            threshold_value=min_score,
+        )
+    return None
+
+
+def _check_flow_pressure_alignment(
+    fp_label: Optional[str],
+    setup_direction: Optional[str],
+) -> Optional[GateReason]:
+    """SUPPRESS if flow pressure direction opposes setup direction."""
+    if not fp_label or not setup_direction:
+        return None
+
+    fp = fp_label.lower().replace("-", "").replace("_", "")
+    direction = setup_direction.lower()
+
+    # Risk-Off + bullish setup = conflict
+    if fp in ("riskoff",) and direction in ("bullish", "bull", "long"):
+        return GateReason(
+            code="FLOW_PRESSURE_OPPOSED",
+            label="Flow Pressure opposed to direction",
+            severity="HARD",
+            detail=f"Flow Pressure is {fp_label} but setup is {setup_direction}",
+            source_value=fp_label,
+            threshold_value=setup_direction,
+        )
+    # Risk-On + bearish setup = conflict
+    if fp in ("riskon",) and direction in ("bearish", "bear", "short"):
+        return GateReason(
+            code="FLOW_PRESSURE_OPPOSED",
+            label="Flow Pressure opposed to direction",
+            severity="HARD",
+            detail=f"Flow Pressure is {fp_label} but setup is {setup_direction}",
+            source_value=fp_label,
+            threshold_value=setup_direction,
+        )
+    return None
+
+
+def _check_macro_proximity(
+    high_events_within_days: int,
+    max_days: int,
+    severity: str = "HARD",
+) -> Optional[GateReason]:
+    """Check if high-severity macro event is too close."""
+    if high_events_within_days > 0 and max_days >= 0:
+        return GateReason(
+            code="MACRO_EVENT_PROXIMITY",
+            label="Macro event proximity",
+            severity=severity,
+            detail=f"{high_events_within_days} high-severity event(s) within {max_days} trading day(s)",
+            source_value=high_events_within_days,
+            threshold_value=max_days,
+        )
+    return None
+
+
+def _check_dealer_gamma_hostile(
+    gamma_ctx: Optional[dict],
+) -> Optional[GateReason]:
+    """WATCH if dealer gamma is hostile (negative + high magnitude)."""
+    if not gamma_ctx or not isinstance(gamma_ctx, dict):
+        return None
+    sign = str(gamma_ctx.get("netGammaSign") or "").lower()
+    mag = str(gamma_ctx.get("magnitudeBucket") or "").lower()
+    if sign == "negative" and mag in ("high", "medium"):
+        return GateReason(
+            code="DEALER_GAMMA_HOSTILE",
+            label="Dealer gamma instability",
+            severity="SOFT",
+            detail=f"Dealer gamma is {sign} with {mag} magnitude",
+            source_value={"sign": sign, "magnitude": mag},
+            threshold_value="positive or low negative",
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Resolve final status
+# ---------------------------------------------------------------------------
+
+def _resolve_status(reasons: List[GateReason]) -> str:
+    """
+    1. ANY HARD reason → SUPPRESS
+    2. ANY SOFT reason → WATCH
+    3. Otherwise       → TRADABLE
+    """
+    for r in reasons:
+        if r.severity == "HARD":
+            return "SUPPRESS"
+    for r in reasons:
+        if r.severity == "SOFT":
+            return "WATCH"
+    return "TRADABLE"
+
+
+# ---------------------------------------------------------------------------
+# Engine-specific gating
+# ---------------------------------------------------------------------------
+
+
+def gate_red_dog(
+    *,
+    ticker: str,
+    setup_direction: Optional[str] = None,
+    regime_label: str = "",
+    vol_direction: str = "",
+    fp_score: Optional[float] = None,
+    fp_label: Optional[str] = None,
+    gamma_ctx: Optional[dict] = None,
+    high_events_within_days: int = 0,
+    # Config overrides
+    regime_allow: Optional[List[str]] = None,
+    vol_state_allow: Optional[List[str]] = None,
+    fp_max: float = 70.0,
+    macro_proximity_days: int = 1,
+) -> GateDecision:
+    """Gate a Red Dog Reversal setup.
+
+    Red Dog thrives when:
+      - Regime is Transitional or Stressed
+      - Vol state is expanding or unstable
+      - Dealer gamma is not strongly hostile
+    """
+    reasons: List[GateReason] = []
+    allowed_regimes = regime_allow or ["Transitional", "Stressed"]
+    allowed_vol = vol_state_allow or ["expanding", "unstable", "RISING", "rising"]
+
+    r = _check_regime(regime_label, allowed_regimes, severity="HARD")
+    if r:
+        reasons.append(r)
+
+    r = _check_vol_state(vol_direction, allowed_vol, severity="SOFT")
+    if r:
+        reasons.append(r)
+
+    r = _check_flow_pressure_max(fp_score, fp_max)
+    if r:
+        reasons.append(r)
+
+    r = _check_macro_proximity(high_events_within_days, macro_proximity_days, severity="HARD")
+    if r:
+        reasons.append(r)
+
+    r = _check_dealer_gamma_hostile(gamma_ctx)
+    if r:
+        reasons.append(r)
+
+    status = _resolve_status(reasons)
+    now = dt.datetime.utcnow().isoformat() + "Z"
+
+    return GateDecision(
+        ticker=ticker,
+        engine="engine3_red_dog",
+        status=status,
+        reasons=[r.to_dict() for r in reasons],
+        decided_at=now,
+        inputs={
+            "regime_label": regime_label,
+            "vol_direction": vol_direction,
+            "fp_score": fp_score,
+            "fp_label": fp_label,
+            "high_events_within_days": high_events_within_days,
+        },
+    )
+
+
+def gate_ichimoku(
+    *,
+    ticker: str,
+    setup_direction: Optional[str] = None,
+    regime_label: str = "",
+    vol_direction: str = "",
+    fp_score: Optional[float] = None,
+    fp_label: Optional[str] = None,
+    gamma_ctx: Optional[dict] = None,
+    high_events_within_days: int = 0,
+    # Config overrides
+    regime_allow: Optional[List[str]] = None,
+    vol_state_allow: Optional[List[str]] = None,
+    fp_min: float = 30.0,
+    check_fp_alignment: bool = True,
+    macro_proximity_days: int = 1,
+) -> GateDecision:
+    """Gate an Ichimoku Cloud Continuation setup.
+
+    Ichimoku thrives when:
+      - Regime is Risk-On or stable Transitional
+      - Vol state is compressing or stable
+      - Flow Pressure is aligned with direction
+    """
+    reasons: List[GateReason] = []
+    allowed_regimes = regime_allow or ["Risk-On", "Transitional"]
+    allowed_vol = vol_state_allow or ["compressing", "stable", "NORMAL", "FALLING", "falling", "flat"]
+
+    r = _check_regime(regime_label, allowed_regimes, severity="HARD")
+    if r:
+        reasons.append(r)
+
+    r = _check_vol_state(vol_direction, allowed_vol, severity="SOFT")
+    if r:
+        reasons.append(r)
+
+    r = _check_flow_pressure_min(fp_score, fp_min)
+    if r:
+        reasons.append(r)
+
+    if check_fp_alignment:
+        r = _check_flow_pressure_alignment(fp_label, setup_direction)
+        if r:
+            reasons.append(r)
+
+    r = _check_macro_proximity(high_events_within_days, macro_proximity_days, severity="SOFT")
+    if r:
+        reasons.append(r)
+
+    status = _resolve_status(reasons)
+    now = dt.datetime.utcnow().isoformat() + "Z"
+
+    return GateDecision(
+        ticker=ticker,
+        engine="engine4_ichimoku",
+        status=status,
+        reasons=[r.to_dict() for r in reasons],
+        decided_at=now,
+        inputs={
+            "regime_label": regime_label,
+            "vol_direction": vol_direction,
+            "fp_score": fp_score,
+            "fp_label": fp_label,
+            "setup_direction": setup_direction,
+            "high_events_within_days": high_events_within_days,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch gating helpers
+# ---------------------------------------------------------------------------
+
+
+def gate_scan_results(
+    *,
+    scan_results: List[dict],
+    engine: str,
+    regime_label: str = "",
+    vol_direction: str = "",
+    fp_score: Optional[float] = None,
+    fp_label: Optional[str] = None,
+    gamma_ctx: Optional[dict] = None,
+    high_events_within_days: int = 0,
+) -> List[dict]:
+    """Apply gating to a list of scan results, adding gate decision to each.
+
+    Returns the same list with 'gate' field injected into each result dict.
+    """
+    gate_fn = gate_red_dog if engine == "engine3_red_dog" else gate_ichimoku
+
+    for result in scan_results:
+        ticker = str(result.get("ticker") or result.get("symbol") or "")
+        direction = str(result.get("direction") or "")
+
+        decision = gate_fn(
+            ticker=ticker,
+            setup_direction=direction or None,
+            regime_label=regime_label,
+            vol_direction=vol_direction,
+            fp_score=fp_score,
+            fp_label=fp_label,
+            gamma_ctx=gamma_ctx,
+            high_events_within_days=high_events_within_days,
+        )
+        result["gate"] = decision.to_dict()
+
+    return scan_results
+
+
+def summarize_gates(scan_results: List[dict]) -> dict:
+    """Produce a summary of gate statuses across all scan results."""
+    counts = {"TRADABLE": 0, "WATCH": 0, "SUPPRESS": 0, "total": 0}
+    for r in scan_results:
+        gate = r.get("gate") if isinstance(r.get("gate"), dict) else {}
+        status = str(gate.get("status") or "UNKNOWN")
+        counts["total"] += 1
+        if status in counts:
+            counts[status] += 1
+    return counts

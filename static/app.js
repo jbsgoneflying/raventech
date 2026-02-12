@@ -1939,6 +1939,59 @@ function _wingRecLabel(label) {
   return l || "—";
 }
 
+// ── Earnings Gamma Context (Raven-Tech 2.0) ──────────────────────────
+function renderEarningsGammaContext(payload) {
+  const sec = $("earningsGammaSection");
+  if (!sec) return;
+
+  const egc = payload?.earningsGammaContext;
+  if (!egc) {
+    sec.style.display = "none";
+    return;
+  }
+  sec.style.display = "";
+
+  const pillCls = (label) => {
+    const l = (label || "").toLowerCase();
+    if (l === "supportive" || l === "near") return "good";
+    if (l === "hostile" || l === "downside_heavy" || l === "snap risk") return "bad";
+    return "warn";
+  };
+
+  const html = `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+      <div class="kv">
+        <span class="k">Gamma Context</span>
+        <span class="v">${pill(egc.gamma_context || "—", pillCls(egc.gamma_context))}</span>
+      </div>
+      <div class="kv">
+        <span class="k">Pin Zone</span>
+        <span class="v">${pill(egc.pin_zone_proximity || "—", pillCls(egc.pin_zone_proximity))}</span>
+      </div>
+      <div class="kv">
+        <span class="k">Skew Risk</span>
+        <span class="v">${pill((egc.skew_risk || "—").replace(/_/g, " "), pillCls(egc.skew_risk))}</span>
+      </div>
+      <div class="kv">
+        <span class="k">Path Risk</span>
+        <span class="v"><strong>${egc.path_risk_label || "—"}</strong></span>
+      </div>
+    </div>
+    <div style="margin-top:6px; font-size:11px; color:var(--muted);">${egc.path_risk_rationale || ""}</div>
+    ${egc.expected_move_band && egc.expected_move_band.low ? `
+      <div style="margin-top:6px; font-size:11px; color:var(--muted);">
+        Expected move band: $${Number(egc.expected_move_band.low).toFixed(2)} – $${Number(egc.expected_move_band.high).toFixed(2)}
+        (±${Number(egc.expected_move_band.impliedMovePct || 0).toFixed(1)}%)
+      </div>` : ""}
+  `;
+  sec.innerHTML = `
+    <div class="sectionHeader">
+      <h2 class="sectionTitle">Dealer Gamma Context</h2>
+    </div>
+    ${html}
+  `;
+}
+
 function renderBufferTarget(payload) {
   const wing = payload?.wingRecommendation || null;
   const hasAsymNumbers = wing && wing.putWingMultiple !== null && wing.putWingMultiple !== undefined
@@ -2801,6 +2854,7 @@ function render(payload) {
   renderSkewWings(payload);
   renderMonteCarlo(payload);
   renderTradeBuilder(payload);
+  renderEarningsGammaContext(payload);
   renderHoldRisk(payload);
   try {
     if (typeof window.renderTechnicalsDailyPanel === "function") {
