@@ -465,11 +465,8 @@ def index(request: Request):
             raise HTTPException(status_code=500, detail="Missing static/landing.html")
         return FileResponse(str(landing_path))
 
-    # App subdomain -> Command Center (Raven-Tech 2.0 default)
-    cc_path = STATIC_DIR / "command-center.html"
-    if cc_path.exists():
-        return FileResponse(str(cc_path))
-    # Fallback to home dashboard if command-center.html not found
+    # App subdomain -> Home dashboard (platform overview & engine directory).
+    # Command Center lives at its own route: /command-center
     home_path = STATIC_DIR / "home.html"
     if not home_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/home.html")
