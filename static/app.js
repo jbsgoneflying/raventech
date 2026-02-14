@@ -3207,6 +3207,7 @@ document.addEventListener("DOMContentLoaded", () => {
     e1DecisionEl.classList.add("e1Click");
     e1DecisionEl.title = "Click for desk insight";
     e1DecisionEl.addEventListener("click", function (ev) {
+      if (ev.target.closest("button, a, input, .tipWrap, .info")) return;
       if (!lastPayload) return;
       var data = { goNoGo: lastPayload.goNoGo || {}, summary: lastPayload.summary || {}, ticker: lastPayload.ticker };
       e1FetchInsight("e1_decision", data, "Decision Panel: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
@@ -3219,6 +3220,7 @@ document.addEventListener("DOMContentLoaded", () => {
     holdRiskEl.classList.add("e1Click");
     holdRiskEl.title = "Click for desk insight";
     holdRiskEl.addEventListener("click", function (ev) {
+      if (ev.target.closest("button, a, .tipWrap, .info")) return;
       if (!lastPayload || !lastPayload.earningsHoldRisk) return;
       e1FetchInsight("e1_hold_risk", lastPayload.earningsHoldRisk, "Earnings Hold Risk: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
     });
@@ -3230,6 +3232,7 @@ document.addEventListener("DOMContentLoaded", () => {
     mcEl.classList.add("e1Click");
     mcEl.title = "Click for desk insight";
     mcEl.addEventListener("click", function (ev) {
+      if (ev.target.closest("button, a, .tipWrap, .info")) return;
       if (!lastPayload) return;
       var data = { monteCarlo: lastPayload.monteCarlo || {}, monteCarloOptimization: lastPayload.monteCarloOptimization || {}, ticker: lastPayload.ticker };
       e1FetchInsight("e1_monte_carlo", data, "Monte Carlo: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
@@ -3237,12 +3240,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ── Click: Regime Overlay ──
+  // The regime section wraps child cards (gamma, strike targets, playbook).
+  // Guard against clicks on those children — only trigger for the regime header area.
   var regimeBannerE1 = document.querySelector(".regimeOverlay, #regimeAsOf")?.closest("section, .surface");
   if (!regimeBannerE1) regimeBannerE1 = $("regimeAsOf")?.parentElement;
   if (regimeBannerE1) {
     regimeBannerE1.classList.add("e1Click");
     regimeBannerE1.title = "Click for desk insight";
     regimeBannerE1.addEventListener("click", function (ev) {
+      // Ignore clicks on child cards, details, buttons, info tips
+      if (ev.target.closest("#marketGammaCard, #tickerGammaCard, #bufferTargetCard, #playbookGrid, details, button, a, .tipWrap, .info, .segmented")) return;
       if (!lastPayload || !lastPayload.regime) return;
       e1FetchInsight("e1_regime", lastPayload.regime, "Regime: " + (lastPayload.regime.label || ""), ev.clientX, ev.clientY);
     });
@@ -3254,6 +3261,7 @@ document.addEventListener("DOMContentLoaded", () => {
     eventRiskEl.classList.add("e1Click");
     eventRiskEl.title = "Click for desk insight";
     eventRiskEl.addEventListener("click", function (ev) {
+      if (ev.target.closest("button, a, .tipWrap, .info")) return;
       if (!lastPayload || !lastPayload.eventRisk) return;
       e1FetchInsight("e1_event_risk", lastPayload.eventRisk, "Event Risk", ev.clientX, ev.clientY);
     });
@@ -3265,6 +3273,7 @@ document.addEventListener("DOMContentLoaded", () => {
     skewEl.classList.add("e1Click");
     skewEl.title = "Click for desk insight";
     skewEl.addEventListener("click", function (ev) {
+      if (ev.target.closest("button, a, .tipWrap, .info")) return;
       if (!lastPayload) return;
       var data = { wingRecommendation: lastPayload.wingRecommendation || {}, skewOverlay: lastPayload.skewOverlay || {}, ticker: lastPayload.ticker };
       e1FetchInsight("e1_skew_wings", data, "Skew & Wings: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
@@ -3277,6 +3286,7 @@ document.addEventListener("DOMContentLoaded", () => {
     gammaCtxEl.classList.add("e1Click");
     gammaCtxEl.title = "Click for desk insight";
     gammaCtxEl.addEventListener("click", function (ev) {
+      if (ev.target.closest("button, a, .tipWrap, .info")) return;
       if (!lastPayload || !lastPayload.earningsGammaContext) return;
       e1FetchInsight("e1_gamma_context", lastPayload.earningsGammaContext, "Earnings Gamma Context", ev.clientX, ev.clientY);
     });
@@ -3288,6 +3298,8 @@ document.addEventListener("DOMContentLoaded", () => {
     strikeEl.classList.add("e1Click");
     strikeEl.title = "Click for desk insight";
     strikeEl.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      if (ev.target.closest("button, .segmented")) return;
       if (!lastPayload) return;
       var data = { strikeTargets: lastPayload.strikeTargets || {}, current: lastPayload.current || {}, regime: lastPayload.regime || {}, ticker: lastPayload.ticker };
       e1FetchInsight("e1_strike_targets", data, "Strike Targets: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
@@ -3300,6 +3312,7 @@ document.addEventListener("DOMContentLoaded", () => {
     mktGammaEl.classList.add("e1Click");
     mktGammaEl.title = "Click for desk insight";
     mktGammaEl.addEventListener("click", function (ev) {
+      ev.stopPropagation();
       if (!lastPayload || !lastPayload.marketDealerGamma) return;
       var data = lastPayload.marketDealerGamma;
       data._label = "Market (SPX)";
@@ -3313,6 +3326,7 @@ document.addEventListener("DOMContentLoaded", () => {
     tckGammaEl.classList.add("e1Click");
     tckGammaEl.title = "Click for desk insight";
     tckGammaEl.addEventListener("click", function (ev) {
+      ev.stopPropagation();
       if (!lastPayload || !lastPayload.tickerDealerGamma) return;
       var data = lastPayload.tickerDealerGamma;
       data._label = (lastPayload.ticker || "Ticker") + " Dealer Gamma";
@@ -3326,6 +3340,7 @@ document.addEventListener("DOMContentLoaded", () => {
     qtrEl.classList.add("e1Click");
     qtrEl.title = "Click for desk insight";
     qtrEl.addEventListener("click", function (ev) {
+      if (ev.target.closest("button, a, .tipWrap, .info")) return;
       if (!lastPayload || !lastPayload.quarters) return;
       e1FetchInsight("e1_quarter", { quarters: lastPayload.quarters, ticker: lastPayload.ticker }, "Quarter Seasonality: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
     });
@@ -3335,6 +3350,7 @@ document.addEventListener("DOMContentLoaded", () => {
   var pbGrid = $("playbookGrid");
   if (pbGrid) {
     pbGrid.addEventListener("click", function (ev) {
+      ev.stopPropagation();
       var card = ev.target.closest(".taCard[data-e1-insight]");
       if (!card || !lastPayload) return;
       var insightType = card.getAttribute("data-e1-insight");
