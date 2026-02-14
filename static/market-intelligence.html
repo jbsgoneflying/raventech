@@ -76,6 +76,7 @@
       .miMetric {
         display: flex; align-items: baseline; gap: 10px;
         margin-bottom: 2px;
+        justify-content: center;
       }
       .miScore {
         font-size: 36px; font-weight: 800; letter-spacing: -0.03em;
@@ -89,15 +90,29 @@
       .miSub {
         margin-top: 10px; padding-top: 8px;
         border-top: 1px solid var(--line);
+        text-align: center;
       }
       .miSubTitle {
-        font-size: 10px; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.06em; color: var(--muted2, rgba(11,11,15,0.48));
-        margin-bottom: 4px;
+        font-size: 9px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 6px;
+        display: flex; align-items: center; justify-content: center; gap: 6px;
       }
       .miSubBody {
         font-size: 12px; line-height: 1.5;
       }
+
+      /* ── Top-card icon badges ────────────────────────────────────── */
+      .miTitleIcon {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 16px; height: 16px; border-radius: 4px;
+        font-size: 9px; font-weight: 700; color: #fff;
+        flex-shrink: 0; vertical-align: middle; margin-right: 4px;
+      }
+      .miTitleIcon--blue   { background: var(--blue); }
+      .miTitleIcon--green  { background: var(--green); }
+      .miTitleIcon--amber  { background: var(--amber, #ff9f0a); }
+      .miTitleIcon--gray   { background: #636366; }
 
       /* ── Brief items ────────────────────────────────────────────── */
       .miBriefItem {
@@ -448,8 +463,8 @@
       <!-- ── Row 1: Regime + Flow ────────────────────────────────── -->
       <div class="miRow miRow--2" id="miTopRow" style="display:none;">
         <div class="miCard miCard--blue miCard--click" id="miRegimeCard" title="Click for desk insight">
-          <div class="miHead">
-            <span class="miTitle">Regime State</span>
+          <div class="miHead" style="justify-content:center;">
+            <span class="miTitle"><span class="miTitleIcon miTitleIcon--blue">R</span> Regime State</span>
             <span class="miTs" id="miRegimeTs"></span>
           </div>
           <div class="miMetric">
@@ -457,21 +472,21 @@
             <span class="miLabel" id="miRegimeLabel">--</span>
           </div>
           <div class="miSub">
-            <div class="miSubTitle">Engine Gates</div>
+            <div class="miSubTitle"><span class="miTitleIcon miTitleIcon--gray">G</span> Engine Gates</div>
             <div class="miSubBody" id="miEngineGates"></div>
           </div>
         </div>
 
         <div class="miCard miCard--green miCard--click" id="miFlowCard" title="Click for desk insight">
-          <div class="miHead">
-            <span class="miTitle">Flow Pressure</span>
+          <div class="miHead" style="justify-content:center;">
+            <span class="miTitle"><span class="miTitleIcon miTitleIcon--green">F</span> Flow Pressure</span>
           </div>
           <div class="miMetric">
             <span class="miScore" id="miFpScore">--</span>
             <span class="miLabel" id="miFpLabel">--</span>
           </div>
           <div class="miSub">
-            <div class="miSubTitle">Vol State</div>
+            <div class="miSubTitle"><span class="miTitleIcon miTitleIcon--amber">V</span> Vol State</div>
             <div class="miSubBody" id="miVolState"></div>
           </div>
         </div>
