@@ -3863,9 +3863,23 @@ def api_front_layer_card_insight(body: dict):
     card_type = body.get("card_type", "").strip()
     card_data = body.get("card_data")
     valid_types = {
+        # Market Intelligence
         "composite", "theme", "regime", "flow", "asymmetry", "diff",
+        # Engine 5 – Lead-Lag
         "e5_regime", "e5_vol", "e5_narrative", "e5_index_bias",
         "e5_sector_bias", "e5_trade_idea", "e5_triggers", "e5_component",
+        # Engine 1 – Breach / Earnings Hold Risk
+        "e1_decision", "e1_hold_risk", "e1_monte_carlo", "e1_regime",
+        "e1_skew_wings", "e1_event_risk", "e1_gamma_context",
+        "e1_quarter", "e1_strike_targets", "e1_dealer_gamma",
+        # Engine 2 – SPX Iron Condor Scanner
+        "e2_regime", "e2_macro", "e2_odds", "e2_dealer_gamma",
+        "e2_gex", "e2_hedging_pressure", "e2_tail_ignition",
+        "e2_vol_pressure", "e2_expected_move", "e2_technicals",
+        # Engine 3 – Red Dog
+        "rd_signal", "rd_gamma", "rd_trend", "rd_scan_summary", "rd_gate",
+        # Engine 4 – Ichimoku
+        "ik_signal", "ik_gamma", "ik_scan_summary", "ik_gate",
     }
 
     if card_type not in valid_types:

@@ -1644,57 +1644,57 @@ function renderEngine2DecisionPanel(payload) {
       </div>
 
       <div class="taGrid" aria-label="Engine 2 instrument cards">
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_regime" data-e2-title="Regime Score" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Regime score</div></div>
           <div class="taCardState mono">${Number.isFinite(score) ? escapeHtml(score.toFixed(1)) + " / 100" : "—"}</div>
           <div class="taCardInterp">Bucket: ${escapeHtml(bucket)}</div>
           ${regChips.length ? `<div class="taCardInterp muted">${regChips.slice(0, 5).map(escapeHtml).join(" · ")}</div>` : ``}
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_macro" data-e2-title="Macro Multiplier" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Macro multiplier</div></div>
           <div class="taCardState mono">${Number.isFinite(multVal) ? escapeHtml(multVal.toFixed(2)) + "×" : "—"}</div>
           <div class="taCardInterp">Bucket: ${escapeHtml(macroBucket)}${macroChipList.length ? ` · ${macroChipList.map(escapeHtml).join(" · ")}` : ""}</div>
           ${top3.length ? `<div class="taCardInterp muted">${top3.map((x) => `<div class="macroEventLine">${escapeHtml(String(x))}</div>`).join("")}${moreN ? `<div class="ref">+${escapeHtml(String(moreN))} more</div>` : ""}</div>` : ``}
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_odds" data-e2-title="Breach Odds" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Breach odds (1.0×)</div></div>
           <div class="taCardState mono">${Number.isFinite(odds10) ? escapeHtml(odds10.toFixed(2)) + "%" : "—"}</div>
           <div class="taCardInterp">${Number.isFinite(n10) ? `n=${escapeHtml(String(n10))}` : "—"}</div>
           <div class="taCardInterp muted">${row15 ? `1.5× ${fmtPct(row15?.breachEitherPct, 2)} (n=${escapeHtml(String(row15?.n ?? "—"))})` : ""}${row20 ? `<br/>2.0× ${fmtPct(row20?.breachEitherPct, 2)} (n=${escapeHtml(String(row20?.n ?? "—"))})` : ""}</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="VWAP & EM" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">VWAP (daily)</div></div>
           <div class="taCardState mono">${Number.isFinite(vwapVal) ? escapeHtml(vwapVal.toFixed(2)) : "—"}</div>
           <div class="taCardInterp">${escapeHtml(vwapDist)}</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_dealer_gamma" data-e2-title="Dealer Gamma (Weekly)" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Dealer gamma (weekly)</div></div>
           <div class="taCardState">${escapeHtml(wSum.main)}</div>
           <div class="taCardInterp muted">${escapeHtml(wSum.sub)}</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_dealer_gamma" data-e2-title="Dealer Gamma (Nearest)" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Dealer gamma (nearest)</div></div>
           <div class="taCardState">${escapeHtml(nSum.main)}</div>
           <div class="taCardInterp muted">${escapeHtml(nSum.sub)}</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_hedging_pressure" data-e2-title="Hedging Pressure (HPI)" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Hedging pressure (HPI)</div></div>
           <div class="taCardState mono">${escapeHtml(wHp.main)}</div>
           <div class="taCardInterp muted">${escapeHtml(wHp.sub)}</div>
           <div class="taCardInterp muted">Nearest: ${escapeHtml(nHp.main)} · ${escapeHtml(nHp.sub)}</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_tail_ignition" data-e2-title="Tail Ignition" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Tail ignition</div></div>
           <div class="taCardState">${escapeHtml(wTail.main)}</div>
           <div class="taCardInterp muted">${escapeHtml(wTail.sub)}</div>
           <div class="taCardInterp muted">Nearest: ${escapeHtml(nTail.main)} · ${escapeHtml(nTail.sub)}</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_vol_pressure" data-e2-title="Vol Pressure" title="Click for desk insight">
           <div class="taCardTop"><div class="taCardTitle">Vol pressure</div></div>
           <div class="taCardState mono">${escapeHtml(vpState)}${Number.isFinite(vpScore) ? ` · z=${escapeHtml(vpScore.toFixed(2))}` : ""}</div>
           <div class="taCardInterp muted">${escapeHtml(vpSub)}</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="Expected Move & Strikes" title="Click for desk insight">
           <div class="taCardTop">
             <div class="taCardTitle">Expected Move</div>
             <span class="info" title="Risk-neutral expected move computed from weekly Friday ATM straddle. Daily options are excluded.">ⓘ</span>
@@ -1703,7 +1703,7 @@ function renderEngine2DecisionPanel(payload) {
           <div class="taCardInterp">${Number.isFinite(emDollars) ? `$${escapeHtml(emDollars.toFixed(2))} pts` : "—"} · ${emExpiry ? `Exp: ${escapeHtml(emExpiry)}` : "—"}${Number.isFinite(emDte) ? ` (${emDte}d)` : ""}</div>
           <div class="taCardInterp muted">${emSymbol ? escapeHtml(emSymbol) : ""} · ${escapeHtml(emSourceLabel)} · Weekly Friday only</div>
         </div>
-        <div class="taCard">
+        <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="Strike Targets" title="Click for desk insight">
           <div class="taCardTop">
             <div class="taCardTitle">Strike Targets (EM)</div>
             <span class="info" title="Wing strike distances based on expected move. White = 2× EM pts, Blue = 1.5× White, Red = 2× White. Use for short-strike targeting.">ⓘ</span>
@@ -1954,5 +1954,218 @@ async function main() {
 
 main();
 
+// ---------------------------------------------------------------------------
+// Desk Insight Popup — LLM-powered card insights for Engine 2
+// ---------------------------------------------------------------------------
+(function () {
+  "use strict";
+
+  var _e2InsightCache = {};
+
+  var e2Popup       = $("e2InsightPopup");
+  var e2PopupHeader = $("e2InsightHeader");
+  var e2PopupTitle  = $("e2InsightTitle");
+  var e2PopupClose  = $("e2InsightClose");
+  var e2PopupBody   = $("e2InsightBody");
+
+  if (!e2Popup) return;  // popup element missing, skip
+
+  // ── Drag logic ──
+  (function () {
+    var ox = 0, oy = 0, sx = 0, sy = 0, dragging = false;
+    function onDown(ev) {
+      if (ev.target === e2PopupClose) return;
+      dragging = true; ox = ev.clientX; oy = ev.clientY;
+      var r = e2Popup.getBoundingClientRect(); sx = r.left; sy = r.top;
+      e2Popup.classList.add("isDragging");
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    }
+    function onMove(ev) { if (!dragging) return; e2Popup.style.left = (sx + ev.clientX - ox) + "px"; e2Popup.style.top  = (sy + ev.clientY - oy) + "px"; }
+    function onUp() { dragging = false; e2Popup.classList.remove("isDragging"); document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); }
+    e2PopupHeader.addEventListener("mousedown", onDown);
+  })();
+
+  e2PopupClose.addEventListener("click", function () { e2Popup.style.display = "none"; });
+
+  function openPopup(title, x, y) {
+    e2PopupTitle.textContent = title;
+    e2PopupBody.innerHTML = "<div class='e2InsightLoading'><span class='e2InsightDot'></span><span class='e2InsightDot'></span><span class='e2InsightDot'></span><br>Generating desk insight\u2026</div>";
+    e2Popup.style.left = Math.min(x, window.innerWidth - 460) + "px";
+    e2Popup.style.top  = Math.min(y, window.innerHeight - 300) + "px";
+    e2Popup.style.display = "block";
+  }
+
+  var _labels = {
+    regime_read:"Regime Read",component_breakdown:"Component Breakdown",bucket_implications:"Bucket Implications",what_would_change:"What Would Change",
+    macro_risk_level:"Macro Risk Level",key_events:"Key Events",multiplier_effect:"Multiplier Effect",
+    probability_read:"Probability Read",width_selection:"Width Selection",conditioning_quality:"Conditioning Quality",directional_skew:"Directional Skew",
+    dealer_regime:"Dealer Regime",key_levels:"Key Levels",gamma_peaks:"Gamma Peaks",condor_positioning:"Condor Positioning",
+    stability_read:"Stability Read",flip_distances:"Flip Distances",risk_asymmetry:"Risk Asymmetry",condor_implications:"Condor Implications",
+    hedging_flow_read:"Hedging Flow Read",elasticity_analysis:"Elasticity Analysis",scenario_walkthrough:"Scenario Walkthrough",
+    tail_risk_map:"Tail Risk Map",air_pockets:"Air Pockets",wall_distances:"Wall Distances",
+    vol_state:"Vol State",z_score_breakdown:"Z-Score Breakdown",iv_vs_rv:"IV vs RV",term_structure:"Term Structure",
+    expected_move_read:"Expected Move Read",strike_targets:"Strike Targets",vwap_context:"VWAP Context",em_trend:"EM Trend",
+    directional_read:"Directional Read",momentum_analysis:"Momentum Analysis",volatility_context:"Volatility Context",condor_relevance:"Condor Relevance",
+    desk_takeaway:"Desk Takeaway",
+  };
+
+  function renderInsight(data) {
+    if (!data) { e2PopupBody.innerHTML = "<div class='e2InsightLoading'>No insight data.</div>"; return; }
+    var html = "";
+    if (data._fallback_reason) {
+      html += "<div style='background:rgba(255,107,107,.15);border:1px solid rgba(255,107,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ff6b6b;'>" + escapeHtml(data._fallback_reason) + "</div>";
+    }
+    var skip = new Set(["_source","_meta","_card_type","_fallback_reason"]);
+    for (var key in data) {
+      if (skip.has(key)) continue;
+      var label = _labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+      var isDesk = key === "desk_takeaway";
+      html += "<div class='e2InsightSection'><div class='e2InsightSectionTitle'>" + escapeHtml(label) + "</div><div class='e2InsightText'" + (isDesk ? " style='color:#34c759;font-weight:600;'" : "") + ">" + escapeHtml(String(data[key])) + "</div></div>";
+    }
+    if (data._source) html += "<div class='e2InsightSource'>Source: " + escapeHtml(data._source) + "</div>";
+    e2PopupBody.innerHTML = html;
+  }
+
+  function fetchInsight(cardType, cardData, title, x, y) {
+    var cacheKey = cardType + ":" + JSON.stringify(cardData).substring(0, 100);
+    if (_e2InsightCache[cacheKey]) { openPopup(title, x, y); renderInsight(_e2InsightCache[cacheKey]); return; }
+    openPopup(title, x, y);
+
+    var ctx = {};
+    if (lastPayload) {
+      ctx.underlying = lastPayload.underlying || {};
+      ctx.regime = lastPayload.current?.regime || {};
+      ctx.macro = lastPayload.current?.macro || {};
+      ctx.expectedMove = lastPayload.expectedMove || {};
+    }
+
+    fetch("/api/front-layer/card-insight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_type: cardType, card_data: cardData, dms_summary: ctx }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (resp) {
+      if (resp.error || resp.detail) { e2PopupBody.innerHTML = "<div class='e2InsightLoading' style='color:#ff6b6b;'>Error: " + escapeHtml(resp.error || resp.detail || "Unknown") + "</div>"; return; }
+      _e2InsightCache[cacheKey] = resp;
+      renderInsight(resp);
+    })
+    .catch(function () { e2PopupBody.innerHTML = "<div class='e2InsightLoading' style='color:#ff6b6b;'>Failed to load insight.</div>"; });
+  }
+
+  // Clear cache on new run
+  var _origRender = window.render;
+  // We'll listen for new lastPayload via mutation on the results section
+  var resultsObs = $("results");
+  if (resultsObs) {
+    var mo = new MutationObserver(function () { _e2InsightCache = {}; });
+    mo.observe(resultsObs, { childList: true, subtree: false });
+  }
+
+  // Helper: wire a section by ID
+  function wireSection(sectionId, cardType, titleFn, dataFn) {
+    var el = $(sectionId);
+    if (!el) return;
+    el.classList.add("e2Click");
+    el.title = "Click for desk insight";
+    el.addEventListener("click", function (ev) {
+      // Don't trigger on buttons, inputs, links inside the section
+      if (ev.target.closest("button, a, input, select, .tipWrap, .gammaLegend, .tbInputs, .segmented")) return;
+      if (!lastPayload) return;
+      var d = dataFn();
+      if (!d) return;
+      fetchInsight(cardType, d, titleFn(), ev.clientX, ev.clientY);
+    });
+  }
+
+  // Decision panel sub-cards are handled by event delegation above (data-e2-insight attrs)
+
+  // ── Dealer Gamma Map ──
+  wireSection("gammaMap", "e2_dealer_gamma",
+    function () { return "Dealer Gamma Map"; },
+    function () {
+      var wf = lastPayload?.liveContext?.weeklyFriday || {};
+      return { dealerGamma: wf.dealerGamma, oiClusters: wf.oiClusters, gammaFlipStrike: wf.gammaFlipStrike, spot: wf.spot };
+    }
+  );
+
+  // ── GEX Heat Map ──
+  wireSection("gexHeatMap", "e2_gex",
+    function () { return "GEX Heatmap Analysis"; },
+    function () {
+      var gex = lastGammaPayload?.levels?.gexHeatmap || {};
+      var lc = lastPayload?.liveContext?.weeklyFriday || {};
+      return { stability: gex.stability, downFlip: gex.downFlip, upFlip: gex.upFlip, gammaFlipStrike: lc.gammaFlipStrike, spot: lc.spot };
+    }
+  );
+
+  // ── Historical Odds Table ──
+  wireSection("oddsSection", "e2_odds",
+    function () { return "Historical Breach Odds"; },
+    function () { return lastPayload?.oddsLikeNow || null; }
+  );
+
+  // ── Technicals ──
+  wireSection("technicalsSection", "e2_technicals",
+    function () { return "Technical Analysis"; },
+    function () { return lastPayload?.technicals || null; }
+  );
+
+  // The decision panel contains sub-cards that are dynamically rendered.
+  // We use event delegation on the decision section for sub-card clicks.
+  var decisionEl = $("e2DecisionSection");
+  if (decisionEl) {
+    decisionEl.addEventListener("click", function (ev) {
+      // Skip if the section-level handler already fired, or if a button/link
+      if (ev.target.closest("button, a, input, select, .tipWrap")) return;
+      if (!lastPayload) return;
+
+      // Check for data attributes on clicked card
+      var card = ev.target.closest("[data-e2-insight]");
+      if (!card) return;
+      ev.stopPropagation(); // prevent section-level regime insight
+
+      var type = card.getAttribute("data-e2-insight");
+      var title = card.getAttribute("data-e2-title") || type;
+      var d = null;
+
+      switch (type) {
+        case "e2_regime":
+          d = lastPayload?.current?.regime || null;
+          break;
+        case "e2_macro":
+          d = lastPayload?.current?.macro || null;
+          break;
+        case "e2_odds":
+          d = lastPayload?.oddsLikeNow || null;
+          break;
+        case "e2_dealer_gamma":
+          // Check if clicked card is "nearest" variant
+          var isNearest = (title || "").toLowerCase().indexOf("nearest") >= 0;
+          var dgView = isNearest ? (lastPayload?.liveContext?.nearestDaily || {}) : (lastPayload?.liveContext?.weeklyFriday || {});
+          d = { dealerGamma: dgView.dealerGamma, oiClusters: dgView.oiClusters, gammaFlipStrike: dgView.gammaFlipStrike, spot: dgView.spot };
+          break;
+        case "e2_hedging_pressure":
+          var hpi = lastPayload?.liveContext?.weeklyFriday?.addons?.hedgingPressure || {};
+          d = hpi;
+          break;
+        case "e2_tail_ignition":
+          var ti = lastPayload?.liveContext?.weeklyFriday?.addons?.tailIgnition || {};
+          d = ti;
+          break;
+        case "e2_vol_pressure":
+          d = lastPayload?.liveContext?.volPressure || null;
+          break;
+        case "e2_expected_move":
+          d = { expectedMove: lastPayload?.expectedMove || {}, vwap: lastPayload?.current?.vwap || {}, strikeTargets: lastPayload?.strikeTargets || {} };
+          break;
+        default:
+          return;
+      }
+      if (d) fetchInsight(type, d, title, ev.clientX, ev.clientY);
+    });
+  }
+})();
 
 

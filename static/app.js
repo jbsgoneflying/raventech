@@ -2693,6 +2693,7 @@ function renderQuarterCards(quarters) {
 function render(payload) {
   $("results").classList.remove("hidden");
   lastPayload = payload;
+  if (window._e1InsightCacheClear) window._e1InsightCacheClear();
   earningsExpanded = false;
   const toggle = $("earningsToggle");
   if (toggle) toggle.textContent = "Show earnings history";
@@ -3225,6 +3226,239 @@ document.addEventListener("DOMContentLoaded", () => {
   initTooltips();
   try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }
   initEngine1GammaVizUI();
+
+  // ---------------------------------------------------------------------------
+  // Desk Insight Popup — LLM-powered card insights for Engine 1
+  // ---------------------------------------------------------------------------
+
+  var _e1InsightCache = {};
+
+  var e1Popup       = $("e1InsightPopup");
+  var e1PopupHeader = $("e1InsightHeader");
+  var e1PopupTitle  = $("e1InsightTitle");
+  var e1PopupClose  = $("e1InsightClose");
+  var e1PopupBody   = $("e1InsightBody");
+
+  // ── Drag logic ──
+  (function () {
+    var ox = 0, oy = 0, sx = 0, sy = 0, dragging = false;
+    function onDown(ev) {
+      if (ev.target === e1PopupClose) return;
+      dragging = true; ox = ev.clientX; oy = ev.clientY;
+      var r = e1Popup.getBoundingClientRect(); sx = r.left; sy = r.top;
+      e1Popup.classList.add("isDragging");
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    }
+    function onMove(ev) { if (!dragging) return; e1Popup.style.left = (sx + ev.clientX - ox) + "px"; e1Popup.style.top  = (sy + ev.clientY - oy) + "px"; }
+    function onUp() { dragging = false; e1Popup.classList.remove("isDragging"); document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); }
+    if (e1PopupHeader) e1PopupHeader.addEventListener("mousedown", onDown);
+  })();
+
+  if (e1PopupClose) e1PopupClose.addEventListener("click", function () { e1Popup.style.display = "none"; });
+
+  function e1OpenPopup(title, x, y) {
+    e1PopupTitle.textContent = title;
+    e1PopupBody.innerHTML = "<div class='e1InsightLoading'><span class='e1InsightDot'></span><span class='e1InsightDot'></span><span class='e1InsightDot'></span><br>Generating desk insight\u2026</div>";
+    e1Popup.style.left = Math.min(x, window.innerWidth - 460) + "px";
+    e1Popup.style.top  = Math.min(y, window.innerHeight - 300) + "px";
+    e1Popup.style.display = "block";
+  }
+
+  var _e1Labels = {
+    decision_summary:"Decision Summary",key_risks:"Key Risks",what_to_watch:"What to Watch",execution_guidance:"Execution Guidance",
+    hold_risk_assessment:"Hold Risk Assessment",conditional_vs_unconditional:"Conditional vs Unconditional",drift_analysis:"Drift Analysis",structure_implications:"Structure Implications",
+    what_simulation_says:"What the Simulation Says",put_vs_call_skew:"Put vs Call Skew",tail_risk:"Tail Risk",wing_optimization:"Wing Optimization",
+    regime_read:"Regime Read",gate_implications:"Gate Implications",tail_multiplier_impact:"Tail Multiplier Impact",
+    skew_read:"Skew Read",wing_recommendation:"Wing Recommendation",directional_risk:"Directional Risk",structure_selection:"Structure Selection",
+    event_risk_level:"Event Risk Level",top_drivers:"Top Drivers",impact_on_trade:"Impact on Trade",
+    dealer_positioning:"Dealer Positioning",tail_ignition_risk:"Tail Ignition Risk",gamma_earnings_interaction:"Gamma-Earnings Interaction",
+    seasonal_pattern:"Seasonal Pattern",current_quarter:"Current Quarter",statistical_significance:"Statistical Significance",
+    strike_map:"Strike Map",symmetric_vs_asymmetric:"Symmetric vs Asymmetric",tail_multiplier_effect:"Tail Multiplier Effect",
+    oi_clusters:"OI Clusters",trade_implications:"Trade Implications",
+    desk_takeaway:"Desk Takeaway",
+  };
+
+  function e1RenderInsight(data) {
+    if (!data) { e1PopupBody.innerHTML = "<div class='e1InsightLoading'>No insight data.</div>"; return; }
+    var html = "";
+    if (data._fallback_reason) {
+      html += "<div style='background:rgba(255,107,107,.15);border:1px solid rgba(255,107,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ff6b6b;'>" + escapeHtml(data._fallback_reason) + "</div>";
+    }
+    var skip = new Set(["_source","_meta","_card_type","_fallback_reason"]);
+    for (var key in data) {
+      if (skip.has(key)) continue;
+      var label = _e1Labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+      var isDesk = key === "desk_takeaway";
+      html += "<div class='e1InsightSection'><div class='e1InsightSectionTitle'>" + escapeHtml(label) + "</div><div class='e1InsightText'" + (isDesk ? " style='color:#34c759;font-weight:600;'" : "") + ">" + escapeHtml(String(data[key])) + "</div></div>";
+    }
+    if (data._source) html += "<div class='e1InsightSource'>Source: " + escapeHtml(data._source) + "</div>";
+    e1PopupBody.innerHTML = html;
+  }
+
+  function e1FetchInsight(cardType, cardData, title, x, y) {
+    var cacheKey = cardType + ":" + JSON.stringify(cardData).substring(0, 100);
+    if (_e1InsightCache[cacheKey]) { e1OpenPopup(title, x, y); e1RenderInsight(_e1InsightCache[cacheKey]); return; }
+    e1OpenPopup(title, x, y);
+
+    var ctx = {};
+    if (lastPayload) {
+      ctx.ticker = lastPayload.ticker;
+      ctx.regime = lastPayload.regime || {};
+      ctx.summary = lastPayload.summary || {};
+      ctx.current = lastPayload.current || {};
+    }
+
+    fetch("/api/front-layer/card-insight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_type: cardType, card_data: cardData, dms_summary: ctx }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (resp) {
+      if (resp.error) { e1PopupBody.innerHTML = "<div class='e1InsightLoading' style='color:#ff6b6b;'>Error: " + escapeHtml(resp.error || resp.detail || "Unknown") + "</div>"; return; }
+      _e1InsightCache[cacheKey] = resp;
+      e1RenderInsight(resp);
+    })
+    .catch(function () { e1PopupBody.innerHTML = "<div class='e1InsightLoading' style='color:#ff6b6b;'>Failed to load insight.</div>"; });
+  }
+
+  // ── Click: Decision Panel / GO-NO-GO ──
+  var e1DecisionEl = $("e1DecisionSection");
+  if (e1DecisionEl) {
+    e1DecisionEl.classList.add("e1Click");
+    e1DecisionEl.title = "Click for desk insight";
+    e1DecisionEl.addEventListener("click", function (ev) {
+      if (!lastPayload) return;
+      var data = { goNoGo: lastPayload.goNoGo || {}, summary: lastPayload.summary || {}, ticker: lastPayload.ticker };
+      e1FetchInsight("e1_decision", data, "GO / NO-GO Decision: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Earnings Hold Risk ──
+  var holdRiskEl = $("holdRiskSection");
+  if (holdRiskEl) {
+    holdRiskEl.classList.add("e1Click");
+    holdRiskEl.title = "Click for desk insight";
+    holdRiskEl.addEventListener("click", function (ev) {
+      if (!lastPayload || !lastPayload.earningsHoldRisk) return;
+      e1FetchInsight("e1_hold_risk", lastPayload.earningsHoldRisk, "Earnings Hold Risk: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Monte Carlo ──
+  var mcEl = $("mcSection");
+  if (mcEl) {
+    mcEl.classList.add("e1Click");
+    mcEl.title = "Click for desk insight";
+    mcEl.addEventListener("click", function (ev) {
+      if (!lastPayload) return;
+      var data = { monteCarlo: lastPayload.monteCarlo || {}, monteCarloOptimization: lastPayload.monteCarloOptimization || {}, ticker: lastPayload.ticker };
+      e1FetchInsight("e1_monte_carlo", data, "Monte Carlo: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Regime Overlay ──
+  var regimeBannerE1 = document.querySelector(".regimeOverlay, #regimeAsOf")?.closest("section, .surface");
+  if (!regimeBannerE1) regimeBannerE1 = $("regimeAsOf")?.parentElement;
+  if (regimeBannerE1) {
+    regimeBannerE1.classList.add("e1Click");
+    regimeBannerE1.title = "Click for desk insight";
+    regimeBannerE1.addEventListener("click", function (ev) {
+      if (!lastPayload || !lastPayload.regime) return;
+      e1FetchInsight("e1_regime", lastPayload.regime, "Regime: " + (lastPayload.regime.label || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Event Risk ──
+  var eventRiskEl = $("eventRiskSection");
+  if (eventRiskEl) {
+    eventRiskEl.classList.add("e1Click");
+    eventRiskEl.title = "Click for desk insight";
+    eventRiskEl.addEventListener("click", function (ev) {
+      if (!lastPayload || !lastPayload.eventRisk) return;
+      e1FetchInsight("e1_event_risk", lastPayload.eventRisk, "Event Risk", ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Skew & Wings ──
+  var skewEl = $("skewWingsSection");
+  if (skewEl) {
+    skewEl.classList.add("e1Click");
+    skewEl.title = "Click for desk insight";
+    skewEl.addEventListener("click", function (ev) {
+      if (!lastPayload) return;
+      var data = { wingRecommendation: lastPayload.wingRecommendation || {}, skewOverlay: lastPayload.skewOverlay || {}, ticker: lastPayload.ticker };
+      e1FetchInsight("e1_skew_wings", data, "Skew & Wings: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Earnings Gamma Context ──
+  var gammaCtxEl = $("earningsGammaSection");
+  if (gammaCtxEl) {
+    gammaCtxEl.classList.add("e1Click");
+    gammaCtxEl.title = "Click for desk insight";
+    gammaCtxEl.addEventListener("click", function (ev) {
+      if (!lastPayload || !lastPayload.earningsGammaContext) return;
+      e1FetchInsight("e1_gamma_context", lastPayload.earningsGammaContext, "Earnings Gamma Context", ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Strike Targets ──
+  var strikeEl = $("bufferTargetCard");
+  if (strikeEl) {
+    strikeEl.classList.add("e1Click");
+    strikeEl.title = "Click for desk insight";
+    strikeEl.addEventListener("click", function (ev) {
+      if (!lastPayload) return;
+      var data = { strikeTargets: lastPayload.strikeTargets || {}, current: lastPayload.current || {}, regime: lastPayload.regime || {}, ticker: lastPayload.ticker };
+      e1FetchInsight("e1_strike_targets", data, "Strike Targets: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Market Dealer Gamma ──
+  var mktGammaEl = $("marketGammaCard");
+  if (mktGammaEl) {
+    mktGammaEl.classList.add("e1Click");
+    mktGammaEl.title = "Click for desk insight";
+    mktGammaEl.addEventListener("click", function (ev) {
+      if (!lastPayload || !lastPayload.marketDealerGamma) return;
+      var data = lastPayload.marketDealerGamma;
+      data._label = "Market (SPX)";
+      e1FetchInsight("e1_dealer_gamma", data, "Market Dealer Gamma (SPX)", ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Ticker Dealer Gamma ──
+  var tckGammaEl = $("tickerGammaCard");
+  if (tckGammaEl) {
+    tckGammaEl.classList.add("e1Click");
+    tckGammaEl.title = "Click for desk insight";
+    tckGammaEl.addEventListener("click", function (ev) {
+      if (!lastPayload || !lastPayload.tickerDealerGamma) return;
+      var data = lastPayload.tickerDealerGamma;
+      data._label = (lastPayload.ticker || "Ticker") + " Dealer Gamma";
+      e1FetchInsight("e1_dealer_gamma", data, (lastPayload.ticker || "Ticker") + " Dealer Gamma", ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Quarter Seasonality ──
+  var qtrEl = $("quarterCards");
+  if (qtrEl) {
+    qtrEl.classList.add("e1Click");
+    qtrEl.title = "Click for desk insight";
+    qtrEl.addEventListener("click", function (ev) {
+      if (!lastPayload || !lastPayload.quarters) return;
+      e1FetchInsight("e1_quarter", { quarters: lastPayload.quarters, ticker: lastPayload.ticker }, "Quarter Seasonality: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // Clear cache on new calculations
+  var origRender = window._e1OrigRender;
+  if (!origRender) {
+    // Monkey-patch to clear insight cache when new data arrives
+    window._e1InsightCacheClear = function () { _e1InsightCache = {}; };
+  }
 
   // Optional auto-run for calendar deep-links: /breach?ticker=...&mc=1&autorun=1
   if (qsAutorun === "1" || qsAutorun === "true" || qsAutorun === "yes" || qsAutorun === "on") {

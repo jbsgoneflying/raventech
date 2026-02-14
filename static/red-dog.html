@@ -737,6 +737,36 @@
       </section>
     </main>
 
+    <!-- ── Desk Insight Popup ───── -->
+    <style>
+      .rdInsightPopup{position:fixed;z-index:10000;width:440px;max-height:80vh;overflow-y:auto;border-radius:16px;background:rgba(28,28,30,.98);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08) inset;user-select:none;transition:opacity .15s ease;color:#fff;display:none}
+      .rdInsightPopup.isDragging{cursor:grabbing;transition:none}
+      .rdInsightHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.08);cursor:grab}
+      .rdInsightHeader:active{cursor:grabbing}
+      .rdInsightTitle{font-size:14px;font-weight:700;line-height:1.3;color:#fff;flex:1}
+      .rdInsightClose{width:24px;height:24px;border-radius:6px;border:none;background:rgba(255,255,255,.12);color:rgba(255,255,255,.7);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s ease}
+      .rdInsightClose:hover{background:rgba(255,255,255,.20);color:#fff}
+      .rdInsightBody{padding:16px}
+      .rdInsightSection{margin-bottom:16px}.rdInsightSection:last-child{margin-bottom:0}
+      .rdInsightSectionTitle{font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+      .rdInsightText{font-size:12px;font-weight:500;line-height:1.5;color:rgba(255,255,255,.88)}
+      .rdInsightLoading{text-align:center;padding:32px 16px;color:rgba(255,255,255,.6);font-size:12px}
+      .rdInsightDot{display:inline-block;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.5);margin:0 2px;animation:rdDotPulse 1.2s ease-in-out infinite}
+      .rdInsightDot:nth-child(2){animation-delay:.2s}.rdInsightDot:nth-child(3){animation-delay:.4s}
+      .rdInsightSource{font-size:10px;color:rgba(255,255,255,.35);text-align:right;margin-top:12px;font-style:italic}
+      @keyframes rdDotPulse{0%,100%{opacity:.3}50%{opacity:1}}
+      .rdClick{cursor:pointer;transition:box-shadow .15s ease}.rdClick:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
+    </style>
+    <div class="rdInsightPopup" id="rdInsightPopup">
+      <div class="rdInsightHeader" id="rdInsightHeader">
+        <span class="rdInsightTitle" id="rdInsightTitle">Desk Insight</span>
+        <button class="rdInsightClose" id="rdInsightClose" type="button">&times;</button>
+      </div>
+      <div class="rdInsightBody" id="rdInsightBody">
+        <div class="rdInsightLoading"><span class="rdInsightDot"></span><span class="rdInsightDot"></span><span class="rdInsightDot"></span><br>Generating desk insight…</div>
+      </div>
+    </div>
+
     <script src="/static/ui_kit.js?v=3"></script>
     <script src="/static/position_calculator.js?v=3"></script>
     <script src="/static/red-dog.js?v=6"></script>

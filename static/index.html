@@ -681,6 +681,39 @@
       </section>
     </main>
 
+    <!-- ── Desk Insight Popup (dark draggable) ───── -->
+    <style>
+      .e1InsightPopup{position:fixed;z-index:10000;width:440px;max-height:80vh;overflow-y:auto;border-radius:16px;background:rgba(28,28,30,.98);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08) inset;user-select:none;transition:opacity .15s ease;color:#fff;display:none}
+      .e1InsightPopup.isDragging{cursor:grabbing;transition:none}
+      .e1InsightHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.08);cursor:grab}
+      .e1InsightHeader:active{cursor:grabbing}
+      .e1InsightTitle{font-size:14px;font-weight:700;line-height:1.3;color:#fff;flex:1}
+      .e1InsightClose{width:24px;height:24px;border-radius:6px;border:none;background:rgba(255,255,255,.12);color:rgba(255,255,255,.7);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s ease}
+      .e1InsightClose:hover{background:rgba(255,255,255,.20);color:#fff}
+      .e1InsightBody{padding:16px}
+      .e1InsightSection{margin-bottom:16px}.e1InsightSection:last-child{margin-bottom:0}
+      .e1InsightSectionTitle{font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+      .e1InsightText{font-size:12px;font-weight:500;line-height:1.5;color:rgba(255,255,255,.88)}
+      .e1InsightLoading{text-align:center;padding:32px 16px;color:rgba(255,255,255,.6);font-size:12px}
+      .e1InsightDot{display:inline-block;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.5);margin:0 2px;animation:e1DotPulse 1.2s ease-in-out infinite}
+      .e1InsightDot:nth-child(2){animation-delay:.2s}.e1InsightDot:nth-child(3){animation-delay:.4s}
+      .e1InsightSource{font-size:10px;color:rgba(255,255,255,.35);text-align:right;margin-top:12px;font-style:italic}
+      @keyframes e1DotPulse{0%,100%{opacity:.3}50%{opacity:1}}
+      .e1Click{cursor:pointer;transition:box-shadow .15s ease}.e1Click:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
+    </style>
+    <div class="e1InsightPopup" id="e1InsightPopup">
+      <div class="e1InsightHeader" id="e1InsightHeader">
+        <span class="e1InsightTitle" id="e1InsightTitle">Desk Insight</span>
+        <button class="e1InsightClose" id="e1InsightClose" type="button">&times;</button>
+      </div>
+      <div class="e1InsightBody" id="e1InsightBody">
+        <div class="e1InsightLoading">
+          <span class="e1InsightDot"></span><span class="e1InsightDot"></span><span class="e1InsightDot"></span>
+          <br>Generating desk insight…
+        </div>
+      </div>
+    </div>
+
     <script src="/static/ui_kit.js?v=3"></script>
     <script src="/static/ta_panel.js"></script>
     <script src="/static/zip_store.js"></script>

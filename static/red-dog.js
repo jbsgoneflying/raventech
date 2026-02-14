@@ -565,3 +565,147 @@ function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+// ---------------------------------------------------------------------------
+// Desk Insight Popup — LLM-powered card insights for Red Dog
+// ---------------------------------------------------------------------------
+(function () {
+  "use strict";
+
+  var _rdCache = {};
+  var popup      = $("rdInsightPopup");
+  var popHeader  = $("rdInsightHeader");
+  var popTitle   = $("rdInsightTitle");
+  var popClose   = $("rdInsightClose");
+  var popBody    = $("rdInsightBody");
+  if (!popup) return;
+
+  // ── Drag ──
+  (function () {
+    var ox=0,oy=0,sx=0,sy=0,dragging=false;
+    function onDown(ev){if(ev.target===popClose)return;dragging=true;ox=ev.clientX;oy=ev.clientY;var r=popup.getBoundingClientRect();sx=r.left;sy=r.top;popup.classList.add("isDragging");document.addEventListener("mousemove",onMove);document.addEventListener("mouseup",onUp);}
+    function onMove(ev){if(!dragging)return;popup.style.left=(sx+ev.clientX-ox)+"px";popup.style.top=(sy+ev.clientY-oy)+"px";}
+    function onUp(){dragging=false;popup.classList.remove("isDragging");document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",onUp);}
+    popHeader.addEventListener("mousedown",onDown);
+  })();
+  popClose.addEventListener("click",function(){popup.style.display="none";});
+
+  function openPopup(title,x,y){
+    popTitle.textContent=title;
+    popBody.innerHTML="<div class='rdInsightLoading'><span class='rdInsightDot'></span><span class='rdInsightDot'></span><span class='rdInsightDot'></span><br>Generating desk insight\u2026</div>";
+    popup.style.left=Math.min(x,window.innerWidth-460)+"px";
+    popup.style.top=Math.min(y,window.innerHeight-300)+"px";
+    popup.style.display="block";
+  }
+
+  var _lbl={
+    setup_quality:"Setup Quality",entry_mechanics:"Entry Mechanics",indicator_confluence:"Indicator Confluence",alignment_check:"Alignment Check",
+    gamma_environment:"Gamma Environment",directional_bias:"Directional Bias",mean_reversion_impact:"Mean-Reversion Impact",
+    trend_read:"Trend Read",alignment_value:"Alignment Value",distance_context:"Distance Context",
+    scan_read:"Scan Read",aplus_concentration:"A+ Concentration",directional_skew:"Directional Skew",
+    gate_status:"Gate Status",regime_impact:"Regime Impact",vol_and_flow:"Vol & Flow",
+    desk_takeaway:"Desk Takeaway",
+  };
+
+  function renderInsight(data){
+    if(!data){popBody.innerHTML="<div class='rdInsightLoading'>No insight data.</div>";return;}
+    var html="";
+    if(data._fallback_reason) html+="<div style='background:rgba(255,107,107,.15);border:1px solid rgba(255,107,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ff6b6b;'>"+escapeHtml(data._fallback_reason)+"</div>";
+    var skip=new Set(["_source","_meta","_card_type","_fallback_reason"]);
+    for(var key in data){
+      if(skip.has(key))continue;
+      var label=_lbl[key]||key.replace(/_/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();});
+      var isDesk=key==="desk_takeaway";
+      html+="<div class='rdInsightSection'><div class='rdInsightSectionTitle'>"+escapeHtml(label)+"</div><div class='rdInsightText'"+(isDesk?" style='color:#34c759;font-weight:600;'":"")+">"+escapeHtml(String(data[key]))+"</div></div>";
+    }
+    if(data._source) html+="<div class='rdInsightSource'>Source: "+escapeHtml(data._source)+"</div>";
+    popBody.innerHTML=html;
+  }
+
+  function fetchInsight(cardType,cardData,title,x,y){
+    var cacheKey=cardType+":"+JSON.stringify(cardData).substring(0,100);
+    if(_rdCache[cacheKey]){openPopup(title,x,y);renderInsight(_rdCache[cacheKey]);return;}
+    openPopup(title,x,y);
+    var ctx={};
+    if(lastPayload){ctx.marketGamma=lastPayload.marketGamma||{};ctx.marketTrend=lastPayload.marketTrend||{};ctx.asOfDate=lastPayload.asOfDate;}
+    fetch("/api/front-layer/card-insight",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({card_type:cardType,card_data:cardData,dms_summary:ctx})})
+    .then(function(r){return r.json();})
+    .then(function(resp){if(resp.error||resp.detail){popBody.innerHTML="<div class='rdInsightLoading' style='color:#ff6b6b;'>Error: "+escapeHtml(resp.error||resp.detail||"Unknown")+"</div>";return;}_rdCache[cacheKey]=resp;renderInsight(resp);})
+    .catch(function(){popBody.innerHTML="<div class='rdInsightLoading' style='color:#ff6b6b;'>Failed to load insight.</div>";});
+  }
+
+  // ── Signal cards (A+ and Standard) ──
+  var aplusGrid = $("aplusGrid");
+  var standardGrid = $("standardGrid");
+  function onCardClick(ev) {
+    var card = ev.target.closest(".signalCard");
+    if (!card || !lastPayload) return;
+    // Don't trigger on position calculator buttons
+    if (ev.target.closest("button, a, input")) return;
+    var ticker = card.getAttribute("data-ticker");
+    var allSignals = [].concat(lastPayload.aPlus || [], lastPayload.standard || []);
+    var sig = allSignals.find(function(s) { return s.ticker === ticker; });
+    if (!sig) return;
+    ev.stopPropagation();
+    fetchInsight("rd_signal", sig, "Red Dog: " + ticker + " (" + (sig.direction || "") + ")", ev.clientX, ev.clientY);
+  }
+  if (aplusGrid) aplusGrid.addEventListener("click", onCardClick);
+  if (standardGrid) standardGrid.addEventListener("click", onCardClick);
+
+  // ── Gamma Context ──
+  var gammaEl = $("gammaSection");
+  if (gammaEl) {
+    gammaEl.classList.add("rdClick");
+    gammaEl.title = "Click for desk insight";
+    gammaEl.addEventListener("click", function(ev) {
+      if (ev.target.closest(".signalCard, button, a")) return;
+      if (!lastPayload || !lastPayload.marketGamma) return;
+      fetchInsight("rd_gamma", lastPayload.marketGamma, "Market Gamma Context", ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Trend Filter ──
+  var trendEl = $("trendSection");
+  if (trendEl) {
+    trendEl.classList.add("rdClick");
+    trendEl.title = "Click for desk insight";
+    trendEl.addEventListener("click", function(ev) {
+      if (ev.target.closest("button, a")) return;
+      if (!lastPayload || !lastPayload.marketTrend) return;
+      fetchInsight("rd_trend", lastPayload.marketTrend, "SPX Trend Filter", ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Scan Summary ──
+  var statsEl = $("statsSection");
+  if (statsEl) {
+    statsEl.classList.add("rdClick");
+    statsEl.title = "Click for desk insight";
+    statsEl.addEventListener("click", function(ev) {
+      if (ev.target.closest("button, a")) return;
+      if (!lastPayload) return;
+      var data = {
+        asOfDate: lastPayload.asOfDate,
+        scannedCount: lastPayload.scannedCount,
+        setupsFound: lastPayload.setupsFound,
+        aPlusCount: (lastPayload.aPlus || []).length,
+        standardCount: (lastPayload.standard || []).length,
+        topSignals: (lastPayload.aPlus || []).slice(0, 5).map(function(s) { return { ticker: s.ticker, score: s.quality?.score, direction: s.direction }; }),
+      };
+      fetchInsight("rd_scan_summary", data, "Scan Summary", ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Gate Banner ──
+  var gateEl = $("gateBanner");
+  if (gateEl) {
+    gateEl.classList.add("rdClick");
+    gateEl.title = "Click for desk insight";
+    gateEl.addEventListener("click", function(ev) {
+      if (ev.target.closest("button, a")) return;
+      if (!lastPayload) return;
+      var data = { gateSummary: lastPayload.gateSummary || {}, gateContext: lastPayload.gateContext || {} };
+      fetchInsight("rd_gate", data, "Gate Context", ev.clientX, ev.clientY);
+    });
+  }
+})();
