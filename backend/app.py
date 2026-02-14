@@ -3342,16 +3342,32 @@ def api_front_layer_refresh():
 
     # ── 5. Re-generate Morning Brief with the fresh DMS ─────────────
     brief = None
+    brief_source = "disabled"
+    brief_error = None
     if flags.ENABLE_FRONT_LAYER_LLM:
         try:
             history = load_dms_history(store, n=flags.FRONT_LAYER_DMS_HISTORY_DAYS) if store else []
             history_dicts = [h.to_dict() for h in history]
             brief = generate_morning_brief(dms_dict, history_dicts)
+            brief_source = brief.get("_source", "unknown") if brief else "error"
             _morning_brief_cache[f"brief:{today_str}"] = brief
             if store:
                 store.set_json(f"front_layer:brief:{today_str}", brief, ttl_s=7 * 86400)
         except Exception as e:
+            brief_error = str(e)
             LOG.warning("Refresh: Morning Brief re-generation failed: %s", e)
+
+    # ── 6. LLM diagnostics ─────────────────────────────────────────
+    llm_diag: Dict[str, Any] = {
+        "enabled": flags.ENABLE_FRONT_LAYER_LLM,
+        "brief_source": brief_source,
+    }
+    if brief_error:
+        llm_diag["brief_error"] = brief_error
+    # Check if OpenAI key is present (don't leak the key itself)
+    openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    llm_diag["openai_key_set"] = bool(openai_key)
+    llm_diag["openai_key_len"] = len(openai_key) if openai_key else 0
 
     return {
         "status": "ok",
@@ -3359,9 +3375,12 @@ def api_front_layer_refresh():
         "date": today_str,
         "regime": dms_dict.get("regime", {}),
         "flow_pressure": dms_dict.get("flow_pressure", {}),
+        "cross_asset_score": dms_dict.get("cross_asset_stress", {}).get("composite_score"),
+        "cross_asset_readings": len(dms_dict.get("cross_asset_stress", {}).get("readings", [])),
         "asymmetry_count": len(dms_dict.get("asymmetry_signals", [])),
         "theme_count": len(dms_dict.get("news_themes", [])),
-        "brief_regenerated": brief is not None,
+        "brief_regenerated": brief_source == "llm",
+        "llm": llm_diag,
     }
 
 
@@ -3458,6 +3477,54 @@ def _build_live_dms(today_str: str, store) -> dict:
     except Exception as e:
         LOG.warning("Front Layer: News theme scoring failed: %s", e)
 
+    # --- Cross-Asset Stress ---
+    cross_asset_snap: Optional[dict] = None
+    try:
+        from backend.eodhd_client import EodhdClient as _EodhdCls
+        _eodhd = _EodhdCls.from_env()
+        # Fetch S&P 500 for equity_return_1d
+        spx_return = 0.0
+        try:
+            spx_resp = _eodhd.get_eod("GSPC.INDX", period="d")
+            spx_bars = sorted(spx_resp.rows, key=lambda b: str(b.get("date", "")))
+            if len(spx_bars) >= 2:
+                cur_c = float(spx_bars[-1].get("adjusted_close") or spx_bars[-1].get("close", 0))
+                prv_c = float(spx_bars[-2].get("adjusted_close") or spx_bars[-2].get("close", 0))
+                if prv_c:
+                    spx_return = round((cur_c - prv_c) / abs(prv_c) * 100, 4)
+        except Exception:
+            pass
+
+        readings: List[AssetStressReading] = []
+        for key, meta in CROSS_ASSET_UNIVERSE.items():
+            try:
+                resp = _eodhd.get_eod(meta["symbol"], period="d")
+                bars = sorted(resp.rows, key=lambda b: str(b.get("date", "")))
+                if len(bars) >= 2:
+                    cur_c = float(bars[-1].get("adjusted_close") or bars[-1].get("close", 0))
+                    prv_c = float(bars[-2].get("adjusted_close") or bars[-2].get("close", 0))
+                    history = [float(b.get("adjusted_close") or b.get("close", 0)) for b in bars[-30:]]
+                    r = compute_asset_stress(
+                        symbol_key=key,
+                        current_close=cur_c,
+                        prior_close=prv_c,
+                        equity_return_1d=spx_return,
+                        history_closes=history,
+                    )
+                    readings.append(r)
+            except Exception:
+                pass
+
+        if readings:
+            now_ts = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            cross_asset_snap = build_cross_asset_snapshot(
+                readings=readings,
+                timestamp=now_ts,
+            ).to_dict()
+            LOG.info("Front Layer: Cross-asset stress: %d readings", len(readings))
+    except Exception as e:
+        LOG.warning("Front Layer: Cross-asset stress unavailable: %s", e)
+
     # --- Build DMS ---
     dms = build_daily_market_state(
         date_str=today_str,
@@ -3468,6 +3535,7 @@ def _build_live_dms(today_str: str, store) -> dict:
         event_count_5d=event_count,
         high_severity_count=high_sev,
         upcoming_events=upcoming,
+        cross_asset_stress=cross_asset_snap,
         news_themes=themes_list,
         sequencer_summary=seq_summary,
     )

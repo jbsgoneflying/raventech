@@ -174,6 +174,60 @@ def main() -> int:
         LOG.warning("Theme scoring failed: %s", e)
         partial = True
 
+    # Cross-asset stress
+    cross_asset_snap = None
+    try:
+        from backend.eodhd_client import EodhdClient as _EodhdCls
+        from backend.cross_asset_stress import (
+            CROSS_ASSET_UNIVERSE, compute_asset_stress,
+            build_cross_asset_snapshot, AssetStressReading,
+        )
+        _eodhd = _EodhdCls.from_env()
+        spx_return = 0.0
+        try:
+            spx_resp = _eodhd.get_eod("GSPC.INDX", period="d")
+            spx_bars = sorted(spx_resp.rows, key=lambda b: str(b.get("date", "")))
+            if len(spx_bars) >= 2:
+                cur_c = float(spx_bars[-1].get("adjusted_close") or spx_bars[-1].get("close", 0))
+                prv_c = float(spx_bars[-2].get("adjusted_close") or spx_bars[-2].get("close", 0))
+                if prv_c:
+                    spx_return = round((cur_c - prv_c) / abs(prv_c) * 100, 4)
+        except Exception:
+            pass
+
+        readings = []
+        for key, meta in CROSS_ASSET_UNIVERSE.items():
+            try:
+                resp = _eodhd.get_eod(meta["symbol"], period="d")
+                bars = sorted(resp.rows, key=lambda b: str(b.get("date", "")))
+                if len(bars) >= 2:
+                    cur_c = float(bars[-1].get("adjusted_close") or bars[-1].get("close", 0))
+                    prv_c = float(bars[-2].get("adjusted_close") or bars[-2].get("close", 0))
+                    history = [float(b.get("adjusted_close") or b.get("close", 0)) for b in bars[-30:]]
+                    r = compute_asset_stress(
+                        symbol_key=key,
+                        current_close=cur_c,
+                        prior_close=prv_c,
+                        equity_return_1d=spx_return,
+                        history_closes=history,
+                    )
+                    readings.append(r)
+            except Exception:
+                pass
+
+        if readings:
+            import datetime as _dt
+            now_ts = _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            cross_asset_snap = build_cross_asset_snapshot(
+                readings=readings,
+                timestamp=now_ts,
+            ).to_dict()
+            LOG.info("Cross-asset stress: %d readings, composite=%.1f",
+                     len(readings), cross_asset_snap.get("composite_score", 0))
+    except Exception as e:
+        LOG.warning("Cross-asset stress unavailable: %s", e)
+        partial = True
+
     # ── 2. Build DailyMarketState ──────────────────────────────────────
 
     dms = build_daily_market_state(
@@ -185,6 +239,7 @@ def main() -> int:
         event_count_5d=event_count,
         high_severity_count=high_sev,
         upcoming_events=upcoming,
+        cross_asset_stress=cross_asset_snap,
         news_themes=themes_list,
         sequencer_summary=seq_summary,
     )

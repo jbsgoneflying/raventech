@@ -405,15 +405,23 @@
         // Show success banner
         if (refreshBanner) {
           var ts = result.refreshed_at ? fmt(result.refreshed_at) : "now";
+          var llm = result.llm || {};
+          var briefStatus = result.brief_regenerated
+            ? '<span style="color:#1b8a3e;">Brief generated (LLM)</span>'
+            : '<span style="color:#995c00;">Brief fallback' +
+              (llm.openai_key_set ? '' : ' — no OpenAI key') +
+              (llm.brief_error ? ' — ' + llm.brief_error : '') +
+              (llm.brief_source === "fallback" && llm.openai_key_set && !llm.brief_error ? ' — LLM call failed (check logs)' : '') +
+              '</span>';
           refreshBanner.className = "miRefreshBanner miRefreshBanner--ok";
           refreshBanner.innerHTML =
             '<b>Live data refreshed</b> at ' + ts +
             ' &middot; Regime: ' + ((result.regime || {}).state || "?") +
             ' (' + ((result.regime || {}).score || 0).toFixed(0) + ')' +
             ' &middot; Flow: ' + ((result.flow_pressure || {}).state || "?") +
-            ' &middot; ' + (result.asymmetry_count || 0) + ' asymmetries' +
+            ' &middot; Cross-asset: ' + (result.cross_asset_readings || 0) + ' readings' +
             ' &middot; ' + (result.theme_count || 0) + ' themes' +
-            (result.brief_regenerated ? ' &middot; Brief regenerated' : '');
+            ' &middot; ' + briefStatus;
         }
 
         // Now reload all panels with the fresh data
