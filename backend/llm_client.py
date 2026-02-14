@@ -85,6 +85,58 @@ def _load_prompt(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Robust JSON parser (shared across this module)
+# ---------------------------------------------------------------------------
+
+
+def _parse_desk_brief_json(content: str) -> Optional[dict]:
+    """Parse LLM response with robust fallback for GPT-5.2 verbosity."""
+    raw = content
+    content = content.strip()
+
+    # Strip markdown code fences
+    if content.startswith("```"):
+        lines = content.split("\n")
+        content = "\n".join(lines[1:])
+        if content.rstrip().endswith("```"):
+            content = content.rstrip()[:-3]
+        content = content.strip()
+
+    # Direct parse
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: extract first {...} block via brace-matching
+    start = content.find("{")
+    if start == -1:
+        LOG.warning("Desk brief LLM returned no JSON; raw (first 300): %s", raw[:300])
+        return None
+
+    depth = 0
+    end = start
+    for i in range(start, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    if depth != 0:
+        LOG.warning("Desk brief JSON brace mismatch; raw (first 300): %s", raw[:300])
+        return None
+
+    try:
+        return json.loads(content[start:end])
+    except json.JSONDecodeError:
+        LOG.warning("Desk brief JSON extraction failed; raw (first 300): %s", raw[:300])
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Desk Brief (narrative compression)
 # ---------------------------------------------------------------------------
 
@@ -132,10 +184,10 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
     if client is None:
         return dict(_DESK_BRIEF_FALLBACK)
 
-    # Truncate context to fit token budget (~2000 tokens)
+    # Truncate context (GPT-5.2 400K context allows more data)
     payload_str = json.dumps(context, default=str)
-    if len(payload_str) > 6000:
-        payload_str = payload_str[:6000] + "..."
+    if len(payload_str) > 15000:
+        payload_str = payload_str[:15000] + "..."
 
     model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-4o-mini").strip()
 
@@ -150,19 +202,17 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
                 {"role": "user", "content": payload_str},
             ],
             temperature=0.3,
-            max_tokens=300,
-            timeout=10,
+            max_tokens=600,
+            timeout=30,
+            response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content.strip()
 
-        # Parse JSON response
-        # Handle potential markdown code blocks
-        if content.startswith("```"):
-            lines = content.split("\n")
-            content = "\n".join(lines[1:-1])
-
-        result = json.loads(content)
+        # Robust JSON parsing (handles GPT-5.2 verbosity)
+        result = _parse_desk_brief_json(content)
+        if result is None:
+            return dict(_DESK_BRIEF_FALLBACK)
 
         # Validate schema
         required = {"market_state", "weekly_bias", "top_risks"}
@@ -176,9 +226,6 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
             "top_risks": str(result["top_risks"])[:200],
         }
 
-    except json.JSONDecodeError:
-        LOG.warning("LLM returned invalid JSON for desk brief")
-        return dict(_DESK_BRIEF_FALLBACK)
     except Exception as e:
         LOG.warning(f"LLM desk brief failed: {e}")
         return dict(_DESK_BRIEF_FALLBACK)

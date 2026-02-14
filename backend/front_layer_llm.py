@@ -33,7 +33,7 @@ LOG = logging.getLogger(__name__)
 class _FrontLayerRateLimiter:
     """Token-bucket rate limiter for Front Layer LLM calls."""
 
-    def __init__(self, max_calls_per_minute: int = 4):
+    def __init__(self, max_calls_per_minute: int = 12):
         self._lock = threading.Lock()
         self._max = max_calls_per_minute
         self._timestamps: List[float] = []
@@ -82,15 +82,57 @@ def _load_prompt(name: str) -> str:
 
 
 def _parse_llm_json(content: str) -> Optional[dict]:
-    """Parse LLM response, handling markdown code blocks."""
+    """Parse LLM response with robust fallback for GPT-5.2 verbosity.
+
+    Handles:
+    - Raw JSON
+    - JSON wrapped in markdown fences (```json ... ```)
+    - JSON preceded by preamble text ("Here is the analysis:\\n{...}")
+    - JSON followed by trailing commentary
+    """
+    raw = content  # keep original for debug logging
     content = content.strip()
+
+    # Strip markdown code fences
     if content.startswith("```"):
         lines = content.split("\n")
-        content = "\n".join(lines[1:-1])
+        # Remove first line (```json) and last line (```)
+        content = "\n".join(lines[1:])
+        if content.rstrip().endswith("```"):
+            content = content.rstrip()[:-3]
+        content = content.strip()
+
+    # Attempt direct parse first
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        LOG.warning("LLM returned invalid JSON")
+        pass
+
+    # Fallback: extract first {...} block via brace-matching
+    start = content.find("{")
+    if start == -1:
+        LOG.warning("LLM returned no JSON object; raw (first 300 chars): %s", raw[:300])
+        return None
+
+    depth = 0
+    end = start
+    for i in range(start, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    if depth != 0:
+        LOG.warning("LLM JSON brace mismatch; raw (first 300 chars): %s", raw[:300])
+        return None
+
+    try:
+        return json.loads(content[start:end])
+    except json.JSONDecodeError:
+        LOG.warning("LLM JSON extraction failed; raw (first 300 chars): %s", raw[:300])
         return None
 
 
@@ -163,9 +205,9 @@ def generate_morning_brief(
         context["prior_days"] = [_sanitize_dms(d) for d in dms_history[:5]]
 
     payload_str = json.dumps(context, default=str)
-    # Truncate to fit token budget (~4000 tokens)
-    if len(payload_str) > 12000:
-        payload_str = payload_str[:12000] + "..."
+    # Truncate to fit token budget (GPT-5.2 400K context allows more data)
+    if len(payload_str) > 30000:
+        payload_str = payload_str[:30000] + "..."
 
     model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-4o-mini").strip()
 
@@ -176,9 +218,10 @@ def generate_morning_brief(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.2,
-            max_tokens=800,
-            timeout=15,
+            temperature=0.3,
+            max_tokens=1500,
+            timeout=45,
+            response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content.strip()
@@ -196,7 +239,7 @@ def generate_morning_brief(
             if isinstance(val, list):
                 brief[key] = val
             else:
-                brief[key] = str(val)[:500]
+                brief[key] = str(val)[:800]
 
         brief["_source"] = "llm"
         return _add_timestamp(brief)
@@ -275,8 +318,8 @@ def generate_weekly_roadmap(
         context["prior_days"] = [_sanitize_dms(d) for d in dms_history[:7]]
 
     payload_str = json.dumps(context, default=str)
-    if len(payload_str) > 15000:
-        payload_str = payload_str[:15000] + "..."
+    if len(payload_str) > 30000:
+        payload_str = payload_str[:30000] + "..."
 
     model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-4o-mini").strip()
 
@@ -287,9 +330,10 @@ def generate_weekly_roadmap(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.2,
-            max_tokens=1000,
-            timeout=20,
+            temperature=0.3,
+            max_tokens=2000,
+            timeout=45,
+            response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content.strip()
@@ -306,7 +350,7 @@ def generate_weekly_roadmap(
             if isinstance(val, list):
                 roadmap[key] = val
             else:
-                roadmap[key] = str(val)[:500]
+                roadmap[key] = str(val)[:800]
 
         # Enforce max 2 earnings focus
         if isinstance(roadmap.get("earnings_focus"), list):
@@ -411,9 +455,10 @@ def generate_asset_insight(
                 {"role": "system", "content": _ASSET_INSIGHT_SYSTEM},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
-            max_tokens=400,
-            timeout=12,
+            temperature=0.4,
+            max_tokens=800,
+            timeout=30,
+            response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content.strip()
@@ -427,7 +472,7 @@ def generate_asset_insight(
         insight = {}
         for key in _ASSET_INSIGHT_REQUIRED_KEYS:
             val = result.get(key, "")
-            insight[key] = str(val)[:400]
+            insight[key] = str(val)[:800]
 
         insight["_source"] = "llm"
         insight["_asset"] = asset_reading.get("name", "")
@@ -1254,9 +1299,10 @@ def generate_card_insight(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
-            max_tokens=400,
-            timeout=12,
+            temperature=0.4,
+            max_tokens=800,
+            timeout=30,
+            response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content.strip()
@@ -1270,7 +1316,7 @@ def generate_card_insight(
         insight: Dict[str, Any] = {}
         for key in required_keys:
             val = result.get(key, "")
-            insight[key] = str(val)[:500]
+            insight[key] = str(val)[:800]
 
         insight["_source"] = "llm"
         insight["_card_type"] = card_type
