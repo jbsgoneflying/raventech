@@ -142,7 +142,17 @@
   /* ── Render: Morning Brief ─────────────────────── */
   function renderBrief(brief) {
     briefCard.style.display = "block";
-    briefTs.textContent = fmt(brief._generated_at);
+    var isFallback = brief._source === "fallback";
+    briefTs.textContent = fmt(brief._generated_at) + (isFallback ? " (fallback)" : "");
+
+    // If fallback, show the reason prominently
+    if (isFallback && brief._fallback_reason) {
+      briefStandDown.innerHTML = '<div class="miStandDown" style="background:rgba(255,149,0,0.08);color:#995c00;">' +
+        '<b>LLM unavailable:</b> ' + brief._fallback_reason +
+        '<br><small>Showing placeholder text. Fix the issue and click Refresh Live Data.</small></div>';
+      briefContent.innerHTML = "";
+      return;
+    }
 
     // Stand-down banner
     var sd = brief.stand_down || "";
@@ -178,7 +188,15 @@
   /* ── Render: Weekly Roadmap ────────────────────── */
   function renderRoadmap(roadmap) {
     roadmapCard.style.display = "block";
-    roadmapTs.textContent = fmt(roadmap._generated_at);
+    var isFallback = roadmap._source === "fallback";
+    roadmapTs.textContent = fmt(roadmap._generated_at) + (isFallback ? " (fallback)" : "");
+
+    // If fallback, show the reason instead of placeholder text
+    if (isFallback && roadmap._fallback_reason) {
+      roadmapContent.innerHTML = '<div style="padding:8px 0;color:#995c00;font-size:12px;">' +
+        '<b>LLM unavailable:</b> ' + roadmap._fallback_reason + '</div>';
+      return;
+    }
 
     var sections = [
       { key: "regime_flow_summary", label: "Regime & Flow Summary" },
@@ -406,12 +424,11 @@
         if (refreshBanner) {
           var ts = result.refreshed_at ? fmt(result.refreshed_at) : "now";
           var llm = result.llm || {};
+          var fallbackReason = llm.fallback_reason || llm.brief_error || "";
           var briefStatus = result.brief_regenerated
             ? '<span style="color:#1b8a3e;">Brief generated (LLM)</span>'
             : '<span style="color:#995c00;">Brief fallback' +
-              (llm.openai_key_set ? '' : ' — no OpenAI key') +
-              (llm.brief_error ? ' — ' + llm.brief_error : '') +
-              (llm.brief_source === "fallback" && llm.openai_key_set && !llm.brief_error ? ' — LLM call failed (check logs)' : '') +
+              (fallbackReason ? ' — ' + fallbackReason : (llm.openai_key_set ? ' — check logs' : ' — no OpenAI key')) +
               '</span>';
           refreshBanner.className = "miRefreshBanner miRefreshBanner--ok";
           refreshBanner.innerHTML =

@@ -115,6 +115,13 @@ _MORNING_BRIEF_REQUIRED_KEYS = {
 }
 
 
+def _fallback_brief(reason: str) -> Dict[str, Any]:
+    """Return morning brief fallback with reason attached."""
+    fb = dict(_MORNING_BRIEF_FALLBACK)
+    fb["_fallback_reason"] = reason
+    return _add_timestamp(fb)
+
+
 def generate_morning_brief(
     dms_today: dict,
     dms_history: Optional[List[dict]] = None,
@@ -130,16 +137,23 @@ def generate_morning_brief(
     """
     if not _rate_limiter.acquire():
         LOG.info("Morning brief rate-limited; returning fallback")
-        return _add_timestamp(_MORNING_BRIEF_FALLBACK)
+        return _fallback_brief("Rate limited (max 4 calls/minute)")
 
     client = _get_openai_client()
     if client is None:
-        return _add_timestamp(_MORNING_BRIEF_FALLBACK)
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            reason = "OPENAI_API_KEY not set in environment"
+        else:
+            reason = "OpenAI client failed to initialize (check openai package installation)"
+        LOG.warning("Morning brief: %s", reason)
+        return _fallback_brief(reason)
 
     system_prompt = _load_prompt("morning_brief.txt")
     if not system_prompt:
-        LOG.warning("morning_brief.txt prompt not found")
-        return _add_timestamp(_MORNING_BRIEF_FALLBACK)
+        reason = "Prompt file backend/prompts/morning_brief.txt not found"
+        LOG.warning(reason)
+        return _fallback_brief(reason)
 
     # Build context payload
     context = {
@@ -171,8 +185,9 @@ def generate_morning_brief(
         result = _parse_llm_json(content)
 
         if result is None or not _MORNING_BRIEF_REQUIRED_KEYS.issubset(set(result.keys())):
-            LOG.warning("Morning brief LLM response missing required keys")
-            return _add_timestamp(_MORNING_BRIEF_FALLBACK)
+            LOG.warning("Morning brief LLM response missing required keys; got: %s",
+                        list(result.keys()) if result else "None")
+            return _fallback_brief("LLM returned invalid/incomplete JSON (model: " + model + ")")
 
         # Sanitize output lengths
         brief = {}
@@ -187,8 +202,9 @@ def generate_morning_brief(
         return _add_timestamp(brief)
 
     except Exception as e:
-        LOG.warning("Morning brief LLM call failed: %s", e)
-        return _add_timestamp(_MORNING_BRIEF_FALLBACK)
+        reason = f"{type(e).__name__}: {e}"
+        LOG.warning("Morning brief LLM call failed: %s", reason)
+        return _fallback_brief(reason)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +228,13 @@ _WEEKLY_ROADMAP_REQUIRED_KEYS = {
 }
 
 
+def _fallback_roadmap(reason: str) -> Dict[str, Any]:
+    """Return weekly roadmap fallback with reason attached."""
+    fb = dict(_WEEKLY_ROADMAP_FALLBACK)
+    fb["_fallback_reason"] = reason
+    return _add_timestamp(fb)
+
+
 def generate_weekly_roadmap(
     dms_today: dict,
     dms_history: Optional[List[dict]] = None,
@@ -227,16 +250,23 @@ def generate_weekly_roadmap(
     """
     if not _rate_limiter.acquire():
         LOG.info("Weekly roadmap rate-limited; returning fallback")
-        return _add_timestamp(_WEEKLY_ROADMAP_FALLBACK)
+        return _fallback_roadmap("Rate limited (max 4 calls/minute)")
 
     client = _get_openai_client()
     if client is None:
-        return _add_timestamp(_WEEKLY_ROADMAP_FALLBACK)
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            reason = "OPENAI_API_KEY not set in environment"
+        else:
+            reason = "OpenAI client failed to initialize (check openai package installation)"
+        LOG.warning("Weekly roadmap: %s", reason)
+        return _fallback_roadmap(reason)
 
     system_prompt = _load_prompt("weekly_roadmap.txt")
     if not system_prompt:
-        LOG.warning("weekly_roadmap.txt prompt not found")
-        return _add_timestamp(_WEEKLY_ROADMAP_FALLBACK)
+        reason = "Prompt file backend/prompts/weekly_roadmap.txt not found"
+        LOG.warning(reason)
+        return _fallback_roadmap(reason)
 
     context = {
         "today": _sanitize_dms(dms_today),
@@ -266,8 +296,9 @@ def generate_weekly_roadmap(
         result = _parse_llm_json(content)
 
         if result is None or not _WEEKLY_ROADMAP_REQUIRED_KEYS.issubset(set(result.keys())):
-            LOG.warning("Weekly roadmap LLM response missing required keys")
-            return _add_timestamp(_WEEKLY_ROADMAP_FALLBACK)
+            LOG.warning("Weekly roadmap LLM response missing required keys; got: %s",
+                        list(result.keys()) if result else "None")
+            return _fallback_roadmap("LLM returned invalid/incomplete JSON (model: " + model + ")")
 
         roadmap: Dict[str, Any] = {}
         for key in _WEEKLY_ROADMAP_REQUIRED_KEYS:
@@ -285,8 +316,9 @@ def generate_weekly_roadmap(
         return _add_timestamp(roadmap)
 
     except Exception as e:
-        LOG.warning("Weekly roadmap LLM call failed: %s", e)
-        return _add_timestamp(_WEEKLY_ROADMAP_FALLBACK)
+        reason = f"{type(e).__name__}: {e}"
+        LOG.warning("Weekly roadmap LLM call failed: %s", reason)
+        return _fallback_roadmap(reason)
 
 
 # ---------------------------------------------------------------------------

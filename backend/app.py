@@ -3364,6 +3364,9 @@ def api_front_layer_refresh():
     }
     if brief_error:
         llm_diag["brief_error"] = brief_error
+    # Surface the fallback reason from the LLM pipeline itself
+    if brief and brief.get("_fallback_reason"):
+        llm_diag["fallback_reason"] = brief["_fallback_reason"]
     # Check if OpenAI key is present (don't leak the key itself)
     openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     llm_diag["openai_key_set"] = bool(openai_key)
