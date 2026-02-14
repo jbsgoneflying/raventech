@@ -27,7 +27,7 @@
   // Card internals
   var regimeScore      = document.getElementById("miRegimeScore");
   var regimeLabel      = document.getElementById("miRegimeLabel");
-  var regimeTs         = document.getElementById("miRegimeTs");
+  // regimeTs removed — timestamp no longer shown in hero card
   var engineGates      = document.getElementById("miEngineGates");
   var fpScore          = document.getElementById("miFpScore");
   var fpLabel          = document.getElementById("miFpLabel");
@@ -108,35 +108,81 @@
   /* ═══════════════════════════════════════════════════════════════════
      Render: Regime + Flow Pressure
      ═══════════════════════════════════════════════════════════════════ */
+  function _heroLabelClass(state) {
+    var s = (state || "").toLowerCase().replace(/[^a-z]/g, "");
+    if (s === "riskon")       return "miHeroLabel--riskon";
+    if (s === "riskoff")      return "miHeroLabel--riskoff";
+    if (s === "stressed")     return "miHeroLabel--stressed";
+    if (s === "transitional") return "miHeroLabel--transitional";
+    if (s === "neutral")      return "miHeroLabel--neutral";
+    return "miHeroLabel--default";
+  }
+
+  function _barColor(score) {
+    if (score >= 70) return "var(--red, #ff3b30)";
+    if (score >= 50) return "var(--amber, #ff9f0a)";
+    if (score >= 30) return "var(--blue, #007aff)";
+    return "var(--green, #34c759)";
+  }
+
+  function _gateDotClass(status) {
+    var s = (status || "").toLowerCase();
+    if (s === "allowed")   return "miHeroGateDot--green";
+    if (s === "suppressed") return "miHeroGateDot--red";
+    return "miHeroGateDot--amber";
+  }
+
   function renderDMS(dms) {
     _lastDms = dms;
     topRow.style.display = "grid";
 
+    // ── Regime card ──
     var regime = dms.regime || {};
-    regimeScore.textContent = (regime.score || 0).toFixed(0);
-    regimeLabel.textContent = regime.state || "--";
-    regimeLabel.className = "miLabel " + pillClass(regime.state).replace("pill ", "");
-    regimeTs.textContent = fmt(dms.generated_at);
+    var rScore = Number(regime.score || 0);
+    regimeScore.textContent = rScore.toFixed(0);
 
+    regimeLabel.textContent = regime.state || "--";
+    regimeLabel.className = "miHeroLabel " + _heroLabelClass(regime.state);
+
+    var regimeBar = document.getElementById("miRegimeBar");
+    if (regimeBar) {
+      regimeBar.style.width = Math.min(rScore, 100) + "%";
+      regimeBar.style.background = _barColor(rScore);
+    }
+
+    // Engine gates as compact chips with colored dots
     var gates = dms.engine_gates || {};
-    var gatesHtml = "";
     var gateNames = { earnings: "Earnings", red_dog: "Red Dog", ichimoku: "Ichimoku", index_income: "Index Income" };
+    var gatesHtml = "";
     for (var gk in gateNames) {
       if (gates[gk] !== undefined) {
-        gatesHtml += '<span style="margin-right:8px;font-size:11px;">' + gateNames[gk] + ': ' + gatePill(gates[gk]) + '</span>';
+        var dotCls = _gateDotClass(gates[gk]);
+        gatesHtml += '<span class="miHeroGate"><span class="miHeroGateDot ' + dotCls + '"></span>' +
+          gateNames[gk] + ': <b>' + gates[gk] + '</b></span>';
       }
     }
     engineGates.innerHTML = gatesHtml;
 
+    // ── Flow Pressure card ──
     var fp = dms.flow_pressure || {};
-    fpScore.textContent = (fp.score || 0).toFixed(0);
-    fpLabel.textContent = fp.state || "--";
+    var fScore = Number(fp.score || 0);
+    fpScore.textContent = fScore.toFixed(0);
 
+    fpLabel.textContent = fp.state || "--";
+    fpLabel.className = "miHeroLabel " + _heroLabelClass(fp.state);
+
+    var fpBar = document.getElementById("miFpBar");
+    if (fpBar) {
+      fpBar.style.width = Math.min(fScore, 100) + "%";
+      fpBar.style.background = _barColor(fScore);
+    }
+
+    // Vol state as clean chips
     var vs = dms.vol_state || {};
     volState.innerHTML =
-      '<span style="font-weight:700;">Term:</span> ' + (vs.term_structure || "--") +
-      ' &nbsp; <span style="font-weight:700;">Skew:</span> ' + (vs.skew || "--") +
-      ' &nbsp; <span style="font-weight:700;">Level:</span> ' + ((vs.level || 0).toFixed(1));
+      '<span class="miHeroChip"><b>Term</b> ' + (vs.term_structure || "--") + '</span>' +
+      '<span class="miHeroChip"><b>Skew</b> ' + (vs.skew || "--") + '</span>' +
+      '<span class="miHeroChip"><b>Level</b> ' + (vs.level || 0).toFixed(1) + '</span>';
   }
 
   /* ═══════════════════════════════════════════════════════════════════

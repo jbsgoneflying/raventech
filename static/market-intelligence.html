@@ -72,47 +72,88 @@
         font-size: 10px; color: var(--muted2, rgba(11,11,15,0.48)); font-style: italic;
       }
 
-      /* ── Metric display (score + label) ─────────────────────────── */
-      .miMetric {
-        display: flex; align-items: baseline; gap: 10px;
-        margin-bottom: 2px;
-        justify-content: center;
+      /* ── Hero cards (Regime / Flow) ─────────────────────────────── */
+      .miHero {
+        display: flex; flex-direction: column; align-items: center;
+        padding: 22px 20px 18px; text-align: center;
       }
-      .miScore {
-        font-size: 36px; font-weight: 800; letter-spacing: -0.03em;
-        line-height: 1;
-      }
-      .miLabel {
-        font-size: 20px; font-weight: 800; letter-spacing: -0.01em;
-      }
-
-      /* ── Sub-section (engine gates, vol state) ──────────────────── */
-      .miSub {
-        margin-top: 10px; padding-top: 8px;
-        border-top: 1px solid var(--line);
-        text-align: center;
-      }
-      .miSubTitle {
+      .miHeroTag {
+        display: inline-flex; align-items: center; gap: 5px;
         font-size: 9px; font-weight: 800; text-transform: uppercase;
-        letter-spacing: 0.08em;
-        margin-bottom: 6px;
-        display: flex; align-items: center; justify-content: center; gap: 6px;
+        letter-spacing: 0.1em; margin-bottom: 14px;
       }
-      .miSubBody {
-        font-size: 12px; line-height: 1.5;
+      .miHeroTagDot {
+        width: 7px; height: 7px; border-radius: 50%;
       }
-
-      /* ── Top-card icon badges ────────────────────────────────────── */
-      .miTitleIcon {
-        display: inline-flex; align-items: center; justify-content: center;
-        width: 16px; height: 16px; border-radius: 4px;
-        font-size: 9px; font-weight: 700; color: #fff;
-        flex-shrink: 0; vertical-align: middle; margin-right: 4px;
+      .miHeroTagDot--blue  { background: var(--blue); }
+      .miHeroTagDot--green { background: var(--green); }
+      .miHeroScoreWrap {
+        display: flex; align-items: center; justify-content: center;
+        gap: 2px; margin-bottom: 4px;
       }
-      .miTitleIcon--blue   { background: var(--blue); }
-      .miTitleIcon--green  { background: var(--green); }
-      .miTitleIcon--amber  { background: var(--amber, #ff9f0a); }
-      .miTitleIcon--gray   { background: #636366; }
+      .miHeroScore {
+        font-size: 48px; font-weight: 900; letter-spacing: -0.04em;
+        line-height: 1; color: var(--text);
+      }
+      .miHeroOf {
+        font-size: 14px; font-weight: 600; color: var(--muted2, rgba(11,11,15,0.36));
+        align-self: flex-end; margin-bottom: 6px; margin-left: 2px;
+      }
+      .miHeroLabel {
+        font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+        text-transform: uppercase; margin-bottom: 12px;
+        padding: 3px 12px; border-radius: 6px;
+      }
+      .miHeroLabel--riskon      { background: rgba(52,199,89,0.10); color: #1b8a3e; }
+      .miHeroLabel--riskoff     { background: rgba(255,59,48,0.10); color: #cc2f26; }
+      .miHeroLabel--stressed    { background: rgba(255,59,48,0.10); color: #cc2f26; }
+      .miHeroLabel--transitional{ background: rgba(255,159,10,0.10); color: #996100; }
+      .miHeroLabel--neutral     { background: rgba(142,142,147,0.10); color: #636366; }
+      .miHeroLabel--default     { background: rgba(0,122,255,0.10); color: #0060cc; }
+      .miHeroBar {
+        width: 100%; height: 4px; border-radius: 2px;
+        background: rgba(11,11,15,0.06); margin-bottom: 14px;
+        position: relative; overflow: hidden;
+      }
+      .miHeroBarFill {
+        height: 100%; border-radius: 2px;
+        transition: width 0.5s ease, background 0.3s ease;
+      }
+      .miHeroDivider {
+        width: 100%; height: 1px; background: var(--line);
+        margin-bottom: 12px;
+      }
+      .miHeroMeta {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        justify-content: center; align-items: center;
+      }
+      .miHeroChip {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 10px; border-radius: 6px;
+        font-size: 10px; font-weight: 600; line-height: 1.4;
+        background: rgba(11,11,15,0.035);
+        border: 1px solid rgba(11,11,15,0.06);
+      }
+      .miHeroChip b {
+        font-weight: 800; color: var(--text);
+      }
+      .miHeroGates {
+        display: flex; flex-wrap: wrap; gap: 5px;
+        justify-content: center; align-items: center;
+      }
+      .miHeroGate {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 10px; border-radius: 6px;
+        font-size: 10px; font-weight: 600; line-height: 1.4;
+        background: rgba(11,11,15,0.035);
+        border: 1px solid rgba(11,11,15,0.06);
+      }
+      .miHeroGateDot {
+        width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+      }
+      .miHeroGateDot--green  { background: var(--green); }
+      .miHeroGateDot--amber  { background: var(--amber, #ff9f0a); }
+      .miHeroGateDot--red    { background: var(--red); }
 
       /* ── Brief items ────────────────────────────────────────────── */
       .miBriefItem {
@@ -462,32 +503,31 @@
 
       <!-- ── Row 1: Regime + Flow ────────────────────────────────── -->
       <div class="miRow miRow--2" id="miTopRow" style="display:none;">
-        <div class="miCard miCard--blue miCard--click" id="miRegimeCard" title="Click for desk insight">
-          <div class="miHead" style="justify-content:center;">
-            <span class="miTitle"><span class="miTitleIcon miTitleIcon--blue">R</span> Regime State</span>
-            <span class="miTs" id="miRegimeTs"></span>
-          </div>
-          <div class="miMetric">
-            <span class="miScore" id="miRegimeScore">--</span>
-            <span class="miLabel" id="miRegimeLabel">--</span>
-          </div>
-          <div class="miSub">
-            <div class="miSubTitle"><span class="miTitleIcon miTitleIcon--gray">G</span> Engine Gates</div>
-            <div class="miSubBody" id="miEngineGates"></div>
+        <div class="miCard miCard--click" id="miRegimeCard" title="Click for desk insight" style="border-left:none;">
+          <div class="miHero" id="miRegimeHero">
+            <div class="miHeroTag"><span class="miHeroTagDot miHeroTagDot--blue"></span> Regime State</div>
+            <div class="miHeroScoreWrap">
+              <span class="miHeroScore" id="miRegimeScore">--</span>
+              <span class="miHeroOf">/100</span>
+            </div>
+            <div class="miHeroLabel miHeroLabel--default" id="miRegimeLabel">--</div>
+            <div class="miHeroBar"><div class="miHeroBarFill" id="miRegimeBar" style="width:0%;"></div></div>
+            <div class="miHeroDivider"></div>
+            <div class="miHeroGates" id="miEngineGates"></div>
           </div>
         </div>
 
-        <div class="miCard miCard--green miCard--click" id="miFlowCard" title="Click for desk insight">
-          <div class="miHead" style="justify-content:center;">
-            <span class="miTitle"><span class="miTitleIcon miTitleIcon--green">F</span> Flow Pressure</span>
-          </div>
-          <div class="miMetric">
-            <span class="miScore" id="miFpScore">--</span>
-            <span class="miLabel" id="miFpLabel">--</span>
-          </div>
-          <div class="miSub">
-            <div class="miSubTitle"><span class="miTitleIcon miTitleIcon--amber">V</span> Vol State</div>
-            <div class="miSubBody" id="miVolState"></div>
+        <div class="miCard miCard--click" id="miFlowCard" title="Click for desk insight" style="border-left:none;">
+          <div class="miHero" id="miFlowHero">
+            <div class="miHeroTag"><span class="miHeroTagDot miHeroTagDot--green"></span> Flow Pressure</div>
+            <div class="miHeroScoreWrap">
+              <span class="miHeroScore" id="miFpScore">--</span>
+              <span class="miHeroOf">/100</span>
+            </div>
+            <div class="miHeroLabel miHeroLabel--default" id="miFpLabel">--</div>
+            <div class="miHeroBar"><div class="miHeroBarFill" id="miFpBar" style="width:0%;"></div></div>
+            <div class="miHeroDivider"></div>
+            <div class="miHeroMeta" id="miVolState"></div>
           </div>
         </div>
       </div>
