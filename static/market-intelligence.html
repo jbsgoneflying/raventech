@@ -125,6 +125,37 @@
       .pill--blue   { background: rgba(0,122,255,0.12); color: #0060cc; }
       .pill--purple { background: rgba(139,92,246,0.12); color: #6d28d9; }
 
+      /* Refresh button */
+      .btn--refresh {
+        font-size: 12px; font-weight: 700; padding: 7px 16px;
+        border-radius: 8px; border: 1px solid var(--amber);
+        background: rgba(255,149,0,0.08); color: #995c00;
+        cursor: pointer; transition: all 0.15s;
+      }
+      .btn--refresh:hover { background: rgba(255,149,0,0.18); }
+      .btn--refresh:disabled {
+        opacity: 0.5; cursor: not-allowed;
+      }
+      .btn--refresh.isRefreshing {
+        animation: miPulse 1.2s ease-in-out infinite;
+      }
+      @keyframes miPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      /* Refresh banner */
+      .miRefreshBanner {
+        padding: 8px 14px; border-radius: 8px; font-size: 11px;
+        background: rgba(255,149,0,0.08); color: #995c00;
+        font-weight: 600; margin-top: 8px; display: none;
+        border: 1px solid rgba(255,149,0,0.2);
+      }
+      .miRefreshBanner--ok {
+        background: rgba(52,199,89,0.08); color: #1b8a3e;
+        border-color: rgba(52,199,89,0.2);
+      }
+
       /* Diff toggle */
       .miDiffBtn {
         font-size: 11px; font-weight: 700; padding: 4px 12px;
@@ -209,10 +240,14 @@
           </div>
           <div class="controlActions">
             <button class="miDiffBtn" type="button" id="miDiffToggle">Show Changes</button>
+            <button class="btn btn--refresh" type="button" id="miRefreshBtn" title="Force-pull live data from all engines and data sources. Use during the trading day after major events.">Refresh Live Data</button>
             <button class="btn btn--primary" type="button" id="miRunBtn">Load Intelligence</button>
           </div>
         </form>
       </section>
+
+      <!-- ── Refresh status banner ───────── -->
+      <div class="miRefreshBanner" id="miRefreshBanner"></div>
 
       <!-- ── Regime + Flow Top Row ───────── -->
       <div class="miGrid" id="miTopRow" style="display:none;">

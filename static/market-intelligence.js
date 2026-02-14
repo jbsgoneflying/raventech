@@ -7,6 +7,8 @@
 
   /* ── DOM refs ─────────────────────────────────────── */
   var runBtn           = document.getElementById("miRunBtn");
+  var refreshBtn       = document.getElementById("miRefreshBtn");
+  var refreshBanner    = document.getElementById("miRefreshBanner");
   var diffToggle       = document.getElementById("miDiffToggle");
   var overlay          = document.getElementById("ravenOverlay");
   var progressFill     = document.getElementById("ravenProgressFill");
@@ -382,9 +384,74 @@
       });
   }
 
+  /* ── Refresh Live Data ──────────────────────────── */
+  function refreshLiveData() {
+    if (!refreshBtn) return;
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("isRefreshing");
+    refreshBtn.textContent = "Refreshing...";
+    if (refreshBanner) {
+      refreshBanner.className = "miRefreshBanner";
+      refreshBanner.style.display = "block";
+      refreshBanner.textContent = "Pulling fresh data from all engines and data sources...";
+    }
+
+    fetch("/api/front-layer/refresh", { method: "POST" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (result) {
+        // Show success banner
+        if (refreshBanner) {
+          var ts = result.refreshed_at ? fmt(result.refreshed_at) : "now";
+          refreshBanner.className = "miRefreshBanner miRefreshBanner--ok";
+          refreshBanner.innerHTML =
+            '<b>Live data refreshed</b> at ' + ts +
+            ' &middot; Regime: ' + ((result.regime || {}).state || "?") +
+            ' (' + ((result.regime || {}).score || 0).toFixed(0) + ')' +
+            ' &middot; Flow: ' + ((result.flow_pressure || {}).state || "?") +
+            ' &middot; ' + (result.asymmetry_count || 0) + ' asymmetries' +
+            ' &middot; ' + (result.theme_count || 0) + ' themes' +
+            (result.brief_regenerated ? ' &middot; Brief regenerated' : '');
+        }
+
+        // Now reload all panels with the fresh data
+        return fetchJSON("/api/front-layer/daily-market-state").then(function (dms) {
+          renderDMS(dms);
+          renderThemes(dms);
+          renderStress(dms);
+          renderAsymmetry(dms);
+          topRow.style.display = "grid";
+          bottomGrid.style.display = "grid";
+
+          return fetchJSON("/api/front-layer/morning-brief");
+        }).then(function (brief) {
+          renderBrief(brief);
+        });
+      })
+      .catch(function (err) {
+        console.error("Refresh error:", err);
+        if (refreshBanner) {
+          refreshBanner.className = "miRefreshBanner";
+          refreshBanner.style.display = "block";
+          refreshBanner.textContent = "Refresh failed: " + err.message;
+        }
+      })
+      .finally(function () {
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove("isRefreshing");
+        refreshBtn.textContent = "Refresh Live Data";
+      });
+  }
+
   /* ── Event bindings ────────────────────────────── */
   if (runBtn) {
     runBtn.addEventListener("click", loadAll);
+  }
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", refreshLiveData);
   }
 
   if (diffToggle) {

@@ -3296,6 +3296,75 @@ def api_front_layer_dms():
     return dms_dict
 
 
+@app.post("/api/front-layer/refresh")
+def api_front_layer_refresh():
+    """Force-refresh: pull live data from all engines, rebuild DMS, bust caches.
+
+    This is a manual desk trigger that:
+    - Bypasses all in-memory and Redis caches
+    - Fetches the freshest data from every engine and data source
+    - Rebuilds the DailyMarketState with a new timestamp
+    - Persists the updated snapshot (additive to rolling history)
+    - Re-generates the Morning Brief with fresh context
+    - Does NOT interfere with cron schedules or retention policy
+
+    Use during the trading day after major events: commodity shocks,
+    crypto sell-offs, surprise news releases, regime flips, etc.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    now = dt.datetime.now(dt.timezone.utc)
+    today_str = dt.date.today().isoformat()
+    store = get_store_optional()
+
+    # ── 1. Bust all in-memory caches ────────────────────────────────
+    _dms_cache.clear()
+    _morning_brief_cache.clear()
+    _weekly_roadmap_cache.clear()
+
+    # ── 2. Build fresh DMS (all live data, no cache reads) ──────────
+    dms_dict = _build_live_dms(today_str, store)
+    # Tag the refresh so the desk knows this was a manual pull
+    dms_dict["_refresh"] = {
+        "triggered_at": now.isoformat().replace("+00:00", "Z"),
+        "source": "manual_desk_refresh",
+    }
+
+    # ── 3. Persist (overwrites today's snapshot; rolling history intact)
+    if store:
+        dms_obj = DailyMarketState.from_dict(dms_dict)
+        persist_dms(dms_obj, store, ttl_s=flags.FRONT_LAYER_DMS_TTL_S)
+
+    # ── 4. Re-cache in memory so subsequent GET reads are fresh ─────
+    _dms_cache[f"dms:{today_str}"] = dms_dict
+
+    # ── 5. Re-generate Morning Brief with the fresh DMS ─────────────
+    brief = None
+    if flags.ENABLE_FRONT_LAYER_LLM:
+        try:
+            history = load_dms_history(store, n=flags.FRONT_LAYER_DMS_HISTORY_DAYS) if store else []
+            history_dicts = [h.to_dict() for h in history]
+            brief = generate_morning_brief(dms_dict, history_dicts)
+            _morning_brief_cache[f"brief:{today_str}"] = brief
+            if store:
+                store.set_json(f"front_layer:brief:{today_str}", brief, ttl_s=7 * 86400)
+        except Exception as e:
+            LOG.warning("Refresh: Morning Brief re-generation failed: %s", e)
+
+    return {
+        "status": "ok",
+        "refreshed_at": now.isoformat().replace("+00:00", "Z"),
+        "date": today_str,
+        "regime": dms_dict.get("regime", {}),
+        "flow_pressure": dms_dict.get("flow_pressure", {}),
+        "asymmetry_count": len(dms_dict.get("asymmetry_signals", [])),
+        "theme_count": len(dms_dict.get("news_themes", [])),
+        "brief_regenerated": brief is not None,
+    }
+
+
 def _build_live_dms(today_str: str, store) -> dict:
     """Build a DailyMarketState from live engine data.
 
