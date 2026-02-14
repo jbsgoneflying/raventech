@@ -333,6 +333,55 @@
     }
   }
 
+  /* ── Front Layer DMS Overlay ──────────────────────────────────── */
+
+  async function loadFrontLayerOverlay() {
+    try {
+      const res = await fetch("/api/front-layer/daily-market-state");
+      if (!res.ok) return;
+      const dms = await res.json();
+
+      // Inject a summary banner below the top metrics row
+      const regime = dms.regime || {};
+      const gates = dms.engine_gates || {};
+      const fp = dms.flow_pressure || {};
+
+      const gateHtml = function(name, status) {
+        const cls = (status || "").toLowerCase() === "allowed" ? "pill--green" :
+                    (status || "").toLowerCase() === "suppressed" ? "pill--red" : "pill--amber";
+        return '<span style="margin-right:8px;font-size:11px;">' + name + ': <span class="pill ' + cls + '">' + (status || "?") + '</span></span>';
+      };
+
+      const banner = document.createElement("div");
+      banner.className = "card ccStripe--blue";
+      banner.style.marginTop = "8px";
+      banner.style.marginBottom = "8px";
+      banner.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+          '<span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);">Front Layer State</span>' +
+          '<a href="/market-intelligence" style="font-size:10px;font-weight:700;color:var(--blue);text-decoration:none;">Open Market Intelligence &rarr;</a>' +
+        '</div>' +
+        '<div style="font-size:12px;">' +
+          '<span style="font-weight:800;margin-right:10px;">Regime: ' + (regime.state || "--") + ' (' + (regime.score || 0).toFixed(0) + ')</span>' +
+          '<span style="font-weight:700;margin-right:10px;">Flow: ' + (fp.state || "--") + ' (' + (fp.score || 0).toFixed(0) + ')</span>' +
+        '</div>' +
+        '<div style="margin-top:6px;">' +
+          gateHtml("Earnings", gates.earnings) +
+          gateHtml("Red Dog", gates.red_dog) +
+          gateHtml("Ichimoku", gates.ichimoku) +
+          gateHtml("Index Income", gates.index_income) +
+        '</div>';
+
+      // Insert after the top metrics row
+      const topRow = document.querySelector(".ccTopRow");
+      if (topRow && topRow.parentNode) {
+        topRow.parentNode.insertBefore(banner, topRow.nextSibling);
+      }
+    } catch (e) {
+      console.debug("Front Layer overlay not available:", e.message);
+    }
+  }
+
   /* ── Run Command Center ─────────────────────────────────────── */
 
   let isRunning = false;
@@ -390,7 +439,11 @@
         await new Promise((r) => setTimeout(r, 10000));
       }
 
-      // Step 4: Final load of all panels
+      // Step 4: Load Front Layer DMS overlay
+      setProgress(90, "Loading Front Layer state…");
+      await loadFrontLayerOverlay();
+
+      // Step 5: Final load of all panels
       setProgress(92, "Refreshing all panels…");
       await Promise.all([
         loadFlowPressure(),

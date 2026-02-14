@@ -6,6 +6,7 @@
 
   var NAV_ITEMS = [
     { href: "/",                label: "Home",            desc: "Platform overview and engine directory" },
+    { href: "/market-intelligence", label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
     { href: "/command-center",  label: "Command Center",  desc: "Weekly planning and intraday monitoring" },
     { href: "/breach",          label: "Engine 1",        desc: "Earnings hold risk with Monte Carlo" },
     { href: "/spx",             label: "Engine 2",        desc: "SPX/SPY iron condor scanner" },

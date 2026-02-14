@@ -247,6 +247,16 @@ class FeatureFlags:
     LLM_NARRATIVE_CACHE_TTL_S: int = 1800         # 30 minutes
     LLM_MAX_CALLS_PER_MINUTE: int = 2
 
+    # --- Raven-Tech Front Layer (Market Intelligence) ---
+    ENABLE_FRONT_LAYER: bool = True
+    ENABLE_FRONT_LAYER_LLM: bool = True
+    FRONT_LAYER_DMS_TTL_S: int = 120 * 86400      # 120 days
+    FRONT_LAYER_LLM_CACHE_TTL_S: int = 3600       # 1 hour
+    FRONT_LAYER_CROSS_ASSET_SYMBOLS: str = ""      # comma-separated override; empty = use defaults
+    FRONT_LAYER_THEME_LOOKBACK_DAYS: int = 14
+    FRONT_LAYER_DMS_HISTORY_DAYS: int = 7          # rolling context for LLM
+    FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE: int = 4
+
     # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
     LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
     LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
@@ -415,6 +425,15 @@ class FeatureFlags:
             ENABLE_LLM_DISCOVERY=_get_bool("ENABLE_LLM_DISCOVERY", False),
             LLM_NARRATIVE_CACHE_TTL_S=_get_int("LLM_NARRATIVE_CACHE_TTL_S", 1800),
             LLM_MAX_CALLS_PER_MINUTE=_get_int("LLM_MAX_CALLS_PER_MINUTE", 2),
+
+            ENABLE_FRONT_LAYER=_get_bool("ENABLE_FRONT_LAYER", True),
+            ENABLE_FRONT_LAYER_LLM=_get_bool("ENABLE_FRONT_LAYER_LLM", True),
+            FRONT_LAYER_DMS_TTL_S=_get_int("FRONT_LAYER_DMS_TTL_S", 120 * 86400),
+            FRONT_LAYER_LLM_CACHE_TTL_S=_get_int("FRONT_LAYER_LLM_CACHE_TTL_S", 3600),
+            FRONT_LAYER_CROSS_ASSET_SYMBOLS=os.getenv("FRONT_LAYER_CROSS_ASSET_SYMBOLS", ""),
+            FRONT_LAYER_THEME_LOOKBACK_DAYS=_get_int("FRONT_LAYER_THEME_LOOKBACK_DAYS", 14),
+            FRONT_LAYER_DMS_HISTORY_DAYS=_get_int("FRONT_LAYER_DMS_HISTORY_DAYS", 7),
+            FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE=_get_int("FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE", 4),
 
             LEGAL_REG_TICKER_DENYLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_DENYLIST", [])),
             LEGAL_REG_TICKER_ALLOWLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_ALLOWLIST", [])),

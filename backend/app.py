@@ -54,6 +54,21 @@ from backend.sequencer import (
     PATTERN_TEMPLATES,
 )
 from backend.llm_client import generate_desk_brief, suggest_features
+from backend.daily_market_state import (
+    DailyMarketState, build_daily_market_state, persist_dms,
+    load_dms, load_dms_history, compute_dms_diff,
+)
+from backend.cross_asset_stress import (
+    CrossAssetStressSnapshot, AssetStressReading,
+    compute_asset_stress, build_cross_asset_snapshot, CROSS_ASSET_UNIVERSE,
+)
+from backend.news_theme_intelligence import (
+    NewsThemeSnapshot, score_themes, extract_headlines_from_eodhd,
+    extract_headlines_from_benzinga, persist_theme_snapshot, load_theme_history,
+)
+from backend.front_layer_llm import (
+    generate_morning_brief, generate_weekly_roadmap, detect_asymmetries,
+)
 
 
 try:
@@ -3233,3 +3248,372 @@ def api_research_suggest():
     return {"suggested": features, "count": len(features)}
 
 
+# ============================================================================
+# Front Layer – Market Intelligence
+# ============================================================================
+
+
+_dms_cache: TTLCache = TTLCache(maxsize=4, ttl=300)  # 5-min in-memory cache
+_morning_brief_cache: TTLCache = TTLCache(maxsize=2, ttl=3600)
+_weekly_roadmap_cache: TTLCache = TTLCache(maxsize=2, ttl=3600)
+
+
+@app.get("/market-intelligence")
+def market_intelligence_page():
+    """Market Intelligence: Front Layer landing page."""
+    mi_path = STATIC_DIR / "market-intelligence.html"
+    if not mi_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/market-intelligence.html")
+    return FileResponse(str(mi_path))
+
+
+@app.get("/api/front-layer/daily-market-state")
+def api_front_layer_dms():
+    """Return today's DailyMarketState (build or load cached)."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    today_str = dt.date.today().isoformat()
+
+    # Check in-memory cache
+    cached = _dms_cache.get(f"dms:{today_str}")
+    if cached is not None:
+        return cached
+
+    # Try Redis
+    store = get_store_optional()
+    dms = load_dms(today_str, store) if store else None
+
+    if dms is not None:
+        result = dms.to_dict()
+        _dms_cache[f"dms:{today_str}"] = result
+        return result
+
+    # Build fresh DMS from live engine outputs
+    dms_dict = _build_live_dms(today_str, store)
+    _dms_cache[f"dms:{today_str}"] = dms_dict
+    return dms_dict
+
+
+def _build_live_dms(today_str: str, store) -> dict:
+    """Build a DailyMarketState from live engine data.
+
+    Reads from existing engines without modifying their logic.
+    """
+    flags = get_flags()
+
+    # --- Engine 5: regime + vol ---
+    regime_data = {}
+    vol_direction = ""
+    iv_stress = 50.0
+
+    try:
+        from backend.engine5_pipeline import run_pipeline
+        from backend.engine5_snapshot import load_best_snapshot
+        snapshot = load_best_snapshot(store) if store else None
+        if snapshot:
+            regime_data = snapshot.get("regime", {})
+            vol_ll = snapshot.get("vol_lead_lag", {})
+            vol_direction = str(vol_ll.get("vol_lag_state", ""))
+            iv_stress = float(regime_data.get("components", {}).get("iv_stress", 50.0))
+    except Exception as e:
+        LOG.warning("Front Layer: Engine 5 data unavailable: %s", e)
+
+    # --- Flow Pressure ---
+    fp_snapshot = {}
+    try:
+        fp_cache_key = "command_center:flow_pressure"
+        fp_cached = _dms_cache.get(fp_cache_key)
+        if fp_cached:
+            fp_snapshot = fp_cached
+        elif store:
+            fp_data = store.get_json("flow_pressure:latest_snapshot")
+            if fp_data:
+                fp_snapshot = fp_data
+    except Exception as e:
+        LOG.warning("Front Layer: Flow Pressure data unavailable: %s", e)
+
+    # --- Sequencer ---
+    seq_summary = {}
+    try:
+        from backend.sequencer import current_week_id, build_weekly_sequence
+        wk = current_week_id()
+        events_raw = []
+        if store:
+            events_raw = store.get_json(f"sequencer:week:{wk}") or []
+        seq = build_weekly_sequence(events_raw, week_id=wk)
+        seq_summary = seq.to_dict()
+    except Exception as e:
+        LOG.warning("Front Layer: Sequencer data unavailable: %s", e)
+
+    # --- News risk ---
+    event_count = 0
+    high_sev = 0
+    upcoming: List[str] = []
+    try:
+        cal = build_calendar_payload(mode="week")
+        events = cal.get("events", [])
+        event_count = len(events)
+        high_sev = sum(1 for ev in events if str(ev.get("importance", "")).lower() in ("high", "critical"))
+        upcoming = [str(ev.get("title", "")) for ev in events[:5] if ev.get("title")]
+    except Exception as e:
+        LOG.warning("Front Layer: Calendar data unavailable: %s", e)
+
+    # --- News Themes ---
+    themes_list: List[dict] = []
+    try:
+        headlines: List[str] = []
+        # Try EODHD
+        try:
+            from backend.eodhd_client import EodhdClient
+            eodhd = EodhdClient()
+            resp = eodhd.get_news(topic="market", limit=50)
+            headlines.extend(extract_headlines_from_eodhd(resp.rows))
+        except Exception:
+            pass
+        # Try Benzinga
+        try:
+            benz = BenzingaClient()
+            resp = benz.get_news(page_size=50)
+            headlines.extend(extract_headlines_from_benzinga(resp.rows))
+        except Exception:
+            pass
+
+        if headlines:
+            prior_themes = load_theme_history(store, n_days=flags.FRONT_LAYER_THEME_LOOKBACK_DAYS) if store else []
+            theme_snap = score_themes(headlines=headlines, prior_snapshots=prior_themes, date_str=today_str)
+            themes_list = theme_snap.themes
+            if store:
+                persist_theme_snapshot(theme_snap, store)
+    except Exception as e:
+        LOG.warning("Front Layer: News theme scoring failed: %s", e)
+
+    # --- Build DMS ---
+    dms = build_daily_market_state(
+        date_str=today_str,
+        regime=regime_data,
+        flow_pressure_snapshot=fp_snapshot,
+        vol_direction=vol_direction,
+        iv_stress=iv_stress,
+        event_count_5d=event_count,
+        high_severity_count=high_sev,
+        upcoming_events=upcoming,
+        news_themes=themes_list,
+        sequencer_summary=seq_summary,
+    )
+
+    # Detect asymmetries
+    dms_dict = dms.to_dict()
+    history = load_dms_history(store, n=flags.FRONT_LAYER_DMS_HISTORY_DAYS) if store else []
+    history_dicts = [h.to_dict() for h in history]
+    asymmetries = detect_asymmetries(dms_dict, history_dicts)
+    dms_dict["asymmetry_signals"] = asymmetries
+
+    # Persist
+    if store:
+        dms_updated = DailyMarketState.from_dict(dms_dict)
+        persist_dms(dms_updated, store, ttl_s=flags.FRONT_LAYER_DMS_TTL_S)
+
+    return dms_dict
+
+
+@app.get("/api/front-layer/morning-brief")
+def api_front_layer_morning_brief():
+    """Return today's Morning Brief (LLM-generated)."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    today_str = dt.date.today().isoformat()
+
+    # Check cache
+    cached = _morning_brief_cache.get(f"brief:{today_str}")
+    if cached is not None:
+        return cached
+
+    # Get DMS
+    store = get_store_optional()
+    dms = load_dms(today_str, store) if store else None
+    if dms is None:
+        # Try building live
+        dms_dict = _build_live_dms(today_str, store)
+    else:
+        dms_dict = dms.to_dict()
+
+    # Get history
+    history = load_dms_history(store, n=flags.FRONT_LAYER_DMS_HISTORY_DAYS) if store else []
+    history_dicts = [h.to_dict() for h in history]
+
+    if flags.ENABLE_FRONT_LAYER_LLM:
+        brief = generate_morning_brief(dms_dict, history_dicts)
+    else:
+        brief = {
+            "market_posture": "LLM generation disabled. Review DailyMarketState directly.",
+            "changes_vs_yesterday": "Enable ENABLE_FRONT_LAYER_LLM for narrative generation.",
+            "active_themes": "See Active Themes panel.",
+            "cross_asset_signals": "See Cross-Asset Stress panel.",
+            "engine_alignment": "See Engine Gates in DailyMarketState.",
+            "watch_list": "None",
+            "stand_down": "Review regime state manually.",
+            "_source": "disabled",
+            "_generated_at": dt.datetime.utcnow().isoformat() + "Z",
+        }
+
+    _morning_brief_cache[f"brief:{today_str}"] = brief
+    return brief
+
+
+@app.get("/api/front-layer/weekly-roadmap")
+def api_front_layer_weekly_roadmap():
+    """Return the Weekly Roadmap (LLM-generated, Sunday night)."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    today_str = dt.date.today().isoformat()
+
+    cached = _weekly_roadmap_cache.get(f"roadmap:{today_str}")
+    if cached is not None:
+        return cached
+
+    store = get_store_optional()
+
+    # Try loading cached roadmap from Redis
+    if store:
+        roadmap_data = store.get_json(f"front_layer:roadmap:{today_str}")
+        if roadmap_data:
+            _weekly_roadmap_cache[f"roadmap:{today_str}"] = roadmap_data
+            return roadmap_data
+
+    dms = load_dms(today_str, store) if store else None
+    if dms is None:
+        dms_dict = _build_live_dms(today_str, store)
+    else:
+        dms_dict = dms.to_dict()
+
+    history = load_dms_history(store, n=flags.FRONT_LAYER_DMS_HISTORY_DAYS) if store else []
+    history_dicts = [h.to_dict() for h in history]
+
+    if flags.ENABLE_FRONT_LAYER_LLM:
+        roadmap = generate_weekly_roadmap(dms_dict, history_dicts)
+    else:
+        roadmap = {
+            "regime_flow_summary": "LLM generation disabled.",
+            "expected_pattern": "Check sequencer panel.",
+            "high_risk_days": [],
+            "engine_behaviors": "See Engine Gates.",
+            "earnings_focus": [],
+            "asymmetry_radar": "No asymmetries detected.",
+            "break_the_plan": "Review regime transition triggers.",
+            "_source": "disabled",
+            "_generated_at": dt.datetime.utcnow().isoformat() + "Z",
+        }
+
+    # Persist roadmap
+    if store:
+        store.set_json(f"front_layer:roadmap:{today_str}", roadmap, ttl_s=7 * 86400)
+
+    _weekly_roadmap_cache[f"roadmap:{today_str}"] = roadmap
+    return roadmap
+
+
+@app.get("/api/front-layer/cross-asset-stress")
+def api_front_layer_cross_asset():
+    """Return live cross-asset stress snapshot."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    # Return latest DMS cross_asset_stress if available
+    store = get_store_optional()
+    today_str = dt.date.today().isoformat()
+    dms = load_dms(today_str, store) if store else None
+    if dms and dms.cross_asset_stress:
+        return dms.cross_asset_stress
+
+    return {"readings": [], "composite_score": 50.0, "composite_label": "Neutral", "timestamp": ""}
+
+
+@app.get("/api/front-layer/news-themes")
+def api_front_layer_news_themes():
+    """Return active news theme readings."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    store = get_store_optional()
+    today_str = dt.date.today().isoformat()
+
+    if store:
+        data = store.get_json(f"front_layer:themes:{today_str}")
+        if data:
+            return data
+
+    # Return from DMS if available
+    dms = load_dms(today_str, store) if store else None
+    if dms and dms.news_themes:
+        return {"date": today_str, "themes": dms.news_themes}
+
+    return {"date": today_str, "themes": [], "dominant_theme": "", "total_headline_count": 0}
+
+
+@app.get("/api/front-layer/asymmetry-radar")
+def api_front_layer_asymmetry():
+    """Return current asymmetry radar signals."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    store = get_store_optional()
+    today_str = dt.date.today().isoformat()
+    dms = load_dms(today_str, store) if store else None
+
+    if dms and dms.asymmetry_signals:
+        return {"signals": dms.asymmetry_signals, "count": len(dms.asymmetry_signals)}
+
+    # Build live
+    dms_dict = _build_live_dms(today_str, store)
+    signals = dms_dict.get("asymmetry_signals", [])
+    return {"signals": signals, "count": len(signals)}
+
+
+@app.get("/api/front-layer/history")
+def api_front_layer_history(days: int = Query(default=7, ge=1, le=120)):
+    """Return rolling DMS history."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    store = get_store_optional()
+    if not store:
+        return {"snapshots": [], "count": 0}
+
+    history = load_dms_history(store, n=days)
+    return {
+        "snapshots": [h.to_dict() for h in history],
+        "count": len(history),
+    }
+
+
+@app.get("/api/front-layer/diff")
+def api_front_layer_diff():
+    """Return diff between today's and yesterday's DMS."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    store = get_store_optional()
+    if not store:
+        return {"has_changes": False, "changes": {}, "error": "No persistence layer"}
+
+    today_str = dt.date.today().isoformat()
+    yesterday_str = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+
+    today_dms = load_dms(today_str, store)
+    yesterday_dms = load_dms(yesterday_str, store)
+
+    if not today_dms or not yesterday_dms:
+        return {"has_changes": False, "changes": {}, "error": "Insufficient history for diff"}
+
+    return compute_dms_diff(today_dms, yesterday_dms)

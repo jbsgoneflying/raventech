@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Market Intelligence</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      /* ── Market Intelligence (using existing app tokens) ────────── */
+
+      .miGrid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .miGrid--full { grid-column: 1 / -1; }
+
+      /* Accent stripes */
+      .miStripe--blue   { border-left: 4px solid var(--blue); }
+      .miStripe--green  { border-left: 4px solid var(--green); }
+      .miStripe--amber  { border-left: 4px solid var(--amber); }
+      .miStripe--red    { border-left: 4px solid var(--red); }
+      .miStripe--purple { border-left: 4px solid #8b5cf6; }
+
+      /* Section header */
+      .miSectionHead {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .miSectionTitle {
+        font-size: 13px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted);
+      }
+      .miTimestamp {
+        font-size: 10px; color: var(--muted); font-style: italic;
+      }
+
+      /* Brief items */
+      .miBriefItem { margin-bottom: 10px; font-size: 12px; line-height: 1.6; }
+      .miBriefLabel {
+        font-size: 10px; font-weight: 800; text-transform: uppercase;
+        color: var(--muted); letter-spacing: 0.06em; margin-bottom: 2px;
+      }
+      .miBriefText { color: var(--fg); }
+      .miBriefCite { color: var(--blue); font-weight: 600; font-size: 11px; }
+
+      /* Stand-down banner */
+      .miStandDown {
+        padding: 10px 14px; border-radius: 10px; font-size: 12px;
+        background: rgba(255,59,48,0.08); color: #cc2f26;
+        font-weight: 700; margin-bottom: 10px;
+      }
+      .miStandDown--clear {
+        background: rgba(52,199,89,0.08); color: #1b8a3e;
+      }
+
+      /* Regime badge (big) */
+      .miRegimeBig {
+        font-size: 22px; font-weight: 800; letter-spacing: -0.01em;
+        margin-right: 8px;
+      }
+      .miRegimeScore {
+        font-size: 32px; font-weight: 800; letter-spacing: -0.02em;
+        margin-right: 10px;
+      }
+
+      /* Theme cards */
+      .miThemeCard {
+        padding: 10px 12px; border-radius: 10px;
+        background: var(--hover); margin-bottom: 8px;
+      }
+      .miThemeHeader { display: flex; align-items: center; justify-content: space-between; }
+      .miThemeName { font-size: 13px; font-weight: 800; }
+      .miThemeIntensity { font-size: 12px; font-weight: 700; }
+      .miThemeMeta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+      .miThemeBar {
+        height: 6px; border-radius: 3px; background: var(--border);
+        overflow: hidden; margin-top: 6px;
+      }
+      .miThemeBarFill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+      /* Acceleration arrows */
+      .accel--rising  { color: var(--red); }
+      .accel--falling { color: var(--green); }
+      .accel--stable  { color: var(--muted); }
+
+      /* Cross-asset stress grid */
+      .miStressGrid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 8px;
+      }
+      .miStressItem {
+        padding: 8px 10px; border-radius: 8px; background: var(--hover);
+        font-size: 12px;
+      }
+      .miStressName { font-weight: 800; font-size: 11px; margin-bottom: 4px; }
+      .miStressScore { font-size: 18px; font-weight: 800; }
+      .miStressDir { font-size: 11px; font-weight: 700; }
+      .miStressChange { font-size: 10px; color: var(--muted); }
+      .miStressRel { font-size: 10px; margin-top: 2px; }
+      .miStressRel--confirming { color: var(--red); font-weight: 700; }
+      .miStressRel--diverging  { color: var(--amber); font-weight: 700; }
+
+      /* Asymmetry radar */
+      .miAsymCard {
+        padding: 10px 12px; border-radius: 10px;
+        background: var(--hover); margin-bottom: 8px;
+        border-left: 3px solid var(--amber);
+      }
+      .miAsymType { font-size: 12px; font-weight: 800; }
+      .miAsymDesc { font-size: 11px; color: var(--fg); margin-top: 4px; line-height: 1.5; }
+      .miAsymAction {
+        font-size: 10px; font-weight: 700; color: var(--amber);
+        margin-top: 6px; text-transform: uppercase;
+      }
+
+      /* Pill variants */
+      .pill--green  { background: rgba(52,199,89,0.14); color: #1b8a3e; }
+      .pill--amber  { background: rgba(255,149,0,0.14); color: #995c00; }
+      .pill--red    { background: rgba(255,59,48,0.14); color: #cc2f26; }
+      .pill--blue   { background: rgba(0,122,255,0.12); color: #0060cc; }
+      .pill--purple { background: rgba(139,92,246,0.12); color: #6d28d9; }
+
+      /* Diff toggle */
+      .miDiffBtn {
+        font-size: 11px; font-weight: 700; padding: 4px 12px;
+        border-radius: 6px; background: var(--hover); border: 1px solid var(--border);
+        cursor: pointer; color: var(--fg);
+      }
+      .miDiffBtn:hover { background: var(--border); }
+      .miDiffBadge {
+        display: inline-block; font-size: 9px; font-weight: 700;
+        padding: 1px 5px; border-radius: 4px; margin-left: 4px;
+      }
+      .miDiffBadge--changed { background: rgba(255,149,0,0.14); color: #995c00; }
+
+      /* Roadmap expandable */
+      .miRoadmapSection { margin-bottom: 8px; }
+      .miRoadmapHead {
+        font-size: 11px; font-weight: 800; text-transform: uppercase;
+        color: var(--muted); letter-spacing: 0.04em; cursor: pointer;
+        padding: 6px 0; border-bottom: 1px solid var(--line);
+      }
+      .miRoadmapBody { font-size: 12px; padding: 8px 0; line-height: 1.6; }
+      .miRoadmapList { padding-left: 16px; margin: 4px 0; }
+      .miRoadmapList li { margin-bottom: 4px; }
+
+      /* Empty state */
+      .miEmpty {
+        text-align: center; padding: 40px 20px; color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* Responsive */
+      @media (max-width: 900px) {
+        .miGrid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Raven loading overlay -->
+    <div class="ravenLoadingOverlay" id="ravenOverlay">
+      <img class="ravenLoadingLogo" src="/static/RavenONLY.png" alt="" />
+      <div class="ravenLoadingProgress"><div class="ravenLoadingProgressFill" id="ravenProgressFill"></div></div>
+      <div class="ravenLoadingStatus" id="ravenStatus">Loading Market Intelligence...</div>
+    </div>
+
+    <div id="ravenTopLoader"></div>
+
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Market Intelligence · Pre-Open Roadmap</div>
+          </div>
+        </div>
+      </header>
+
+      <!-- ── Control Bar ───────── -->
+      <section class="controlBar" aria-label="Market Intelligence Controls">
+        <form id="miForm" class="controlBarForm">
+          <div class="controlGroup">
+            <label class="controlLabel">
+              Market Intelligence
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Market Intelligence</div>
+                  <div class="tipBody">
+                    <p>Synthesizes all Raven Tech engines into a daily roadmap.</p>
+                    <ul>
+                      <li><b>Morning Brief</b>: LLM-generated pre-open summary.</li>
+                      <li><b>Weekly Roadmap</b>: Sunday night planning view.</li>
+                      <li><b>Active Themes</b>: Narrative clusters from news.</li>
+                      <li><b>Cross-Asset Stress</b>: FX, commodities, crypto, vol.</li>
+                      <li><b>Asymmetry Radar</b>: Rare dislocation alerts.</li>
+                    </ul>
+                    <p><em>Read-only. No trade recommendations.</em></p>
+                  </div>
+                </div>
+              </span>
+            </label>
+          </div>
+          <div class="controlActions">
+            <button class="miDiffBtn" type="button" id="miDiffToggle">Show Changes</button>
+            <button class="btn btn--primary" type="button" id="miRunBtn">Load Intelligence</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- ── Regime + Flow Top Row ───────── -->
+      <div class="miGrid" id="miTopRow" style="display:none;">
+        <div class="card miStripe--blue" id="miRegimeCard">
+          <div class="miSectionHead">
+            <span class="miSectionTitle">Regime State</span>
+            <span class="miTimestamp" id="miRegimeTs"></span>
+          </div>
+          <div>
+            <span class="miRegimeScore" id="miRegimeScore">--</span>
+            <span class="miRegimeBig" id="miRegimeLabel">--</span>
+          </div>
+          <div style="margin-top:6px;">
+            <span class="miSectionTitle">Engine Gates</span>
+            <div id="miEngineGates" style="margin-top:4px;"></div>
+          </div>
+        </div>
+        <div class="card miStripe--green" id="miFlowCard">
+          <div class="miSectionHead">
+            <span class="miSectionTitle">Flow Pressure</span>
+          </div>
+          <div>
+            <span class="miRegimeScore" id="miFpScore">--</span>
+            <span class="miRegimeBig" id="miFpLabel">--</span>
+          </div>
+          <div style="margin-top:6px;">
+            <span class="miSectionTitle">Vol State</span>
+            <div id="miVolState" style="margin-top:4px; font-size:12px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Morning Brief ───────── -->
+      <div class="card miGrid--full" id="miBriefCard" style="display:none; margin-top:12px;">
+        <div class="miSectionHead">
+          <span class="miSectionTitle">Morning Brief</span>
+          <span class="miTimestamp" id="miBriefTs"></span>
+        </div>
+        <div id="miBriefStandDown"></div>
+        <div id="miBriefContent"></div>
+      </div>
+
+      <!-- ── Weekly Roadmap ───────── -->
+      <div class="card miGrid--full" id="miRoadmapCard" style="display:none; margin-top:12px;">
+        <div class="miSectionHead">
+          <span class="miSectionTitle">Weekly Roadmap</span>
+          <span class="miTimestamp" id="miRoadmapTs"></span>
+        </div>
+        <div id="miRoadmapContent"></div>
+      </div>
+
+      <!-- ── Bottom Grid: Themes + Cross-Asset + Asymmetry ───────── -->
+      <div class="miGrid" id="miBottomGrid" style="display:none; margin-top:12px;">
+        <div class="card miStripe--purple">
+          <div class="miSectionHead">
+            <span class="miSectionTitle">Active Themes</span>
+          </div>
+          <div id="miThemes"></div>
+        </div>
+        <div class="card miStripe--amber">
+          <div class="miSectionHead">
+            <span class="miSectionTitle">Cross-Asset Stress</span>
+          </div>
+          <div id="miStressGrid" class="miStressGrid"></div>
+        </div>
+      </div>
+
+      <!-- ── Asymmetry Radar ───────── -->
+      <div class="card miGrid--full miStripe--red" id="miAsymCard" style="display:none; margin-top:12px;">
+        <div class="miSectionHead">
+          <span class="miSectionTitle">Asymmetry Radar</span>
+          <span class="pill pill--amber" style="font-size:10px;">MONITOR ONLY</span>
+        </div>
+        <div id="miAsymContent"></div>
+      </div>
+
+      <!-- ── Diff Panel ───────── -->
+      <div class="card miGrid--full" id="miDiffPanel" style="display:none; margin-top:12px;">
+        <div class="miSectionHead">
+          <span class="miSectionTitle">Day-over-Day Changes</span>
+        </div>
+        <div id="miDiffContent"></div>
+      </div>
+
+    </main>
+
+    <script src="/static/nav.js"></script>
+    <script src="/static/market-intelligence.js"></script>
+  </body>
+</html>

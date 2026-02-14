@@ -98,6 +98,24 @@
       "base": "AUD",
       "quote": "USD",
       "risk_type": "risk_currency"
+    },
+    {
+      "symbol": "USDCHF.FOREX",
+      "name": "USD/CHF",
+      "region": "global",
+      "base": "USD",
+      "quote": "CHF",
+      "risk_type": "funding_currency",
+      "_comment": "Front Layer: CHF safe-haven proxy"
+    },
+    {
+      "symbol": "DX-Y.NYB",
+      "name": "US Dollar Index (DXY)",
+      "region": "global",
+      "base": "USD",
+      "quote": "basket",
+      "risk_type": "dollar_index",
+      "_comment": "Front Layer: DXY for broad dollar strength"
     }
   ],
   "commodities": [
@@ -121,6 +139,14 @@
       "region": "global",
       "commodity": "copper",
       "stress_role": "cyclical"
+    },
+    {
+      "symbol": "SLV.US",
+      "name": "Silver (SLV ETF)",
+      "region": "global",
+      "commodity": "silver",
+      "stress_role": "hybrid",
+      "_comment": "Front Layer: silver as industrial/precious hybrid"
     }
   ],
   "sovereign_yields": [
@@ -139,7 +165,30 @@
       "tenor": "10Y"
     }
   ],
+  "crypto": [
+    {
+      "symbol": "BTC-USD.CC",
+      "name": "Bitcoin",
+      "region": "global",
+      "asset_class": "crypto",
+      "_comment": "Front Layer: BTC as risk-on crypto proxy"
+    },
+    {
+      "symbol": "ETH-USD.CC",
+      "name": "Ethereum",
+      "region": "global",
+      "asset_class": "crypto",
+      "_comment": "Front Layer: ETH for BTC/ETH ratio"
+    }
+  ],
   "volatility_indices": [
+    {
+      "symbol": "VIX.INDX",
+      "label": "VIX",
+      "region": "us",
+      "weight": 1.0,
+      "_comment": "Front Layer: VIX spot for US equity vol"
+    },
     {
       "symbol": "V2TX.INDX",
       "label": "VSTOXX",
