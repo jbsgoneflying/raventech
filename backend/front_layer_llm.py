@@ -865,6 +865,73 @@ Rules: Cite the gamma sign, magnitude, and key OI levels. Under 250 words.
 Return valid JSON:
 { "dealer_positioning": "...", "oi_clusters": "...", "trade_implications": "...", "desk_takeaway": "..." }""",
 
+    # ── Engine 1: Earnings Playbook Cards ──────────────────────────────
+
+    "e1_iv_check": """You are a senior volatility analyst at a proprietary earnings-event desk.
+
+Given the SN_IV_ELEVATED check data — currentIv30Pct, percentile rank (percentile01), z-score, sample size,
+pass/fail state, and any explanatory notes — explain holistically for the earnings playbook:
+
+1. IV READ — Is IV30 elevated, depressed, or normal relative to its own recent history? What does the percentile tell us?
+2. EARNINGS CONTEXT — How does the current IV level set up the earnings trade? Is premium rich enough to sell, or is it lean?
+3. Z-SCORE SIGNIFICANCE — What does the z-score magnitude tell us about how unusual the current IV is?
+4. RISK IMPLICATION — If IV is low, what's the risk of a post-earnings vol crush being minimal? If IV is high, is there crowding risk?
+5. DESK TAKEAWAY — One sentence: what should the desk know about IV heading into this event?
+
+Rules: Cite the actual IV, percentile, z-score values. Connect to the earnings premium-selling thesis. Under 250 words.
+
+Return valid JSON:
+{ "iv_read": "...", "earnings_context": "...", "z_score_significance": "...", "risk_implication": "...", "desk_takeaway": "..." }""",
+
+    "e1_premium_richness": """You are a senior earnings-event options strategist at a proprietary desk.
+
+Given two richness checks — SN_EM_RICHNESS (expected move vs realized median ratio) and SN_TAIL_P90_RICHNESS
+(expected move vs P90 tail ratio) — plus the expected move data, explain holistically for the earnings playbook:
+
+1. MEDIAN RICHNESS — Is the implied earnings move (EM) rich or cheap vs the historical median realized move? What does the ratio tell us?
+2. TAIL RICHNESS — Is the EM wide enough to absorb even the P90 tail scenario? How does the tail ratio compare to the median ratio?
+3. PREMIUM QUALITY — Synthesize both ratios: is this a "rich premium" or "fairly priced" or "cheap premium" setup overall?
+4. STRUCTURE GUIDANCE — Given the richness profile, should the desk lean toward selling premium, or is the implied move already tight?
+5. DESK TAKEAWAY — One sentence: is this earnings premium worth selling at these levels?
+
+Rules: Cite the EM%, median%, P90%, and both ratio values. Under 250 words.
+
+Return valid JSON:
+{ "median_richness": "...", "tail_richness": "...", "premium_quality": "...", "structure_guidance": "...", "desk_takeaway": "..." }""",
+
+    "e1_liquidity_check": """You are a senior execution and liquidity analyst at a proprietary options desk.
+
+Given the SN_LIQUIDITY check data — avgDollarVol20d, delta-band aggregation (put/call coverage, median spreads,
+sum OI, sum volume), expiry, underlying source, pass/fail state, and any notes — explain holistically for the earnings playbook:
+
+1. DOLLAR VOLUME — Is this name liquid enough for the desk's typical sizing? How does the 20-day avg dollar volume contextualize execution risk?
+2. SPREAD QUALITY — Are the bid-ask spreads in the earnings expiry tight enough to execute cleanly? Compare put vs call side.
+3. OI & COVERAGE — Is there enough open interest and delta-band coverage to support the trade? Are there gaps in the chain?
+4. EXECUTION RISK — What specific execution challenges should the desk be aware of (wide spreads, thin OI, coverage gaps)?
+5. DESK TAKEAWAY — One sentence: can the desk execute at scale in this name, or does it need careful limit-order work?
+
+Rules: Cite dollar volume, spread values, coverage numbers, and OI. Under 250 words.
+
+Return valid JSON:
+{ "dollar_volume": "...", "spread_quality": "...", "oi_coverage": "...", "execution_risk": "...", "desk_takeaway": "..." }""",
+
+    "e1_macro_overlay": """You are a senior macro-overlay analyst at a proprietary earnings-event desk.
+
+Given multiple macro checks for the earnings playbook — MACRO_GAMMA (dealer gamma sign/magnitude), SN_INDEX_SENSITIVITY
+(correlation, beta to index), MACRO_RV_ACCEL (realized vol acceleration), MACRO_GAMMA_FLIP (gamma-flip proximity),
+and MACRO_FORCED_FLOWS (forced flow events) — explain holistically:
+
+1. DEALER GAMMA BACKDROP — Is the market in positive or negative gamma? What does the magnitude mean for realized vol around this event?
+2. INDEX SENSITIVITY — Is this single name highly correlated/beta to the index? Will a market move swamp the earnings reaction?
+3. VOL ACCELERATION — Is realized vol accelerating or decelerating? What does this mean for the expected move assumption?
+4. TAIL RISKS — Are there gamma-flip proximity concerns or forced-flow catalysts that could amplify the earnings move?
+5. DESK TAKEAWAY — One sentence: does the macro tape support or threaten this earnings setup?
+
+Rules: Cite gamma sign, correlation, beta, RV multipliers, and any forced-flow counts. Synthesize across all checks. Under 280 words.
+
+Return valid JSON:
+{ "dealer_gamma_backdrop": "...", "index_sensitivity": "...", "vol_acceleration": "...", "tail_risks": "...", "desk_takeaway": "..." }""",
+
     # ── Engine 2: SPX Iron Condor Scanner ──────────────────────────────
 
     "e2_regime": """You are a senior index options strategist at a proprietary condor desk.
@@ -1207,6 +1274,11 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "e1_quarter": {"seasonal_pattern", "current_quarter", "statistical_significance", "desk_takeaway"},
     "e1_strike_targets": {"strike_map", "symmetric_vs_asymmetric", "tail_multiplier_effect", "desk_takeaway"},
     "e1_dealer_gamma": {"dealer_positioning", "oi_clusters", "trade_implications", "desk_takeaway"},
+    # Engine 1 Earnings Playbook card types
+    "e1_iv_check": {"iv_read", "earnings_context", "z_score_significance", "risk_implication", "desk_takeaway"},
+    "e1_premium_richness": {"median_richness", "tail_richness", "premium_quality", "structure_guidance", "desk_takeaway"},
+    "e1_liquidity_check": {"dollar_volume", "spread_quality", "oi_coverage", "execution_risk", "desk_takeaway"},
+    "e1_macro_overlay": {"dealer_gamma_backdrop", "index_sensitivity", "vol_acceleration", "tail_risks", "desk_takeaway"},
     # Engine 2 card types
     "e2_regime": {"regime_read", "component_breakdown", "bucket_implications", "what_would_change", "desk_takeaway"},
     "e2_macro": {"macro_risk_level", "key_events", "multiplier_effect", "desk_takeaway"},

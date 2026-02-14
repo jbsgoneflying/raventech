@@ -285,8 +285,58 @@
             </div>
 
             <details class="taDetails" style="margin-top:12px;">
-              <summary>Live details</summary>
-              <div class="finePrint muted" style="margin-top:10px;">Full OI clusters and supporting metadata (kept out of the scan grid).</div>
+              <summary>Live Data</summary>
+
+              <!-- Earnings Playbook Cards -->
+              <div class="finePrint muted" style="margin-top:10px;">Pre-trade earnings playbook — IV, premium, liquidity and macro context. Click any card for LLM desk notes.</div>
+              <div class="taGrid" id="playbookGrid" style="margin-top:10px;">
+                <div class="taCard e1Click" id="pbIvCard" data-e1-insight="e1_iv_check" data-e1-title="IV Percentile">
+                  <div class="taCardTop">
+                    <div class="taCardTitle">
+                      IV Percentile
+                      <span class="info" title="Current IV30 vs its own 30-day history. Shows percentile rank and z-score. Elevated IV = richer premium to sell.">ⓘ</span>
+                    </div>
+                  </div>
+                  <div id="pbIvState" class="taCardState mono">—</div>
+                  <div id="pbIvInterp" class="taCardInterp muted">—</div>
+                </div>
+
+                <div class="taCard e1Click" id="pbRichnessCard" data-e1-insight="e1_premium_richness" data-e1-title="Premium Richness">
+                  <div class="taCardTop">
+                    <div class="taCardTitle">
+                      Premium Richness
+                      <span class="info" title="Is the earnings expected move (EM) rich vs historical realized moves? Compares EM to median and P90 tail. Ratio > 1 = implied is overstating.">ⓘ</span>
+                    </div>
+                  </div>
+                  <div id="pbRichnessState" class="taCardState mono">—</div>
+                  <div id="pbRichnessInterp" class="taCardInterp muted">—</div>
+                </div>
+
+                <div class="taCard e1Click" id="pbLiquidityCard" data-e1-insight="e1_liquidity_check" data-e1-title="Options Liquidity">
+                  <div class="taCardTop">
+                    <div class="taCardTitle">
+                      Options Liquidity
+                      <span class="info" title="Can we actually execute? Dollar volume, bid-ask spreads, OI depth, and delta-band coverage for the earnings expiry.">ⓘ</span>
+                    </div>
+                  </div>
+                  <div id="pbLiqState" class="taCardState mono">—</div>
+                  <div id="pbLiqInterp" class="taCardInterp muted">—</div>
+                </div>
+
+                <div class="taCard e1Click" id="pbMacroCard" data-e1-insight="e1_macro_overlay" data-e1-title="Macro Overlay">
+                  <div class="taCardTop">
+                    <div class="taCardTitle">
+                      Macro Overlay
+                      <span class="info" title="Market-level context: dealer gamma sign, RV acceleration, gamma-flip proximity, forced flows, and index sensitivity. Tells you if the macro tape helps or hurts.">ⓘ</span>
+                    </div>
+                  </div>
+                  <div id="pbMacroState" class="taCardState mono">—</div>
+                  <div id="pbMacroInterp" class="taCardInterp muted">—</div>
+                </div>
+              </div>
+
+              <!-- OI Clusters -->
+              <div class="finePrint muted" style="margin-top:14px;">Full OI clusters and supporting metadata (kept out of the scan grid).</div>
               <div class="taGrid" style="margin-top:10px;">
                 <div class="taCard" id="marketOiClustersCard">
                   <div class="taCardTop">

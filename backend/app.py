@@ -3872,6 +3872,8 @@ def api_front_layer_card_insight(body: dict):
         "e1_decision", "e1_hold_risk", "e1_monte_carlo", "e1_regime",
         "e1_skew_wings", "e1_event_risk", "e1_gamma_context",
         "e1_quarter", "e1_strike_targets", "e1_dealer_gamma",
+        # Engine 1 – Earnings Playbook Cards
+        "e1_iv_check", "e1_premium_richness", "e1_liquidity_check", "e1_macro_overlay",
         # Engine 2 – SPX Iron Condor Scanner
         "e2_regime", "e2_macro", "e2_odds", "e2_dealer_gamma",
         "e2_gex", "e2_hedging_pressure", "e2_tail_ignition",

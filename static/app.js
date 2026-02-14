@@ -615,12 +615,6 @@ function renderEngine1DecisionPanel(payload) {
   host.classList.toggle("hidden", !t || t === "—");
   if (!t || t === "—") return;
 
-  const go = payload?.goNoGo || null;
-  const goStatus = String(go?.status || "").toUpperCase();
-  const goPassed = go?.passed === true && goStatus === "GO";
-  const goLabel = goPassed ? "GO" : "NO-GO";
-  const goCls = goPassed ? "isGo" : "isNo";
-
   const pxTxt = Number.isFinite(price) ? price.toFixed(2) : "—";
   const metaRight = [
     `EOD: ${escapeHtml(barDate || "—")}`,
@@ -633,7 +627,6 @@ function renderEngine1DecisionPanel(payload) {
         <div class="taHeaderRow">
           <div class="taHeaderTitle">
             ${escapeHtml(t)} — Engine 1
-            <button class="goPill ${goCls}" type="button" id="e1GoNoGoBtn" aria-label="GO/NO-GO details" aria-haspopup="dialog">${escapeHtml(goLabel)}</button>
           </div>
           <div class="taHeaderMeta">${metaRight}</div>
         </div>
@@ -713,16 +706,6 @@ function renderEngine1DecisionPanel(payload) {
     </div>
   `;
 
-  // GO/NO-GO modal (centered)
-  const goBtn = $("e1GoNoGoBtn");
-  if (goBtn) {
-    goBtn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      openGoNoGoModal(go);
-    });
-  }
-
   const expBtn = $("e1ExportLLM");
   if (expBtn) {
     expBtn.addEventListener("click", async () => {
@@ -738,254 +721,141 @@ function renderEngine1DecisionPanel(payload) {
   }
 }
 
-// --- GO/NO-GO Modal (centered) ---
-let _goModalBound = false;
-function ensureGoNoGoModal() {
-  let overlay = document.getElementById("goNoGoOverlay");
-  if (overlay) return overlay;
-  overlay = document.createElement("div");
-  overlay.id = "goNoGoOverlay";
-  overlay.className = "goModalOverlay hidden";
-  overlay.innerHTML = `
-    <div class="goModal" role="dialog" aria-modal="true" aria-label="GO/NO-GO details">
-      <button class="goModalClose" type="button" aria-label="Close">×</button>
-      <div class="goModalHead">
-        <div class="goModalTitle">GO/NO-GO</div>
-        <div class="goModalVerdict" id="goNoGoVerdict">—</div>
-      </div>
-      <div class="goModalSub muted" id="goNoGoSub">—</div>
-      <div class="goCols" id="goNoGoCols"></div>
-      <div class="goModalFoot" id="goNoGoFoot"></div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  if (!_goModalBound) {
-    _goModalBound = true;
-    overlay.addEventListener("click", (ev) => {
-      const t = ev.target;
-      if (!t) return;
-      if (t === overlay) closeGoNoGoModal();
-      if (t.closest && t.closest(".goModalClose")) closeGoNoGoModal();
-    });
-    document.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") closeGoNoGoModal();
-    });
-  }
-  return overlay;
-}
-
-function closeGoNoGoModal() {
-  const overlay = document.getElementById("goNoGoOverlay");
-  if (!overlay) return;
-  overlay.classList.add("hidden");
-}
-
-function openGoNoGoModal(go) {
-  const overlay = ensureGoNoGoModal();
-  const status = String(go?.status || "NO_GO").toUpperCase();
-  const passed = (go?.passed === true && status === "GO");
+// --- Earnings Playbook Cards (Live Data dropdown) ---
+// Populates the 4 playbook cards from goNoGo.checks data.
+function renderPlaybookCards(go) {
   const checks = Array.isArray(go?.checks) ? go.checks : [];
-  const warns = Array.isArray(go?.warnings) ? go.warnings : [];
+  const byId = {};
+  for (const c of checks) byId[String(c?.id || "")] = c;
 
-  const verdictEl = document.getElementById("goNoGoVerdict");
-  const subEl = document.getElementById("goNoGoSub");
-  const colsEl = document.getElementById("goNoGoCols");
-  const footEl = document.getElementById("goNoGoFoot");
-  if (!verdictEl || !subEl || !colsEl || !footEl) return;
-
-  verdictEl.textContent = passed ? "GO" : "NO-GO";
-  verdictEl.classList.toggle("isGo", passed);
-  verdictEl.classList.toggle("isNo", !passed);
-  subEl.textContent = passed ? "All checks passed" : "One or more checks failed / missing";
-
-  const by = { FAIL: [], MISSING: [], PASS: [] };
-  for (const c of checks) {
-    const st = String(c?.state || "MISSING").toUpperCase();
-    const k = (st === "PASS" || st === "FAIL") ? st : "MISSING";
-    by[k].push(c);
-  }
-
-  const renderCol = (title, st) => {
-    const items = by[st] || [];
-    const icon = st === "PASS" ? "✅" : st === "FAIL" ? "❌" : "⚠️";
-    const cls = st === "PASS" ? "isPass" : st === "FAIL" ? "isFail" : "isMissing";
-    const rows = items.map((c) => {
-      const label = String(c?.label || c?.id || "—");
-      const code = c?.code ? String(c.code) : "";
-      const metrics = goMetricsLine(c);
-      const explain = (c?.explain !== null && c?.explain !== undefined) ? String(c.explain) : "";
-      const notes = Array.isArray(c?.value?.notes) ? c.value.notes : [];
-      const isLiq = String(c?.id || "") === "SN_LIQUIDITY";
-      const clean = (xs) => xs.map((x) => String(x ?? "").trim()).filter(Boolean);
-      let noteLines = clean(notes.slice(0, isLiq ? 4 : 3));
-      if (isLiq && notes.length > 4) {
-        const tail = clean(notes.slice(-4));
-        // Merge unique while preserving order.
-        for (const t of tail) {
-          if (!noteLines.includes(t)) noteLines.push(t);
-        }
-      }
-      const showExplain = (!metrics || !metrics.trim()) || (String(c?.state || "").toUpperCase() !== "PASS");
-      return `
-        <div class="goRow">
-          <div class="goRowTop">
-            <span class="goRowLabel">${escapeHtml(label)}</span>
-          </div>
-          <div class="goRowMeta">
-            ${code ? `<span class="mono goRowCode">${escapeHtml(code)}</span>` : ""}
-            ${metrics ? `<span class="mono goRowMetrics">${escapeHtml(metrics)}</span>` : ""}
-            ${showExplain && explain ? `<div class="goRowExplain muted">${escapeHtml(explain)}</div>` : ""}
-            ${showExplain && noteLines.length ? noteLines.map((s) => `<div class="goRowExplain muted">${escapeHtml(s)}</div>`).join("") : ""}
-          </div>
-        </div>
-      `;
-    }).join("");
-    return `
-      <div class="goCol ${cls}">
-        <div class="goColHead">
-          <span class="goColIcon" aria-hidden="true">${icon}</span>
-          <span class="goColTitle">${escapeHtml(title)}</span>
-          <span class="goColCount mono">${items.length}</span>
-        </div>
-        <div class="goColBody">${rows || `<div class="muted">—</div>`}</div>
-      </div>
-    `;
+  const num = (x) => (x === null || x === undefined || x === "" ? Number.NaN : Number(x));
+  const badge = (state) => {
+    const s = String(state || "").toUpperCase();
+    if (s === "PASS") return '<span style="color:#34c759;font-weight:600;margin-left:6px;">PASS</span>';
+    if (s === "FAIL") return '<span style="color:#ff3b30;font-weight:600;margin-left:6px;">FAIL</span>';
+    return '<span style="color:#ff9f0a;font-weight:600;margin-left:6px;">—</span>';
   };
 
-  colsEl.innerHTML = [
-    renderCol("Fail", "FAIL"),
-    renderCol("Missing", "MISSING"),
-    renderCol("Pass", "PASS"),
-  ].join("");
+  // --- Card 1: IV Percentile ---
+  const ivEl = $("pbIvState");
+  const ivInterp = $("pbIvInterp");
+  const iv = byId["SN_IV_ELEVATED"] || null;
+  if (ivEl && ivInterp) {
+    if (iv) {
+      const v = iv.value || {};
+      const pctl = num(v.percentile01);
+      const z = num(v.z);
+      const ivPct = num(v.currentIv30Pct);
+      const n = num(v.sampleN);
+      ivEl.innerHTML = (Number.isFinite(pctl) ? (pctl * 100).toFixed(0) + "th" : "—") + badge(iv.state);
+      const parts = [];
+      if (Number.isFinite(ivPct)) parts.push("IV30=" + ivPct.toFixed(1) + "%");
+      if (Number.isFinite(z)) parts.push("z=" + z.toFixed(2));
+      if (Number.isFinite(n)) parts.push("n=" + n.toFixed(0));
+      ivInterp.textContent = parts.length ? parts.join(" · ") : (iv.explain || "—");
+    } else {
+      ivEl.innerHTML = "—";
+      ivInterp.textContent = "No IV check data available.";
+    }
+  }
 
-  footEl.innerHTML = warns.length
-    ? `<div class="goWarnTitle">Warnings</div>${warns.slice(0, 5).map(w => `<div class="goWarnLine muted">${escapeHtml(String(w?.label || w?.id || "warning"))}</div>`).join("")}`
-    : `<div class="muted">—</div>`;
+  // --- Card 2: Premium Richness ---
+  const richEl = $("pbRichnessState");
+  const richInterp = $("pbRichnessInterp");
+  const emR = byId["SN_EM_RICHNESS"] || null;
+  const tailR = byId["SN_TAIL_P90_RICHNESS"] || null;
+  if (richEl && richInterp) {
+    if (emR) {
+      const v = emR.value || {};
+      const ratio = num(v.ratio);
+      const em = num(v.expectedMovePct);
+      const med = num(v.realizedMedianPct);
+      const tailV = tailR?.value || {};
+      const p90 = num(tailV.p90RealizedPct);
+      const tRatio = num(tailV.ratio);
+      richEl.innerHTML = (Number.isFinite(ratio) ? ratio.toFixed(2) + "× median" : "—") + badge(emR.state);
+      const parts = [];
+      if (Number.isFinite(em)) parts.push("EM=" + em.toFixed(2) + "%");
+      if (Number.isFinite(med)) parts.push("med=" + med.toFixed(2) + "%");
+      if (Number.isFinite(tRatio)) parts.push("P90 ratio=" + tRatio.toFixed(2) + "×");
+      if (tailR) parts.push("tail " + (String(tailR.state || "").toUpperCase() === "PASS" ? "PASS" : "FAIL"));
+      richInterp.textContent = parts.length ? parts.join(" · ") : (emR.explain || "—");
+    } else {
+      richEl.innerHTML = "—";
+      richInterp.textContent = "No richness check data available.";
+    }
+  }
 
-  overlay.classList.remove("hidden");
-}
+  // --- Card 3: Options Liquidity ---
+  const liqEl = $("pbLiqState");
+  const liqInterp = $("pbLiqInterp");
+  const liq = byId["SN_LIQUIDITY"] || null;
+  if (liqEl && liqInterp) {
+    if (liq) {
+      const v = liq.value || {};
+      const dvol = num(v.avgDollarVol20d);
+      const agg = v.deltaBandAgg || {};
+      const putSpr = num((agg.put || {}).medianSpread);
+      const callSpr = num((agg.call || {}).medianSpread);
+      const putCov = num((agg.put || {}).coverage);
+      const callCov = num((agg.call || {}).coverage);
+      const dvolTxt = Number.isFinite(dvol) ? "$" + Math.round(dvol / 1e6) + "M" : "—";
+      liqEl.innerHTML = dvolTxt + " 20d avg" + badge(liq.state);
+      const parts = [];
+      if (Number.isFinite(putSpr)) parts.push("P.spr=" + putSpr.toFixed(2));
+      if (Number.isFinite(callSpr)) parts.push("C.spr=" + callSpr.toFixed(2));
+      if (Number.isFinite(putCov)) parts.push("P.cov=" + putCov.toFixed(2));
+      if (Number.isFinite(callCov)) parts.push("C.cov=" + callCov.toFixed(2));
+      liqInterp.textContent = parts.length ? parts.join(" · ") : (liq.explain || "—");
+    } else {
+      liqEl.innerHTML = "—";
+      liqInterp.textContent = "No liquidity check data available.";
+    }
+  }
 
-function goMetricsLine(c) {
-  const id = String(c?.id || "");
-  const v = c?.value || {};
-  // Avoid JS gotcha: Number(null) === 0. Treat null/undefined/"" as "missing".
-  const num = (x) => (x === null || x === undefined || x === "" ? Number.NaN : Number(x));
-  try {
-    if (id === "SN_IV_ELEVATED") {
-      const iv = num(v?.currentIv30Pct);
-      const n = num(v?.sampleN);
-      const p = num(v?.percentile01);
-      const z = num(v?.z);
-      const parts = [];
-      if (Number.isFinite(iv)) parts.push(`IV=${iv.toFixed(2)}%`);
-      if (Number.isFinite(p)) parts.push(`pctl=${p.toFixed(2)}`);
-      if (Number.isFinite(z)) parts.push(`z=${z.toFixed(2)}`);
-      if (Number.isFinite(n)) parts.push(`n=${n.toFixed(0)}`);
-      return parts.join(" · ");
+  // --- Card 4: Macro Overlay ---
+  const macroEl = $("pbMacroState");
+  const macroInterp = $("pbMacroInterp");
+  const gamma = byId["MACRO_GAMMA"] || null;
+  const idxSens = byId["SN_INDEX_SENSITIVITY"] || null;
+  const rvAccel = byId["MACRO_RV_ACCEL"] || null;
+  const gFlip = byId["MACRO_GAMMA_FLIP"] || null;
+  const forced = byId["MACRO_FORCED_FLOWS"] || null;
+  if (macroEl && macroInterp) {
+    // Primary display: dealer gamma sign + magnitude
+    if (gamma) {
+      const gv = gamma.value || {};
+      const sign = String(gv.netGammaSign || "—");
+      const bucket = String(gv.magnitudeBucket || "");
+      macroEl.innerHTML = sign + (bucket ? " · " + bucket : "") + badge(gamma.state);
+    } else {
+      macroEl.innerHTML = "—";
     }
-    if (id === "SN_EM_RICHNESS") {
-      const em = num(v?.expectedMovePct);
-      const med = num(v?.realizedMedianPct);
-      const n = num(v?.nUsed);
-      const r = num(v?.ratio);
-      const parts = [];
-      if (Number.isFinite(em)) parts.push(`EM=${em.toFixed(2)}%`);
-      if (Number.isFinite(med)) parts.push(`med=${med.toFixed(2)}%`);
-      if (Number.isFinite(r)) parts.push(`ratio=${r.toFixed(2)}×`);
-      if (Number.isFinite(n)) parts.push(`n=${n.toFixed(0)}`);
-      return parts.join(" · ");
+    const parts = [];
+    if (idxSens) {
+      const sv = idxSens.value || {};
+      const c20 = num(sv.corr20);
+      const b20 = num(sv.beta20);
+      if (Number.isFinite(c20)) parts.push("corr=" + c20.toFixed(2));
+      if (Number.isFinite(b20)) parts.push("beta=" + b20.toFixed(2));
+      if (sv.sensitive) parts.push("index-sensitive");
     }
-    if (id === "SN_TAIL_P90_RICHNESS") {
-      const em = num(v?.expectedMovePct);
-      const p90 = num(v?.p90RealizedPct);
-      const n = num(v?.nUsed);
-      const r = num(v?.ratio);
-      const parts = [];
-      if (Number.isFinite(em)) parts.push(`EM=${em.toFixed(2)}%`);
-      if (Number.isFinite(p90)) parts.push(`p90=${p90.toFixed(2)}%`);
-      if (Number.isFinite(r)) parts.push(`ratio=${r.toFixed(2)}×`);
-      if (Number.isFinite(n)) parts.push(`n=${n.toFixed(0)}`);
-      return parts.join(" · ");
+    if (rvAccel) {
+      const rv = rvAccel.value || {};
+      const r5 = num(rv.rv5Jump);
+      if (Number.isFinite(r5)) parts.push("RV5=" + r5.toFixed(2) + "×");
     }
-    if (id === "SN_LIQUIDITY") {
-      const dvol = num(v?.avgDollarVol20d);
-      const exp = v?.expiry ? String(v.expiry).slice(5) : "";
-      const src = v?.underlyingSource ? String(v.underlyingSource) : "";
-      const agg = v?.deltaBandAgg || {};
-      const put = agg?.put || {};
-      const call = agg?.call || {};
-      const covP = num(put?.coverage);
-      const covC = num(call?.coverage);
-      const sprP = num(put?.medianSpread);
-      const sprC = num(call?.medianSpread);
-      const oiP = num(put?.sumOI);
-      const oiC = num(call?.sumOI);
-      const volP = num(put?.sumVol);
-      const volC = num(call?.sumVol);
-      const parts = [];
-      if (Number.isFinite(dvol)) parts.push(`$vol20=${Math.round(dvol/1e6)}M`);
-      if (exp) parts.push(`exp=${exp}`);
-      if (src) parts.push(`src=${src}`);
-      if (Number.isFinite(covP) || Number.isFinite(covC)) {
-        const a = Number.isFinite(covP) ? covP.toFixed(2) : "—";
-        const b = Number.isFinite(covC) ? covC.toFixed(2) : "—";
-        parts.push(`cov(P,C)=${a},${b}`);
-      }
-      if (Number.isFinite(sprP) || Number.isFinite(sprC)) {
-        const a = Number.isFinite(sprP) ? sprP.toFixed(2) : "—";
-        const b = Number.isFinite(sprC) ? sprC.toFixed(2) : "—";
-        parts.push(`spr50(P,C)=${a},${b}`);
-      }
-      if (Number.isFinite(oiP) || Number.isFinite(oiC) || Number.isFinite(volP) || Number.isFinite(volC)) {
-        const a = Number.isFinite(oiP) ? oiP.toFixed(0) : "—";
-        const b = Number.isFinite(oiC) ? oiC.toFixed(0) : "—";
-        const c0 = Number.isFinite(volP) ? volP.toFixed(0) : "—";
-        const d0 = Number.isFinite(volC) ? volC.toFixed(0) : "—";
-        parts.push(`OI(P,C)=${a},${b}`);
-        parts.push(`Vol(P,C)=${c0},${d0}`);
-      }
-      return parts.join(" · ");
+    if (forced) {
+      const fv = forced.value || {};
+      const hi = Array.isArray(fv.high) ? fv.high.length : 0;
+      if (hi > 0) parts.push("flows=" + hi + " HIGH");
     }
-    if (id === "MACRO_GAMMA") {
-      const sign = String(v?.netGammaSign || "—");
-      const b = String(v?.magnitudeBucket || "—");
-      const sym = String(v?.symbolUsed || "SPX");
-      return `${sym} · ${sign} · ${b}`;
+    if (gFlip) {
+      const gfv = gFlip.value || {};
+      const mf = num(gfv.minFlipEm);
+      if (Number.isFinite(mf)) parts.push("flip@" + mf.toFixed(2) + "×EM");
     }
-    if (id === "SN_INDEX_SENSITIVITY") {
-      const c20 = num(v?.corr20);
-      const b20 = num(v?.beta20);
-      const sens = v?.sensitive === true;
-      const parts = [];
-      if (Number.isFinite(c20)) parts.push(`corr20=${c20.toFixed(2)}`);
-      if (Number.isFinite(b20)) parts.push(`beta20=${b20.toFixed(2)}`);
-      if (sens) parts.push("tighten");
-      return parts.join(" · ");
-    }
-    if (id === "MACRO_RV_ACCEL") {
-      const r5 = num(v?.rv5Jump);
-      const r20 = num(v?.rv20Jump);
-      const parts = [];
-      if (Number.isFinite(r5)) parts.push(`rv5=${r5.toFixed(2)}×`);
-      if (Number.isFinite(r20)) parts.push(`rv20=${r20.toFixed(2)}×`);
-      return parts.join(" · ");
-    }
-    if (id === "MACRO_GAMMA_FLIP") {
-      const m = num(v?.minFlipEm);
-      const cut = num(v?.cutoffEm);
-      if (Number.isFinite(m) && Number.isFinite(cut)) return `minFlip=${m.toFixed(2)}×EM · cut=${cut.toFixed(2)}`;
-      if (Number.isFinite(m)) return `minFlip=${m.toFixed(2)}×EM`;
-    }
-    if (id === "MACRO_FORCED_FLOWS") {
-      const hi = Array.isArray(v?.high) ? v.high.length : 0;
-      const win = Array.isArray(v?.windowTradingDays) ? v.windowTradingDays.length : null;
-      if (win !== null) return `HIGH=${hi} · window=${win}d`;
-      return `HIGH=${hi}`;
-    }
-    return "";
-  } catch {
-    return "";
+    macroInterp.textContent = parts.length ? parts.join(" · ") : "No macro overlay data.";
   }
 }
 
@@ -2817,6 +2687,9 @@ function render(payload) {
     call.textContent = calls.length ? `Call: ${calls.join(" | ")}` : "Call: —";
   }
 
+  // Earnings Playbook cards (Live Data dropdown)
+  try { renderPlaybookCards(payload?.goNoGo || null); } catch (e) { /* ignore */ }
+
   renderOiClustersCard("market", mg);
   renderOiClustersCard("ticker", tgd);
 
@@ -3276,6 +3149,11 @@ document.addEventListener("DOMContentLoaded", () => {
     seasonal_pattern:"Seasonal Pattern",current_quarter:"Current Quarter",statistical_significance:"Statistical Significance",
     strike_map:"Strike Map",symmetric_vs_asymmetric:"Symmetric vs Asymmetric",tail_multiplier_effect:"Tail Multiplier Effect",
     oi_clusters:"OI Clusters",trade_implications:"Trade Implications",
+    // Earnings Playbook cards
+    iv_read:"IV Read",earnings_context:"Earnings Context",z_score_significance:"Z-Score Significance",risk_implication:"Risk Implication",
+    median_richness:"Median Richness",tail_richness:"Tail Richness",premium_quality:"Premium Quality",structure_guidance:"Structure Guidance",
+    dollar_volume:"Dollar Volume",spread_quality:"Spread Quality",oi_coverage:"OI & Coverage",execution_risk:"Execution Risk",
+    dealer_gamma_backdrop:"Dealer Gamma Backdrop",index_sensitivity:"Index Sensitivity",vol_acceleration:"Vol Acceleration",tail_risks:"Tail Risks",
     desk_takeaway:"Desk Takeaway",
   };
 
@@ -3323,7 +3201,7 @@ document.addEventListener("DOMContentLoaded", () => {
     .catch(function () { e1PopupBody.innerHTML = "<div class='e1InsightLoading' style='color:#ff6b6b;'>Failed to load insight.</div>"; });
   }
 
-  // ── Click: Decision Panel / GO-NO-GO ──
+  // ── Click: Decision Panel ──
   var e1DecisionEl = $("e1DecisionSection");
   if (e1DecisionEl) {
     e1DecisionEl.classList.add("e1Click");
@@ -3331,7 +3209,7 @@ document.addEventListener("DOMContentLoaded", () => {
     e1DecisionEl.addEventListener("click", function (ev) {
       if (!lastPayload) return;
       var data = { goNoGo: lastPayload.goNoGo || {}, summary: lastPayload.summary || {}, ticker: lastPayload.ticker };
-      e1FetchInsight("e1_decision", data, "GO / NO-GO Decision: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+      e1FetchInsight("e1_decision", data, "Decision Panel: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
     });
   }
 
@@ -3450,6 +3328,33 @@ document.addEventListener("DOMContentLoaded", () => {
     qtrEl.addEventListener("click", function (ev) {
       if (!lastPayload || !lastPayload.quarters) return;
       e1FetchInsight("e1_quarter", { quarters: lastPayload.quarters, ticker: lastPayload.ticker }, "Quarter Seasonality: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
+    });
+  }
+
+  // ── Click: Earnings Playbook Cards (Live Data dropdown) ──
+  var pbGrid = $("playbookGrid");
+  if (pbGrid) {
+    pbGrid.addEventListener("click", function (ev) {
+      var card = ev.target.closest(".taCard[data-e1-insight]");
+      if (!card || !lastPayload) return;
+      var insightType = card.getAttribute("data-e1-insight");
+      var title = card.getAttribute("data-e1-title") || insightType;
+      var go = lastPayload.goNoGo || {};
+      var checks = Array.isArray(go.checks) ? go.checks : [];
+      var checkMap = {};
+      for (var ci = 0; ci < checks.length; ci++) checkMap[String(checks[ci].id || "")] = checks[ci];
+
+      var cardData = {};
+      if (insightType === "e1_iv_check") {
+        cardData = { check: checkMap["SN_IV_ELEVATED"] || {}, ticker: lastPayload.ticker, regime: lastPayload.regime || {} };
+      } else if (insightType === "e1_premium_richness") {
+        cardData = { emRichness: checkMap["SN_EM_RICHNESS"] || {}, tailP90: checkMap["SN_TAIL_P90_RICHNESS"] || {}, ticker: lastPayload.ticker, expectedMove: lastPayload.expectedMove || {} };
+      } else if (insightType === "e1_liquidity_check") {
+        cardData = { check: checkMap["SN_LIQUIDITY"] || {}, ticker: lastPayload.ticker };
+      } else if (insightType === "e1_macro_overlay") {
+        cardData = { gamma: checkMap["MACRO_GAMMA"] || {}, indexSensitivity: checkMap["SN_INDEX_SENSITIVITY"] || {}, rvAccel: checkMap["MACRO_RV_ACCEL"] || {}, gammaFlip: checkMap["MACRO_GAMMA_FLIP"] || {}, forcedFlows: checkMap["MACRO_FORCED_FLOWS"] || {}, ticker: lastPayload.ticker, regime: lastPayload.regime || {} };
+      }
+      e1FetchInsight(insightType, cardData, title + ": " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
     });
   }
 
