@@ -288,13 +288,16 @@
       ' <span class="' + pillClass(xa.composite_label) + '">' + (xa.composite_label || "Neutral") + '</span>' +
     '</div>';
 
-    readings.forEach(function (r) {
+    // Store readings for popup access
+    _lastReadings = readings;
+
+    readings.forEach(function (r, idx) {
       var sc = r.stress_score || 50;
       var relCls = "";
       if (r.equity_relationship === "confirming") relCls = "miStressRel--confirming";
       if (r.equity_relationship === "diverging") relCls = "miStressRel--diverging";
 
-      html += '<div class="miStressItem">' +
+      html += '<div class="miStressItem miStressCard" data-reading-idx="' + idx + '" title="Click for desk insight">' +
         '<div class="miStressName">' + (r.name || r.symbol || "") + '</div>' +
         '<div><span class="miStressScore" style="color:' + stressColor(sc) + ';">' + sc.toFixed(0) + '</span>' +
         ' <span class="miStressDir">' + (r.direction || "flat") + '</span></div>' +
@@ -482,6 +485,182 @@
         fetchJSON("/api/front-layer/diff").then(renderDiff).catch(function () {});
       }
       diffPanel.style.display = showDiff ? "block" : "none";
+    });
+  }
+
+  /* ── Asset Insight Popup (dark draggable) ──────── */
+  var _lastReadings = [];
+  var _insightCache = {};  // keyed by asset name to avoid repeat LLM calls
+
+  var insightPopup  = document.getElementById("miInsightPopup");
+  var insightHeader = document.getElementById("miInsightHeader");
+  var insightTitle  = document.getElementById("miInsightTitle");
+  var insightClose  = document.getElementById("miInsightClose");
+  var insightBody   = document.getElementById("miInsightBody");
+
+  // Drag state
+  var _dragState = { isDragging: false, offsetX: 0, offsetY: 0 };
+
+  function startInsightDrag(e) {
+    if (!insightPopup) return;
+    if (e.target.closest(".miInsightClose")) return;
+    _dragState.isDragging = true;
+    insightPopup.classList.add("isDragging");
+    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    var rect = insightPopup.getBoundingClientRect();
+    _dragState.offsetX = clientX - rect.left;
+    _dragState.offsetY = clientY - rect.top;
+    e.preventDefault();
+  }
+
+  function doInsightDrag(e) {
+    if (!_dragState.isDragging) return;
+    if (!insightPopup) return;
+    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    var newX = clientX - _dragState.offsetX;
+    var newY = clientY - _dragState.offsetY;
+    var maxX = window.innerWidth - insightPopup.offsetWidth;
+    var maxY = window.innerHeight - insightPopup.offsetHeight;
+    newX = Math.max(0, Math.min(newX, maxX));
+    newY = Math.max(0, Math.min(newY, maxY));
+    insightPopup.style.left = newX + "px";
+    insightPopup.style.top = newY + "px";
+  }
+
+  function endInsightDrag() {
+    if (!_dragState.isDragging) return;
+    if (insightPopup) insightPopup.classList.remove("isDragging");
+    _dragState.isDragging = false;
+  }
+
+  document.addEventListener("mousemove", doInsightDrag);
+  document.addEventListener("mouseup", endInsightDrag);
+  document.addEventListener("touchmove", doInsightDrag, { passive: false });
+  document.addEventListener("touchend", endInsightDrag);
+
+  function showInsightPopup(reading, clickEvent) {
+    if (!insightPopup) return;
+    var name = reading.name || reading.symbol || "Asset";
+    insightTitle.textContent = name + " — Desk Insight";
+
+    // Loading state
+    insightBody.innerHTML =
+      '<div class="miInsightLoading">' +
+      '<span class="miInsightDot"></span>' +
+      '<span class="miInsightDot"></span>' +
+      '<span class="miInsightDot"></span>' +
+      '<br>Generating desk insight...</div>';
+
+    // Position near click
+    var posX = (clickEvent ? clickEvent.clientX : window.innerWidth / 2) + 20;
+    var posY = (clickEvent ? clickEvent.clientY : window.innerHeight / 2) - 120;
+    if (posX + 420 > window.innerWidth) posX = (clickEvent ? clickEvent.clientX : 200) - 420;
+    if (posX < 16) posX = 16;
+    if (posY < 16) posY = 16;
+    if (posY + 400 > window.innerHeight) posY = window.innerHeight - 420;
+    insightPopup.style.left = posX + "px";
+    insightPopup.style.top = posY + "px";
+    insightPopup.style.display = "block";
+
+    // Attach drag to header
+    insightHeader.removeEventListener("mousedown", startInsightDrag);
+    insightHeader.removeEventListener("touchstart", startInsightDrag);
+    insightHeader.addEventListener("mousedown", startInsightDrag);
+    insightHeader.addEventListener("touchstart", startInsightDrag, { passive: false });
+
+    // Check cache
+    var cacheKey = name;
+    if (_insightCache[cacheKey]) {
+      renderInsight(_insightCache[cacheKey], reading);
+      return;
+    }
+
+    // Fetch from LLM
+    fetch("/api/front-layer/asset-insight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ asset: reading }),
+    })
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (insight) {
+      _insightCache[cacheKey] = insight;
+      renderInsight(insight, reading);
+    })
+    .catch(function (err) {
+      insightBody.innerHTML =
+        '<div class="miInsightText" style="color:rgba(255,200,150,0.8);">Insight unavailable: ' + err.message + '</div>';
+    });
+  }
+
+  function renderInsight(insight, reading) {
+    var sc = (reading.stress_score || 50).toFixed(0);
+    var dir = reading.direction || "flat";
+    var rel = reading.equity_relationship || "neutral";
+    var chg = ((reading.change_vs_prior || 0) >= 0 ? "+" : "") + (reading.change_vs_prior || 0).toFixed(2) + "%";
+
+    var html = '';
+    // Meta row
+    html += '<div class="miInsightMeta">' +
+      '<div class="miInsightMetaItem">Stress Score<br><span class="miInsightMetaValue" style="color:' + stressColor(parseFloat(sc)) + ';">' + sc + '/100</span></div>' +
+      '<div class="miInsightMetaItem">Direction<br><span class="miInsightMetaValue">' + dir + ' (' + chg + ')</span></div>' +
+      '<div class="miInsightMetaItem">vs Equities<br><span class="miInsightMetaValue">' + rel + '</span></div>' +
+      '<div class="miInsightMetaItem">Asset Class<br><span class="miInsightMetaValue">' + (reading.asset_class || "--") + '</span></div>' +
+    '</div>';
+
+    var sections = [
+      { key: "what_its_telling_us", title: "What This Asset Is Telling Us" },
+      { key: "why_it_matters",      title: "Why It Matters for Equities" },
+      { key: "context",             title: "Context" },
+      { key: "desk_takeaway",       title: "Desk Takeaway" },
+    ];
+
+    sections.forEach(function (s) {
+      var val = insight[s.key] || "";
+      if (!val) return;
+      var isDesk = s.key === "desk_takeaway";
+      html += '<div class="miInsightSection">' +
+        '<div class="miInsightSectionTitle">' + s.title + '</div>' +
+        '<div class="miInsightText"' + (isDesk ? ' style="font-weight:700;color:rgba(255,255,255,0.95);"' : '') + '>' + val + '</div>' +
+      '</div>';
+    });
+
+    // Source + fallback reason
+    if (insight._source === "fallback" && insight._fallback_reason) {
+      html += '<div class="miInsightSource" style="color:rgba(255,180,100,0.6);">Fallback: ' + insight._fallback_reason + '</div>';
+    } else if (insight._source === "llm") {
+      html += '<div class="miInsightSource">Generated by LLM &middot; Read-only &middot; Not a trade recommendation</div>';
+    }
+
+    insightBody.innerHTML = html;
+  }
+
+  function hideInsightPopup() {
+    if (insightPopup) insightPopup.style.display = "none";
+  }
+
+  // Close button
+  if (insightClose) {
+    insightClose.addEventListener("click", hideInsightPopup);
+  }
+
+  // Escape to close
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") hideInsightPopup();
+  });
+
+  // Click on stress cards
+  if (stressGrid) {
+    stressGrid.addEventListener("click", function (e) {
+      var card = e.target.closest(".miStressCard");
+      if (!card) return;
+      var idx = parseInt(card.getAttribute("data-reading-idx"), 10);
+      if (isNaN(idx) || !_lastReadings[idx]) return;
+      showInsightPopup(_lastReadings[idx], e);
     });
   }
 

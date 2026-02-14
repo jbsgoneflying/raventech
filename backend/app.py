@@ -68,6 +68,7 @@ from backend.news_theme_intelligence import (
 )
 from backend.front_layer_llm import (
     generate_morning_brief, generate_weekly_roadmap, detect_asymmetries,
+    generate_asset_insight,
 )
 
 
@@ -3818,3 +3819,32 @@ def api_front_layer_backfill_status():
         },
         "days": days,
     }
+
+
+@app.post("/api/front-layer/asset-insight")
+def api_front_layer_asset_insight(body: dict):
+    """Generate a desk-level LLM insight for a single cross-asset stress reading.
+
+    Request body: { "asset": { ...AssetStressReading dict... } }
+    The DMS context is loaded automatically from today's snapshot.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER or not flags.ENABLE_FRONT_LAYER_LLM:
+        raise HTTPException(status_code=503, detail="Front Layer LLM is disabled.")
+
+    asset = body.get("asset")
+    if not asset or not isinstance(asset, dict):
+        raise HTTPException(status_code=400, detail="Missing 'asset' in request body.")
+
+    # Load today's DMS for context
+    today_str = dt.date.today().isoformat()
+    store = get_store_optional()
+    dms_dict = _dms_cache.get(f"dms:{today_str}")
+    if not dms_dict and store:
+        dms_obj = load_dms(today_str, store)
+        if dms_obj:
+            dms_dict = dms_obj.to_dict()
+    dms_dict = dms_dict or {}
+
+    insight = generate_asset_insight(asset, dms_dict)
+    return insight

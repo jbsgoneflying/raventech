@@ -178,6 +178,96 @@
       .miBackfillDot--green { background: var(--green); }
       .miBackfillDot--amber { background: var(--amber); }
 
+      /* Asset insight popup (dark draggable, matches news-risk pattern) */
+      .miInsightPopup {
+        position: fixed;
+        z-index: 10000;
+        width: 400px;
+        max-height: 80vh;
+        overflow-y: auto;
+        border-radius: 16px;
+        background: rgba(28, 28, 30, 0.98);
+        backdrop-filter: blur(40px) saturate(180%);
+        -webkit-backdrop-filter: blur(40px) saturate(180%);
+        box-shadow:
+          0 20px 60px rgba(0, 0, 0, 0.45),
+          0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+        user-select: none;
+        transition: opacity 0.15s ease;
+        color: #fff;
+        display: none;
+      }
+      .miInsightPopup.isDragging { cursor: grabbing; transition: none; }
+      .miInsightHeader {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.06);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        cursor: grab;
+      }
+      .miInsightHeader:active { cursor: grabbing; }
+      .miInsightTitle {
+        font-size: 14px; font-weight: 700; line-height: 1.3;
+        color: #fff; flex: 1;
+      }
+      .miInsightClose {
+        width: 24px; height: 24px; border-radius: 6px; border: none;
+        background: rgba(255, 255, 255, 0.12);
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 16px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s ease;
+      }
+      .miInsightClose:hover {
+        background: rgba(255, 255, 255, 0.20); color: #fff;
+      }
+      .miInsightBody { padding: 16px; }
+      .miInsightSection { margin-bottom: 16px; }
+      .miInsightSection:last-child { margin-bottom: 0; }
+      .miInsightSectionTitle {
+        font-size: 10px; font-weight: 700;
+        color: rgba(255, 255, 255, 0.5);
+        text-transform: uppercase; letter-spacing: 0.5px;
+        margin-bottom: 6px;
+      }
+      .miInsightText {
+        font-size: 12px; font-weight: 500; line-height: 1.5;
+        color: rgba(255, 255, 255, 0.88);
+      }
+      .miInsightMeta {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+        margin-bottom: 14px;
+      }
+      .miInsightMetaItem {
+        font-size: 11px; color: rgba(255, 255, 255, 0.6);
+      }
+      .miInsightMetaValue {
+        font-size: 14px; font-weight: 700; color: #fff;
+      }
+      .miInsightLoading {
+        text-align: center; padding: 32px 16px;
+        color: rgba(255, 255, 255, 0.6); font-size: 12px;
+      }
+      .miInsightDot {
+        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5); margin: 0 2px;
+        animation: miPulse 1.2s ease-in-out infinite;
+      }
+      .miInsightDot:nth-child(2) { animation-delay: 0.2s; }
+      .miInsightDot:nth-child(3) { animation-delay: 0.4s; }
+      @keyframes miPulse {
+        0%, 100% { opacity: 0.3; } 50% { opacity: 1; }
+      }
+      .miInsightSource {
+        font-size: 10px; color: rgba(255, 255, 255, 0.35);
+        text-align: right; margin-top: 12px; font-style: italic;
+      }
+      /* Make stress cards clickable */
+      .miStressCard { cursor: pointer; transition: box-shadow 0.15s ease; }
+      .miStressCard:hover {
+        box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      }
+
       /* Diff toggle */
       .miDiffBtn {
         font-size: 11px; font-weight: 700; padding: 4px 12px;
@@ -358,6 +448,22 @@
       </div>
 
     </main>
+
+    <!-- ── Asset Insight Popup (dark draggable) ───── -->
+    <div class="miInsightPopup" id="miInsightPopup">
+      <div class="miInsightHeader" id="miInsightHeader">
+        <span class="miInsightTitle" id="miInsightTitle">Asset Insight</span>
+        <button class="miInsightClose" id="miInsightClose" type="button">&times;</button>
+      </div>
+      <div class="miInsightBody" id="miInsightBody">
+        <div class="miInsightLoading">
+          <span class="miInsightDot"></span>
+          <span class="miInsightDot"></span>
+          <span class="miInsightDot"></span>
+          <br>Generating desk insight...
+        </div>
+      </div>
+    </div>
 
     <script src="/static/nav.js"></script>
     <script src="/static/market-intelligence.js"></script>

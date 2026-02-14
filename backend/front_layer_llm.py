@@ -322,6 +322,125 @@ def generate_weekly_roadmap(
 
 
 # ---------------------------------------------------------------------------
+# Asset Insight (desk-level LLM tooltip)
+# ---------------------------------------------------------------------------
+
+_ASSET_INSIGHT_SYSTEM = """You are a senior cross-asset desk strategist at a proprietary trading firm.
+
+Given a single asset's stress reading and the broader market context (DailyMarketState),
+produce a concise, desk-ready insight explaining:
+
+1. WHAT THIS ASSET IS TELLING US — plain English, no jargon. What is this move or lack of move signaling?
+2. WHY IT MATTERS FOR EQUITIES — how does this asset historically relate to US equity risk?
+3. CONTEXT — is today's reading unusual vs recent history? Is it confirming or contradicting other signals?
+4. DESK TAKEAWAY — one sentence: what should the desk do with this information?
+
+Rules:
+- Never recommend specific trades or positions
+- Never mention prices, P&L, or dollar amounts
+- Always cite the stress score, direction, and equity relationship in your reasoning
+- Use the regime, flow pressure, and theme context to add depth
+- Keep total response under 200 words
+- Be direct and actionable in tone — this is for professional traders
+
+Return valid JSON:
+{
+  "what_its_telling_us": "...",
+  "why_it_matters": "...",
+  "context": "...",
+  "desk_takeaway": "..."
+}"""
+
+_ASSET_INSIGHT_REQUIRED_KEYS = {"what_its_telling_us", "why_it_matters", "context", "desk_takeaway"}
+
+
+def generate_asset_insight(
+    asset_reading: dict,
+    dms_summary: dict,
+) -> Dict[str, Any]:
+    """Generate a desk-level LLM insight for a single cross-asset stress reading.
+
+    Args:
+        asset_reading: Single AssetStressReading dict (symbol, name, stress_score, etc.)
+        dms_summary: Condensed DailyMarketState context (regime, flow, vol, themes).
+
+    Returns:
+        Dict with insight sections + _source tag.
+    """
+    fallback = {
+        "what_its_telling_us": "Insight unavailable. Review the stress score and direction above.",
+        "why_it_matters": "Check the equity relationship label for confirmation or divergence signals.",
+        "context": "Compare today's reading against recent history in the DMS diff panel.",
+        "desk_takeaway": "Use the composite stress score and individual readings to inform positioning.",
+        "_source": "fallback",
+    }
+
+    if not _rate_limiter.acquire():
+        LOG.info("Asset insight rate-limited; returning fallback")
+        fallback["_fallback_reason"] = "Rate limited (max 4 calls/minute). Wait a moment and try again."
+        return fallback
+
+    client = _get_openai_client()
+    if client is None:
+        fallback["_fallback_reason"] = "OpenAI client unavailable"
+        return fallback
+
+    # Build compact context
+    context = {
+        "asset": asset_reading,
+        "market": {
+            "regime": dms_summary.get("regime", {}),
+            "flow_pressure": dms_summary.get("flow_pressure", {}),
+            "vol_state": dms_summary.get("vol_state", {}),
+            "composite_stress": dms_summary.get("cross_asset_stress", {}).get("composite_score"),
+            "composite_label": dms_summary.get("cross_asset_stress", {}).get("composite_label"),
+            "dominant_theme": next(
+                (t.get("theme") for t in dms_summary.get("news_themes", [])
+                 if float(t.get("intensity", 0)) > 20), None
+            ),
+        },
+    }
+
+    payload_str = json.dumps(context, default=str)
+    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-4o-mini").strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _ASSET_INSIGHT_SYSTEM},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=0.3,
+            max_tokens=400,
+            timeout=12,
+        )
+
+        content = response.choices[0].message.content.strip()
+        result = _parse_llm_json(content)
+
+        if result is None or not _ASSET_INSIGHT_REQUIRED_KEYS.issubset(set(result.keys())):
+            LOG.warning("Asset insight LLM response missing required keys")
+            fallback["_fallback_reason"] = "LLM returned invalid JSON"
+            return fallback
+
+        insight = {}
+        for key in _ASSET_INSIGHT_REQUIRED_KEYS:
+            val = result.get(key, "")
+            insight[key] = str(val)[:400]
+
+        insight["_source"] = "llm"
+        insight["_asset"] = asset_reading.get("name", "")
+        return insight
+
+    except Exception as e:
+        reason = f"{type(e).__name__}: {e}"
+        LOG.warning("Asset insight LLM call failed: %s", reason)
+        fallback["_fallback_reason"] = reason
+        return fallback
+
+
+# ---------------------------------------------------------------------------
 # Asymmetry Radar (deterministic – NOT LLM)
 # ---------------------------------------------------------------------------
 
