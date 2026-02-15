@@ -101,3 +101,14 @@ export const polymarketConfig = {
 export const discoveryConfig = {
   intervalMs: envInt("MARKET_DISCOVERY_INTERVAL_MS", 300_000),
 };
+
+// ─── Email Alerts ────────────────────────────────────────────
+
+export const emailConfig = {
+  enabled: process.env.EMAIL_ALERTS_ENABLED === "1",
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
+  from: process.env.EMAIL_ALERT_FROM ?? "Flow Monitor <alerts@raven-tech.co>",
+  to: process.env.EMAIL_ALERT_TO ?? "",
+  scoreThreshold: envInt("EMAIL_SCORE_THRESHOLD", 70),
+  maxPerHour: envInt("EMAIL_MAX_PER_HOUR", 10),
+};

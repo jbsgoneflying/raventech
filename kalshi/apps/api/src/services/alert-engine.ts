@@ -8,6 +8,7 @@ import { getCooldown, setCooldown } from "./redis-windows.js";
 import { db, schema } from "../db/index.js";
 import { eq, and, gte } from "drizzle-orm";
 import { sseBroadcaster } from "./sse.js";
+import { maybeSendEmailAlert } from "./email-alerts.js";
 import { logger } from "../logger.js";
 
 /**
@@ -122,6 +123,20 @@ export async function evaluateTrade(features: TradeFeature): Promise<Alert | nul
 
   // 7. Broadcast via SSE
   sseBroadcaster.broadcastAlert(alert);
+
+  // 8. Email alert for high-conviction trades (non-blocking)
+  maybeSendEmailAlert({
+    id: alert.id,
+    market_ticker: alert.market_ticker,
+    market_title: alert.market_title ?? alert.market_ticker,
+    alert_type: alert.alert_type,
+    anomaly_score: alert.anomaly_score,
+    reason: alert.reason,
+    exchange: alert.exchange ?? "kalshi",
+    close_time: alert.close_time,
+    last_price_cents: alert.last_price_cents,
+    explanation: result.explanation as Record<string, unknown>,
+  }).catch(() => {});
 
   logger.info(
     {

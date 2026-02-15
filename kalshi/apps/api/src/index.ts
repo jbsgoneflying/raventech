@@ -25,6 +25,7 @@ import { alertsRouter } from "./routes/alerts.js";
 import { marketsRouter } from "./routes/markets.js";
 import { configRouter } from "./routes/config.js";
 import { isAuthAvailable } from "./kalshi/auth.js";
+import { initEmailAlerts } from "./services/email-alerts.js";
 import { logger } from "./logger.js";
 
 async function main() {
@@ -116,6 +117,9 @@ async function main() {
     ? "Kalshi auth ACTIVE (full API access)"
     : "Kalshi auth NOT CONFIGURED (public channels only)"
   );
+
+  // 3a. Initialize email alerts
+  initEmailAlerts();
 
   // 3. Start Express server
   const app = express();
