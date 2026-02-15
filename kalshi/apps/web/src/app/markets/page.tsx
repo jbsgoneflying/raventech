@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getMarkets, type MarketRow } from "@/lib/api";
 import { centsToProb, formatTtc } from "@/lib/format";
 import { ExchangeBadge, ExchangeFilter } from "@/components/ExchangeBadge";
@@ -69,12 +70,12 @@ export default function MarketsPage() {
                     <ExchangeBadge exchange={m.exchange} />
                   </td>
                   <td className="py-2 pr-3">
-                    <a
+                    <Link
                       href={`/market/${m.ticker}`}
                       className="text-blue-400 hover:text-blue-300 hover:underline"
                     >
                       {m.title}
-                    </a>
+                    </Link>
                     <div className="text-[10px] text-gray-600 font-mono">{m.ticker}</div>
                   </td>
                   <td className="py-2 pr-3 font-mono text-xs">{centsToProb(m.last_price_cents)}</td>

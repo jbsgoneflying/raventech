@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  basePath: "/flow-monitor",
   transpilePackages: ["@kalshi-monitor/shared"],
   async rewrites() {
     return [

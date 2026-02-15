@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
+import Link from "next/link";
 import { useSSE } from "@/hooks/useSSE";
 import { getAlerts, type AlertRow } from "@/lib/api";
 import { timeAgo, formatTtc, centsToProb, alertTypeBadge } from "@/lib/format";
@@ -142,12 +143,12 @@ function AlertRowComponent({ alert }: { alert: AlertRow }) {
         <ExchangeBadge exchange={alert.exchange} />
       </td>
       <td className="py-2.5 pr-3">
-        <a
+        <Link
           href={`/market/${alert.market_ticker}`}
           className="text-blue-400 hover:text-blue-300 hover:underline"
         >
           {alert.market_title ?? alert.market_ticker}
-        </a>
+        </Link>
       </td>
       <td className="py-2.5 pr-3">
         <ScoreBar score={alert.anomaly_score} />

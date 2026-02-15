@@ -15,6 +15,7 @@
     { href: "/calendar",        label: "Earnings Calendar", desc: "Mega-cap earnings dates and compare workflow" },
     { href: "/compare",         label: "Compare",         desc: "Multi-ticker side-by-side" },
     { href: "/news-risk",       label: "News Risk",       desc: "Macro events and headline risk" },
+    { href: "/flow-monitor",    label: "Flow Monitor",    desc: "Prediction market unusual activity detection" },
   ];
 
   /* Which nav item matches the current URL? */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { getMarketDetail, type MarketDetail, type AlertRow } from "@/lib/api";
 import { useSSE } from "@/hooks/useSSE";
@@ -95,7 +96,7 @@ export default function MarketPage() {
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-1">
-          <a href="/alerts" className="text-gray-600 hover:text-gray-400 text-sm">&larr; Alerts</a>
+          <Link href="/alerts" className="text-gray-600 hover:text-gray-400 text-sm">&larr; Alerts</Link>
           <span className="text-gray-700">/</span>
           <span className="font-mono text-xs text-gray-500">{market.ticker}</span>
         </div>
