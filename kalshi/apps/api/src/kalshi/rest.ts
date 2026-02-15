@@ -64,6 +64,9 @@ async function kalshiGet<T>(
   const url = `${kalshiConfig.baseUrl}/trade-api/v2${path}`;
   const authHeaders = needsAuth ? createAuthHeaders("GET", `/trade-api/v2${path}`) : {};
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+
   const res = await fetch(url, {
     method: "GET",
     headers: {
@@ -71,7 +74,10 @@ async function kalshiGet<T>(
       Accept: "application/json",
       ...authHeaders,
     },
+    signal: controller.signal,
   });
+
+  clearTimeout(timeout);
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -103,7 +109,7 @@ export async function getMarkets(params: GetMarketsParams = {}): Promise<{
   if (params.series_ticker) qs.set("series_ticker", params.series_ticker);
 
   const path = `/markets${qs.toString() ? "?" + qs.toString() : ""}`;
-  const raw = await kalshiGet(path, false);
+  const raw = await kalshiGet(path, isAuthAvailable());
   const parsed = KalshiGetMarketsResponseSchema.safeParse(raw);
 
   if (!parsed.success) {

@@ -88,9 +88,23 @@ export async function discoverPolymarketMarkets(): Promise<void> {
     const tokenMapEntries: Array<{ assetId: string; conditionId: string }> = [];
     const allAssetIds: string[] = [];
 
+    // Log first event structure for debugging
+    if (events.length > 0) {
+      const sampleEvent = events[0];
+      const sampleMarket = (sampleEvent.markets ?? [])[0];
+      logger.info({
+        eventKeys: Object.keys(sampleEvent),
+        hasMarkets: Array.isArray(sampleEvent.markets),
+        marketsCount: sampleEvent.markets?.length ?? 0,
+        sampleMarketKeys: sampleMarket ? Object.keys(sampleMarket) : [],
+        sampleConditionId: sampleMarket?.condition_id,
+        sampleActive: sampleMarket?.active,
+      }, "Polymarket sample event structure");
+    }
+
     for (const event of events) {
       for (const market of event.markets ?? []) {
-        if (!market.condition_id || !market.active) continue;
+        if (!market.condition_id) continue;
 
         const normalized = normalizePolyMarket(event, market);
 
@@ -159,7 +173,9 @@ export async function discoverMarkets(): Promise<void> {
   const [kalshiResult, polyResult] = await Promise.allSettled([
     (async () => {
       try {
+        logger.info("Fetching Kalshi markets from REST API...");
         const markets = await getAllOpenMarkets();
+        logger.info({ total: markets.length }, "Fetched Kalshi markets, upserting...");
         const count = await upsertMarkets(markets);
         logger.info(
           { count, total: markets.length, durationMs: Date.now() - start },
