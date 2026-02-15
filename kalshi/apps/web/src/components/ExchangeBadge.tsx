@@ -1,7 +1,8 @@
 /**
- * Exchange badge component: displays a colored pill indicating
- * which prediction market exchange a row comes from.
+ * Exchange badge and filter components for the light Raven Tech theme.
  */
+
+import { InfoTip } from "./InfoTip";
 
 interface ExchangeBadgeProps {
   exchange: string;
@@ -12,12 +13,12 @@ const EXCHANGE_STYLES: Record<string, { label: string; abbr: string; color: stri
   kalshi: {
     label: "Kalshi",
     abbr: "K",
-    color: "bg-emerald-900/60 text-emerald-400 border border-emerald-700/50",
+    color: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   },
   polymarket: {
     label: "Polymarket",
     abbr: "P",
-    color: "bg-blue-900/60 text-blue-400 border border-blue-700/50",
+    color: "bg-blue-100 text-blue-700 border border-blue-200",
   },
 };
 
@@ -25,7 +26,7 @@ export function ExchangeBadge({ exchange, className = "" }: ExchangeBadgeProps) 
   const style = EXCHANGE_STYLES[exchange] ?? {
     label: exchange,
     abbr: exchange.charAt(0).toUpperCase(),
-    color: "bg-gray-800 text-gray-400 border border-gray-700",
+    color: "bg-gray-100 text-gray-600 border border-gray-200",
   };
 
   return (
@@ -38,9 +39,6 @@ export function ExchangeBadge({ exchange, className = "" }: ExchangeBadgeProps) 
   );
 }
 
-/**
- * Dropdown for filtering by exchange.
- */
 interface ExchangeFilterProps {
   value: string;
   onChange: (value: string) => void;
@@ -49,11 +47,20 @@ interface ExchangeFilterProps {
 export function ExchangeFilter({ value, onChange }: ExchangeFilterProps) {
   return (
     <div className="flex items-center gap-2">
-      <label className="text-xs text-gray-500 uppercase tracking-wider">Exchange</label>
+      <label className="text-[11px] text-raven-muted uppercase tracking-wider font-semibold">
+        Exchange
+        <InfoTip title="Exchange Filter">
+          <p>Filter by prediction market exchange.</p>
+          <ul>
+            <li><b>Kalshi</b>: U.S. regulated event contracts.</li>
+            <li><b>Polymarket</b>: Crypto-settled, larger political markets.</li>
+          </ul>
+        </InfoTip>
+      </label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-surface-200 border border-surface-300 text-sm rounded px-2 py-1 text-gray-300"
+        className="bg-white border border-raven-border text-[13px] rounded-[10px] px-2.5 py-1 text-raven-text"
       >
         <option value="">All</option>
         <option value="kalshi">Kalshi</option>

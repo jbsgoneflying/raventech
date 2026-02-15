@@ -17,39 +17,31 @@ export function PriceChart({ trades }: { trades: Array<{ created_time: string; y
 
     let cleanup = () => {};
 
-    // Dynamic import to avoid SSR issues
     import("lightweight-charts").then(({ createChart, LineStyle }) => {
       if (!containerRef.current) return;
 
-      // Clear previous chart
       containerRef.current.innerHTML = "";
 
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth,
         height: 250,
         layout: {
-          background: { color: "#111118" },
-          textColor: "#94a3b8",
+          background: { color: "transparent" },
+          textColor: "rgba(11, 11, 15, 0.48)",
           fontSize: 11,
+          fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
         },
         grid: {
-          vertLines: { color: "#1e1e28" },
-          horzLines: { color: "#1e1e28" },
+          vertLines: { color: "rgba(15, 23, 42, 0.06)" },
+          horzLines: { color: "rgba(15, 23, 42, 0.06)" },
         },
-        crosshair: {
-          mode: 0,
-        },
-        rightPriceScale: {
-          borderColor: "#2a2a36",
-        },
-        timeScale: {
-          borderColor: "#2a2a36",
-          timeVisible: true,
-        },
+        crosshair: { mode: 0 },
+        rightPriceScale: { borderColor: "rgba(15, 23, 42, 0.10)" },
+        timeScale: { borderColor: "rgba(15, 23, 42, 0.10)", timeVisible: true },
       });
 
       const series = chart.addLineSeries({
-        color: "#10b981",
+        color: "rgba(52, 199, 89, 0.95)",
         lineWidth: 2,
         priceFormat: {
           type: "custom",
@@ -57,7 +49,6 @@ export function PriceChart({ trades }: { trades: Array<{ created_time: string; y
         },
       });
 
-      // Convert trades to chart data (deduplicate by second)
       const pointMap = new Map<number, number>();
       for (const t of trades) {
         const ts = Math.floor(new Date(t.created_time).getTime() / 1000);
@@ -75,7 +66,6 @@ export function PriceChart({ trades }: { trades: Array<{ created_time: string; y
 
       chartRef.current = chart;
 
-      // Resize handler
       const onResize = () => {
         if (containerRef.current) {
           chart.applyOptions({ width: containerRef.current.clientWidth });
@@ -93,22 +83,16 @@ export function PriceChart({ trades }: { trades: Array<{ created_time: string; y
   }, [trades]);
 
   return (
-    <div className="bg-surface-50 rounded-lg border border-surface-300 p-4">
-      <h3 className="text-sm font-medium text-gray-400 mb-3">
+    <div className="surface">
+      <h3 className="text-[13px] font-semibold text-raven-muted mb-3">
         Price (Yes %)
         <InfoTip title="Price Chart">
-          <p>Real-time price of the &ldquo;Yes&rdquo; outcome plotted over time. Each point is a trade that executed.</p>
-          <ul>
-            <li><b>Sharp moves up</b>: Aggressive buying — someone is rapidly increasing their Yes position.</li>
-            <li><b>Sharp moves down</b>: Heavy selling or No-side buying.</li>
-            <li><b>Flat then spike</b>: A quiet market that suddenly got attention — classic late/heavy flow pattern.</li>
-          </ul>
-          <p><b>Desk view</b>: Look for the price move that corresponds to a flagged trade in the tape below. That tells you exactly when the informed flow hit and how much it moved the market.</p>
+          <p>Real-time &ldquo;Yes&rdquo; price over time. Sharp moves correspond to aggressive flow. Look for the spike matching a flagged trade.</p>
         </InfoTip>
       </h3>
       <div ref={containerRef} className="w-full" />
       {trades.length === 0 && (
-        <div className="h-[250px] flex items-center justify-center text-gray-600 text-sm">
+        <div className="h-[250px] flex items-center justify-center text-raven-muted2 text-sm">
           No trade data available
         </div>
       )}

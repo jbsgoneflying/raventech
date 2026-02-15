@@ -19,24 +19,18 @@ interface Props {
 
 export function TradeTape({ trades, flaggedTradeIds = new Set() }: Props) {
   return (
-    <div className="bg-surface-50 rounded-lg border border-surface-300 p-4">
-      <h3 className="text-sm font-medium text-gray-400 mb-3">
+    <div className="surface">
+      <h3 className="text-[13px] font-semibold text-raven-muted mb-3">
         Recent Trades
-        <span className="text-xs text-gray-600 ml-2">({trades.length})</span>
+        <span className="text-xs text-raven-muted2 ml-2">({trades.length})</span>
         <InfoTip title="Trade Tape">
-          <p>Live stream of individual trades as they execute. Each row shows time, direction (BUY = taker bought Yes, SELL = taker bought No), size, and price.</p>
-          <ul>
-            <li><b>FLAGGED</b> (red highlight): This trade triggered an anomaly alert — it was outsized, aggressive, or timed unusually.</li>
-            <li><b>Clusters of BUYs</b>: Persistent demand on the Yes side.</li>
-            <li><b>Large single prints</b>: Likely institutional or high-conviction retail.</li>
-          </ul>
-          <p><b>Desk view</b>: Watch the tape for follow-through after a flagged trade. If more flow comes in the same direction, it confirms the signal. If it reverses, someone may be fading the move.</p>
+          <p>Live stream of individual trades. <b>FLAGGED</b> = this trade triggered an anomaly alert. Watch for follow-through after flagged prints.</p>
         </InfoTip>
       </h3>
 
       <div className="max-h-[400px] overflow-y-auto space-y-0.5">
         {trades.length === 0 ? (
-          <div className="py-8 text-center text-gray-600 text-sm">No trades</div>
+          <div className="py-8 text-center text-raven-muted2 text-sm">No trades</div>
         ) : (
           trades.map((trade) => {
             const isFlagged = flaggedTradeIds.has(trade.trade_id);
@@ -47,19 +41,19 @@ export function TradeTape({ trades, flaggedTradeIds = new Set() }: Props) {
                 key={trade.trade_id}
                 className={`flex items-center justify-between px-2 py-1 rounded text-xs font-mono ${
                   isFlagged
-                    ? "trade-flagged bg-red-500/5"
-                    : "hover:bg-surface-200/50"
+                    ? "trade-flagged"
+                    : "hover:bg-raven-hover"
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-gray-600 w-16">{timeAgo(trade.created_time)}</span>
-                  <span className={isYes ? "text-green-400" : "text-red-400"}>
+                  <span className="text-raven-muted2 w-16">{timeAgo(trade.created_time)}</span>
+                  <span className={isYes ? "text-[var(--green)] font-semibold" : "text-[var(--red)] font-semibold"}>
                     {isYes ? "BUY" : "SELL"}
                   </span>
-                  <span className="text-gray-300">{trade.count} @ {trade.yes_price_cents}%</span>
+                  <span className="text-raven-text">{trade.count} @ {trade.yes_price_cents}%</span>
                 </div>
                 {isFlagged && (
-                  <span className="text-red-400 text-[10px] uppercase tracking-wider">flagged</span>
+                  <span className="text-[var(--red)] text-[10px] uppercase tracking-wider font-bold">flagged</span>
                 )}
               </div>
             );

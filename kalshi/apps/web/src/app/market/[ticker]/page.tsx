@@ -35,7 +35,6 @@ export default function MarketPage() {
       });
   }, [ticker]);
 
-  // SSE for real-time updates on this market
   const handleTrade = useCallback((tradeData: Record<string, unknown>) => {
     if (tradeData.market_ticker !== ticker) return;
     setData((prev) => {
@@ -76,7 +75,7 @@ export default function MarketPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="text-gray-500">Loading market data...</span>
+        <span className="text-raven-muted">Loading market data...</span>
       </div>
     );
   }
@@ -84,7 +83,7 @@ export default function MarketPage() {
   if (error || !data) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="text-red-400">{error ?? "Market not found"}</span>
+        <span className="text-[var(--red)]">{error ?? "Market not found"}</span>
       </div>
     );
   }
@@ -97,59 +96,50 @@ export default function MarketPage() {
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-1">
-          <Link href="/alerts" className="text-gray-600 hover:text-gray-400 text-sm">&larr; Alerts</Link>
-          <span className="text-gray-700">/</span>
-          <span className="font-mono text-xs text-gray-500">{market.ticker}</span>
+          <Link href="/alerts" className="text-raven-muted2 hover:text-raven-text text-sm font-medium">&larr; Alerts</Link>
+          <span className="text-raven-border">/</span>
+          <span className="font-mono text-xs text-raven-muted2">{market.ticker}</span>
         </div>
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold text-white">{market.title}</h2>
+          <h2 className="text-xl font-bold text-raven-text tracking-tight">{market.title}</h2>
           <ExchangeBadge exchange={market.exchange} />
         </div>
-        <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+        <div className="flex items-center gap-4 mt-2 text-[13px] text-raven-muted">
           <div className="flex items-center">
-            <span className="text-gray-600">Last: </span>
-            <span className="text-white font-mono ml-1">{centsToProb(market.last_price_cents)}</span>
+            <span className="text-raven-muted2">Last: </span>
+            <span className="text-raven-text font-mono font-semibold ml-1">{centsToProb(market.last_price_cents)}</span>
             <InfoTip title="Last Trade Price">
-              <p>The most recent traded price for the &ldquo;Yes&rdquo; outcome, expressed as a probability.</p>
-              <p><b>Desk view</b>: This is the market&apos;s real-time consensus. Compare to your own thesis — if you think the true probability is significantly different, that&apos;s your edge.</p>
+              <p>Most recent traded price for &ldquo;Yes,&rdquo; expressed as a probability.</p>
             </InfoTip>
           </div>
           <div className="flex items-center">
-            <span className="text-gray-600">Bid/Ask: </span>
+            <span className="text-raven-muted2">Bid/Ask: </span>
             <span className="font-mono ml-1">
               {centsToProb(market.yes_bid_cents)} / {centsToProb(market.yes_ask_cents)}
             </span>
             <InfoTip title="Bid / Ask Spread">
-              <p>Best available bid (what buyers will pay) and ask (what sellers want) for &ldquo;Yes.&rdquo; The gap between them is the spread.</p>
-              <ul>
-                <li><b>Tight spread</b> (&lt;2%): Liquid market, easy to enter/exit.</li>
-                <li><b>Wide spread</b> (&gt;5%): Illiquid — your order may move the price. Be careful sizing.</li>
-              </ul>
-              <p><b>Desk view</b>: Wide spreads amplify the signal of aggressive trades (sweeps/impacts). A sweep through a wide book is very high conviction.</p>
+              <p>Best bid and ask for &ldquo;Yes.&rdquo; Tight = liquid. Wide = careful sizing.</p>
             </InfoTip>
           </div>
           <div className="flex items-center">
-            <span className="text-gray-600">Vol: </span>
+            <span className="text-raven-muted2">Vol: </span>
             <span className="font-mono ml-1">{market.volume?.toLocaleString() ?? "—"}</span>
             <InfoTip title="Volume">
-              <p>Total number of contracts traded in this market (lifetime or daily, depending on exchange).</p>
-              <p><b>Desk view</b>: High volume means more participants and more reliable price discovery. Low-volume markets are where unusual flow is most impactful — one big trade can move the price significantly.</p>
+              <p>Total contracts traded. Low volume = outsized flow is more impactful.</p>
             </InfoTip>
           </div>
           <div className="flex items-center">
-            <span className="text-gray-600">OI: </span>
+            <span className="text-raven-muted2">OI: </span>
             <span className="font-mono ml-1">{market.open_interest?.toLocaleString() ?? "—"}</span>
             <InfoTip title="Open Interest">
-              <p>Number of outstanding (unsettled) contracts. Represents total capital committed to this market.</p>
-              <p><b>Desk view</b>: Rising OI with price movement = new money entering (confirming the move). Rising OI with flat price = building tension, breakout ahead.</p>
+              <p>Outstanding contracts. Rising OI + price move = new money confirming.</p>
             </InfoTip>
           </div>
           <div className="flex items-center">
-            <span className="text-gray-600">Close: </span>
+            <span className="text-raven-muted2">Close: </span>
             <span className="font-mono ml-1">{formatTtc(market.close_time)}</span>
-            <InfoTip title="Market Close / Expiry">
-              <p>When this market expires and settles to its final outcome (Yes = 100%, No = 0%).</p>
-              <p><b>Desk view</b>: Markets approaching close have the highest-signal flow. Trades within hours of expiry are from participants with strong, time-sensitive conviction. This is where front-running value is highest.</p>
+            <InfoTip title="Market Close">
+              <p>Time until expiry and settlement. Near-close trades are highest signal.</p>
             </InfoTip>
           </div>
         </div>
@@ -157,13 +147,10 @@ export default function MarketPage() {
 
       {/* Main grid */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Left: Chart + Trade Tape */}
         <div className="col-span-8 space-y-4">
           <PriceChart trades={trades} />
           <TradeTape trades={trades} flaggedTradeIds={flaggedTradeIds} />
         </div>
-
-        {/* Right: Order Book + Features + Alert History */}
         <div className="col-span-4 space-y-4">
           <OrderBookDepth book={book} />
           <FeaturePanel alerts={alerts} />

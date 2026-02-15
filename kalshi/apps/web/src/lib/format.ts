@@ -49,14 +49,14 @@ export function timeAgo(iso: string): string {
 export function alertTypeBadge(type: string): { label: string; color: string } {
   switch (type) {
     case "LARGE_LATE_PRINT":
-      return { label: "Late Print", color: "bg-red-500/20 text-red-400" };
+      return { label: "Late Print", color: "bg-red-100 text-red-700" };
     case "LIQUIDITY_SWEEP":
-      return { label: "Sweep", color: "bg-yellow-500/20 text-yellow-400" };
+      return { label: "Sweep", color: "bg-amber-100 text-amber-700" };
     case "FAST_PRICE_IMPACT":
-      return { label: "Impact", color: "bg-blue-500/20 text-blue-400" };
+      return { label: "Impact", color: "bg-blue-100 text-blue-700" };
     case "SUSTAINED_IMBALANCE":
-      return { label: "Imbalance", color: "bg-purple-500/20 text-purple-400" };
+      return { label: "Imbalance", color: "bg-purple-100 text-purple-700" };
     default:
-      return { label: type, color: "bg-gray-500/20 text-gray-400" };
+      return { label: type, color: "bg-gray-100 text-gray-600" };
   }
 }
