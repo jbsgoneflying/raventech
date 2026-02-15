@@ -609,6 +609,10 @@ if (document.readyState === "loading") {
     var sig = allSignals.find(function(s) { return s.ticker === ticker; });
     if (!sig) return;
     ev.stopPropagation();
+    // Open Position Calculator alongside the desk insight (same as Red Dog)
+    if (window.PositionCalculator) {
+      window.PositionCalculator.open(sig, ev);
+    }
     fetchInsight("ik_signal", sig, "Ichimoku: " + ticker + " (" + (sig.direction || "") + ")", ev.clientX, ev.clientY);
   }
   if (actionableGrid) actionableGrid.addEventListener("click", onCardClick);
