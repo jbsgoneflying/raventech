@@ -97,7 +97,7 @@ export async function discoverPolymarketMarkets(): Promise<void> {
         hasMarkets: Array.isArray(sampleEvent.markets),
         marketsCount: sampleEvent.markets?.length ?? 0,
         sampleMarketKeys: sampleMarket ? Object.keys(sampleMarket) : [],
-        sampleConditionId: sampleMarket?.condition_id,
+        sampleConditionId: sampleMarket?.conditionId,
         sampleActive: sampleMarket?.active,
       }, "Polymarket sample event structure");
     }
