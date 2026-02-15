@@ -12,7 +12,11 @@
 
 import express from "express";
 import cors from "cors";
-import { serverConfig, kalshiConfig, polymarketConfig } from "./config.js";
+import pg from "pg";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { serverConfig, kalshiConfig, polymarketConfig, dbConfig } from "./config.js";
 import { pool } from "./db/index.js";
 import { connectRedis, disconnectRedis } from "./services/redis-windows.js";
 import { startMarketDiscovery } from "./services/market-discovery.js";
@@ -47,7 +51,62 @@ async function main() {
     process.exit(1);
   }
 
-  // 2. Log auth status
+  // 2. Run database migrations
+  logger.info("Running database migrations...");
+  try {
+    const migClient = new pg.Client({ connectionString: dbConfig.url });
+    await migClient.connect();
+
+    await migClient.query(`
+      CREATE TABLE IF NOT EXISTS _migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    // In Docker, __dirname is /app/apps/api/dist/ and migrations are at ../src/db/migrations
+    // Locally, __dirname is .../src/ and migrations are at ./db/migrations
+    const candidates = [
+      path.resolve(__dirname, "../src/db/migrations"),
+      path.resolve(__dirname, "db/migrations"),
+    ];
+    const actualDir = candidates.find((d) => fs.existsSync(d)) ?? candidates[0];
+    const migrationFiles = fs.existsSync(actualDir)
+      ? fs.readdirSync(actualDir).filter((f) => f.endsWith(".sql")).sort()
+      : [];
+
+    for (const file of migrationFiles) {
+      const { rows } = await migClient.query("SELECT 1 FROM _migrations WHERE name = $1", [file]);
+      if (rows.length > 0) {
+        logger.info({ file }, "Migration already applied");
+        continue;
+      }
+
+      const sql = fs.readFileSync(path.join(actualDir, file), "utf-8");
+      logger.info({ file }, "Applying migration...");
+
+      await migClient.query("BEGIN");
+      try {
+        await migClient.query(sql);
+        await migClient.query("INSERT INTO _migrations (name) VALUES ($1)", [file]);
+        await migClient.query("COMMIT");
+        logger.info({ file }, "Migration applied successfully");
+      } catch (err) {
+        await migClient.query("ROLLBACK");
+        logger.error({ err, file }, "Migration FAILED");
+        throw err;
+      }
+    }
+
+    await migClient.end();
+    logger.info("Database migrations complete");
+  } catch (err) {
+    logger.error({ err }, "Migration failed");
+    process.exit(1);
+  }
+
+  // 3. Log auth status
   const authAvailable = isAuthAvailable();
   logger.info({
     auth: authAvailable,
