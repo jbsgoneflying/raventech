@@ -1,5 +1,7 @@
 "use client";
 
+import { InfoTip } from "./InfoTip";
+
 interface Props {
   book: {
     mid: number | null;
@@ -14,7 +16,13 @@ export function OrderBookDepth({ book }: Props) {
   if (!book) {
     return (
       <div className="bg-surface-50 rounded-lg border border-surface-300 p-4">
-        <h3 className="text-sm font-medium text-gray-400 mb-3">Order Book</h3>
+        <h3 className="text-sm font-medium text-gray-400 mb-3">
+          Order Book
+          <InfoTip title="Order Book Depth">
+            <p>Stacked visualization of resting limit orders. Shows bid/ask depth to help you gauge market liquidity and potential price impact.</p>
+            <p><b>Desk view</b>: No data means the exchange doesn&apos;t expose orderbook depth for this market, or the API key is not configured. You can still use the trade tape and alerts to track flow.</p>
+          </InfoTip>
+        </h3>
         <div className="py-8 text-center text-gray-600 text-sm">
           No orderbook data (requires API key)
         </div>
@@ -45,6 +53,15 @@ export function OrderBookDepth({ book }: Props) {
             Mid: {book.mid.toFixed(1)}%
           </span>
         )}
+        <InfoTip title="Order Book Depth">
+          <p>Stacked visualization of resting limit orders. <b>Green bars</b> (bottom) = bids to buy Yes. <b>Red bars</b> (top) = offers to sell Yes (derived from No bids).</p>
+          <ul>
+            <li><b>Thick bars</b>: Deep liquidity at that price level — harder to move through.</li>
+            <li><b>Thin bars</b>: Shallow depth — a single large trade could blow through this level.</li>
+            <li><b>Spread</b>: The gap between best bid and best ask. Wider spread = less liquid, more opportunity cost.</li>
+          </ul>
+          <p><b>Desk view</b>: Before trading, check the book. If depth is thin on the side you&apos;re crossing, size down or use limits. A &ldquo;sweep&rdquo; alert means someone already ate through these levels aggressively.</p>
+        </InfoTip>
       </h3>
 
       <div className="space-y-0.5">

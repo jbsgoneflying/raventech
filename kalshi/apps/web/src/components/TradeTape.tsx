@@ -1,6 +1,7 @@
 "use client";
 
 import { timeAgo } from "@/lib/format";
+import { InfoTip } from "./InfoTip";
 
 interface Trade {
   trade_id: string;
@@ -22,6 +23,15 @@ export function TradeTape({ trades, flaggedTradeIds = new Set() }: Props) {
       <h3 className="text-sm font-medium text-gray-400 mb-3">
         Recent Trades
         <span className="text-xs text-gray-600 ml-2">({trades.length})</span>
+        <InfoTip title="Trade Tape">
+          <p>Live stream of individual trades as they execute. Each row shows time, direction (BUY = taker bought Yes, SELL = taker bought No), size, and price.</p>
+          <ul>
+            <li><b>FLAGGED</b> (red highlight): This trade triggered an anomaly alert — it was outsized, aggressive, or timed unusually.</li>
+            <li><b>Clusters of BUYs</b>: Persistent demand on the Yes side.</li>
+            <li><b>Large single prints</b>: Likely institutional or high-conviction retail.</li>
+          </ul>
+          <p><b>Desk view</b>: Watch the tape for follow-through after a flagged trade. If more flow comes in the same direction, it confirms the signal. If it reverses, someone may be fading the move.</p>
+        </InfoTip>
       </h3>
 
       <div className="max-h-[400px] overflow-y-auto space-y-0.5">

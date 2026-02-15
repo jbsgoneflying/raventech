@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { InfoTip } from "./InfoTip";
 
 interface PricePoint {
   time: number;
@@ -93,7 +94,18 @@ export function PriceChart({ trades }: { trades: Array<{ created_time: string; y
 
   return (
     <div className="bg-surface-50 rounded-lg border border-surface-300 p-4">
-      <h3 className="text-sm font-medium text-gray-400 mb-3">Price (Yes %)</h3>
+      <h3 className="text-sm font-medium text-gray-400 mb-3">
+        Price (Yes %)
+        <InfoTip title="Price Chart">
+          <p>Real-time price of the &ldquo;Yes&rdquo; outcome plotted over time. Each point is a trade that executed.</p>
+          <ul>
+            <li><b>Sharp moves up</b>: Aggressive buying — someone is rapidly increasing their Yes position.</li>
+            <li><b>Sharp moves down</b>: Heavy selling or No-side buying.</li>
+            <li><b>Flat then spike</b>: A quiet market that suddenly got attention — classic late/heavy flow pattern.</li>
+          </ul>
+          <p><b>Desk view</b>: Look for the price move that corresponds to a flagged trade in the tape below. That tells you exactly when the informed flow hit and how much it moved the market.</p>
+        </InfoTip>
+      </h3>
       <div ref={containerRef} className="w-full" />
       {trades.length === 0 && (
         <div className="h-[250px] flex items-center justify-center text-gray-600 text-sm">

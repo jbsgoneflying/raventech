@@ -7,6 +7,7 @@ import { getAlerts, type AlertRow } from "@/lib/api";
 import { timeAgo, formatTtc, centsToProb, alertTypeBadge } from "@/lib/format";
 import { ScoreBar } from "./ScoreBar";
 import { ExchangeBadge, ExchangeFilter } from "./ExchangeBadge";
+import { InfoTip } from "./InfoTip";
 
 interface Filters {
   min_score: number;
@@ -51,7 +52,19 @@ export function AlertsTable() {
       {/* Filter bar */}
       <div className="flex items-center gap-4 mb-4 p-3 bg-surface-50 rounded-lg border border-surface-300">
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500 uppercase tracking-wider">Min Score</label>
+          <label className="text-xs text-gray-500 uppercase tracking-wider">
+            Min Score
+            <InfoTip title="Minimum Anomaly Score">
+              <p>Filters the alert feed to only show trades that scored at or above this threshold (0–100).</p>
+              <ul>
+                <li><b>0–30</b>: Routine activity — most flow looks like this.</li>
+                <li><b>30–50</b>: Mildly unusual — worth a glance if the market matters to you.</li>
+                <li><b>50–70</b>: Notable — outsized or late flow that broke the normal pattern.</li>
+                <li><b>70+</b>: High conviction — rare, large, or aggressive prints that warrant immediate attention.</li>
+              </ul>
+              <p><b>Desk view</b>: Start at 0 to get a feel for the flow, then raise to 40–50 to cut noise and focus on actionable signals.</p>
+            </InfoTip>
+          </label>
           <input
             type="range"
             min={0}
@@ -64,7 +77,19 @@ export function AlertsTable() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500 uppercase tracking-wider">Type</label>
+          <label className="text-xs text-gray-500 uppercase tracking-wider">
+            Type
+            <InfoTip title="Alert Type Filter">
+              <p>Narrow to a specific anomaly pattern:</p>
+              <ul>
+                <li><b>Late Print</b>: A large trade that hit close to market expiry — someone is making a last-minute conviction bet.</li>
+                <li><b>Sweep</b>: A trade that ate through multiple price levels of the book — aggressive and urgent.</li>
+                <li><b>Impact</b>: A trade that visibly moved the market price — the book was thin or the size was heavy.</li>
+                <li><b>Imbalance</b>: Sustained one-directional flow over the last minute — persistent buying or selling pressure.</li>
+              </ul>
+              <p><b>Desk view</b>: Late Prints near expiry + high scores are the highest signal. Imbalances show emerging momentum.</p>
+            </InfoTip>
+          </label>
           <select
             value={filters.alert_type}
             onChange={(e) => setFilters((f) => ({ ...f, alert_type: e.target.value }))}
@@ -94,15 +119,88 @@ export function AlertsTable() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-surface-300">
-              <th className="pb-2 pr-3">Time</th>
-              <th className="pb-2 pr-2 w-8">Exch</th>
-              <th className="pb-2 pr-3">Market</th>
-              <th className="pb-2 pr-3">Score</th>
-              <th className="pb-2 pr-3">Type</th>
-              <th className="pb-2 pr-3">T-Close</th>
-              <th className="pb-2 pr-3">Price</th>
-              <th className="pb-2 pr-3">Size Z</th>
-              <th className="pb-2">Reason</th>
+              <th className="pb-2 pr-3">
+                Time
+                <InfoTip title="Alert Time">
+                  <p>How long ago this alert was generated. Alerts appear in real time as the engine detects anomalous trades.</p>
+                  <p><b>Desk view</b>: Recent alerts (seconds/minutes old) represent live, actionable flow. Older alerts are historical context.</p>
+                </InfoTip>
+              </th>
+              <th className="pb-2 pr-2 w-8">
+                Exch
+                <InfoTip title="Exchange">
+                  <p>Which prediction market exchange the trade occurred on.</p>
+                  <ul>
+                    <li><b>K</b> = Kalshi — U.S. regulated, event contracts (politics, crypto, weather, sports).</li>
+                    <li><b>P</b> = Polymarket — crypto-settled, larger liquidity on politics and current events.</li>
+                  </ul>
+                  <p><b>Desk view</b>: Cross-reference the same event on both exchanges. Divergent flow (heavy buying on one, quiet on the other) is a strong signal.</p>
+                </InfoTip>
+              </th>
+              <th className="pb-2 pr-3">
+                Market
+                <InfoTip title="Market">
+                  <p>The prediction market question being traded (e.g. &ldquo;Will BTC be above $100k on March 1?&rdquo;). Click to drill into the market detail page with charts, order book, and trade tape.</p>
+                  <p><b>Desk view</b>: Look for names you have a thesis on. Unusual flow into a market you&apos;re watching is a confirmation signal or early warning.</p>
+                </InfoTip>
+              </th>
+              <th className="pb-2 pr-3">
+                Score
+                <InfoTip title="Anomaly Score">
+                  <p>Composite score from 0–100 measuring how unusual this trade was relative to the market&apos;s recent history. Combines trade size, timing, price impact, book depth, and flow direction.</p>
+                  <ul>
+                    <li><b>40–50</b>: Mildly unusual, broke one or two normal patterns.</li>
+                    <li><b>50–70</b>: Clearly anomalous, multiple features elevated.</li>
+                    <li><b>70+</b>: Rare and aggressive — this is the flow you came here to find.</li>
+                  </ul>
+                  <p><b>Desk view</b>: The score answers &ldquo;how much should I care?&rdquo; — higher = more urgent. Compare scores across markets to prioritize your attention.</p>
+                </InfoTip>
+              </th>
+              <th className="pb-2 pr-3">
+                Type
+                <InfoTip title="Alert Type">
+                  <p>The primary anomaly pattern detected:</p>
+                  <ul>
+                    <li><b>Late Print</b>: Large trade near market expiry — high conviction, time-sensitive.</li>
+                    <li><b>Sweep</b>: Trade ate through multiple book levels — aggressive, price-insensitive buyer/seller.</li>
+                    <li><b>Impact</b>: Trade visibly moved the market price — thin book or heavy size.</li>
+                    <li><b>Imbalance</b>: Sustained one-direction flow over 1 minute — persistent pressure building.</li>
+                  </ul>
+                </InfoTip>
+              </th>
+              <th className="pb-2 pr-3">
+                T-Close
+                <InfoTip title="Time to Close">
+                  <p>How much time remains before this market expires and settles. Displayed as days, hours, or minutes.</p>
+                  <p><b>Desk view</b>: Trades near close are the most informative — the trader has less time to be wrong and is accepting more gamma risk. Late prints into expiry with high scores are the strongest signals.</p>
+                </InfoTip>
+              </th>
+              <th className="pb-2 pr-3">
+                Price
+                <InfoTip title="Yes Price (Probability)">
+                  <p>Current market-implied probability for the &ldquo;Yes&rdquo; outcome, shown as a percentage. A market at 72% means the crowd prices a 72% chance the event occurs.</p>
+                  <p><b>Desk view</b>: Extreme probabilities (90%+ or sub-10%) mean the market is already priced as near-certain. Unusual flow at those levels suggests someone disagrees or is hedging. Mid-range prices (30–70%) are where flow signals are most tradeable.</p>
+                </InfoTip>
+              </th>
+              <th className="pb-2 pr-3">
+                Size Z
+                <InfoTip title="Trade Size Z-Score">
+                  <p>How many standard deviations above average this trade was in size, relative to the market&apos;s recent trade history.</p>
+                  <ul>
+                    <li><b>1–2</b>: Somewhat larger than normal.</li>
+                    <li><b>2–3</b>: Notably outsized.</li>
+                    <li><b>3+</b>: Extremely large relative to this market&apos;s norms.</li>
+                  </ul>
+                  <p><b>Desk view</b>: A high Z-score in a market with low volume is more meaningful than the same Z in a high-volume market. Cross-reference with the Score for conviction.</p>
+                </InfoTip>
+              </th>
+              <th className="pb-2">
+                Reason
+                <InfoTip title="Alert Reason">
+                  <p>Human-readable explanation of why this trade was flagged. Includes the dominant feature(s), direction (buy/sell, yes/no), and key metrics.</p>
+                  <p><b>Desk view</b>: Read this first for quick context. It tells you the &ldquo;what&rdquo; and &ldquo;why&rdquo; at a glance before you drill into the detail page.</p>
+                </InfoTip>
+              </th>
             </tr>
           </thead>
           <tbody>

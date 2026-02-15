@@ -12,6 +12,7 @@ import { OrderBookDepth } from "@/components/OrderBookDepth";
 import { FeaturePanel } from "@/components/FeaturePanel";
 import { AlertHistory } from "@/components/AlertHistory";
 import { ExchangeBadge } from "@/components/ExchangeBadge";
+import { InfoTip } from "@/components/InfoTip";
 
 export default function MarketPage() {
   const params = useParams();
@@ -105,27 +106,51 @@ export default function MarketPage() {
           <ExchangeBadge exchange={market.exchange} />
         </div>
         <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-          <div>
+          <div className="flex items-center">
             <span className="text-gray-600">Last: </span>
-            <span className="text-white font-mono">{centsToProb(market.last_price_cents)}</span>
+            <span className="text-white font-mono ml-1">{centsToProb(market.last_price_cents)}</span>
+            <InfoTip title="Last Trade Price">
+              <p>The most recent traded price for the &ldquo;Yes&rdquo; outcome, expressed as a probability.</p>
+              <p><b>Desk view</b>: This is the market&apos;s real-time consensus. Compare to your own thesis — if you think the true probability is significantly different, that&apos;s your edge.</p>
+            </InfoTip>
           </div>
-          <div>
+          <div className="flex items-center">
             <span className="text-gray-600">Bid/Ask: </span>
-            <span className="font-mono">
+            <span className="font-mono ml-1">
               {centsToProb(market.yes_bid_cents)} / {centsToProb(market.yes_ask_cents)}
             </span>
+            <InfoTip title="Bid / Ask Spread">
+              <p>Best available bid (what buyers will pay) and ask (what sellers want) for &ldquo;Yes.&rdquo; The gap between them is the spread.</p>
+              <ul>
+                <li><b>Tight spread</b> (&lt;2%): Liquid market, easy to enter/exit.</li>
+                <li><b>Wide spread</b> (&gt;5%): Illiquid — your order may move the price. Be careful sizing.</li>
+              </ul>
+              <p><b>Desk view</b>: Wide spreads amplify the signal of aggressive trades (sweeps/impacts). A sweep through a wide book is very high conviction.</p>
+            </InfoTip>
           </div>
-          <div>
+          <div className="flex items-center">
             <span className="text-gray-600">Vol: </span>
-            <span className="font-mono">{market.volume?.toLocaleString() ?? "—"}</span>
+            <span className="font-mono ml-1">{market.volume?.toLocaleString() ?? "—"}</span>
+            <InfoTip title="Volume">
+              <p>Total number of contracts traded in this market (lifetime or daily, depending on exchange).</p>
+              <p><b>Desk view</b>: High volume means more participants and more reliable price discovery. Low-volume markets are where unusual flow is most impactful — one big trade can move the price significantly.</p>
+            </InfoTip>
           </div>
-          <div>
+          <div className="flex items-center">
             <span className="text-gray-600">OI: </span>
-            <span className="font-mono">{market.open_interest?.toLocaleString() ?? "—"}</span>
+            <span className="font-mono ml-1">{market.open_interest?.toLocaleString() ?? "—"}</span>
+            <InfoTip title="Open Interest">
+              <p>Number of outstanding (unsettled) contracts. Represents total capital committed to this market.</p>
+              <p><b>Desk view</b>: Rising OI with price movement = new money entering (confirming the move). Rising OI with flat price = building tension, breakout ahead.</p>
+            </InfoTip>
           </div>
-          <div>
+          <div className="flex items-center">
             <span className="text-gray-600">Close: </span>
-            <span className="font-mono">{formatTtc(market.close_time)}</span>
+            <span className="font-mono ml-1">{formatTtc(market.close_time)}</span>
+            <InfoTip title="Market Close / Expiry">
+              <p>When this market expires and settles to its final outcome (Yes = 100%, No = 0%).</p>
+              <p><b>Desk view</b>: Markets approaching close have the highest-signal flow. Trades within hours of expiry are from participants with strong, time-sensitive conviction. This is where front-running value is highest.</p>
+            </InfoTip>
           </div>
         </div>
       </div>

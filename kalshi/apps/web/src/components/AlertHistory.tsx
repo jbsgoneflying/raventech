@@ -3,6 +3,7 @@
 import { ScoreBar } from "./ScoreBar";
 import { timeAgo, alertTypeBadge } from "@/lib/format";
 import type { AlertRow } from "@/lib/api";
+import { InfoTip } from "./InfoTip";
 
 export function AlertHistory({ alerts }: { alerts: AlertRow[] }) {
   return (
@@ -10,6 +11,15 @@ export function AlertHistory({ alerts }: { alerts: AlertRow[] }) {
       <h3 className="text-sm font-medium text-gray-400 mb-3">
         Alert History
         <span className="text-xs text-gray-600 ml-2">({alerts.length})</span>
+        <InfoTip title="Alert History">
+          <p>All anomaly alerts generated for this specific market, ordered newest first. Each card shows the score, type, timing, and reason.</p>
+          <ul>
+            <li><b>Multiple alerts in quick succession</b>: Sustained institutional flow — very high signal.</li>
+            <li><b>Increasing scores</b>: The flow is getting more aggressive over time.</li>
+            <li><b>Mixed types</b> (Sweep + Imbalance): Confirms the move is real, not just one noisy trade.</li>
+          </ul>
+          <p><b>Desk view</b>: This is your conviction log. If a market has 3+ alerts in the last hour, especially with rising scores, it&apos;s time to act or build a position thesis around it.</p>
+        </InfoTip>
       </h3>
 
       {alerts.length === 0 ? (
