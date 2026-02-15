@@ -157,7 +157,9 @@ export class KalshiWsClient extends EventEmitter {
 
       this.ws.on("error", (err) => {
         logger.error({ err }, "Kalshi WS error");
-        this.emit("error", err);
+        // Do NOT this.emit("error", err) — Node's EventEmitter treats
+        // unhandled "error" events as fatal.  The promise rejection
+        // (below) is sufficient; reconnect is driven by the "close" event.
         reject(err);
       });
 

@@ -62,6 +62,8 @@ services:
       REDIS_URL: redis://kalshi-redis:6379
     ports:
       - "127.0.0.1:3100:3100"
+    volumes:
+      - ./kalshi/kalshi-key.pem:/app/kalshi-key.pem:ro
     depends_on:
       kalshi-postgres:
         condition: service_healthy

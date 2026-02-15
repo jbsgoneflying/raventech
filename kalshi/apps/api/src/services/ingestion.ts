@@ -126,6 +126,12 @@ export async function startIngestion(): Promise<KalshiWsClient> {
     logger.debug({ msg }, "Orderbook delta (incremental update)");
   });
 
+  // ─── Safety-net error listener (prevent process crash) ───
+
+  wsClient.on("error", (err: unknown) => {
+    logger.error({ err }, "Kalshi WS client error (handled, will reconnect)");
+  });
+
   // ─── Connect and subscribe ───────────────────────────────
 
   try {
@@ -313,6 +319,11 @@ export async function startPolymarketIngestion(): Promise<PolymarketWsClient> {
     } catch (err) {
       logger.debug({ err }, "Polymarket best_bid_ask error");
     }
+  });
+
+  // ─── Safety-net error listener (prevent process crash) ───
+  polyWsClient.on("error", (err: unknown) => {
+    logger.error({ err }, "Polymarket WS client error (handled, will reconnect)");
   });
 
   // ─── Connect ─────────────────────────────────────────────

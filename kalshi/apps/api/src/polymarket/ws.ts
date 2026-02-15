@@ -85,8 +85,8 @@ export class PolymarketWsClient extends EventEmitter {
 
         this.ws.on("error", (err) => {
           logger.error({ err }, "Polymarket WS error");
-          this.emit("error", err);
-          // First connection attempt: reject the promise
+          // Do NOT this.emit("error", err) — Node's EventEmitter treats
+          // unhandled "error" events as fatal.  Reconnect is driven by "close".
           reject(err);
         });
       } catch (err) {
