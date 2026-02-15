@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import "./globals.css";
 import { NavDrawer } from "@/components/NavDrawer";
 
@@ -69,11 +70,11 @@ function SubNav() {
 
 function SubNavLink({ href, label }: { href: string; label: string }) {
   return (
-    <a
+    <Link
       href={href}
       className="px-3.5 py-1.5 text-[13px] font-semibold text-raven-muted hover:text-raven-text hover:bg-raven-hover rounded-[10px] transition-colors"
     >
       {label}
-    </a>
+    </Link>
   );
 }
