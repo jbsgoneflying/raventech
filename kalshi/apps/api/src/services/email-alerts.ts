@@ -80,7 +80,7 @@ function recordSent(): void {
 // ─── Alert payload ──────────────────────────────────────────────
 
 export interface EmailAlertPayload {
-  id: number;
+  id: string | number;
   market_ticker: string;
   market_title: string;
   alert_type: string;
