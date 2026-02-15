@@ -86,6 +86,21 @@ alertsRouter.post("/test", async (req, res) => {
   try {
     const score = parseInt(req.body?.score as string) || 85;
     const exchange = (req.body?.exchange as string) || "kalshi";
+    const testTicker = "__TEST_ALERT_PROBE__";
+
+    // Upsert a dummy market so the FK constraint is satisfied
+    await db
+      .insert(schema.markets)
+      .values({
+        ticker: testTicker,
+        event_ticker: "__TEST_EVENT__",
+        title: "Test Alert — Email Delivery Probe",
+        status: "active",
+        exchange: "kalshi",
+        close_time: new Date(Date.now() + 3_600_000),
+        last_price_cents: 72,
+      })
+      .onConflictDoNothing();
 
     const explanation = {
       trade_size_z: 4.9,
@@ -99,10 +114,10 @@ alertsRouter.post("/test", async (req, res) => {
     };
 
     const alertRow = {
-      market_ticker: "TEST-ALERT-PROBE",
+      market_ticker: testTicker,
       alert_type: "LARGE_LATE_PRINT",
       anomaly_score: score,
-      trade_id: `test-${Date.now()}`,
+      trade_id: null,
       explanation,
       reason: `[TEST] Synthetic alert with score ${score} to verify email delivery pipeline.`,
       exchange: exchange as "kalshi" | "polymarket",
