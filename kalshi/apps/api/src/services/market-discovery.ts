@@ -104,7 +104,7 @@ export async function discoverPolymarketMarkets(): Promise<void> {
 
     for (const event of events) {
       for (const market of event.markets ?? []) {
-        if (!market.condition_id) continue;
+        if (!market.conditionId) continue;
 
         const normalized = normalizePolyMarket(event, market);
 
@@ -133,11 +133,11 @@ export async function discoverPolymarketMarkets(): Promise<void> {
 
           // Collect token map entries and asset IDs for WS subscription
           for (const [outcome, tokenId] of Object.entries(normalized.clob_token_ids)) {
-            tokenMapEntries.push({ assetId: tokenId, conditionId: market.condition_id });
+            tokenMapEntries.push({ assetId: tokenId, conditionId: market.conditionId });
             allAssetIds.push(tokenId);
           }
         } catch (err) {
-          logger.warn({ conditionId: market.condition_id, err }, "Failed to upsert Polymarket market");
+          logger.warn({ conditionId: market.conditionId, err }, "Failed to upsert Polymarket market");
         }
       }
     }

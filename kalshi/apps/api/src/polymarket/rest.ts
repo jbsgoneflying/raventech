@@ -59,37 +59,33 @@ async function polyFetch<T>(url: string, limiter: TokenBucket): Promise<T> {
 
 // ─── Types ─────────────────────────────────────────────────────
 
-/** A single token (Yes or No outcome) within a Polymarket market */
-export interface PolyToken {
-  token_id: string;
-  outcome: string; // "Yes" | "No"
-  price?: number;
-  winner?: boolean;
-}
-
-/** A market (condition) within a Polymarket event */
+/** A market (condition) within a Polymarket event (Gamma API uses camelCase) */
 export interface PolyMarket {
-  condition_id: string;
+  conditionId: string;
   question: string;
   description?: string;
-  tokens: PolyToken[];
-  end_date_iso?: string;
-  game_start_time?: string;
+  outcomes?: string[];         // e.g. ["Yes", "No"]
+  outcomePrices?: string[];    // e.g. ["0.56", "0.44"] (JSON string or array)
+  clobTokenIds?: string[];     // token IDs per outcome (JSON string or array)
+  endDateIso?: string;
+  startDateIso?: string;
   active: boolean;
   closed: boolean;
-  accepting_orders: boolean;
-  // CLOB token IDs
-  clobTokenIds?: string[];
-  outcomePrices?: string[];
+  acceptingOrders: boolean;
+  volume?: string;
+  volumeNum?: number;
+  lastTradePrice?: number;
+  bestAsk?: number;
+  negRisk?: boolean;
 }
 
-/** A top-level event containing 1..N markets */
+/** A top-level event containing 1..N markets (Gamma API uses camelCase) */
 export interface PolyEvent {
   id: string;
   title: string;
   slug: string;
   description?: string;
-  end_date_iso?: string;
+  endDate?: string;
   active: boolean;
   closed: boolean;
   markets: PolyMarket[];

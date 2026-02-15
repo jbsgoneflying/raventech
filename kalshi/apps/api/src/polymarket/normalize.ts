@@ -182,40 +182,52 @@ export function normalizePolyMarket(
   clob_token_ids: Record<string, string>;
   event_slug: string;
 } {
-  // Map tokens: find Yes and No token IDs
-  const yesToken = market.tokens?.find((t) => t.outcome === "Yes");
-  const noToken = market.tokens?.find((t) => t.outcome === "No");
+  // Parse clobTokenIds -- Gamma API may return as JSON string or array
+  let tokenIds: string[] = [];
+  if (Array.isArray(market.clobTokenIds)) {
+    tokenIds = market.clobTokenIds;
+  } else if (typeof market.clobTokenIds === "string") {
+    try { tokenIds = JSON.parse(market.clobTokenIds); } catch { /* ignore */ }
+  }
+
+  // Map outcomes to token IDs (typically ["Yes","No"] → [tokenId0, tokenId1])
+  const outcomes: string[] = Array.isArray(market.outcomes)
+    ? market.outcomes
+    : typeof market.outcomes === "string"
+      ? (() => { try { return JSON.parse(market.outcomes); } catch { return ["Yes", "No"]; } })()
+      : ["Yes", "No"];
 
   const clobTokenIds: Record<string, string> = {};
-  if (yesToken) clobTokenIds.yes = yesToken.token_id;
-  if (noToken) clobTokenIds.no = noToken.token_id;
-
-  // Use clobTokenIds array if tokens aren't populated
-  if (!clobTokenIds.yes && market.clobTokenIds && market.clobTokenIds.length > 0) {
-    clobTokenIds.yes = market.clobTokenIds[0];
-  }
-  if (!clobTokenIds.no && market.clobTokenIds && market.clobTokenIds.length > 1) {
-    clobTokenIds.no = market.clobTokenIds[1];
+  for (let i = 0; i < outcomes.length && i < tokenIds.length; i++) {
+    const key = outcomes[i].toLowerCase(); // "yes" | "no"
+    clobTokenIds[key] = tokenIds[i];
   }
 
-  // Parse outcome prices
+  // Parse outcome prices (may be JSON string or array)
+  let outcomePrices: string[] = [];
+  if (Array.isArray(market.outcomePrices)) {
+    outcomePrices = market.outcomePrices;
+  } else if (typeof market.outcomePrices === "string") {
+    try { outcomePrices = JSON.parse(market.outcomePrices); } catch { /* ignore */ }
+  }
+
   let yesPriceCents: number | null = null;
-  if (market.outcomePrices && market.outcomePrices.length > 0) {
-    const p = parseFloat(market.outcomePrices[0]);
+  if (outcomePrices.length > 0) {
+    const p = parseFloat(outcomePrices[0]);
     if (!isNaN(p)) yesPriceCents = Math.round(p * 100);
-  } else if (yesToken?.price != null) {
-    yesPriceCents = Math.round(yesToken.price * 100);
+  } else if (market.lastTradePrice != null) {
+    yesPriceCents = Math.round(market.lastTradePrice * 100);
   }
 
   // Determine close time from event or market
-  const endDateStr = market.end_date_iso ?? event.end_date_iso ?? null;
+  const endDateStr = market.endDateIso ?? event.endDate ?? null;
   const closeTime = endDateStr ? new Date(endDateStr) : null;
 
   // Status mapping
   let status: string;
   if (market.closed) {
     status = "closed";
-  } else if (market.active && market.accepting_orders) {
+  } else if (market.active && market.acceptingOrders) {
     status = "open";
   } else {
     status = "inactive";
@@ -226,9 +238,11 @@ export function normalizePolyMarket(
     ? event.tags[0].label
     : null;
 
+  // Volume
+  const volume = market.volumeNum ?? (market.volume ? parseFloat(market.volume) : null);
+
   return {
-    // Use condition_id as the ticker (primary key in our DB)
-    ticker: market.condition_id,
+    ticker: market.conditionId,
     event_ticker: event.id,
     title: market.question || event.title,
     yes_sub_title: "Yes",
@@ -236,15 +250,15 @@ export function normalizePolyMarket(
     status,
     close_time: closeTime,
     last_price_cents: yesPriceCents,
-    yes_bid_cents: null, // Populated by WS book events
+    yes_bid_cents: null,
     yes_ask_cents: null,
     no_bid_cents: null,
     no_ask_cents: null,
-    volume: null, // Polymarket doesn't expose aggregate volume easily
+    volume: volume ? Math.round(volume) : null,
     open_interest: null,
     category,
     exchange: "polymarket",
-    exchange_market_id: market.condition_id,
+    exchange_market_id: market.conditionId,
     clob_token_ids: clobTokenIds,
     event_slug: event.slug,
   };
