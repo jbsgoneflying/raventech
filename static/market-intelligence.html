@@ -314,13 +314,6 @@
       .btn--refresh:disabled { opacity: 0.5; cursor: not-allowed; }
       .btn--refresh.isRefreshing { animation: miPulseOp 1.2s ease-in-out infinite; }
 
-      .miDiffBtn {
-        font-size: 11px; font-weight: 700; padding: 5px 14px;
-        border-radius: 8px; background: var(--hover); border: 1px solid var(--border);
-        cursor: pointer; color: var(--text); transition: background 0.15s;
-      }
-      .miDiffBtn:hover { background: var(--border); }
-
       /* ── Banners ────────────────────────────────────────────────── */
       .miRefreshBanner {
         padding: 8px 14px; border-radius: 10px; font-size: 11px;
@@ -490,9 +483,7 @@
             </label>
           </div>
           <div class="controlActions">
-            <button class="miDiffBtn" type="button" id="miDiffToggle">Show Changes</button>
             <button class="btn btn--refresh" type="button" id="miRefreshBtn" title="Force-pull live data from all engines and data sources.">Refresh Live Data</button>
-            <button class="btn btn--primary" type="button" id="miRunBtn">Load Intelligence</button>
           </div>
         </form>
       </section>

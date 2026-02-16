@@ -7,10 +7,8 @@
   "use strict";
 
   /* ── DOM refs ─────────────────────────────────────── */
-  var runBtn           = document.getElementById("miRunBtn");
   var refreshBtn       = document.getElementById("miRefreshBtn");
   var refreshBanner    = document.getElementById("miRefreshBanner");
-  var diffToggle       = document.getElementById("miDiffToggle");
   var overlay          = document.getElementById("ravenOverlay");
   var progressFill     = document.getElementById("ravenProgressFill");
   var statusLabel      = document.getElementById("ravenStatus");
@@ -46,7 +44,7 @@
   var patternList      = document.getElementById("miPatternList");
   var patternMatch     = document.getElementById("miPatternMatch");
 
-  var showDiff = false;
+  var showDiff = true;
 
   /* ── Helpers ──────────────────────────────────────── */
   function pillClass(label) {
@@ -501,7 +499,6 @@
   function loadAll() {
     showOverlay();
     setProgress(5, "Fetching DailyMarketState...");
-    runBtn.disabled = true;
 
     // Load patterns in parallel
     loadPatterns();
@@ -535,7 +532,6 @@
       })
       .finally(function () {
         setTimeout(hideOverlay, 600);
-        runBtn.disabled = false;
       });
   }
 
@@ -612,19 +608,7 @@
   }
 
   /* ── Event bindings ────────────────────────────── */
-  if (runBtn)      runBtn.addEventListener("click", loadAll);
   if (refreshBtn)  refreshBtn.addEventListener("click", refreshLiveData);
-
-  if (diffToggle) {
-    diffToggle.addEventListener("click", function () {
-      showDiff = !showDiff;
-      diffToggle.textContent = showDiff ? "Hide Changes" : "Show Changes";
-      if (showDiff && diffPanel.style.display === "none") {
-        fetchJSON("/api/front-layer/diff").then(renderDiff).catch(function () {});
-      }
-      diffPanel.style.display = showDiff ? "grid" : "none";
-    });
-  }
 
   /* ═══════════════════════════════════════════════════════════════════
      Desk Insight Popup (dark draggable)
@@ -988,6 +972,6 @@
   checkBackfillStatus();
 
   /* ── Auto-load on page open ────────────────────── */
-  hideOverlay();
+  loadAll();
 
 })();
