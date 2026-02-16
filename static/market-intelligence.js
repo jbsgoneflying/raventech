@@ -16,7 +16,6 @@
   // Layout rows
   var topRow           = document.getElementById("miTopRow");
   var briefRow         = document.getElementById("miBriefRow");
-  var roadmapRow       = document.getElementById("miRoadmapRow");
   var bottomGrid       = document.getElementById("miBottomGrid");
   var asymRow          = document.getElementById("miAsymRow");
   var asymCard         = document.getElementById("miAsymCard");
@@ -34,9 +33,6 @@
   var briefTs          = document.getElementById("miBriefTs");
   var briefStandDown   = document.getElementById("miBriefStandDown");
   var briefContent     = document.getElementById("miBriefContent");
-  var roadmapCard      = document.getElementById("miRoadmapCard");
-  var roadmapTs        = document.getElementById("miRoadmapTs");
-  var roadmapContent   = document.getElementById("miRoadmapContent");
   var themesContainer  = document.getElementById("miThemes");
   var stressGrid       = document.getElementById("miStressGrid");
   var asymContent      = document.getElementById("miAsymContent");
@@ -306,62 +302,6 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════════
-     Render: Weekly Roadmap
-     ═══════════════════════════════════════════════════════════════════ */
-  function renderRoadmap(roadmap) {
-    roadmapRow.style.display = "grid";
-    var isFallback = roadmap._source === "fallback";
-    roadmapTs.textContent = fmt(roadmap._generated_at) + (isFallback ? " (fallback)" : "");
-
-    if (isFallback && roadmap._fallback_reason) {
-      roadmapContent.innerHTML = '<div style="padding:8px 0;color:#995c00;font-size:12px;">' +
-        '<b>LLM unavailable:</b> ' + roadmap._fallback_reason + '</div>';
-      return;
-    }
-
-    var sections = [
-      { key: "regime_flow_summary", label: "Regime & Flow Summary" },
-      { key: "expected_pattern",    label: "Expected Pattern" },
-      { key: "engine_behaviors",    label: "Engine Behaviors" },
-      { key: "asymmetry_radar",     label: "Asymmetry Radar" },
-      { key: "break_the_plan",      label: "What Would Break the Plan" },
-    ];
-
-    // Helper: strip bracket citations like [field.name] left over from prior prompt style
-    var strip = function (s) {
-      return String(s).replace(/\[[\w.]+\]/g, "").replace(/\s{2,}/g, " ").trim();
-    };
-
-    var html = "";
-    sections.forEach(function (s) {
-      var val = roadmap[s.key] || "";
-      if (typeof val === "object") val = JSON.stringify(val);
-      val = strip(val);
-      html += '<div class="miRoadmapSection">' +
-        '<div class="miRoadmapHead">' + s.label + '</div>' +
-        '<div class="miRoadmapBody">' + val + '</div></div>';
-    });
-
-    var hrd = roadmap.high_risk_days || [];
-    if (hrd.length > 0) {
-      html += '<div class="miRoadmapSection"><div class="miRoadmapHead">High-Risk Days</div><div class="miRoadmapBody"><ul class="miRoadmapList">';
-      hrd.forEach(function (d) { html += "<li>" + strip(d) + "</li>"; });
-      html += "</ul></div></div>";
-    }
-
-    var ef = roadmap.earnings_focus || [];
-    if (ef.length > 0) {
-      html += '<div class="miRoadmapSection"><div class="miRoadmapHead">Earnings Focus (max 2)</div><div class="miRoadmapBody">';
-      ef.forEach(function (t) {
-        html += '<span class="pill pill--blue" style="margin-right:6px;">' + strip(t) + '</span>';
-      });
-      html += "</div></div>";
-    }
-
-    roadmapContent.innerHTML = html;
-  }
-
-  /* ═══════════════════════════════════════════════════════════════════
      Render: Active Themes
      ═══════════════════════════════════════════════════════════════════ */
   function renderThemes(dms) {
@@ -515,10 +455,6 @@
         setProgress(50, "Generating Morning Brief...");
         return fetchJSON("/api/front-layer/morning-brief").then(function (brief) {
           renderBrief(brief);
-          setProgress(70, "Loading Weekly Roadmap...");
-          return fetchJSON("/api/front-layer/weekly-roadmap");
-        }).then(function (roadmap) {
-          renderRoadmap(roadmap);
           setProgress(85, "Checking day-over-day changes...");
           return fetchJSON("/api/front-layer/diff");
         }).then(function (diffData) {
