@@ -319,6 +319,68 @@ class OratsClient:
     def cores(self, *, ticker: str, fields: str) -> OratsResponse:
         return self.get("/cores", {"ticker": ticker, "fields": fields})
 
+    def cores_delayed(self, *, ticker: str, fields: str) -> OratsResponse:
+        """Snapshot /cores with short-TTL cache (10s) for freshest 15-min delayed data.
+
+        Uses the standard /datav2 base URL (not /datav2/live) but routes through the
+        live cache so repeated calls within a request batch don't hammer the API, while
+        still refreshing on the next user-initiated request.
+        """
+        params: Dict[str, Any] = {"ticker": ticker, "fields": fields}
+        key = ("GET_DELAYED", "/cores", tuple(sorted((k, str(v)) for k, v in params.items())))
+        cached = self._live_cache_get(key)
+        if cached is not None:
+            return cached
+
+        url = f"{self._base_url}/{'/cores'.lstrip('/')}"
+        q = dict(params)
+        q["token"] = self._token
+
+        last_err: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                sess = getattr(self, "_session", None)
+                if sess is not None and callable(getattr(sess, "get", None)):
+                    resp = sess.get(url, params=q, timeout=self._timeout_s)
+                    status = int(getattr(resp, "status_code", 0) or 0)
+                    headers = getattr(resp, "headers", {}) or {}
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+                    body = (getattr(resp, "text", "") or "").encode("utf-8")
+                else:
+                    status, headers, body = _http_get(url, q, self._timeout_s)
+                    data = None
+                if status == 429:
+                    retry_after = headers.get("Retry-After")
+                    sleep_s = float(retry_after) if retry_after else min(2.0 * attempt, 6.0)
+                    self._log.warning("ORATS 429 rate-limited (cores_delayed); sleeping %.1fs (attempt %d/3)", sleep_s, attempt)
+                    time.sleep(sleep_s)
+                    continue
+
+                if status in (401, 403):
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise OratsError(f"ORATS auth/entitlement error {status} for /cores (delayed): {snippet}")
+
+                if status >= 400:
+                    snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                    raise OratsError(f"ORATS error {status} for /cores (delayed): {snippet}")
+
+                if data is None:
+                    data = json.loads(body.decode("utf-8") or "{}")
+                rows = self._normalize_rows(data)
+                out = OratsResponse(rows=rows, raw=data)
+                self._live_cache_set(key, out)
+                return out
+            except (Exception, OratsError) as e:
+                last_err = e
+                if isinstance(e, OratsError) and ("auth/entitlement error" in str(e)):
+                    raise
+                time.sleep(min(0.5 * (2**(attempt - 1)), 3.0))
+
+        raise OratsError(f"Failed ORATS /cores (delayed) after retries") from last_err
+
     def hist_cores(self, ticker: str, trade_date: str, fields: str) -> OratsResponse:
         return self.get("/hist/cores", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
 

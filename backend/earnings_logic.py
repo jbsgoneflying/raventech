@@ -832,6 +832,29 @@ def _current_snapshot(client: OratsClient, *, ticker: str, as_of_date: str) -> D
     except Exception:
         pass
 
+    # 15-minute delayed ORATS EM overlay via /cores (snapshot, no tradeDate).
+    # Uses cores_delayed() which has a 10-second cache TTL for freshness.
+    # This provides a fresher impErnMv than hist_cores EOD, especially on earnings day.
+    out["delayedImpErnMv"] = None
+    out["delayedImpliedMovePct"] = None
+    out["delayedUpdatedAt"] = None
+    out["delayedTradeDate"] = None
+    try:
+        fetcher = getattr(client, "cores_delayed", None) or getattr(client, "cores", None)
+        if callable(fetcher):
+            snap = fetcher(ticker=ticker, fields="ticker,tradeDate,stockPrice,impErnMv,updatedAt")
+            snap_row = _first_row(snap.rows) if snap and getattr(snap, "rows", None) else None
+            if snap_row:
+                delayed_em = snap_row.get("impErnMv")
+                delayed_pct = _imp_to_pct(delayed_em) if delayed_em is not None else None
+                if delayed_pct is not None:
+                    out["delayedImpErnMv"] = delayed_em
+                    out["delayedImpliedMovePct"] = _round2(delayed_pct)
+                    out["delayedUpdatedAt"] = str(snap_row.get("updatedAt") or "")
+                    out["delayedTradeDate"] = str(snap_row.get("tradeDate") or "")[:10]
+    except Exception:
+        pass
+
     return out
 
 
@@ -2386,14 +2409,19 @@ def compute_breach_stats(
         )
         out["expectedMove"] = expected_move_payload
 
-        # Compute strike targets using ORATS EM (used for earnings events calculations)
-        # Try multiple fallback sources for ORATS EM:
-        # 1. current.impliedMovePct (from ORATS cores snapshot)
-        # 2. nextEvent.impliedMovePctPlanned (if Monte Carlo enabled)
-        # 3. summary.avg_implied_all_pct (average from historical events)
-        # 4. Most recent event's impliedMovePct
-        orats_em_pct = _to_float(current.get("impliedMovePct"))
-        
+        # Compute strike targets using ORATS EM.
+        # Prefer the 15-minute delayed EM from /cores (freshest available),
+        # then fall back to EOD hist_cores, then other sources.
+        delayed_em_pct = _to_float(current.get("delayedImpliedMovePct"))
+        eod_em_pct = _to_float(current.get("impliedMovePct"))
+
+        # Primary: 15-min delayed /cores EM (freshest)
+        orats_em_pct = delayed_em_pct
+
+        # Fallback chain if delayed is unavailable
+        if orats_em_pct is None:
+            orats_em_pct = eod_em_pct
+
         if orats_em_pct is None:
             next_ev = out.get("nextEvent") if isinstance(out.get("nextEvent"), dict) else {}
             orats_em_pct = _to_float(next_ev.get("impliedMovePctPlanned"))
@@ -2412,7 +2440,9 @@ def compute_breach_stats(
         spot_px = _to_float(current.get("stockPrice")) or expected_move_payload.get("spotPrice")
         
         if orats_em_pct is not None and spot_px is not None and orats_em_pct > 0 and spot_px > 0:
-            out["strikeTargets"] = compute_strike_targets(orats_em_pct, spot_px)
+            st = compute_strike_targets(orats_em_pct, spot_px)
+            st["emSource"] = "delayed" if (delayed_em_pct is not None and orats_em_pct == delayed_em_pct) else "eod"
+            out["strikeTargets"] = st
         else:
             out["strikeTargets"] = None
     except Exception as e:

@@ -598,11 +598,17 @@ function renderEngine1DecisionPanel(payload) {
   const oratsEmSource = cur?.source || (nextEv?.impliedMoveSource ? "nextEvent" : null);
   const oratsEmAsOf = String(cur?.asOfDate || "").slice(0, 10);
 
-  // Strike Targets data (using ORATS EM percentages)
+  // 15-min delayed ORATS EM (from /cores snapshot)
+  const delayedEmPct = cur?.delayedImpliedMovePct;
+  const delayedUpdatedAt = String(cur?.delayedUpdatedAt || "").trim();
+  const delayedTradeDate = String(cur?.delayedTradeDate || "").slice(0, 10);
+
+  // Strike Targets data (using ORATS EM percentages — prefers delayed EM)
   const st = payload?.strikeTargets || null;
   const stWhitePct = st?.whitePct;
   const stBluePct = st?.bluePct;
   const stRedPct = st?.redPct;
+  const stEmSource = st?.emSource || "eod";
 
   const chips = [];
   if (gateTxt !== "—") chips.push(`Gate: ${gateTxt}`);
@@ -675,10 +681,14 @@ function renderEngine1DecisionPanel(payload) {
         <div class="taCard">
           <div class="taCardTop">
             <div class="taCardTitle">ORATS EM</div>
-            <span class="info" title="ORATS implied earnings move (impErnMv). This is the figure used for historical earnings event breach calculations. Sourced from ORATS cores endpoint.">ⓘ</span>
+            <span class="info" title="ORATS implied earnings move (impErnMv). EOD = last close from hist/cores. Delayed = 15-min delayed from /cores snapshot (freshest available). Strike targets are built off the delayed value when available.">ⓘ</span>
           </div>
           <div class="taCardState mono">${Number.isFinite(oratsEmPct) ? escapeHtml(oratsEmPct.toFixed(2)) + "%" : "—"}</div>
-          <div class="taCardInterp">${oratsEmAsOf ? `As of: ${escapeHtml(oratsEmAsOf)}` : "—"} · Used for earnings events</div>
+          <div class="taCardInterp">${oratsEmAsOf ? `As of: ${escapeHtml(oratsEmAsOf)}` : "—"} · EOD (used for breach history)</div>
+          <div style="border-top:1px solid rgba(0,0,0,0.06); margin-top:6px; padding-top:6px;">
+            <div class="taCardState mono" style="font-size:0.95em;">${Number.isFinite(delayedEmPct) ? escapeHtml(delayedEmPct.toFixed(2)) + "%" : "—"}</div>
+            <div class="taCardInterp">${delayedUpdatedAt ? `Updated: ${escapeHtml(delayedUpdatedAt)}` : delayedTradeDate ? `As of: ${escapeHtml(delayedTradeDate)}` : "—"} · 15-min delayed${Number.isFinite(delayedEmPct) ? " · <strong>Used for strike targets</strong>" : ""}</div>
+          </div>
         </div>
         <div class="taCard">
           <div class="taCardTop">
@@ -698,7 +708,7 @@ function renderEngine1DecisionPanel(payload) {
             <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span class="v mono">${Number.isFinite(stBluePct) ? escapeHtml(stBluePct.toFixed(2)) + "%" : "—"}</span></div>
             <div class="emRow emBox--red"><span class="k">2.0× EM</span><span class="v mono">${Number.isFinite(stRedPct) ? escapeHtml(stRedPct.toFixed(2)) + "%" : "—"}</span></div>
           </div>
-          <div class="taCardInterp">Wing distance as % of spot (ORATS EM).</div>
+          <div class="taCardInterp">Wing distance as % of spot (${stEmSource === "delayed" ? "15-min delayed EM" : "ORATS EOD EM"}).</div>
         </div>
       </div>
 
