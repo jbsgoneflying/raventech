@@ -1733,7 +1733,11 @@ def compute_breach_stats(
         except Exception:
             pass
     # PERFORMANCE OPTIMIZATION: Run skew and technicals overlays in parallel
-    current_as_of = str(current.get("asOfDate") or str(regime.get("asOfDate") or _fmt_date(now)))[:10]
+    # Use today's date for skew/technicals when delayed (15-min) data is available,
+    # so we get the freshest skew snapshot rather than the stale EOD date.
+    eod_as_of = str(current.get("asOfDate") or str(regime.get("asOfDate") or _fmt_date(now)))[:10]
+    has_delayed = current.get("delayedImpliedMovePct") is not None
+    current_as_of = _fmt_date(now) if has_delayed else eod_as_of
     
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_skew = executor.submit(
@@ -1935,15 +1939,19 @@ def compute_breach_stats(
     out["tickerDealerGamma"] = ticker_dg if ticker_dg is not None else {"enabled": False, "symbolUsed": str(t).upper(), "notes": ["Ticker dealer gamma unavailable."]}
 
     # Progressive enhancement: chain-based strike builder
+    # Use today's date when delayed data is available so live_strikes can be attempted.
     if trade_builder_inputs is not None:
         try:
+            tb_as_of = current_as_of if has_delayed else str(current.get("asOfDate") or str(regime.get("asOfDate") or ""))[:10]
+            tb_live_px = _to_float(current.get("stockPrice")) if has_delayed else None
             out["tradeBuilderInputs"] = {k: v for k, v in trade_builder_inputs.items() if v is not None}
             out["tradeBuilder"] = compute_trade_builder(
                 client,
                 ticker=t,
-                as_of_date=str(current.get("asOfDate") or str(regime.get("asOfDate") or ""))[:10],
+                as_of_date=tb_as_of,
                 inputs=trade_builder_inputs,
                 wing_recommendation=wing_rec,
+                live_price=tb_live_px,
             )
         except Exception as e:
             out["tradeBuilderInputs"] = {k: v for k, v in trade_builder_inputs.items() if v is not None}

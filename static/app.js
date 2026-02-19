@@ -2233,6 +2233,12 @@ function _bestUnderlyingPrice(payload) {
 
 function _bestImpliedMovePct(payload) {
   const cur = payload?.current;
+  // Prefer 15-min delayed EM from /cores (freshest available)
+  if (cur && cur.delayedImpliedMovePct !== null && cur.delayedImpliedMovePct !== undefined) {
+    const imp = Number(cur.delayedImpliedMovePct);
+    if (Number.isFinite(imp) && imp > 0) return imp;
+  }
+  // Fallback: EOD hist_cores EM
   if (cur && cur.impliedMovePct !== null && cur.impliedMovePct !== undefined) {
     const imp = Number(cur.impliedMovePct);
     if (Number.isFinite(imp) && imp > 0) return imp;
@@ -2353,9 +2359,11 @@ function renderTradeBuilder(payload) {
 
   const extra = gate === "NO_TRADE" ? "No Trade (Regime Gate)." : "Chain-based strike selection not enabled; showing distance targets only.";
   const cur = payload?.current || null;
+  const usingDelayed = cur?.delayedImpliedMovePct !== null && cur?.delayedImpliedMovePct !== undefined && Number.isFinite(Number(cur.delayedImpliedMovePct)) && Number(cur.delayedImpliedMovePct) > 0;
+  const emLabel = usingDelayed ? "15-min delayed" : "EOD";
   const src = cur?.source ? `source=${cur.source}` : "";
-  const asOf = cur?.asOfDate ? `asOf=${cur.asOfDate}` : "";
-  const meta = [src, asOf].filter(Boolean).join(", ");
+  const asOf = usingDelayed && cur?.delayedUpdatedAt ? `updated=${cur.delayedUpdatedAt}` : cur?.asOfDate ? `asOf=${cur.asOfDate}` : "";
+  const meta = [src, emLabel, asOf].filter(Boolean).join(", ");
   if (notes) notes.textContent = `${extra} Assumed price $${price.toFixed(2)}; implied move ${impPct.toFixed(2)}%.${meta ? ` (${meta})` : ""}`;
 }
 

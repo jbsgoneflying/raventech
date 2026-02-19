@@ -103,10 +103,12 @@ def compute_trade_builder(
     as_of_date: str,
     inputs: Dict[str, Any],
     wing_recommendation: Optional[Dict[str, Any]] = None,
+    live_price: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
-    Build strike-based suggestions for an earnings IC using ORATS /hist/strikes chain.
+    Build strike-based suggestions for an earnings IC using ORATS strikes chain.
 
+    Tries live_strikes first for real-time data, then falls back to hist_strikes (EOD).
     If chain is unavailable/empty, returns a safe stub with notes.
     """
     mode = str(inputs.get("mode") or "auto")
@@ -126,7 +128,7 @@ def compute_trade_builder(
     # Pull strikes chain around the target window
     if not expir:
         return {
-            "underlyingPrice": spot_from_monies,
+            "underlyingPrice": live_price or spot_from_monies,
             "expiration": None,
             "modeUsed": mode,
             "symmetryUsed": symmetry,
@@ -156,11 +158,27 @@ def compute_trade_builder(
         ]
     )
 
-    rows = client.hist_strikes(ticker=ticker, trade_date=str(as_of_date)[:10], fields=fields, dte=f"{max(1,dte_target-2)},{dte_target+10}").rows or []
-    rows = [r for r in rows if str(r.get("expirDate") or "")[:10] == expir]
+    # Try live strikes first for real-time chain data
+    rows: List[dict] = []
+    chain_source = "eod"
+    try:
+        if callable(getattr(client, "live_strikes_by_expiry", None)) and expir:
+            live_resp = client.live_strikes_by_expiry(ticker=ticker, expiry=expir, fields=fields)
+            live_rows = [r for r in (live_resp.rows or []) if str(r.get("expirDate") or "")[:10] == expir]
+            if live_rows:
+                rows = live_rows
+                chain_source = "live"
+    except Exception:
+        pass
+
+    # Fallback to historical EOD strikes
+    if not rows:
+        rows = client.hist_strikes(ticker=ticker, trade_date=str(as_of_date)[:10], fields=fields, dte=f"{max(1,dte_target-2)},{dte_target+10}").rows or []
+        rows = [r for r in rows if str(r.get("expirDate") or "")[:10] == expir]
+
     if not rows:
         return {
-            "underlyingPrice": spot_from_monies,
+            "underlyingPrice": live_price or spot_from_monies,
             "expiration": expir,
             "modeUsed": mode,
             "symmetryUsed": symmetry,
@@ -170,8 +188,8 @@ def compute_trade_builder(
             "notes": ["Options chain unavailable for selected expiration (empty strikes response)."],
         }
 
-    # Underlying price: use chain stockPrice if present
-    underlying = _to_float(rows[0].get("stockPrice")) or spot_from_monies
+    # Underlying price: prefer live price, then chain, then monies
+    underlying = live_price or _to_float(rows[0].get("stockPrice")) or spot_from_monies
 
     # Resolve auto mode using wingRecommendation if available
     mode_used = mode
@@ -301,8 +319,9 @@ def compute_trade_builder(
             "credit": call_credit,
         },
         "totalCredit": total_credit,
+        "chainSource": chain_source,
         "notes": [
-            "Chain-based strike selection enabled via ORATS /datav2/hist/strikes.",
+            f"Chain-based strike selection enabled via ORATS {'live' if chain_source == 'live' else 'hist'} strikes.",
             *notes,
         ],
     }
