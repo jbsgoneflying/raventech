@@ -142,6 +142,17 @@ def _build_event_row(
     mag_bucket = _magnitude_bucket(move_vs_em, flags)
     struct_bucket = _structure_bucket(gap_structure)
 
+    # Relative volume: event-day volume / 20-day average volume
+    rel_volume: Optional[float] = None
+    post_vol = _to_float(post_bar.get("volume"))
+    if post_vol is not None and post_vol > 0 and bars_for_atr:
+        avg_vols = [_to_float(b.get("volume")) for b in bars_for_atr[-20:]]
+        avg_vols = [v for v in avg_vols if v is not None and v > 0]
+        if avg_vols:
+            avg_vol = sum(avg_vols) / len(avg_vols)
+            if avg_vol > 0:
+                rel_volume = post_vol / avg_vol
+
     # Forward returns
     forward_returns: Dict[int, Optional[float]] = {}
     sorted_fwd = sorted(forward_bars, key=lambda b: str(b.get("date", "")))
@@ -160,6 +171,7 @@ def _build_event_row(
         "gap_structure": gap_structure,
         "magnitude_bucket": mag_bucket,
         "structure_bucket": struct_bucket,
+        "rel_volume": round(rel_volume, 2) if rel_volume is not None else None,
         "forward_returns": {str(k): round(v, 4) for k, v in forward_returns.items() if v is not None},
     }
 

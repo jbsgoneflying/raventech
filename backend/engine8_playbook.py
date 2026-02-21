@@ -32,6 +32,7 @@ from backend.config import FeatureFlags, get_flags
 LOG = logging.getLogger(__name__)
 
 _HORIZONS = (1, 3, 5)
+_HIGH_VOLUME_THRESHOLD = 1.5  # event-day volume > 1.5x 20d avg = "high volume"
 
 # Playbook magnitude buckets (different from Engine 8 pattern layer — cleaner for desk use)
 _MAG_CONTAINED = "contained"   # < 1.0x EM
@@ -99,37 +100,85 @@ def _compute_scenario_stats(events: List[dict], direction: str) -> Dict[str, Any
             stats[f"avg_reversion_{h}d"] = None
             stats[f"total_{h}d"] = 0
 
+    # Volume confirmation: % of events with high relative volume
+    vols = [ev.get("rel_volume") for ev in events if ev.get("rel_volume") is not None]
+    if vols:
+        high_vol_count = sum(1 for v in vols if v >= _HIGH_VOLUME_THRESHOLD)
+        stats["high_vol_pct"] = round(high_vol_count / len(vols), 4)
+        stats["avg_rel_volume"] = round(sum(vols) / len(vols), 2)
+    else:
+        stats["high_vol_pct"] = None
+        stats["avg_rel_volume"] = None
+
+    # HOLD structure rate (strong PEAD signal when gap is sustained)
+    hold_count = sum(1 for ev in events if _struct_simplify(ev.get("structure_bucket") or ev.get("gap_structure")) == "HOLD")
+    stats["hold_pct"] = round(hold_count / len(events), 4) if events else None
+
+    # Optimal horizon: pick the horizon with highest continuation (or reversion for FADE)
+    best_h = 3
+    best_rate = 0.0
+    for h in _HORIZONS:
+        cr = stats.get(f"continuation_rate_{h}d")
+        if cr is not None and cr > best_rate:
+            best_rate = cr
+            best_h = h
+    stats["optimal_hold_days"] = best_h
+
     return stats
 
 
 def _derive_action(stats: Dict[str, Any], direction: str) -> Dict[str, Any]:
     """Derive recommended action from scenario stats.
 
-    Uses the 5-day horizon as primary signal (captures PEAD drift),
-    with 1-day as confirmation.
+    Primary signal: 5-day continuation/reversion rate (captures PEAD drift).
+    Confirmation: 1-day rate + volume confirmation + HOLD structure.
     """
     cont_5d = stats.get("continuation_rate_5d")
+    cont_3d = stats.get("continuation_rate_3d")
     rev_5d = stats.get("reversion_rate_5d")
     cont_1d = stats.get("continuation_rate_1d")
     count = stats.get("count", 0)
+    high_vol_pct = stats.get("high_vol_pct")
+    hold_pct = stats.get("hold_pct")
 
     if cont_5d is None or count < _SCENARIO_MIN_EVENTS:
         return {"action": "PASS", "confidence": "INSUFFICIENT", "reason": "Not enough historical events for this scenario."}
 
+    # Base confidence from sample size
     confidence = "LOW" if count < 6 else "MEDIUM" if count < 10 else "HIGH"
 
+    # Volume and structure can upgrade confidence by one tier
+    vol_confirmed = high_vol_pct is not None and high_vol_pct >= 0.6
+    hold_confirmed = hold_pct is not None and hold_pct >= 0.5
+    confirmations = sum([vol_confirmed, hold_confirmed])
+    if confirmations >= 1 and confidence == "LOW":
+        confidence = "MEDIUM"
+    elif confirmations >= 1 and confidence == "MEDIUM":
+        confidence = "HIGH"
+
+    # Build reason with context
+    reason_parts: list[str] = []
+
     if cont_5d >= 0.65 and (cont_1d is None or cont_1d >= 0.55):
+        reason_parts.append(f"{round(cont_5d * 100)}% continuation over 5d ({count} events)")
+        if vol_confirmed:
+            reason_parts.append(f"{round(high_vol_pct * 100)}% on high volume")
+        if hold_confirmed:
+            reason_parts.append(f"{round(hold_pct * 100)}% held the gap intraday")
         return {
             "action": "CONTINUE",
             "confidence": confidence,
-            "reason": f"{round(cont_5d * 100)}% continuation rate over 5 days ({count} events).",
+            "reason": ". ".join(reason_parts) + ".",
         }
 
     if rev_5d is not None and rev_5d >= 0.60 and (cont_1d is not None and cont_1d < 0.45):
+        reason_parts.append(f"{round(rev_5d * 100)}% reversion over 5d ({count} events)")
+        if high_vol_pct is not None and high_vol_pct < 0.4:
+            reason_parts.append("low volume confirms overreaction")
         return {
             "action": "FADE",
             "confidence": confidence,
-            "reason": f"{round(rev_5d * 100)}% reversion rate over 5 days ({count} events).",
+            "reason": ". ".join(reason_parts) + ".",
         }
 
     return {

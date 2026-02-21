@@ -13,6 +13,8 @@
 
   var _dummyEl = document.createElement("span");
   function qs(id) { return document.getElementById(id) || _dummyEl; }
+  var _lastPhaseAData = null;
+  var _deskNotesCache = {};
   function fmt(v, d) { return v == null ? "—" : Number(v).toFixed(d == null ? 2 : d); }
   function pct(v) { return v == null ? "—" : (Number(v) * 100).toFixed(1) + "%"; }
 
@@ -107,18 +109,29 @@
     }
 
     /* Playbook */
+    _lastPhaseAData = data;
     renderPlaybook(data.playbook);
   }
 
   /* ── Playbook Renderer ────────────────────────────────────────────── */
   function renderPlaybook(pb) {
     var section = qs("playbookSection");
+    var deskWrap = qs("pbDeskNotesWrap");
+    var deskPanel = qs("pbDeskNotesPanel");
+    var deskBtn = qs("pbDeskNotesBtn");
+    var deskBtnText = qs("pbDeskNotesBtnText");
+    deskPanel.style.display = "none";
+    deskPanel.innerHTML = "";
+    deskBtn.disabled = false;
+    deskBtnText.textContent = "Get GPT-5.2 Desk Notes";
+
     if (!pb) {
       section.style.display = "";
       qs("pbQuickRefList").innerHTML = '<div style="color:var(--muted); font-style:italic;">Playbook unavailable — historical bar data could not be loaded. Try again when markets are open.</div>';
       qs("pbThresholds").style.display = "none";
       qs("pbScenarioBody").innerHTML = "";
       qs("pbMeta").textContent = "";
+      deskWrap.style.display = "none";
       return;
     }
     section.style.display = "";
@@ -129,8 +142,10 @@
       qs("pbScenarioBody").innerHTML = "";
       var meta = pb.meta || {};
       qs("pbMeta").textContent = (meta.total_historical_events || 0) + " historical events analyzed — insufficient per-scenario data.";
+      deskWrap.style.display = "none";
       return;
     }
+    deskWrap.style.display = "";
 
     /* Quick reference */
     var qrList = qs("pbQuickRefList");
@@ -176,11 +191,25 @@
       var actClass = (s.action || "pass").toLowerCase();
       var confClass = (s.confidence || "low").toLowerCase();
       var cont1d = s.continuation_rate_1d != null ? Math.round(s.continuation_rate_1d * 100) + "%" : "—";
+      var cont3d = s.continuation_rate_3d != null ? Math.round(s.continuation_rate_3d * 100) + "%" : "—";
       var cont5d = s.continuation_rate_5d != null ? Math.round(s.continuation_rate_5d * 100) + "%" : "—";
       var driftVal = s.avg_continuation_5d;
       var avgDrift = driftVal != null ? (driftVal > 0 ? "+" : "") + fmt(driftVal) + "%" : "—";
       var dirArrow = s.direction === "UP" ? "&#9650;" : "&#9660;";
       var dirColor = s.direction === "UP" ? "color:rgba(52,199,89,0.9)" : "color:rgba(255,59,48,0.85)";
+
+      /* Volume confirmation badge */
+      var volHtml = "—";
+      if (s.high_vol_pct != null) {
+        var vp = Math.round(s.high_vol_pct * 100);
+        var volColor = vp >= 60 ? "color:rgba(52,199,89,0.9)" : vp >= 40 ? "color:rgba(255,149,0,0.9)" : "color:rgba(11,11,15,0.4)";
+        volHtml = '<span style="' + volColor + '; font-weight:700;">' + vp + '%</span>';
+        if (s.avg_rel_volume != null) volHtml += '<br><span style="font-size:10px; color:var(--muted);">' + fmt(s.avg_rel_volume) + '×</span>';
+      }
+
+      /* Optimal hold period */
+      var holdHtml = s.optimal_hold_days != null ? s.optimal_hold_days + "d" : "—";
+
       rows +=
         '<tr>' +
           '<td><span class="pbMagLabel ' + magClass + '">' + (magLabels[s.magnitude] || escHtml(s.magnitude || "")) + '</span></td>' +
@@ -188,8 +217,11 @@
           '<td>' + escHtml(s.structure || "") + '</td>' +
           '<td style="font-family:monospace;">' + (s.count || 0) + '</td>' +
           '<td style="font-family:monospace;">' + cont1d + '</td>' +
+          '<td style="font-family:monospace;">' + cont3d + '</td>' +
           '<td style="font-family:monospace; font-weight:700;">' + cont5d + '</td>' +
           '<td style="font-family:monospace;">' + avgDrift + '</td>' +
+          '<td style="font-family:monospace; text-align:center;">' + volHtml + '</td>' +
+          '<td style="font-family:monospace; text-align:center; font-weight:700;">' + holdHtml + '</td>' +
           '<td><span class="pbActionBadge ' + actClass + '">' + escHtml(s.action || "PASS") + '</span></td>' +
           '<td><span class="pbConfBadge ' + confClass + '">' + escHtml(s.confidence || "") + '</span></td>' +
         '</tr>';
@@ -345,6 +377,125 @@
         runBtn.disabled = false;
         runBtn.querySelector(".btnSpinner").style.display = "none";
         if (window.RavenLoading) window.RavenLoading.hide();
+      });
+  });
+
+  /* ── Desk Notes (GPT-5.2 LLM) ─────────────────────────────────────── */
+  var _deskNotesSections = [
+    { key: "overall_thesis",   title: "Overall Thesis",      icon: "&#128202;" },
+    { key: "iron_condor_view", title: "Iron Condor View",    icon: "&#9878;" },
+    { key: "scenario_playbook",title: "Scenario Playbook",   icon: "&#128214;" },
+    { key: "entry_timing",     title: "Entry Timing",        icon: "&#9654;" },
+    { key: "risk_management",  title: "Risk Management",     icon: "&#128737;" },
+    { key: "what_breaks_it",   title: "What Breaks It",      icon: "&#9888;" },
+    { key: "desk_takeaway",    title: "Desk Takeaway",       icon: "&#128161;" },
+  ];
+
+  var _deskNotesAbort = null;
+
+  function buildDeskNotesPayload(data) {
+    var e1 = data.engine1 || {};
+    var sum = e1.summary || {};
+    var cur = e1.current || {};
+    var bl = e1.baseline || {};
+    var pb = data.playbook || {};
+    return {
+      ticker: data.ticker || "",
+      earnings_date: data.earnings_date || "",
+      timing: data.timing || "",
+      breach_stats: {
+        breach_rate_pct: sum.breach_rate_pct,
+        avg_above_breach_pct: sum.avg_above_breach_pct,
+        events_used: sum.events_used,
+        events_found: sum.events_found,
+        avg_ratio_realized_to_implied: bl.avg_ratio_realized_to_implied,
+      },
+      expected_move: {
+        orats_em_eod_pct: cur.impliedMovePct,
+        orats_em_delayed_pct: cur.delayedImpliedMovePct,
+        straddle_em_pct: cur.straddleImpliedMovePct,
+        stock_price: cur.stockPrice,
+        strike_targets: e1.strikeTargets,
+      },
+      playbook: {
+        scenarios: (pb.scenarios || []).slice(0, 16),
+        thresholds: pb.thresholds,
+        quick_reference: pb.quick_reference,
+        meta: pb.meta,
+      },
+    };
+  }
+
+  function renderDeskNotes(data) {
+    var panel = qs("pbDeskNotesPanel");
+    var html = "";
+    _deskNotesSections.forEach(function (sec) {
+      var val = data[sec.key];
+      if (!val) return;
+      html += '<div class="pbDeskNoteSection">';
+      html += '<div class="pbDeskNoteTitle">' + sec.icon + " " + sec.title + '</div>';
+      html += '<div class="pbDeskNoteText">' + escHtml(val) + '</div>';
+      html += '</div>';
+    });
+    if (data._source) {
+      html += '<div class="pbDeskNoteSource">Generated by ' + escHtml(data._source) + '</div>';
+    }
+    panel.innerHTML = html;
+    panel.style.display = "";
+  }
+
+  qs("pbDeskNotesBtn").addEventListener("click", function () {
+    if (!_lastPhaseAData) return;
+
+    var ticker = (_lastPhaseAData.ticker || "").toUpperCase();
+    var cacheKey = ticker + "_" + (_lastPhaseAData.earnings_date || "");
+
+    if (_deskNotesCache[cacheKey]) {
+      renderDeskNotes(_deskNotesCache[cacheKey]);
+      return;
+    }
+
+    var btn = qs("pbDeskNotesBtn");
+    var btnText = qs("pbDeskNotesBtnText");
+    btn.disabled = true;
+    btnText.textContent = "Generating desk notes with GPT-5.2\u2026";
+
+    var dotCount = 0;
+    var dotInterval = setInterval(function () {
+      dotCount = (dotCount + 1) % 4;
+      btnText.textContent = "Generating desk notes with GPT-5.2" + ".".repeat(dotCount);
+    }, 400);
+
+    if (_deskNotesAbort) _deskNotesAbort.abort();
+    _deskNotesAbort = new AbortController();
+
+    var payload = buildDeskNotesPayload(_lastPhaseAData);
+
+    fetch("/api/engine8/desk-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload: payload }),
+      signal: _deskNotesAbort.signal,
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || r.statusText); });
+        return r.json();
+      })
+      .then(function (data) {
+        _deskNotesCache[cacheKey] = data;
+        renderDeskNotes(data);
+        btn.disabled = false;
+        btnText.textContent = "Refresh Desk Notes";
+      })
+      .catch(function (err) {
+        if (err.name === "AbortError") return;
+        qs("pbDeskNotesPanel").innerHTML = '<div style="color:rgba(255,59,48,0.8); font-size:13px;">Error: ' + escHtml(err.message) + '</div>';
+        qs("pbDeskNotesPanel").style.display = "";
+        btn.disabled = false;
+        btnText.textContent = "Retry Desk Notes";
+      })
+      .finally(function () {
+        clearInterval(dotInterval);
       });
   });
 

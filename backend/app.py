@@ -4467,6 +4467,98 @@ async def engine8_history(
         raise HTTPException(status_code=500, detail=f"Engine 8 history error: {e}") from e
 
 
+# ---------------------------------------------------------------------------
+# Engine 8 – LLM Desk Notes for Earnings Playbook
+# ---------------------------------------------------------------------------
+
+_E8_DESK_NOTES_SYSTEM = """You are a senior quant on an options-focused systematic desk.
+A junior desk quant is reviewing an earnings playbook for an upcoming earnings event.
+They need your guidance on how to interpret and trade the scenarios.
+
+You will receive a JSON payload with:
+- ticker, earnings_date, timing (BMO/AMC)
+- breach_stats: historical breach rate, avg overshoot, realized/implied ratio
+- expected_move: ORATS EM %, straddle EM, strike targets at 1.0x/1.5x/2.0x
+- playbook: scenario matrix with magnitude buckets, continuation/reversion rates, actions
+- thresholds: dollar price levels at EM multiples
+
+Write a concise desk briefing in this exact JSON structure:
+
+{
+  "overall_thesis": "3-4 sentences: What this ticker's earnings history tells us. Is it a momentum name (gaps continue) or a mean-reverter (gaps fade)? What's the historical edge?",
+  "iron_condor_view": "3-4 sentences: Given the breach rate and EM data, how should we think about selling an iron condor here? Wing placement relative to EM multiples. Is the premium worth the risk given the breach history?",
+  "scenario_playbook": "4-6 sentences: Walk through the key scenarios. If it gaps up within EM — what do we do? If it gaps beyond 1.5x EM? If it gaps down? Reference the actual continuation rates and drift numbers.",
+  "entry_timing": "2-3 sentences: When to put the trade on (days before earnings?), how to manage delta exposure into the event, and when to act post-announcement.",
+  "risk_management": "2-3 sentences: Position sizing relative to the EM, stop-loss levels, max acceptable loss. How the breach rate informs our risk budget.",
+  "what_breaks_it": "2-3 sentences: What scenario invalidates the playbook — regime change, unusual vol, earnings restatement, guidance surprise beyond historical norms.",
+  "desk_takeaway": "2-3 sentences: The one key insight a junior quant should remember about trading this name around earnings. What makes this ticker different from the average stock."
+}
+
+Key data fields in each scenario:
+- high_vol_pct: % of events where volume was >1.5x the 20-day average. High volume confirms information flow (continuation). Low volume = overreaction (fade candidate).
+- hold_pct: % of events where the gap held intraday (didn't fade by close). HOLD events have the strongest PEAD (post-earnings drift).
+- optimal_hold_days: the horizon (1d, 3d, or 5d) with the highest continuation rate — the suggested holding period.
+- continuation_rate_3d: the 3-day continuation rate — often the sweet spot for PEAD capture.
+- avg_rel_volume: average relative volume across events in this scenario.
+
+Rules:
+- Write as a senior quant talking to a junior: clear, direct, practical.
+- Reference the ACTUAL numbers from the data (breach rate, EM %, continuation rates, volume, specific dollar levels).
+- Be specific about this ticker — don't give generic earnings trading advice.
+- If breach rate is high (>25%), emphasize the risk to short premium strategies.
+- If high_vol_pct is high (>60%), note that volume confirms the gap is real (not overreaction).
+- If continuation rates are strongly directional, highlight the PEAD opportunity and recommend the optimal_hold_days.
+- If HOLD structure events dominate (hold_pct > 50%), call out that gap-and-hold is the strongest PEAD signal.
+- Keep each field under 100 words.
+- Output valid JSON only."""
+
+
+@app.post("/api/engine8/desk-notes")
+def engine8_desk_notes(body: dict):
+    """Engine 8: Generate GPT-5.2 senior quant desk notes for the earnings playbook."""
+    payload_data = body.get("payload")
+    if not payload_data:
+        raise HTTPException(status_code=400, detail="Missing 'payload' in request body")
+
+    try:
+        from backend.llm_client import _get_openai_client, _parse_desk_brief_json
+
+        client = _get_openai_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="OpenAI client unavailable — set OPENAI_API_KEY")
+
+        import json as _json
+        payload_str = _json.dumps(payload_data, default=str)
+        if len(payload_str) > 12000:
+            payload_str = payload_str[:12000]
+
+        resp = client.chat.completions.create(
+            model="gpt-5.2",
+            messages=[
+                {"role": "system", "content": _E8_DESK_NOTES_SYSTEM},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=0.3,
+            max_completion_tokens=1800,
+            timeout=45,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or ""
+        parsed = _parse_desk_brief_json(content)
+        if parsed is None:
+            raise HTTPException(status_code=502, detail="LLM returned unparseable response")
+
+        parsed["_source"] = "gpt-5.2"
+        parsed["_ticker"] = payload_data.get("ticker", "")
+        return parsed
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Engine 8 desk-notes LLM failed")
+        raise HTTPException(status_code=500, detail=f"LLM error: {e}") from e
+
+
 @app.post("/api/front-layer/asset-insight")
 def api_front_layer_asset_insight(body: dict):
     """Generate a desk-level LLM insight for a single cross-asset stress reading.
