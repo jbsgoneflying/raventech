@@ -1123,6 +1123,27 @@ def compute_breach_stats(
         _hold_risk_events = _build_hold_risk_events(parsed, _dailies_cache, _cores_cache)
         LOG.debug("Built %d HoldRiskEvent objects for %s", len(_hold_risk_events), t)
 
+    # Build per-event CTC (close-to-close) lookup for gap-vs-session comparison
+    _ctc_lookup: Dict[str, Dict[str, Any]] = {}
+    for _hre in _hold_risk_events:
+        if _hre.prior_close and _hre.prior_close > 0 and _hre.earnings_day_close and _hre.expected_move_pct and _hre.expected_move_pct > 0:
+            _pc = _hre.prior_close
+            _ec = _hre.earnings_day_close
+            _em = _hre.expected_move_pct
+            _ctc_abs = abs(_ec - _pc)
+            _ctc_pct = _ctc_abs / _pc * 100.0
+            _threshold = _pc * (_em / 100.0)
+            _ctc_lookup[_hre.earn_date] = {
+                "priorClose": _round2(_pc),
+                "earningsClose": _round2(_ec),
+                "ctcMovePct": _round2(_ctc_pct),
+                "ctcSignedMovePct": _round2((_ec - _pc) / _pc * 100.0),
+                "ctcVsEM": _round2(_ctc_pct / _em) if _em > 0 else None,
+                "ctcBreach1x": _ctc_abs >= _threshold * 1.0,
+                "ctcBreach15x": _ctc_abs >= _threshold * 1.5,
+                "ctcBreach2x": _ctc_abs >= _threshold * 2.0,
+            }
+
     # Step 2-5: per-event computations
     out_events: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
@@ -1139,76 +1160,33 @@ def compute_breach_stats(
     down_overshoot_all: List[float] = []
     up_breaches_all: int = 0
     down_breaches_all: int = 0
+    # Fixed-k gap breach accumulators for gap-vs-session comparison
+    gap_breach_k15_all: int = 0
+    gap_breach_k20_all: int = 0
+    gap_events_used_all: int = 0
 
+    _q_acc_template: Dict[str, Any] = {
+        "events_total": 0,
+        "events_used": 0,
+        "breaches": 0,  # at request k
+        "breaches_k1": 0,  # at k=1.0 (for recommendation)
+        "breaches_k15": 0,  # at k=1.5 (gap-vs-session)
+        "breaches_k20": 0,  # at k=2.0 (gap-vs-session)
+        "near_08": 0,
+        "near_09": 0,
+        "ratios": [],
+        "above_breach": [],
+        "up_breaches": 0,
+        "down_breaches": 0,
+        "up_overshoot": [],
+        "down_overshoot": [],
+        "realized": [],
+        "implied": [],
+        "max_ratio": None,
+    }
     quarter_acc: Dict[str, Dict[str, Any]] = {
-        "Q1": {
-            "events_total": 0,
-            "events_used": 0,
-            "breaches": 0,  # at request k
-            "breaches_k1": 0,  # at k=1.0 (for recommendation)
-            "near_08": 0,
-            "near_09": 0,
-            "ratios": [],
-            "above_breach": [],
-            "up_breaches": 0,
-            "down_breaches": 0,
-            "up_overshoot": [],
-            "down_overshoot": [],
-            "realized": [],
-            "implied": [],
-            "max_ratio": None,
-        },
-        "Q2": {
-            "events_total": 0,
-            "events_used": 0,
-            "breaches": 0,
-            "breaches_k1": 0,
-            "near_08": 0,
-            "near_09": 0,
-            "ratios": [],
-            "above_breach": [],
-            "up_breaches": 0,
-            "down_breaches": 0,
-            "up_overshoot": [],
-            "down_overshoot": [],
-            "realized": [],
-            "implied": [],
-            "max_ratio": None,
-        },
-        "Q3": {
-            "events_total": 0,
-            "events_used": 0,
-            "breaches": 0,
-            "breaches_k1": 0,
-            "near_08": 0,
-            "near_09": 0,
-            "ratios": [],
-            "above_breach": [],
-            "up_breaches": 0,
-            "down_breaches": 0,
-            "up_overshoot": [],
-            "down_overshoot": [],
-            "realized": [],
-            "implied": [],
-            "max_ratio": None,
-        },
-        "Q4": {
-            "events_total": 0,
-            "events_used": 0,
-            "breaches": 0,
-            "breaches_k1": 0,
-            "near_08": 0,
-            "near_09": 0,
-            "ratios": [],
-            "above_breach": [],
-            "up_breaches": 0,
-            "down_breaches": 0,
-            "up_overshoot": [],
-            "down_overshoot": [],
-            "realized": [],
-            "implied": [],
-            "max_ratio": None,
-        },
+        qk: {**_q_acc_template, "ratios": [], "above_breach": [], "up_overshoot": [], "down_overshoot": [], "realized": [], "implied": []}
+        for qk in ("Q1", "Q2", "Q3", "Q4")
     }
 
     for earn_date, raw in parsed:
@@ -1402,8 +1380,19 @@ def compute_breach_stats(
                     q["max_ratio"] = ratio
 
             breach_k1 = realized_pct > implied_pct  # k=1.0
+            breach_k15 = realized_pct > implied_pct * 1.5
+            breach_k20 = realized_pct > implied_pct * 2.0
             if breach_k1:
                 q["breaches_k1"] += 1
+            if breach_k15:
+                q["breaches_k15"] += 1
+            if breach_k20:
+                q["breaches_k20"] += 1
+            gap_events_used_all += 1
+            if breach_k15:
+                gap_breach_k15_all += 1
+            if breach_k20:
+                gap_breach_k20_all += 1
             if breach:
                 q["breaches"] += 1
                 if above_breach_pct is not None:
@@ -1459,6 +1448,7 @@ def compute_breach_stats(
                 "aboveBreachPct": _round2(above_breach_pct),
                 "aboveBreachPctVsK": _round2(above_breach_pct_vs_k) if flags.ADD_K_CONSISTENT_OVERSHOOT else None,
                 "notes": row_notes,
+                **(_ctc_lookup.get(_fmt_date(earn_date), {})),
             }
         )
 
@@ -1540,6 +1530,32 @@ def compute_breach_stats(
         "avg_above_breach_pct": _round2(baseline_avg_above_breach),
     }
 
+    # Baseline gap breach rates at fixed k-multiples for gap-vs-session card
+    _total_k1 = sum(int(acc["breaches_k1"]) for acc in quarter_acc.values())
+    baseline_gap_k1_pct = _rate_pct(_total_k1, gap_events_used_all)
+    baseline_gap_k15_pct = _rate_pct(gap_breach_k15_all, gap_events_used_all)
+    baseline_gap_k20_pct = _rate_pct(gap_breach_k20_all, gap_events_used_all)
+
+    # Baseline CTC breach rates at fixed k-multiples
+    _ctc_breach_1x_all = sum(1 for v in _ctc_lookup.values() if v.get("ctcBreach1x"))
+    _ctc_breach_15x_all = sum(1 for v in _ctc_lookup.values() if v.get("ctcBreach15x"))
+    _ctc_breach_2x_all = sum(1 for v in _ctc_lookup.values() if v.get("ctcBreach2x"))
+    _ctc_sample_all = len(_ctc_lookup)
+    baseline_ctc_k1_pct = _rate_pct(_ctc_breach_1x_all, _ctc_sample_all)
+    baseline_ctc_k15_pct = _rate_pct(_ctc_breach_15x_all, _ctc_sample_all)
+    baseline_ctc_k2_pct = _rate_pct(_ctc_breach_2x_all, _ctc_sample_all)
+
+    # Group CTC data by quarter for quarterly CTC breach rates
+    _ctc_by_quarter: Dict[str, List[Dict[str, Any]]] = {"Q1": [], "Q2": [], "Q3": [], "Q4": []}
+    for _hre in _hold_risk_events:
+        _ed = _hre.earn_date
+        if _ed in _ctc_lookup:
+            try:
+                _qk = _quarter_key(_parse_date(str(_ed)[:10]))
+                _ctc_by_quarter[_qk].append(_ctc_lookup[_ed])
+            except Exception:
+                pass
+
     quarters: Dict[str, Any] = {}
     for qk, acc in quarter_acc.items():
         eu = int(acc["events_used"])
@@ -1551,6 +1567,17 @@ def compute_breach_stats(
 
         near08 = _rate_pct(int(acc["near_08"]), eu)
         near09 = _rate_pct(int(acc["near_09"]), eu)
+
+        # Fixed-k gap breach rates for this quarter
+        br_k15_q = _rate_pct(int(acc["breaches_k15"]), eu)
+        br_k20_q = _rate_pct(int(acc["breaches_k20"]), eu)
+
+        # CTC breach rates for this quarter
+        _q_ctc = _ctc_by_quarter.get(qk, [])
+        _q_ctc_n = len(_q_ctc)
+        ctc_k1_q = _rate_pct(sum(1 for c in _q_ctc if c.get("ctcBreach1x")), _q_ctc_n)
+        ctc_k15_q = _rate_pct(sum(1 for c in _q_ctc if c.get("ctcBreach15x")), _q_ctc_n)
+        ctc_k2_q = _rate_pct(sum(1 for c in _q_ctc if c.get("ctcBreach2x")), _q_ctc_n)
 
         ratios: List[float] = acc["ratios"]
         avg_ratio = _mean(ratios)
@@ -1631,6 +1658,28 @@ def compute_breach_stats(
             "quarterDownBreachDeltaPP": _round2(q_down_delta_pp),
             "quarterAvgUpOvershootDeltaPP": _round2(q_up_os_delta_pp),
             "quarterAvgDownOvershootDeltaPP": _round2(q_down_os_delta_pp),
+            # Gap-vs-session fixed-k breach rates and deltas
+            "gapBreachRate": {
+                "1.0": _round2(br_k1),
+                "1.5": _round2(br_k15_q),
+                "2.0": _round2(br_k20_q),
+            },
+            "ctcBreachRate": {
+                "1.0": _round2(ctc_k1_q),
+                "1.5": _round2(ctc_k15_q),
+                "2.0": _round2(ctc_k2_q),
+            },
+            "ctcBreachDelta": {
+                "1.0": _round2(ctc_k1_q - baseline_ctc_k1_pct) if (ctc_k1_q is not None and baseline_ctc_k1_pct is not None and eu >= 3) else None,
+                "1.5": _round2(ctc_k15_q - baseline_ctc_k15_pct) if (ctc_k15_q is not None and baseline_ctc_k15_pct is not None and eu >= 3) else None,
+                "2.0": _round2(ctc_k2_q - baseline_ctc_k2_pct) if (ctc_k2_q is not None and baseline_ctc_k2_pct is not None and eu >= 3) else None,
+            },
+            "gapBreachDelta": {
+                "1.0": _round2(br_k1 - baseline_gap_k1_pct) if (br_k1 is not None and baseline_gap_k1_pct is not None and eu >= 3) else None,
+                "1.5": _round2(br_k15_q - baseline_gap_k15_pct) if (br_k15_q is not None and baseline_gap_k15_pct is not None and eu >= 3) else None,
+                "2.0": _round2(br_k20_q - baseline_gap_k20_pct) if (br_k20_q is not None and baseline_gap_k20_pct is not None and eu >= 3) else None,
+            },
+            "ctcSample": _q_ctc_n,
             "seasonality": seasonality_obj,
             "recommendation": _recommendation(
                 events_used=eu,
@@ -1758,6 +1807,22 @@ def compute_breach_stats(
         skew_overlay = future_skew.result()
         technicals = future_technicals.result()
 
+    # Gap-vs-Session (CTC) summary for the main comparison card
+    gap_vs_ctc = {
+        "gap": {
+            "1.0": _round2(baseline_gap_k1_pct),
+            "1.5": _round2(baseline_gap_k15_pct),
+            "2.0": _round2(baseline_gap_k20_pct),
+        },
+        "ctc": {
+            "1.0": _round2(baseline_ctc_k1_pct),
+            "1.5": _round2(baseline_ctc_k15_pct),
+            "2.0": _round2(baseline_ctc_k2_pct),
+        },
+        "sample_gap": gap_events_used_all,
+        "sample_ctc": _ctc_sample_all,
+    }
+
     out: Dict[str, Any] = {
         "ticker": t,
         "params": {"n": n, "years": years, "k": float(k)},
@@ -1773,6 +1838,7 @@ def compute_breach_stats(
         "wingRecommendation": wing_rec,
         "skewOverlay": skew_overlay,
         "technicals": technicals,
+        "gapVsCtc": gap_vs_ctc,
     }
     if event_risk is not None:
         out["eventRisk"] = event_risk

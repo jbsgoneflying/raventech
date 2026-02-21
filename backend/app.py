@@ -4328,6 +4328,7 @@ async def engine8_evaluate(
                         "breach_1_5x": (hold_risk.get("unconditional", {}).get("earnings_close", {}).get("1.5")),
                         "breach_2_0x": (hold_risk.get("unconditional", {}).get("earnings_close", {}).get("2.0")),
                     },
+                    "gapVsCtc": e1_result.get("gapVsCtc"),
                 },
                 "playbook": playbook,
                 "decision": None,

@@ -125,6 +125,16 @@ function buildEngine1OnePageMarkdown({ sanitizedPayload, riskChecks, levels, uiS
   add("engine1.summary.events_found", summary?.events_found);
   add("engine1.baseline.avg_ratio_realized_to_implied", baseline?.avg_ratio_realized_to_implied);
 
+  const gapVsCtc = payload?.gapVsCtc;
+  if (gapVsCtc) {
+    add("engine1.gapVsCtc.gap_1x", gapVsCtc.gap?.["1.0"]);
+    add("engine1.gapVsCtc.gap_15x", gapVsCtc.gap?.["1.5"]);
+    add("engine1.gapVsCtc.gap_2x", gapVsCtc.gap?.["2.0"]);
+    add("engine1.gapVsCtc.session_1x", gapVsCtc.ctc?.["1.0"]);
+    add("engine1.gapVsCtc.session_15x", gapVsCtc.ctc?.["1.5"]);
+    add("engine1.gapVsCtc.session_2x", gapVsCtc.ctc?.["2.0"]);
+  }
+
   add("engine1.regime.label", regime?.label);
   add("engine1.regime.tailMultiplier", regime?.tailMultiplier);
   add("engine1.regime.tradeGate", regime?.guidance?.tradeGate);
@@ -324,6 +334,21 @@ function buildEngine1SnapshotMarkdown({ payload, levels, uiState, riskChecks }) 
   lines.push(`- avg_above_breach_pct: ${summary?.avg_above_breach_pct ?? "—"}`);
   lines.push(`- events_used: ${summary?.events_used ?? "—"} (found ${summary?.events_found ?? "—"})`);
   lines.push("");
+
+  const gvcExp = payload?.gapVsCtc;
+  if (gvcExp) {
+    lines.push("## Gap vs Session Risk");
+    lines.push("| Multiple | Gap | Session | Delta |");
+    lines.push("|----------|-----|---------|-------|");
+    for (const mk of ["1.0", "1.5", "2.0"]) {
+      const g = gvcExp.gap?.[mk], s = gvcExp.ctc?.[mk];
+      const gT = g != null ? Number(g).toFixed(1) + "%" : "—";
+      const sT = s != null ? Number(s).toFixed(1) + "%" : "—";
+      const d = (g != null && s != null) ? (Number(s) - Number(g)).toFixed(1) + "pp" : "—";
+      lines.push(`| ${mk}× EM | ${gT} | ${sT} | ${d} |`);
+    }
+    lines.push("");
+  }
 
   lines.push("## Baseline");
   lines.push(`- avg_ratio_realized_to_implied: ${baseline?.avg_ratio_realized_to_implied ?? "—"}`);
@@ -610,6 +635,11 @@ function renderEngine1DecisionPanel(payload) {
   const stRedPct = st?.redPct;
   const stEmSource = st?.emSource || "eod";
 
+  // Gap vs Session (CTC) risk comparison data
+  const gvc = payload?.gapVsCtc || {};
+  const gvcGap = gvc?.gap || {};
+  const gvcCtc = gvc?.ctc || {};
+
   const chips = [];
   if (gateTxt !== "—") chips.push(`Gate: ${gateTxt}`);
   if (label && label !== "—") chips.push(`Regime: ${label}`);
@@ -648,10 +678,26 @@ function renderEngine1DecisionPanel(payload) {
       </div>
 
       <div class="taGrid" aria-label="Engine 1 instrument cards">
-        <div class="taCard">
-          <div class="taCardTop"><div class="taCardTitle">Breach rate</div></div>
-          <div class="taCardState mono">${Number.isFinite(br) ? escapeHtml(br.toFixed(2)) + "%" : "—"}</div>
-          <div class="taCardInterp">Share of usable events that breached (k-controlled).</div>
+        <div class="taCard taCard--wide" style="grid-column: span 2;">
+          <div class="taCardTop">
+            <div class="taCardTitle">Gap vs Session Risk</div>
+            <span class="info" title="Gap = overnight open-to-close move vs EM. Session = prior close to earnings day close (full move including intraday continuation). Delta shows additional risk from holding through the session.">ⓘ</span>
+          </div>
+          <table class="gvcTable">
+            <thead><tr><th></th><th>Gap</th><th>Session</th><th>Δ</th></tr></thead>
+            <tbody>
+              ${["1.0", "1.5", "2.0"].map(function(mk) {
+                var gv = gvcGap[mk], sv = gvcCtc[mk];
+                var gTxt = (gv !== null && gv !== undefined) ? Number(gv).toFixed(1) + "%" : "—";
+                var sTxt = (sv !== null && sv !== undefined) ? Number(sv).toFixed(1) + "%" : "—";
+                var delta = (gv !== null && gv !== undefined && sv !== null && sv !== undefined) ? Number(sv) - Number(gv) : null;
+                var dTxt = delta !== null ? (delta > 0 ? "+" : "") + delta.toFixed(1) + "pp" : "—";
+                var dCls = delta === null ? "" : delta > 5 ? "gvcDelta--high" : delta > 0 ? "gvcDelta--med" : "gvcDelta--zero";
+                return '<tr><td class="gvcLabel">' + mk + '× EM</td><td class="mono">' + gTxt + '</td><td class="mono">' + sTxt + '</td><td class="mono ' + dCls + '">' + dTxt + '</td></tr>';
+              }).join("")}
+            </tbody>
+          </table>
+          <div class="taCardInterp">Gap = overnight. Session = close-to-close (PC→EC). ${gvc.sample_gap || 0} gap / ${gvc.sample_ctc || 0} session events.</div>
         </div>
         <div class="taCard">
           <div class="taCardTop"><div class="taCardTitle">Avg overshoot if breached</div></div>
@@ -2406,6 +2452,8 @@ function renderEarningsTable(events) {
       <td>${escapeHtml(e.openDateUsed ?? "")}</td>
       <td class="num">${fmtNum(e.openPx)}</td>
       <td class="num">${fmtPct(e.realizedMovePct)}</td>
+      <td class="num">${fmtPct(e.ctcMovePct)}</td>
+      <td class="num ${e.ctcVsEM != null ? (Number(e.ctcVsEM) >= 1.5 ? "ctcEM--high" : Number(e.ctcVsEM) >= 1.0 ? "ctcEM--med" : "ctcEM--low") : ""}">${e.ctcVsEM != null ? Number(e.ctcVsEM).toFixed(2) + "×" : "—"}</td>
       <td class="num advCol">${fmtSignedPct(e.signedMovePct)}</td>
       <td class="advCol">${escapeHtml(e.breachSide ?? "—")}</td>
       <td class="num advCol">${fmtPct(e.upOvershootPct ?? e.downOvershootPct)}</td>
@@ -2556,6 +2604,10 @@ function renderQuarterCards(quarters) {
     if (season.z_breach !== null && season.z_breach !== undefined) tooltipParts.push(`z_breach: ${season.z_breach}`);
     const tooltip = tooltipParts.length ? tooltipParts.join(" | ") : "—";
 
+    // CTC (session) breach deltas for this quarter
+    const ctcD = row.ctcBreachDelta || {};
+    const gapD = row.gapBreachDelta || {};
+
     const card = document.createElement("div");
     card.className = "quarterCard";
     card.innerHTML = `
@@ -2566,8 +2618,14 @@ function renderQuarterCards(quarters) {
         </div>
       </div>
       <div class="kv">
-        <div class="k">Breach Δ vs baseline</div>
+        <div class="k">Gap breach Δ</div>
         <div class="v" title="${escapeHtml(tooltip)}"><span class="delta ${deltaClass(breachDeltaPP)}">${escapeHtml(fmtSignedPP(breachDeltaPP))}</span></div>
+        <div class="k">Session Δ 1.0×</div>
+        <div class="v"><span class="delta ${deltaClass(ctcD["1.0"])}">${escapeHtml(fmtSignedPP(ctcD["1.0"]))}</span></div>
+        <div class="k">Session Δ 1.5×</div>
+        <div class="v"><span class="delta ${deltaClass(ctcD["1.5"])}">${escapeHtml(fmtSignedPP(ctcD["1.5"]))}</span></div>
+        <div class="k">Session Δ 2.0×</div>
+        <div class="v"><span class="delta ${deltaClass(ctcD["2.0"])}">${escapeHtml(fmtSignedPP(ctcD["2.0"]))}</span></div>
         <div class="k">Avg realized / implied</div>
         <div class="v mono">${escapeHtml(fmtX(avgRatio))}</div>
         <div class="k">Max realized / implied</div>
