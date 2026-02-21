@@ -201,7 +201,7 @@ export function subscribeToOrderbooks(tickers: string[]): void {
  * Process a normalized trade through the shared pipeline.
  * Used by both Kalshi and Polymarket.
  */
-const MIN_TRADE_COUNT = 5; // Skip tiny trades — whale detection only
+const MIN_TRADE_COUNT = 10; // Skip small trades — whale detection only
 
 async function processTrade(trade: IncomingTrade, exchange: "kalshi" | "polymarket"): Promise<void> {
   // Skip tiny trades that can't be whales

@@ -102,9 +102,9 @@ export async function discoverPolymarketMarkets(): Promise<void> {
       }, "Polymarket sample event structure");
     }
 
-    const MIN_VOLUME_FOR_DB = 5_000;  // Only upsert markets with >$5k volume (saves memory)
-    const MIN_VOLUME_FOR_WS = 50_000; // Only subscribe to WS for markets with >$50k volume
-    const MAX_WS_TOKENS = 2_000;      // Hard cap on total WS subscriptions
+    const MIN_VOLUME_FOR_DB = 25_000;  // Only upsert markets with >$25k volume
+    const MIN_VOLUME_FOR_WS = 100_000; // Only subscribe to WS for markets with >$100k volume
+    const MAX_WS_TOKENS = 500;         // Hard cap — whales only, keeps memory stable
     let skippedLowVolume = 0;
     let skippedFromDb = 0;
 

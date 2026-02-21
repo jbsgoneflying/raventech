@@ -99,7 +99,7 @@ export const polymarketConfig = {
 // ─── Market Discovery ────────────────────────────────────────
 
 export const discoveryConfig = {
-  intervalMs: envInt("MARKET_DISCOVERY_INTERVAL_MS", 300_000),
+  intervalMs: envInt("MARKET_DISCOVERY_INTERVAL_MS", 900_000), // 15 min
 };
 
 // ─── Email Alerts ────────────────────────────────────────────
