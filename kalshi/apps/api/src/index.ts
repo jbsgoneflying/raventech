@@ -189,12 +189,60 @@ async function main() {
     }, "Ingestion metrics");
   }, 60_000);
 
+  // 7. Auto-cleanup: purge stale trades/alerts/snapshots every hour
+  const RETENTION_HOURS = 24;
+  const cleanupInterval = setInterval(async () => {
+    const cutoff = new Date(Date.now() - RETENTION_HOURS * 60 * 60 * 1000);
+    try {
+      const { rowCount: trades } = await pool.query(
+        "DELETE FROM trade_events WHERE created_time < $1", [cutoff]
+      );
+      const { rowCount: alertRows } = await pool.query(
+        "DELETE FROM alerts WHERE created_at < $1", [cutoff]
+      );
+      const { rowCount: snaps } = await pool.query(
+        "DELETE FROM orderbook_snapshots WHERE captured_at < $1", [cutoff]
+      );
+      if ((trades ?? 0) > 0 || (alertRows ?? 0) > 0 || (snaps ?? 0) > 0) {
+        logger.info(
+          { trades, alerts: alertRows, snapshots: snaps, cutoff: cutoff.toISOString() },
+          "Auto-cleanup: purged stale data"
+        );
+      }
+    } catch (err) {
+      logger.warn({ err }, "Auto-cleanup failed");
+    }
+  }, 60 * 60 * 1000); // every hour
+
+  // Run cleanup once on startup to clear any existing backlog
+  setTimeout(async () => {
+    const cutoff = new Date(Date.now() - RETENTION_HOURS * 60 * 60 * 1000);
+    try {
+      const { rowCount: trades } = await pool.query(
+        "DELETE FROM trade_events WHERE created_time < $1", [cutoff]
+      );
+      const { rowCount: alertRows } = await pool.query(
+        "DELETE FROM alerts WHERE created_at < $1", [cutoff]
+      );
+      const { rowCount: snaps } = await pool.query(
+        "DELETE FROM orderbook_snapshots WHERE captured_at < $1", [cutoff]
+      );
+      logger.info(
+        { trades, alerts: alertRows, snapshots: snaps, cutoff: cutoff.toISOString() },
+        "Startup cleanup: purged stale data"
+      );
+    } catch (err) {
+      logger.warn({ err }, "Startup cleanup failed");
+    }
+  }, 15_000); // 15s after boot
+
   // ─── Graceful shutdown ─────────────────────────────────────
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutting down...");
     clearInterval(discoveryInterval);
     clearInterval(metricsInterval);
+    clearInterval(cleanupInterval);
 
     server.close();
     await disconnectRedis();

@@ -201,7 +201,12 @@ export function subscribeToOrderbooks(tickers: string[]): void {
  * Process a normalized trade through the shared pipeline.
  * Used by both Kalshi and Polymarket.
  */
+const MIN_TRADE_COUNT = 5; // Skip tiny trades — whale detection only
+
 async function processTrade(trade: IncomingTrade, exchange: "kalshi" | "polymarket"): Promise<void> {
+  // Skip tiny trades that can't be whales
+  if (trade.count < MIN_TRADE_COUNT) return;
+
   // Idempotent insert (skip if trade_id already exists)
   try {
     await db.insert(schema.tradeEvents).values({

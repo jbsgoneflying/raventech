@@ -57,10 +57,10 @@ export const serverConfig = {
 // ─── Scoring & Alerts (mutable at runtime) ───────────────────
 
 let _alertConfig: AlertConfig = {
-  score_threshold: envInt("SCORE_THRESHOLD", DEFAULT_CONFIG.score_threshold),
+  score_threshold: envInt("SCORE_THRESHOLD", 70),
   cooldown_seconds: envInt("COOLDOWN_SECONDS", DEFAULT_CONFIG.cooldown_seconds),
   cooldown_score_delta: envInt("COOLDOWN_SCORE_DELTA", DEFAULT_CONFIG.cooldown_score_delta),
-  min_open_interest: envInt("MIN_OPEN_INTEREST", DEFAULT_CONFIG.min_open_interest),
+  min_open_interest: envInt("MIN_OPEN_INTEREST", 100),
   weights: {
     size_weight: envFloat("WEIGHT_SIZE", DEFAULT_CONFIG.weights.size_weight),
     late_weight: envFloat("WEIGHT_LATE", DEFAULT_CONFIG.weights.late_weight),
