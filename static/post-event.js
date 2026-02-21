@@ -15,44 +15,48 @@
 
   /* ── Render results ────────────────────────────────────────────────── */
   function render(data) {
-    /* Decision */
-    var decision = (data.decision || "PASS").toUpperCase();
+    var dec = data.decision || {};
+    var decisionStr = (typeof dec === "string" ? dec : dec.decision || "PASS").toUpperCase();
     var badge = qs("decisionBadge");
-    badge.textContent = decision;
-    badge.className = "decisionBadge " + decision.toLowerCase();
+    badge.textContent = decisionStr;
+    badge.className = "decisionBadge " + decisionStr.toLowerCase();
 
-    qs("decisionDirection").textContent = data.direction ? (data.direction === "long" ? "Long" : "Short") : "—";
-    qs("decisionConfidence").textContent = data.confidence != null ? "Confidence: " + Math.round(data.confidence) + " / 100" : "";
-    qs("decisionRationale").textContent = data.rationale || data.summary || "";
+    var dir = dec.direction || data.direction;
+    qs("decisionDirection").textContent = dir ? (dir.toLowerCase() === "long" ? "Long" : "Short") : "—";
+    var conf = dec.confidence_score != null ? dec.confidence_score : data.confidence;
+    qs("decisionConfidence").textContent = conf != null ? "Confidence: " + Math.round(conf) + " / 100" : "";
+    qs("decisionRationale").textContent = dec.pass_reason || data.rationale || data.summary || "";
 
     /* Snapshot */
-    var snap = data.snapshot || data;
-    qs("snapActualMove").textContent = snap.actualMove != null ? fmt(snap.actualMove) + "%" : snap.actual_move != null ? fmt(snap.actual_move) + "%" : "—";
-    qs("snapEmMultiple").textContent = fmt(snap.emMultiple || snap.em_multiple) + "x";
-    qs("snapAtrMultiple").textContent = fmt(snap.atrMultiple || snap.atr_multiple) + "x";
-    qs("snapGapStructure").textContent = snap.gapStructure || snap.gap_structure || "—";
-    qs("snapIvCrush").textContent = snap.ivCrush != null ? fmt(snap.ivCrush) + "%" : snap.iv_crush != null ? fmt(snap.iv_crush) + "%" : "—";
-    qs("snapSentiment").textContent = snap.sentiment || snap.eventSentiment || snap.event_sentiment || "—";
+    var snap = data.snapshot || {};
+    qs("snapActualMove").textContent = snap.actual_move_pct != null ? fmt(snap.actual_move_pct) + "%" : snap.actual_move != null ? fmt(snap.actual_move) + "%" : "—";
+    qs("snapEmMultiple").textContent = fmt(snap.move_vs_em || snap.em_multiple) + "x";
+    qs("snapAtrMultiple").textContent = fmt(snap.atr_multiple) + "x";
+    qs("snapGapStructure").textContent = snap.gap_structure || "—";
+    qs("snapIvCrush").textContent = snap.iv_crush_pct != null ? fmt(snap.iv_crush_pct) + "%" : snap.iv_crush != null ? fmt(snap.iv_crush) + "%" : "—";
+    qs("snapSentiment").textContent = snap.sentiment || "—";
 
     /* Displacement */
-    var disp = data.displacement || data.classification || data;
-    qs("displaceMagnitude").textContent = disp.magnitude || "—";
-    qs("displaceStructure").textContent = disp.structure || disp.gapStructure || disp.gap_structure || "—";
-    qs("displaceContext").textContent = disp.contextAlignment || disp.context_alignment || disp.context || "—";
+    var prof = data.profile || data.displacement || {};
+    qs("displaceMagnitude").textContent = prof.magnitude_em_label || prof.magnitude || "—";
+    qs("displaceStructure").textContent = prof.structure_label || prof.structure || prof.gap_structure || "—";
+    qs("displaceContext").textContent = prof.context_label || prof.context || "—";
 
-    /* Historical */
-    var hist = data.historical || data.history || {};
-    qs("histContinuation").textContent = hist.continuationProb != null ? pct(hist.continuationProb) : hist.continuation_prob != null ? pct(hist.continuation_prob) : "—";
-    qs("histReversion").textContent = hist.reversionProb != null ? pct(hist.reversionProb) : hist.reversion_prob != null ? pct(hist.reversion_prob) : "—";
-    qs("histMagnitude").textContent = hist.avgMagnitude != null ? fmt(hist.avgMagnitude) + "%" : hist.avg_magnitude != null ? fmt(hist.avg_magnitude) + "%" : "—";
-    qs("histSample").textContent = hist.sampleSize || hist.sample_size || "—";
+    /* Historical — use 5-day horizon as the primary display */
+    var hist = data.historical || {};
+    var contProb = hist.continuation_prob_5d != null ? hist.continuation_prob_5d : hist.continuation_prob_3d;
+    var revProb  = hist.reversion_prob_5d != null ? hist.reversion_prob_5d : hist.reversion_prob_3d;
+    qs("histContinuation").textContent = contProb != null ? pct(contProb) : "—";
+    qs("histReversion").textContent = revProb != null ? pct(revProb) : "—";
+    qs("histMagnitude").textContent = hist.avg_continuation_magnitude != null ? fmt(hist.avg_continuation_magnitude) + "%" : "—";
+    qs("histSample").textContent = hist.sample_size || "—";
 
     /* Trade profile */
-    if (decision !== "PASS") {
-      qs("tradeDirection").textContent = data.direction ? (data.direction === "long" ? "Long" : "Short") : "—";
-      qs("tradeRiskUnits").textContent = fmt(data.riskUnits || data.risk_units, 1);
-      qs("tradeHolding").textContent = (data.holdingPeriod || data.holding_period || "1–5") + "d";
-      qs("tradeEntry").textContent = data.entryPreference || data.entry_preference || "—";
+    if (decisionStr !== "PASS") {
+      qs("tradeDirection").textContent = dir ? (dir.toLowerCase() === "long" ? "Long" : "Short") : "—";
+      qs("tradeRiskUnits").textContent = fmt(dec.risk_units, 1);
+      qs("tradeHolding").textContent = (dec.holding_period_days || "1–5") + "d";
+      qs("tradeEntry").textContent = dec.entry_preference || "—";
       qs("tradeSection").style.display = "";
     } else {
       qs("tradeSection").style.display = "none";
