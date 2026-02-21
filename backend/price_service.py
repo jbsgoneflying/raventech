@@ -232,6 +232,7 @@ class PriceService:
             return cached
 
         sym = _to_eodhd_symbol(ticker)
+        failed = False
         try:
             resp = self._eodhd.get_eod(
                 sym,
@@ -242,8 +243,10 @@ class PriceService:
         except Exception as exc:
             LOG.warning("PriceService.fetch_daily_bars(%s) failed: %s", ticker, exc)
             bars = []
+            failed = True
 
-        self._cache_set(self._bar_cache, self._bar_lock, key, bars)
+        if not failed:
+            self._cache_set(self._bar_cache, self._bar_lock, key, bars)
         return bars
 
     # -----------------------------------------------------------------------

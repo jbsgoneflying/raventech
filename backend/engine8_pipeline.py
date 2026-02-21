@@ -101,33 +101,63 @@ def _build_all_event_rows(
     earnings_rows.sort(key=lambda r: str(r.get("earnDate", "")), reverse=True)
     earnings_rows = earnings_rows[:flags.ENGINE8_LOOKBACK_EVENTS]
 
+    LOG.info("Engine 8 _build_all_event_rows: %s has %d historical earnings before %s", ticker, len(earnings_rows), current_earnings_date)
+
     if not earnings_rows:
         return []
 
     oldest_date = _parse_date(str(earnings_rows[-1]["earnDate"])) - dt.timedelta(days=40)
     newest_date = _parse_date(str(earnings_rows[0]["earnDate"])) + dt.timedelta(days=10)
 
+    LOG.info("Engine 8 _build_all_event_rows: fetching bars for %s from %s to %s", ticker, oldest_date, newest_date)
+
     all_bars: List[dict] = []
+
+    # Strategy 1: EODHD price service (preferred — fully adjusted OHLCV)
     if price_svc is not None:
         try:
             bar_objs = price_svc.fetch_daily_bars(ticker, oldest_date, newest_date)
+            LOG.info("Engine 8 _build_all_event_rows: EODHD returned %d bars for %s", len(bar_objs), ticker)
             all_bars = [
                 {"date": _fmt_date(b.date), "open": b.open, "high": b.high,
                  "low": b.low, "close": b.close, "volume": b.volume}
                 for b in bar_objs
             ]
         except Exception as e:
-            LOG.warning("Engine 8 bar fetch failed for %s: %s", ticker, e)
+            LOG.warning("Engine 8 bar fetch (EODHD) failed for %s: %s", ticker, e)
 
-    if not all_bars:
-        return []
+    use_orats_fallback = not all_bars and orats_client is not None
+    if use_orats_fallback:
+        LOG.info("Engine 8 _build_all_event_rows: EODHD empty, will use ORATS per-event fallback for %s", ticker)
 
     bars_by_date = {str(b.get("date", ""))[:10]: b for b in all_bars}
     sorted_dates = sorted(bars_by_date.keys())
 
     event_rows: List[dict] = []
+    skipped_no_bar = 0
 
     from backend.earnings_logic import classify_timing
+
+    def _orats_bar(d: dt.date) -> Optional[dict]:
+        """Fetch a single day's bar from ORATS hist_dailies."""
+        if orats_client is None:
+            return None
+        try:
+            resp = orats_client.hist_dailies(
+                ticker=ticker,
+                trade_date=_fmt_date(d),
+                fields="ticker,tradeDate,clsPx,open",
+            )
+            row = (resp.rows or [None])[0]
+            if row and isinstance(row, dict):
+                cp = _to_float(row.get("clsPx") or row.get("close"))
+                op = _to_float(row.get("open"))
+                if cp is not None and cp > 0:
+                    return {"date": _fmt_date(d), "open": op or cp, "high": cp,
+                            "low": cp, "close": cp, "volume": None}
+        except Exception:
+            pass
+        return None
 
     for erow in earnings_rows:
         earn_date = _parse_date(str(erow["earnDate"]))
@@ -141,7 +171,23 @@ def _build_all_event_rows(
 
         pre_bar = bars_by_date.get(pre_bar_key)
         post_bar = bars_by_date.get(post_bar_key)
+
+        if (pre_bar is None or post_bar is None) and use_orats_fallback:
+            if pre_bar is None:
+                fb = _orats_bar(pre_d)
+                if fb:
+                    bars_by_date[pre_bar_key] = fb
+                    all_bars.append(fb)
+                    pre_bar = fb
+            if post_bar is None:
+                fb = _orats_bar(post_d)
+                if fb:
+                    bars_by_date[post_bar_key] = fb
+                    all_bars.append(fb)
+                    post_bar = fb
+
         if pre_bar is None or post_bar is None:
+            skipped_no_bar += 1
             continue
 
         pre_close = _to_float(pre_bar.get("close") or pre_bar.get("adjusted_close"))
@@ -156,13 +202,33 @@ def _build_all_event_rows(
         lookback_start = _fmt_date(earn_date - dt.timedelta(days=25))
         atr_bars = [b for b in all_bars if lookback_start <= str(b.get("date", ""))[:10] <= pre_bar_key]
 
+        # Rebuild sorted_dates if we added ORATS bars
+        if use_orats_fallback:
+            sorted_dates = sorted(bars_by_date.keys())
+
         post_idx = sorted_dates.index(post_bar_key) if post_bar_key in sorted_dates else -1
         if post_idx < 0:
             continue
-        forward_bars = [
-            bars_by_date[sorted_dates[i]]
-            for i in range(post_idx + 1, min(post_idx + 6, len(sorted_dates)))
-        ]
+
+        forward_bars_list: List[dict] = []
+        for i in range(post_idx + 1, min(post_idx + 6, len(sorted_dates))):
+            forward_bars_list.append(bars_by_date[sorted_dates[i]])
+
+        if use_orats_fallback and len(forward_bars_list) < 3:
+            for day_off in range(1, 8):
+                fd = post_d + dt.timedelta(days=day_off)
+                fk = _fmt_date(fd)
+                if fk not in bars_by_date and fd.weekday() < 5:
+                    fb = _orats_bar(fd)
+                    if fb:
+                        bars_by_date[fk] = fb
+                        all_bars.append(fb)
+            sorted_dates = sorted(bars_by_date.keys())
+            post_idx = sorted_dates.index(post_bar_key) if post_bar_key in sorted_dates else post_idx
+            forward_bars_list = [
+                bars_by_date[sorted_dates[i]]
+                for i in range(post_idx + 1, min(post_idx + 6, len(sorted_dates)))
+            ]
 
         row = _build_event_row(
             earnings_date=earn_date,
@@ -170,11 +236,14 @@ def _build_all_event_rows(
             post_bar=post_bar,
             expected_move_pct=expected_move_pct,
             bars_for_atr=atr_bars,
-            forward_bars=forward_bars,
+            forward_bars=forward_bars_list,
             flags=flags,
         )
         if row is not None:
             event_rows.append(row)
+
+    if skipped_no_bar:
+        LOG.info("Engine 8 _build_all_event_rows: skipped %d/%d events (missing bars) for %s", skipped_no_bar, len(earnings_rows), ticker)
 
     return event_rows
 
