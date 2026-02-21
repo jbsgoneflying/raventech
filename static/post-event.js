@@ -26,23 +26,68 @@
     qs("phaseATiming").textContent = data.earnings_date + " · " + timingLabel;
     qs("phaseACountdown").textContent = data.countdown_days != null ? data.countdown_days + " day" + (data.countdown_days !== 1 ? "s" : "") + " away" : "";
 
-    qs("paExpectedMove").textContent = data.expected_move_pct != null ? fmt(data.expected_move_pct) + "%" : "—";
-    qs("paStockPrice").textContent = data.stock_price != null ? "$" + fmt(data.stock_price) : "—";
-
     var e1 = data.engine1 || {};
     var sum = e1.summary || {};
+    var cur = e1.current || {};
+    var em = e1.expectedMove || {};
+    var st = e1.strikeTargets || {};
+    var bl = e1.baseline || {};
+
+    /* Core metrics row */
     qs("paBreachRate").textContent = sum.breach_rate_pct != null ? fmt(sum.breach_rate_pct) + "%" : "—";
-    qs("paTailBias").textContent = sum.tailBias || "—";
+
+    var avgOs = sum.avg_above_breach_pct;
+    qs("paAvgOvershoot").textContent = avgOs != null ? fmt(avgOs) + "%" : "—";
+
+    qs("paAvgRealizedImplied").textContent = bl.avg_ratio_realized_to_implied != null ? fmt(bl.avg_ratio_realized_to_implied) + "×" : "—";
+
+    var evUsed = sum.events_used;
+    var evFound = sum.events_found;
+    qs("paEventsUsed").textContent = evUsed != null ? evUsed + (evFound != null ? " / " + evFound : "") : "—";
+
+    var regime = e1.regime || {};
+    qs("paRegimeLabel").textContent = regime.label || "—";
+
+    var guidance = regime.guidance || {};
+    var gateRaw = guidance.tradeGate || "";
+    var gateLabel = gateRaw === "NO_TRADE" ? "No Trade" : gateRaw === "CAUTION" ? "Caution" : gateRaw === "OK" ? "OK" : "—";
+    qs("paGoNoGo").textContent = gateLabel;
+
+    /* ORATS EM (EOD + delayed) */
+    var eodEmPct = cur.impliedMovePct;
+    var delayedEmPct = cur.delayedImpliedMovePct;
+    qs("paOratsEm").textContent = eodEmPct != null ? fmt(eodEmPct) + "%" : "—";
+    qs("paOratsEmCaption").textContent = cur.asOfDate ? "As of: " + cur.asOfDate + " · EOD (used for breach history)" : "EOD (used for breach history)";
+    qs("paDelayedEm").textContent = delayedEmPct != null ? fmt(delayedEmPct) + "%" : "—";
+    var delayedNote = cur.delayedUpdatedAt ? "Updated: " + cur.delayedUpdatedAt : cur.delayedTradeDate ? "As of: " + cur.delayedTradeDate : "";
+    qs("paDelayedEmCaption").textContent = (delayedNote ? delayedNote + " · " : "") + "15-min delayed" + (delayedEmPct != null ? " · Used for strike targets" : "");
+
+    /* Straddle EM */
+    var stEmPct = em.expectedMovePct;
+    var stEmDollars = em.expectedMoveDollars;
+    var stEmExpiry = em.expiry ? String(em.expiry).slice(0, 10) : "";
+    var stEmSource = em.source || "";
+    qs("paStraddleEm").textContent = stEmPct != null ? fmt(stEmPct) + "%" : "—";
+    var stCaption = [];
+    if (stEmDollars != null) stCaption.push("$" + fmt(stEmDollars) + " pts");
+    if (stEmExpiry) stCaption.push("Exp: " + stEmExpiry);
+    if (stEmSource) stCaption.push(stEmSource === "live" ? "Live" : stEmSource === "eod" ? "EOD" : stEmSource);
+    qs("paStraddleEmCaption").textContent = stCaption.length ? stCaption.join(" · ") : "ATM-forward straddle method";
+
+    /* Strike Targets */
+    qs("paStWhite").textContent = st && st.whitePct != null ? fmt(st.whitePct) + "%" : "—";
+    qs("paStBlue").textContent = st && st.bluePct != null ? fmt(st.bluePct) + "%" : "—";
+    qs("paStRed").textContent = st && st.redPct != null ? fmt(st.redPct) + "%" : "—";
+    var stSource = st && st.emSource === "delayed" ? "15-min delayed EM" : "ORATS EOD EM";
+    qs("paStrikeCaption").textContent = "Wing distance as % of spot (" + stSource + ").";
+
+    /* Breach detail */
     qs("paUpBreach").textContent = sum.upBreachRatePct != null ? fmt(sum.upBreachRatePct) + "%" : "—";
     qs("paDownBreach").textContent = sum.downBreachRatePct != null ? fmt(sum.downBreachRatePct) + "%" : "—";
     qs("paUpOvershoot").textContent = sum.avgUpOvershootPct != null ? fmt(sum.avgUpOvershootPct) + "%" : "—";
     qs("paDownOvershoot").textContent = sum.avgDownOvershootPct != null ? fmt(sum.avgDownOvershootPct) + "%" : "—";
-
-    var regime = e1.regime || {};
-    qs("paRegimeLabel").textContent = regime.label || "—";
-    var guidance = regime.guidance || {};
-    qs("paGoNoGo").textContent = guidance.tradeGate || "—";
-    qs("paEventsUsed").textContent = sum.events_used || "—";
+    qs("paTailBias").textContent = sum.tailBias || "—";
+    qs("paStockPrice").textContent = data.stock_price != null ? "$" + fmt(data.stock_price) : "—";
 
     /* IC structure */
     var tb = e1.tradeBuilder;

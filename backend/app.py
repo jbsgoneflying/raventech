@@ -4271,6 +4271,9 @@ async def engine8_evaluate(
             go_no_go = e1_result.get("goNoGo", {})
             regime = e1_result.get("regime", {})
             current = e1_result.get("current", {})
+            expected_move = e1_result.get("expectedMove", {})
+            strike_targets = e1_result.get("strikeTargets")
+            baseline = e1_result.get("baseline", {})
 
             return {
                 "phase": "pre_earnings",
@@ -4278,18 +4281,40 @@ async def engine8_evaluate(
                 "earnings_date": ed.isoformat(),
                 "timing": timing,
                 "countdown_days": (ed - today).days,
-                "expected_move_pct": current.get("impliedMovePct"),
                 "stock_price": current.get("stockPrice"),
                 "engine1": {
                     "summary": {
                         "breach_rate_pct": summary.get("breach_rate_pct"),
                         "events_used": summary.get("events_used"),
+                        "events_found": summary.get("events_found"),
                         "upBreachRatePct": summary.get("upBreachRatePct"),
                         "downBreachRatePct": summary.get("downBreachRatePct"),
                         "avgUpOvershootPct": summary.get("avgUpOvershootPct"),
                         "avgDownOvershootPct": summary.get("avgDownOvershootPct"),
+                        "avg_above_breach_pct": summary.get("avg_above_breach_pct"),
                         "tailBias": summary.get("tailBias"),
+                        "avg_implied_all_pct": summary.get("avg_implied_all_pct"),
                     },
+                    "baseline": {
+                        "avg_ratio_realized_to_implied": baseline.get("avg_ratio_realized_to_implied"),
+                    },
+                    "current": {
+                        "stockPrice": current.get("stockPrice"),
+                        "asOfDate": current.get("asOfDate"),
+                        "source": current.get("source"),
+                        "impliedMovePct": current.get("impliedMovePct"),
+                        "impErnMv": current.get("impErnMv"),
+                        "delayedImpliedMovePct": current.get("delayedImpliedMovePct"),
+                        "delayedUpdatedAt": current.get("delayedUpdatedAt"),
+                        "delayedTradeDate": current.get("delayedTradeDate"),
+                    },
+                    "expectedMove": {
+                        "expectedMovePct": (expected_move or {}).get("expectedMovePct"),
+                        "expectedMoveDollars": (expected_move or {}).get("expectedMoveDollars"),
+                        "expiry": (expected_move or {}).get("expiry"),
+                        "source": (expected_move or {}).get("source"),
+                    },
+                    "strikeTargets": strike_targets,
                     "tradeBuilder": trade_builder,
                     "goNoGo": go_no_go,
                     "regime": {
