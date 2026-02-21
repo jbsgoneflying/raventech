@@ -117,16 +117,18 @@
 
       /* Row Playbook: detail panel */
       .pbRowDetail td { padding: 0 !important; border-bottom: 1px solid var(--line); }
-      .rpDetailCell { padding: 0 !important; }
+      .rpDetailCell { padding: 0 !important; max-width: 0; }
       .rpCard {
         margin: 0; padding: 18px 20px;
         background: linear-gradient(135deg, rgba(0,122,255,0.03), rgba(88,86,214,0.03));
         border-top: 1px solid rgba(0,122,255,0.10);
         min-width: 0; overflow: hidden;
+        max-width: calc(100vw - 80px);
       }
       .rpHeader {
         display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
         padding-bottom: 12px; border-bottom: 1px solid rgba(0,0,0,0.06);
+        flex-wrap: wrap;
       }
       .rpSource {
         margin-left: auto; font-size: 10px; font-weight: 600;
@@ -140,7 +142,7 @@
       }
       .rpText {
         font-size: 12.5px; line-height: 1.6; color: rgba(11,11,15,0.82);
-        word-wrap: break-word; overflow-wrap: break-word;
+        word-wrap: break-word; overflow-wrap: break-word; white-space: normal;
       }
       .rpOneLiner .rpText {
         font-size: 13px; font-weight: 600; color: rgba(11,11,15,0.90);
@@ -152,17 +154,17 @@
       }
       .rpDeskVoice .rpText { font-style: italic; color: rgba(11,11,15,0.65); }
       .rpNestedGrid {
-        display: grid; grid-template-columns: repeat(2, 1fr);
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px 20px;
       }
-      .rpNestedItem { padding: 8px 0; }
+      .rpNestedItem { padding: 8px 0; min-width: 0; }
       .rpNestedLabel {
         font-size: 10px; font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.3px; color: var(--muted); margin-bottom: 3px;
       }
       .rpNestedValue {
         font-size: 12.5px; line-height: 1.55; color: rgba(11,11,15,0.82);
-        word-wrap: break-word; overflow-wrap: break-word;
+        word-wrap: break-word; overflow-wrap: break-word; white-space: normal;
       }
       .rpLoading {
         padding: 24px 20px; text-align: center;
@@ -874,7 +876,7 @@
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/post-event.js?v=15"></script>
+    <script src="/static/post-event.js?v=16"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>
