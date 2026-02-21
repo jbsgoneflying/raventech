@@ -4195,12 +4195,13 @@ def api_front_layer_backfill_status():
 @app.get("/api/engine8/evaluate")
 async def engine8_evaluate(
     ticker: str = Query(..., description="US equity ticker"),
-    earnings_date: str = Query("", description="Earnings date override (YYYY-MM-DD); defaults to most recent"),
+    earnings_date: str = Query("", description="Earnings date override (YYYY-MM-DD); defaults to next/most recent"),
 ):
-    """Evaluate a ticker for post-event trade extension.
+    """Engine 8 lifecycle evaluation.
 
-    ``trade_outcome`` is NOT a parameter — it is derived deterministically
-    from the Engine 1 trade structure and current market price.
+    Automatically detects the phase:
+      Phase A (pre-earnings): Runs Engine 1 internally, returns IC analysis
+      Phase B (post-earnings): Loads persisted Engine 1 data, runs extension pipeline
     """
     import asyncio
 
@@ -4217,37 +4218,134 @@ async def engine8_evaluate(
         raise HTTPException(status_code=503, detail="ORATS client unavailable")
 
     store = get_store_optional()
+    today = dt.date.today()
 
-    # Resolve PriceService
     try:
         from backend.price_service import get_price_service
         price_svc = get_price_service()
     except Exception:
         price_svc = None
 
-    # Resolve Engine 1 trade for this ticker (most recent cached breach result)
-    engine1_trade = None
-    try:
-        key = _breach_cache_key(ticker, 20, 5, 1.0, flags.cache_fingerprint())
-        with _breach_cache_lock:
-            cached_breach = _breach_cache.get(key)
-        if cached_breach and isinstance(cached_breach, dict):
-            engine1_trade = cached_breach
-    except Exception:
-        pass
+    bz = _get_benzinga_client_optional()
 
-    ed = None
+    # -- Resolve earnings date -------------------------------------------------
+    ed: dt.date | None = None
     if earnings_date:
         try:
             ed = dt.date.fromisoformat(earnings_date[:10])
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid earnings_date format (YYYY-MM-DD)")
 
+    # If no date provided, try to find next upcoming earnings first (Phase A),
+    # then fall back to most recent past earnings (Phase B).
+    if ed is None:
+        from backend.engine8_e1_bridge import resolve_next_earnings
+        next_info = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: resolve_next_earnings(orats, ticker, today)
+        )
+        if next_info and next_info.get("earnings_date"):
+            ed = dt.date.fromisoformat(next_info["earnings_date"])
+
+    # -- Detect phase ----------------------------------------------------------
+    is_pre_earnings = ed is not None and ed > today
+
+    # For AMC on earnings day itself, still pre-earnings (gap hasn't happened)
+    if ed is not None and ed == today:
+        from backend.engine8_e1_bridge import resolve_next_earnings
+        next_info_check = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: resolve_next_earnings(orats, ticker, today)
+        )
+        if next_info_check and next_info_check.get("timing") == "AMC":
+            is_pre_earnings = True
+
+    # =========================================================================
+    # PHASE A: Pre-Earnings — run Engine 1, persist, return IC analysis
+    # =========================================================================
+    if is_pre_earnings:
+        try:
+            from backend.engine8_e1_bridge import run_engine1_for_phase_a, resolve_next_earnings
+
+            next_info = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: resolve_next_earnings(orats, ticker, today)
+            )
+
+            e1_result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: run_engine1_for_phase_a(
+                    ticker=ticker,
+                    orats_client=orats,
+                    store=store,
+                    earnings_date=ed,
+                    today=today,
+                    benzinga_client=bz,
+                ),
+            )
+
+            summary = e1_result.get("summary", {})
+            trade_builder = e1_result.get("tradeBuilder")
+            go_no_go = e1_result.get("goNoGo", {})
+            regime = e1_result.get("regime", {})
+
+            return {
+                "phase": "pre_earnings",
+                "ticker": ticker,
+                "earnings_date": ed.isoformat() if ed else None,
+                "timing": next_info.get("timing", "UNK") if next_info else "UNK",
+                "countdown_days": (ed - today).days if ed else None,
+                "expected_move_pct": next_info.get("expected_move_pct") if next_info else None,
+                "stock_price": next_info.get("stock_price") if next_info else None,
+                "engine1": {
+                    "summary": {
+                        "breach_rate_pct": summary.get("breach_rate_pct"),
+                        "events_used": summary.get("events_used"),
+                        "upBreachRatePct": summary.get("upBreachRatePct"),
+                        "downBreachRatePct": summary.get("downBreachRatePct"),
+                        "avgUpOvershootPct": summary.get("avgUpOvershootPct"),
+                        "avgDownOvershootPct": summary.get("avgDownOvershootPct"),
+                        "tailBias": summary.get("tailBias"),
+                    },
+                    "tradeBuilder": trade_builder,
+                    "goNoGo": go_no_go,
+                    "regime": {
+                        "label": regime.get("label"),
+                        "guidance": regime.get("guidance"),
+                    },
+                },
+                "decision": None,
+            }
+        except Exception as e:
+            LOG.exception("Engine 8 Phase A failed for %s", ticker)
+            raise HTTPException(status_code=500, detail=f"Engine 8 Phase A error: {e}") from e
+
+    # =========================================================================
+    # PHASE B: Post-Earnings — load Engine 1, run extension pipeline
+    # =========================================================================
     try:
+        from backend.engine8_e1_bridge import load_engine1_for_phase_b, derive_trade_outcome_from_e1
         from backend.engine8_pipeline import evaluate_ticker
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
+        engine1_trade = None
+        e1_persisted = None
+        if ed is not None and store is not None:
+            e1_persisted = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: load_engine1_for_phase_b(
+                    ticker=ticker, earnings_date=ed.isoformat(), store=store,
+                ),
+            )
+            if e1_persisted:
+                engine1_trade = e1_persisted
+
+        # Fall back to in-memory breach cache if no persisted data
+        if engine1_trade is None:
+            try:
+                key = _breach_cache_key(ticker, 20, 5, 1.0, flags.cache_fingerprint())
+                with _breach_cache_lock:
+                    cached_breach = _breach_cache.get(key)
+                if cached_breach and isinstance(cached_breach, dict):
+                    engine1_trade = cached_breach
+            except Exception:
+                pass
+
+        result = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: evaluate_ticker(
                 ticker=ticker,
@@ -4259,9 +4357,40 @@ async def engine8_evaluate(
                 flags=flags,
             ),
         )
+
+        result["phase"] = "post_earnings"
+
+        # Attach Engine 1 summary for the IC outcome card
+        if e1_persisted:
+            tb = e1_persisted.get("tradeBuilder")
+            current_price_val = None
+            if price_svc:
+                try:
+                    bars = price_svc.fetch_daily_bars(ticker, today - dt.timedelta(days=5), today)
+                    if bars:
+                        bars.sort(key=lambda b: b.date, reverse=True)
+                        current_price_val = bars[0].close
+                except Exception:
+                    pass
+
+            trade_outcome = derive_trade_outcome_from_e1(e1_persisted, current_price_val, flags.ENGINE8_MAX_CONTROLLED_LOSS_PCT)
+            result["engine1_summary"] = {
+                "had_phase_a": True,
+                "trade_outcome": trade_outcome,
+                "tradeBuilder": tb,
+                "breach_rate_pct": (e1_persisted.get("summary") or {}).get("breach_rate_pct"),
+                "expected_move_pct": (e1_persisted.get("current") or {}).get("impliedMovePct"),
+            }
+        else:
+            result["engine1_summary"] = {
+                "had_phase_a": False,
+                "trade_outcome": "unknown",
+                "message": "No pre-earnings setup found. Run Engine 8 before earnings to set up the lifecycle.",
+            }
+
         return result
     except Exception as e:
-        LOG.exception("Engine 8 evaluation failed for %s", ticker)
+        LOG.exception("Engine 8 Phase B failed for %s", ticker)
         raise HTTPException(status_code=500, detail=f"Engine 8 error: {e}") from e
 
 

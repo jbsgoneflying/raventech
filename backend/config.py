@@ -254,7 +254,7 @@ class FeatureFlags:
     ENGINE8_CONFIDENCE_THRESHOLD: int = 65             # Min score for any trade
     ENGINE8_CONTINUE_THRESHOLD: int = 65               # Min score for CONTINUE
     ENGINE8_FADE_THRESHOLD: int = 70                   # Min score for FADE (higher bar)
-    ENGINE8_MIN_HISTORICAL_SAMPLE: int = 15            # Min similar events; below this, force PASS
+    ENGINE8_MIN_HISTORICAL_SAMPLE: int = 8              # Min similar events; below this, try relaxed matching
     ENGINE8_EM_RATIO_OVER: float = 1.20                # move_vs_em above this = "over"
     ENGINE8_EM_RATIO_EXTREME: float = 1.50             # move_vs_em above this = "extreme"
     ENGINE8_ATR_ELEVATED: float = 1.50                 # ATR multiple threshold
@@ -478,7 +478,7 @@ class FeatureFlags:
             ENGINE8_CONFIDENCE_THRESHOLD=_get_int("ENGINE8_CONFIDENCE_THRESHOLD", 65),
             ENGINE8_CONTINUE_THRESHOLD=_get_int("ENGINE8_CONTINUE_THRESHOLD", 65),
             ENGINE8_FADE_THRESHOLD=_get_int("ENGINE8_FADE_THRESHOLD", 70),
-            ENGINE8_MIN_HISTORICAL_SAMPLE=_get_int("ENGINE8_MIN_HISTORICAL_SAMPLE", 15),
+            ENGINE8_MIN_HISTORICAL_SAMPLE=_get_int("ENGINE8_MIN_HISTORICAL_SAMPLE", 8),
             ENGINE8_EM_RATIO_OVER=_get_float("ENGINE8_EM_RATIO_OVER", 1.20),
             ENGINE8_EM_RATIO_EXTREME=_get_float("ENGINE8_EM_RATIO_EXTREME", 1.50),
             ENGINE8_ATR_ELEVATED=_get_float("ENGINE8_ATR_ELEVATED", 1.50),

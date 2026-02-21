@@ -1,5 +1,6 @@
-/* ── Engine 8: Post-Event Trade Extension ───────────────────────────────
-   Frontend controller for the post-event evaluator page.
+/* ── Engine 8: Post-Event Trade Extension (Lifecycle) ───────────────────
+   Frontend controller — handles Phase A (pre-earnings) and Phase B
+   (post-earnings) rendering based on the API response.
    ──────────────────────────────────────────────────────────────────────── */
 (function () {
   "use strict";
@@ -8,14 +9,91 @@
   var runBtn     = document.getElementById("runBtn");
   var statusEl   = document.getElementById("status");
   var resultsEl  = document.getElementById("results");
+  var phaseAEl   = document.getElementById("phaseAResults");
 
   var _dummyEl = document.createElement("span");
   function qs(id) { return document.getElementById(id) || _dummyEl; }
   function fmt(v, d) { return v == null ? "—" : Number(v).toFixed(d == null ? 2 : d); }
   function pct(v) { return v == null ? "—" : (Number(v) * 100).toFixed(1) + "%"; }
 
-  /* ── Render results ────────────────────────────────────────────────── */
-  function render(data) {
+  /* ── Phase A: Pre-Earnings ───────────────────────────────────────── */
+  function renderPhaseA(data) {
+    phaseAEl.classList.remove("hidden");
+    resultsEl.classList.add("hidden");
+
+    var timing = data.timing || "UNK";
+    var timingLabel = timing === "AMC" ? "After Market Close" : timing === "BMO" ? "Before Market Open" : "Timing TBD";
+    qs("phaseATiming").textContent = data.earnings_date + " · " + timingLabel;
+    qs("phaseACountdown").textContent = data.countdown_days != null ? data.countdown_days + " day" + (data.countdown_days !== 1 ? "s" : "") + " away" : "";
+
+    qs("paExpectedMove").textContent = data.expected_move_pct != null ? fmt(data.expected_move_pct) + "%" : "—";
+    qs("paStockPrice").textContent = data.stock_price != null ? "$" + fmt(data.stock_price) : "—";
+
+    var e1 = data.engine1 || {};
+    var sum = e1.summary || {};
+    qs("paBreachRate").textContent = sum.breach_rate_pct != null ? fmt(sum.breach_rate_pct) + "%" : "—";
+    qs("paTailBias").textContent = sum.tailBias || "—";
+    qs("paUpBreach").textContent = sum.upBreachRatePct != null ? fmt(sum.upBreachRatePct) + "%" : "—";
+    qs("paDownBreach").textContent = sum.downBreachRatePct != null ? fmt(sum.downBreachRatePct) + "%" : "—";
+    qs("paUpOvershoot").textContent = sum.avgUpOvershootPct != null ? fmt(sum.avgUpOvershootPct) + "%" : "—";
+    qs("paDownOvershoot").textContent = sum.avgDownOvershootPct != null ? fmt(sum.avgDownOvershootPct) + "%" : "—";
+
+    var regime = e1.regime || {};
+    qs("paRegimeLabel").textContent = regime.label || "—";
+    var guidance = regime.guidance || {};
+    qs("paGoNoGo").textContent = guidance.tradeGate || "—";
+    qs("paEventsUsed").textContent = sum.events_used || "—";
+
+    /* IC structure */
+    var tb = e1.tradeBuilder;
+    var icSection = qs("phaseAIcSection");
+    var icGrid = qs("phaseAIcGrid");
+    if (tb && tb.totalCredit != null) {
+      icSection.style.display = "";
+      var putLeg = tb.put || {};
+      var callLeg = tb.call || {};
+      icGrid.innerHTML =
+        '<div class="evalCard"><div class="evalCardLabel">Short Put</div><div class="evalCardValue">' + fmt(putLeg.shortStrike) + '</div><div class="evalCardCaption">strike</div></div>' +
+        '<div class="evalCard"><div class="evalCardLabel">Short Call</div><div class="evalCardValue">' + fmt(callLeg.shortStrike) + '</div><div class="evalCardCaption">strike</div></div>' +
+        '<div class="evalCard"><div class="evalCardLabel">Total Credit</div><div class="evalCardValue">$' + fmt(tb.totalCredit) + '</div><div class="evalCardCaption">IC premium collected</div></div>' +
+        '<div class="evalCard"><div class="evalCardLabel">Expiration</div><div class="evalCardValue" style="font-size:14px;">' + (tb.expiration || "—") + '</div><div class="evalCardCaption">options expiry</div></div>';
+      if (putLeg.longStrike != null || callLeg.longStrike != null) {
+        icGrid.innerHTML +=
+          '<div class="evalCard"><div class="evalCardLabel">Long Put</div><div class="evalCardValue">' + fmt(putLeg.longStrike) + '</div><div class="evalCardCaption">wing</div></div>' +
+          '<div class="evalCard"><div class="evalCardLabel">Long Call</div><div class="evalCardValue">' + fmt(callLeg.longStrike) + '</div><div class="evalCardCaption">wing</div></div>';
+      }
+    } else {
+      icSection.style.display = "none";
+    }
+  }
+
+  /* ── Phase B: Post-Earnings ──────────────────────────────────────── */
+  function renderPhaseB(data) {
+    phaseAEl.classList.add("hidden");
+    resultsEl.classList.remove("hidden");
+
+    /* Engine 1 outcome card */
+    var e1s = data.engine1_summary || {};
+    var outcomeSection = qs("e1OutcomeSection");
+    var outcomeContent = qs("e1OutcomeContent");
+    if (e1s.had_phase_a) {
+      outcomeSection.style.display = "";
+      var outcomeLabel = (e1s.trade_outcome || "unknown").replace(/_/g, " ");
+      var outcomeColor = e1s.trade_outcome === "profitable" ? "rgba(52,199,89,0.9)" :
+                         e1s.trade_outcome === "controlled_loss" ? "rgba(255,149,0,0.9)" :
+                         e1s.trade_outcome === "breakdown" ? "rgba(255,59,48,0.9)" : "var(--muted)";
+      var html = '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">';
+      html += '<span class="decisionBadge" style="background:' + outcomeColor.replace("0.9", "0.12") + '; border:1px solid ' + outcomeColor.replace("0.9", "0.30") + '; color:' + outcomeColor + ';">' + outcomeLabel.toUpperCase() + '</span>';
+      if (e1s.expected_move_pct != null) html += '<span style="font-size:12px; color:var(--muted);">Expected move: ' + fmt(e1s.expected_move_pct) + '%</span>';
+      if (e1s.breach_rate_pct != null) html += '<span style="font-size:12px; color:var(--muted);">Breach rate: ' + fmt(e1s.breach_rate_pct) + '%</span>';
+      html += '</div>';
+      outcomeContent.innerHTML = html;
+    } else {
+      outcomeSection.style.display = "";
+      outcomeContent.innerHTML = '<div style="color:var(--muted); font-style:italic;">' + (e1s.message || "No pre-earnings setup found. Run Engine 8 before earnings to set up the lifecycle.") + '</div>';
+    }
+
+    /* Decision */
     var dec = data.decision || {};
     var decisionStr = (typeof dec === "string" ? dec : dec.decision || "PASS").toUpperCase();
     var badge = qs("decisionBadge");
@@ -26,6 +104,7 @@
     qs("decisionDirection").textContent = dir ? (dir.toLowerCase() === "long" ? "Long" : "Short") : "—";
     var conf = dec.confidence_score != null ? dec.confidence_score : data.confidence;
     qs("decisionConfidence").textContent = conf != null ? "Confidence: " + Math.round(conf) + " / 100" : "";
+
     var rationale = "";
     if (dec.pass_reason) {
       var reasonMap = {
@@ -41,20 +120,20 @@
 
     /* Snapshot */
     var snap = data.snapshot || {};
-    qs("snapActualMove").textContent = snap.actual_move_pct != null ? fmt(snap.actual_move_pct) + "%" : snap.actual_move != null ? fmt(snap.actual_move) + "%" : "—";
-    qs("snapEmMultiple").textContent = fmt(snap.move_vs_em || snap.em_multiple) + "x";
+    qs("snapActualMove").textContent = snap.actual_move_pct != null ? fmt(snap.actual_move_pct) + "%" : "—";
+    qs("snapEmMultiple").textContent = fmt(snap.move_vs_em) + "x";
     qs("snapAtrMultiple").textContent = fmt(snap.atr_multiple) + "x";
     qs("snapGapStructure").textContent = snap.gap_structure || "—";
-    qs("snapIvCrush").textContent = snap.iv_crush_pct != null ? fmt(snap.iv_crush_pct) + "%" : snap.iv_crush != null ? fmt(snap.iv_crush) + "%" : "—";
+    qs("snapIvCrush").textContent = snap.iv_crush_pct != null ? fmt(snap.iv_crush_pct) + "%" : "—";
     qs("snapSentiment").textContent = snap.sentiment || "—";
 
     /* Displacement */
-    var prof = data.profile || data.displacement || {};
-    qs("displaceMagnitude").textContent = prof.magnitude_em_label || prof.magnitude || "—";
-    qs("displaceStructure").textContent = prof.structure_label || prof.structure || prof.gap_structure || "—";
-    qs("displaceContext").textContent = prof.context_label || prof.context || "—";
+    var prof = data.profile || {};
+    qs("displaceMagnitude").textContent = prof.magnitude_em_label || "—";
+    qs("displaceStructure").textContent = prof.structure_label || "—";
+    qs("displaceContext").textContent = prof.context_label || "—";
 
-    /* Historical — use 5-day horizon as the primary display */
+    /* Historical */
     var hist = data.historical || {};
     var contProb = hist.continuation_prob_5d != null ? hist.continuation_prob_5d : hist.continuation_prob_3d;
     var revProb  = hist.reversion_prob_5d != null ? hist.reversion_prob_5d : hist.reversion_prob_3d;
@@ -89,8 +168,9 @@
 
     runBtn.disabled = true;
     runBtn.querySelector(".btnSpinner").style.display = "inline-block";
-    statusEl.textContent = "Evaluating " + ticker + " for post-event extension…";
+    statusEl.textContent = "Evaluating " + ticker + "…";
     resultsEl.classList.add("hidden");
+    phaseAEl.classList.add("hidden");
 
     if (window.RavenLoading) window.RavenLoading.show("Evaluating " + ticker + "…");
 
@@ -100,9 +180,13 @@
         return r.json();
       })
       .then(function (data) {
-        render(data);
-        resultsEl.classList.remove("hidden");
-        statusEl.textContent = "Evaluation complete for " + ticker + ".";
+        if (data.phase === "pre_earnings") {
+          renderPhaseA(data);
+          statusEl.textContent = "Pre-earnings analysis for " + ticker + " — earnings " + (data.earnings_date || "") + " (" + (data.timing || "UNK") + ").";
+        } else {
+          renderPhaseB(data);
+          statusEl.textContent = "Post-earnings evaluation complete for " + ticker + ".";
+        }
       })
       .catch(function (err) {
         statusEl.textContent = "Error: " + err.message;

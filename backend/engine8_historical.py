@@ -169,10 +169,19 @@ def _build_event_row(
 # ---------------------------------------------------------------------------
 
 def _matches(event: dict, current_mag: str, current_struct: str, current_dir: str) -> bool:
-    """Similarity matching on deterministic fields only.  No sentiment."""
+    """Strict similarity matching on all 3 deterministic fields."""
     if event.get("magnitude_bucket") != current_mag:
         return False
     if event.get("structure_bucket") != current_struct:
+        return False
+    if event.get("direction") != current_dir:
+        return False
+    return True
+
+
+def _matches_relaxed(event: dict, current_mag: str, current_dir: str) -> bool:
+    """Relaxed matching — magnitude + direction only (structure dropped)."""
+    if event.get("magnitude_bucket") != current_mag:
         return False
     if event.get("direction") != current_dir:
         return False
@@ -241,8 +250,12 @@ def compute_historical_patterns(
     ``all_event_rows`` should be pre-built rows from
     ``build_historical_events()`` (see engine8_pipeline).
 
-    If ``sample_size < flags.ENGINE8_MIN_HISTORICAL_SAMPLE`` then
-    ``force_pass=True`` and all probability fields are None.
+    Matching strategy:
+      1. Try strict match (magnitude + structure + direction).
+      2. If strict match yields < ENGINE8_MIN_HISTORICAL_SAMPLE events,
+         fall back to relaxed match (magnitude + direction only) with
+         confidence_band capped at "LOW".
+      3. If relaxed match also < ENGINE8_MIN_HISTORICAL_SAMPLE, force_pass.
     """
     if flags is None:
         flags = get_flags()
@@ -252,7 +265,24 @@ def compute_historical_patterns(
         if _matches(ev, current_magnitude_bucket, current_structure_bucket, current_direction)
     ]
     n = len(matched)
-    band = _confidence_band(n)
+    relaxed = False
+
+    if n < flags.ENGINE8_MIN_HISTORICAL_SAMPLE:
+        matched_relaxed = [
+            ev for ev in all_event_rows
+            if _matches_relaxed(ev, current_magnitude_bucket, current_direction)
+        ]
+        if len(matched_relaxed) >= flags.ENGINE8_MIN_HISTORICAL_SAMPLE:
+            matched = matched_relaxed
+            n = len(matched)
+            relaxed = True
+            LOG.info(
+                "Engine 8 historical: strict match yielded %d events, relaxed to %d for %s",
+                len([ev for ev in all_event_rows if _matches(ev, current_magnitude_bucket, current_structure_bucket, current_direction)]),
+                n, ticker,
+            )
+
+    band = "LOW" if relaxed else _confidence_band(n)
 
     if n < flags.ENGINE8_MIN_HISTORICAL_SAMPLE:
         return HistoricalPatternResult(

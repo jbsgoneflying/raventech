@@ -313,6 +313,33 @@ def _snapshot_redis_key(ticker: str, earnings_date: str) -> str:
 # Main builder
 # ---------------------------------------------------------------------------
 
+def _resolve_pre_post_dates(
+    earnings_date: dt.date,
+    timing: str,
+) -> tuple:
+    """Return (pre_date, post_date) adjusted for BMO/AMC timing.
+
+    BMO: gap at open on earnings day  → pre = prior trading day, post = earnings day
+    AMC: gap at open next day         → pre = earnings day, post = next trading day
+    UNK: default to AMC-style (safe for most US equities)
+    """
+    if timing == "BMO":
+        pre_date = earnings_date - dt.timedelta(days=1)
+        while pre_date.weekday() >= 5:
+            pre_date -= dt.timedelta(days=1)
+        post_date = earnings_date
+        if post_date.weekday() >= 5:
+            post_date += dt.timedelta(days=(7 - post_date.weekday()))
+    else:
+        pre_date = earnings_date
+        if pre_date.weekday() >= 5:
+            pre_date -= dt.timedelta(days=(pre_date.weekday() - 4))
+        post_date = earnings_date + dt.timedelta(days=1)
+        while post_date.weekday() >= 5:
+            post_date += dt.timedelta(days=1)
+    return pre_date, post_date
+
+
 def build_post_event_snapshot(
     *,
     ticker: str,
@@ -322,9 +349,11 @@ def build_post_event_snapshot(
     price_service_mod: Any = None,
     store: Any = None,
     flags: Optional[FeatureFlags] = None,
+    timing: str = "UNK",
 ) -> PostEventSnapshot:
     """Build (or replay from Redis) the post-event snapshot for a ticker.
 
+    ``timing`` should be "BMO", "AMC", or "UNK" (from ORATS anncTod).
     If the snapshot is already persisted in Redis, it is replayed.
     Otherwise it is built from live data and persisted.
     """
@@ -348,12 +377,7 @@ def build_post_event_snapshot(
     post_iv: Optional[float] = None
     benzinga_headlines: List[dict] = []
 
-    pre_date = earnings_date - dt.timedelta(days=1)
-    while pre_date.weekday() >= 5:
-        pre_date -= dt.timedelta(days=1)
-    post_date = earnings_date + dt.timedelta(days=1)
-    while post_date.weekday() >= 5:
-        post_date += dt.timedelta(days=1)
+    pre_date, post_date = _resolve_pre_post_dates(earnings_date, timing)
     lookback_start = earnings_date - dt.timedelta(days=30)
 
     def _fetch_orats_cores():

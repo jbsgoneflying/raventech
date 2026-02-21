@@ -80,7 +80,7 @@
           <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
           <div class="appHeaderText">
             <div class="appTitle">Raven-Tech.co</div>
-            <div class="appSubtitle">Engine 8 · Post-Event Trade Extension · Directional follow-through after earnings catalysts</div>
+            <div class="appSubtitle">Engine 8 · Earnings Lifecycle · Iron condor setup through post-event extension</div>
           </div>
         </div>
       </header>
@@ -95,9 +95,10 @@
                 <div class="tipPanel" role="tooltip">
                   <div class="tipTitle">Ticker selection</div>
                   <div class="tipBody">
-                    <p>Enter a US equity ticker that has recently reported earnings or experienced a major catalyst.</p>
-                    <p><b>Key requirement</b>: This engine does NOT scan for new opportunities. It activates only after an existing event-driven trade has reached the post-event phase.</p>
-                    <p><b>Desk view</b>: Use this after your Engine 1 iron condor has resolved. If the earnings move was contained and your short premium trade is profitable (or within loss tolerance), Engine 8 evaluates whether a directional follow-through trade exists.</p>
+                    <p>Enter a US equity ticker to evaluate the full earnings lifecycle.</p>
+                    <p><b>Phase A (Pre-Earnings)</b>: If earnings are upcoming, Engine 8 runs Engine 1 internally and shows the iron condor analysis — breach stats, expected move, IC structure, and regime context.</p>
+                    <p><b>Phase B (Post-Earnings)</b>: After earnings, come back and re-evaluate. Engine 8 derives how the IC resolved and evaluates whether a directional follow-through trade (CONTINUE/FADE) exists.</p>
+                    <p><b>Desk view</b>: Always start before earnings. Set up Phase A, enter the IC if it looks good, then return after earnings for the extension decision.</p>
                   </div>
                 </div>
               </span>
@@ -129,7 +130,112 @@
         <div id="status" class="status">Enter a ticker and click "Evaluate" to assess post-event trade extension potential.</div>
       </section>
 
+      <!-- ══════════ PHASE A: Pre-Earnings ══════════ -->
+      <section class="results hidden" id="phaseAResults">
+        <section class="surface" id="phaseAHeader">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span class="decisionBadge" id="phaseABadge" style="background:rgba(0,122,255,0.12); border:1px solid rgba(0,122,255,0.30); color:rgba(0,60,160,0.96);">PRE-EARNINGS</span>
+            <span id="phaseATiming" style="font-size:13px; font-weight:700;"></span>
+            <span id="phaseACountdown" style="font-size:13px; font-weight:600; color:var(--muted);"></span>
+          </div>
+          <div id="phaseANote" style="margin-top:10px; font-size:12px; color:var(--text); line-height:1.5;">
+            Engine 1 has been run for this ticker. Review the IC analysis below, enter the trade if it fits your thesis, then return after earnings for the extension decision.
+          </div>
+        </section>
+
+        <section class="surface" id="phaseASnapshot">
+          <div class="sectionHeader"><h2 class="sectionTitle">Earnings Snapshot</h2></div>
+          <div class="evalGrid">
+            <div class="evalCard">
+              <div class="evalCardLabel">Expected Move</div>
+              <div id="paExpectedMove" class="evalCardValue">—</div>
+              <div class="evalCardCaption">implied earnings move</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Stock Price</div>
+              <div id="paStockPrice" class="evalCardValue">—</div>
+              <div class="evalCardCaption">current underlying</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Breach Rate</div>
+              <div id="paBreachRate" class="evalCardValue">—</div>
+              <div class="evalCardCaption">historical containment</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Tail Bias</div>
+              <div id="paTailBias" class="evalCardValue" style="font-size:16px;">—</div>
+              <div class="evalCardCaption">up vs down skew</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface" id="phaseABreachDetail">
+          <div class="sectionHeader"><h2 class="sectionTitle">Breach Statistics</h2></div>
+          <div class="evalGrid">
+            <div class="evalCard">
+              <div class="evalCardLabel">Up Breach Rate</div>
+              <div id="paUpBreach" class="evalCardValue">—</div>
+              <div class="evalCardCaption">upside containment failures</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Down Breach Rate</div>
+              <div id="paDownBreach" class="evalCardValue">—</div>
+              <div class="evalCardCaption">downside containment failures</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Avg Up Overshoot</div>
+              <div id="paUpOvershoot" class="evalCardValue">—</div>
+              <div class="evalCardCaption">when upside breaches</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Avg Down Overshoot</div>
+              <div id="paDownOvershoot" class="evalCardValue">—</div>
+              <div class="evalCardCaption">when downside breaches</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface" id="phaseAIcSection" style="display:none;">
+          <div class="sectionHeader"><h2 class="sectionTitle">Iron Condor Structure</h2></div>
+          <div class="evalGrid" id="phaseAIcGrid"></div>
+        </section>
+
+        <section class="surface" id="phaseARegime">
+          <div class="sectionHeader"><h2 class="sectionTitle">Regime &amp; Context</h2></div>
+          <div class="evalGrid">
+            <div class="evalCard">
+              <div class="evalCardLabel">Regime</div>
+              <div id="paRegimeLabel" class="evalCardValue" style="font-size:16px;">—</div>
+              <div class="evalCardCaption">volatility environment</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">GO / NO-GO</div>
+              <div id="paGoNoGo" class="evalCardValue" style="font-size:16px;">—</div>
+              <div class="evalCardCaption">informational only</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Events Used</div>
+              <div id="paEventsUsed" class="evalCardValue">—</div>
+              <div class="evalCardCaption">historical earnings analyzed</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface">
+          <div style="padding:4px 0; font-size:12px; color:var(--muted); line-height:1.5;">
+            <b>Next step</b>: After earnings are announced, return to this page and re-evaluate the ticker. Engine 8 will load this pre-earnings setup and run the full post-event extension analysis.
+          </div>
+        </section>
+      </section>
+
+      <!-- ══════════ PHASE B: Post-Earnings ══════════ -->
       <section class="results hidden" id="results">
+        <!-- Engine 1 Outcome (shown when Phase A data exists) -->
+        <section class="surface" id="e1OutcomeSection" style="display:none;">
+          <div class="sectionHeader"><h2 class="sectionTitle">Engine 1 IC Outcome</h2></div>
+          <div id="e1OutcomeContent" style="font-size:12px; line-height:1.5;"></div>
+        </section>
+
         <!-- Decision Banner -->
         <section class="surface" id="decisionSection">
           <div class="sectionHeader">
@@ -483,7 +589,7 @@
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/post-event.js?v=4"></script>
+    <script src="/static/post-event.js?v=5"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

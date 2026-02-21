@@ -37,7 +37,10 @@ from backend.engine8_historical import (
     _structure_bucket,
     compute_historical_patterns,
 )
-from backend.engine8_snapshot import PostEventSnapshot, _to_float, _fmt_date, _compute_atr, build_post_event_snapshot
+from backend.engine8_snapshot import (
+    PostEventSnapshot, _to_float, _fmt_date, _compute_atr,
+    build_post_event_snapshot, _resolve_pre_post_dates,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -124,11 +127,14 @@ def _build_all_event_rows(
 
     event_rows: List[dict] = []
 
+    from backend.earnings_logic import classify_timing
+
     for erow in earnings_rows:
         earn_date = _parse_date(str(erow["earnDate"]))
 
-        pre_d = _previous_trading_day(earn_date)
-        post_d = _next_trading_day(earn_date)
+        annc_tod = erow.get("anncTod") or erow.get("annc_tod") or erow.get("anncTOD")
+        timing = classify_timing(annc_tod)
+        pre_d, post_d = _resolve_pre_post_dates(earn_date, timing)
 
         pre_bar_key = _fmt_date(pre_d)
         post_bar_key = _fmt_date(post_d)
@@ -254,7 +260,10 @@ def evaluate_ticker(
     if cached is not None:
         return cached
 
-    # -- Resolve earnings date from ORATS if not provided ---------------------
+    # -- Resolve earnings date + timing from ORATS if not provided -------------
+    from backend.earnings_logic import classify_timing as _classify_timing
+
+    earnings_timing: str = "UNK"
     if earnings_date is None and orats_client is not None:
         try:
             resp = orats_client.hist_earnings(ticker)
@@ -267,9 +276,21 @@ def evaluate_ticker(
                 ed = _parse_date(str(r["earnDate"]))
                 if ed <= today:
                     earnings_date = ed
+                    annc = r.get("anncTod") or r.get("annc_tod") or r.get("anncTOD")
+                    earnings_timing = _classify_timing(annc)
                     break
         except Exception as e:
             LOG.warning("Engine 8 earnings date resolution failed for %s: %s", ticker, e)
+    elif earnings_date is not None and orats_client is not None:
+        try:
+            resp = orats_client.hist_earnings(ticker)
+            for r in (resp.rows or []):
+                if r.get("earnDate") and _parse_date(str(r["earnDate"])) == earnings_date:
+                    annc = r.get("anncTod") or r.get("annc_tod") or r.get("anncTOD")
+                    earnings_timing = _classify_timing(annc)
+                    break
+        except Exception:
+            pass
 
     # -- Fetch current price for activation -----------------------------------
     current_price: Optional[float] = None
@@ -282,10 +303,10 @@ def evaluate_ticker(
         except Exception:
             pass
 
-    # -- Check if post-event bar exists ---------------------------------------
+    # -- Check if post-event bar exists (timing-aware) ------------------------
     has_post_event_bar = False
     if earnings_date is not None and price_svc is not None:
-        post_d = _next_trading_day(earnings_date)
+        _, post_d = _resolve_pre_post_dates(earnings_date, earnings_timing)
         try:
             bars = price_svc.fetch_daily_bars(ticker, post_d, post_d + dt.timedelta(days=3))
             has_post_event_bar = len(bars) > 0
@@ -306,6 +327,7 @@ def evaluate_ticker(
     result: Dict[str, Any] = {
         "ticker": ticker,
         "earnings_date": _fmt_date(earnings_date) if earnings_date else None,
+        "timing": earnings_timing,
         "activation": activation.to_dict(),
         "snapshot": None,
         "profile": None,
@@ -324,13 +346,14 @@ def evaluate_ticker(
             _eval_cache[cache_key] = result
         return result
 
-    # -- Build post-event snapshot --------------------------------------------
+    # -- Build post-event snapshot (timing-aware) ------------------------------
     eodhd_client = getattr(price_svc, "_eodhd", None) if price_svc else None
     snapshot = build_post_event_snapshot(
         ticker=ticker,
         earnings_date=earnings_date,
         orats_client=orats_client,
         eodhd_client=eodhd_client,
+        timing=earnings_timing,
         store=store,
         flags=flags,
     )
