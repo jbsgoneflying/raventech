@@ -586,6 +586,24 @@ def lead_lag_page():
     return FileResponse(str(lead_lag_path))
 
 
+@app.get("/pairs")
+def pairs_page():
+    """Engine 7: Thematic Relative Value (Pairs) Scanner page."""
+    pairs_path = STATIC_DIR / "pairs.html"
+    if not pairs_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/pairs.html")
+    return FileResponse(str(pairs_path))
+
+
+@app.get("/post-event")
+def post_event_page():
+    """Engine 8: Post-Event Trade Extension Evaluator page."""
+    pe_path = STATIC_DIR / "post-event.html"
+    if not pe_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/post-event.html")
+    return FileResponse(str(pe_path))
+
+
 @app.get("/api/spx-ic")
 def spx_ic(
     underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),

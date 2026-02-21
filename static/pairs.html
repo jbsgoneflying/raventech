@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Engine 7 · Thematic Relative Value (Pairs)</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 7 Thematic Relative Value pairs scanner with z-score, momentum, and theme-validated spread trades." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      .pairsGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .pairCard {
+        padding: 16px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+        transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+        cursor: pointer;
+      }
+      .pairCard:hover {
+        border-color: rgba(15, 23, 42, 0.16);
+        background: rgba(255,255,255,0.88);
+        transform: translateY(-1px);
+      }
+      .pairCardHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .pairCardPair {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .pairCardSymbol {
+        font-size: 17px;
+        font-weight: 900;
+        letter-spacing: -0.2px;
+      }
+      .pairCardMode {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      .pairCardMode.mean_reversion {
+        background: rgba(0, 122, 255, 0.12);
+        border: 1px solid rgba(0, 122, 255, 0.25);
+        color: rgba(0, 80, 180, 0.96);
+      }
+      .pairCardMode.momentum {
+        background: rgba(175, 82, 222, 0.12);
+        border: 1px solid rgba(175, 82, 222, 0.25);
+        color: rgba(120, 50, 170, 0.96);
+      }
+      .pairCardGrade {
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.1px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+      }
+      .pairCardGrade.grade-aplus {
+        background: rgba(52, 199, 89, 0.14);
+        border-color: rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+      .pairCardGrade.grade-a {
+        background: rgba(0, 122, 255, 0.12);
+        border-color: rgba(0, 122, 255, 0.25);
+        color: rgba(0, 90, 200, 0.95);
+      }
+      .pairCardGrade.grade-b {
+        background: rgba(255, 159, 10, 0.12);
+        border-color: rgba(255, 159, 10, 0.28);
+        color: rgba(180, 100, 0, 0.95);
+      }
+      .pairCardBody {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .pairCardMetric {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 12px;
+      }
+      .pairCardMetric .k { color: var(--muted); font-weight: 600; }
+      .pairCardMetric .v { font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .pairCardThemes {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .themeChip {
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        background: rgba(175, 82, 222, 0.10);
+        border: 1px solid rgba(175, 82, 222, 0.20);
+        color: rgba(120, 50, 170, 0.90);
+      }
+      .tierChip {
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+      }
+      .tierChip.tier1 { background: rgba(52, 199, 89, 0.12); border: 1px solid rgba(52, 199, 89, 0.25); color: rgba(12, 70, 38, 0.90); }
+      .tierChip.tier2 { background: rgba(0, 122, 255, 0.10); border: 1px solid rgba(0, 122, 255, 0.20); color: rgba(0, 80, 180, 0.90); }
+      .tierChip.tier3 { background: rgba(255, 149, 0, 0.10); border: 1px solid rgba(255, 149, 0, 0.22); color: rgba(180, 100, 0, 0.90); }
+
+      .statsGrid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      @media (max-width: 980px) {
+        .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .pairsGrid { grid-template-columns: 1fr; }
+      }
+      .emptyState { padding: 40px 20px; text-align: center; color: var(--muted); }
+      .emptyStateTitle { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+      .emptyStateBody { font-size: 13px; font-weight: 500; }
+      .pairCardNotes { margin-top: 8px; font-size: 11px; color: var(--muted); font-weight: 500; line-height: 1.35; }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Engine 7 · Thematic Relative Value · Pairs spread scanner with z-score, momentum & theme validation</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Engine 7 Controls">
+        <form id="e7Form" class="controlBarForm controlBarForm--engine2">
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Tier Filter
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Tier help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Pair tier classification</div>
+                  <div class="tipBody">
+                    <p>The 20-pair universe is organized into three tiers:</p>
+                    <ul>
+                      <li><b>Tier 1 — Core Index / Style</b>: QQQ/IWM, SPY/IWM, QQQ/SPY, RSP/SPY, SPHB/SPLV, SPY/EFA. Large-cap style and size rotation.</li>
+                      <li><b>Tier 2 — Sector Rotation</b>: XLY/XLP, XLF/XLK, XLE/SPY, XLI/XLU, XLB/XLI, SOXX/IGV, XBI/XLV, XHB/SPY. Sector relative strength.</li>
+                      <li><b>Tier 3 — Macro / Cross-Asset</b>: GLD/TLT, USO/SPY, UUP/SPY, IBIT/QQQ, VIXY/SPY, HYG/TLT. Cross-asset regime signals.</li>
+                    </ul>
+                    <p><b>Desk view</b>: Tier 1 pairs are the most liquid and carry the tightest spreads. Tier 3 pairs offer the most diversification but require macro conviction.</p>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <select id="tier" class="controlSelect">
+              <option value="" selected>All Tiers</option>
+              <option value="1">Tier 1 — Core Index</option>
+              <option value="2">Tier 2 — Sector</option>
+              <option value="3">Tier 3 — Macro</option>
+            </select>
+          </div>
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Mode Filter
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Mode help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Trade mode classification</div>
+                  <div class="tipBody">
+                    <p>Each pair signal operates in one of two modes:</p>
+                    <ul>
+                      <li><b>Mean Reversion</b>: Spread has reached a statistical extreme (high z-score). Expectation is reversion toward the rolling mean. Typically 2–5 day holding period.</li>
+                      <li><b>Momentum</b>: Spread has broken trend with confirmation. Expectation is continuation of divergence. Typically 3–10 day holding period.</li>
+                    </ul>
+                    <p><b>Desk view</b>: Mean-reversion trades work best in range-bound regimes with positive gamma. Momentum trades favour trending regimes with strong narrative support.</p>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <select id="mode" class="controlSelect">
+              <option value="" selected>All Modes</option>
+              <option value="mean_reversion">Mean Reversion</option>
+              <option value="momentum">Momentum</option>
+            </select>
+          </div>
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Min Score
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Min score help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Minimum confidence score</div>
+                  <div class="tipBody">
+                    <p>Composite confidence score (0–100) combining:</p>
+                    <ul>
+                      <li><b>Z-score extremity</b>: How far the spread has deviated from its rolling mean</li>
+                      <li><b>Momentum alignment</b>: 5-day and 10-day ROC confirmation</li>
+                      <li><b>Trend confirmation</b>: Position vs moving averages, breakout vs reversion structure</li>
+                      <li><b>Theme alignment</b>: Macro/narrative context support from headlines and LLM classification</li>
+                      <li><b>Volatility regime</b>: ORATS IV overlay (when enabled)</li>
+                    </ul>
+                    <p><b>Desk view</b>: 75+ is A+ (high conviction, multiple confirmations). 50–74 is standard. Below 50 is watchlist only — not tradeable without additional confluence.</p>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <select id="minScore" class="controlSelect">
+              <option value="75">75+ (A+)</option>
+              <option value="60">60+ (A)</option>
+              <option value="50" selected>50+ (A/B)</option>
+              <option value="0">All</option>
+            </select>
+          </div>
+          <div class="controlSpacer"></div>
+          <button id="runBtn" class="primaryButton" type="submit">
+            <span class="btnSpinner" aria-hidden="true"></span>
+            Scan Pairs
+          </button>
+        </form>
+        <div id="status" class="status">Click "Scan Pairs" to evaluate 20 fixed asset pairs across all tiers.</div>
+      </section>
+
+      <section class="results hidden" id="results">
+        <!-- Gate Banner -->
+        <section class="surface" id="gateBanner" style="display:none; margin-bottom:12px;">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Gate Status</span>
+            <span id="gateSummary" style="font-size:13px; font-weight:700;"></span>
+          </div>
+          <div id="gateReasons" style="margin-top:6px; font-size:11px; color:var(--muted);"></div>
+        </section>
+
+        <!-- Scan Summary -->
+        <section class="surface" id="statsSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Scan Summary
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Scan summary help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Pairs scan summary</div>
+                  <div class="tipBody">
+                    <p>Overview of the current pairs scan:</p>
+                    <ul>
+                      <li><b>Universe</b>: 20 fixed asset pairs across 3 tiers</li>
+                      <li><b>Eligible</b>: Pairs with active theme support — only these can generate signals</li>
+                      <li><b>A+ Pairs</b>: High-conviction pairs with score >= 75 and multiple confirmations</li>
+                      <li><b>Active Themes</b>: Macro/narrative themes currently driving pair eligibility</li>
+                    </ul>
+                    <p><b>Desk view</b>: Focus on A+ pairs first. Check that active themes align with your macro view before sizing.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="statsMeta">—</div>
+          </div>
+          <div class="statsGrid" id="statsGrid">
+            <div class="metricCard">
+              <div class="metricLabel">Pairs Scanned</div>
+              <div id="statScanned" class="metricValue mono">—</div>
+              <div class="metricCaption muted">20-pair universe</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Eligible Pairs</div>
+              <div id="statEligible" class="metricValue mono">—</div>
+              <div class="metricCaption muted">Theme-validated</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">A+ Pairs</div>
+              <div id="statAPlus" class="metricValue mono">—</div>
+              <div class="metricCaption muted">Score >= 75</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Active Themes</div>
+              <div id="statThemes" class="metricValue mono">—</div>
+              <div class="metricCaption muted">Macro narratives</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Active Themes -->
+        <section class="surface" id="themesSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Active Themes
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Themes help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Theme Engine (Critical Layer)</div>
+                  <div class="tipBody">
+                    <p>Themes are derived from recent headlines (Benzinga + EODHD) and classified using deterministic rules + LLM annotation.</p>
+                    <p><b>Key rule</b>: Narrative alone does NOT trigger trades. Narrative <em>enables</em> trades when the statistical signal confirms.</p>
+                    <ul>
+                      <li><b>AI Expansion / Deceleration</b>: Drives SOXX/IGV, QQQ/SPY, IBIT/QQQ</li>
+                      <li><b>Rates Rising / Falling</b>: Drives GLD/TLT, XLF/XLK, HYG/TLT</li>
+                      <li><b>Risk-Off</b>: Drives VIXY/SPY, XLY/XLP, SPY/EFA</li>
+                      <li><b>Energy Shock</b>: Drives XLE/SPY, USO/SPY</li>
+                      <li><b>Liquidity Expansion</b>: Drives SPHB/SPLV, SPY/IWM, IBIT/QQQ</li>
+                    </ul>
+                    <p><b>Desk view</b>: Read the theme tags on each pair to understand WHY it's eligible. If you disagree with the theme classification, treat the signal with caution — your macro conviction matters.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div id="themesGrid" class="pairCardThemes" style="min-height:24px;"></div>
+          <div id="llmThemeNote" class="pairCardNotes" style="display:none;"></div>
+        </section>
+
+        <!-- A+ Pairs -->
+        <section class="surface" id="aplusSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              A+ Pairs
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="A+ pairs help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">A+ Pair Signals</div>
+                  <div class="tipBody">
+                    <p>High-conviction pair trades (score >= 75) with multiple confirmation factors:</p>
+                    <ul>
+                      <li><b>Statistical extreme</b>: Z-score beyond entry threshold</li>
+                      <li><b>Momentum alignment</b>: 5d and 10d ROC confirm direction</li>
+                      <li><b>Theme validation</b>: Active macro narrative supports the trade</li>
+                      <li><b>No overlap conflict</b>: Passes correlation overlap filter</li>
+                    </ul>
+                    <p><b>Desk view</b>: These are your primary candidates. Check the suggested risk allocation (0.5–1.5 RU) and expected holding period. Max 3–5 concurrent pairs to avoid correlation stacking.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="aplusMeta">—</div>
+          </div>
+          <div id="aplusGrid" class="pairsGrid"></div>
+        </section>
+
+        <!-- Standard Pairs -->
+        <section class="surface" id="standardSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Standard Pairs
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Standard pairs help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Standard Pair Signals</div>
+                  <div class="tipBody">
+                    <p>Eligible pair trades with score 50–74. The statistical signal exists but fewer confirmation factors align.</p>
+                    <p><b>Desk view</b>: Consider these with reduced position size (0.5 RU) or as watchlist candidates. Wait for additional confirmation — a theme strengthening or z-score widening — before committing full size.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="standardMeta">—</div>
+          </div>
+          <div id="standardGrid" class="pairsGrid"></div>
+        </section>
+
+        <!-- Watchlist -->
+        <section class="surface" id="watchlistSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Watchlist
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Watchlist help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Watchlist Pairs</div>
+                  <div class="tipBody">
+                    <p>Eligible pairs below the minimum score threshold. The spread shows some statistical deviation but not enough for a trade.</p>
+                    <p><b>Desk view</b>: Monitor these for developing setups. A watchlist pair today can become an A+ signal tomorrow if the spread widens and theme support strengthens.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="watchlistMeta">—</div>
+          </div>
+          <div id="watchlistGrid" class="pairsGrid"></div>
+        </section>
+
+        <!-- How to Trade Section -->
+        <section class="surface" id="howToSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">How to Trade Relative Value Pairs</h2>
+          </div>
+          <div class="taPanel">
+            <div class="taGrid taGrid--4">
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Entry Rules</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li><b>Mean Reversion</b>: Enter when z-score exceeds threshold with theme support</li>
+                    <li><b>Momentum</b>: Enter on trend break with directional ROC confirmation</li>
+                    <li>Always verify the active theme aligns with your macro view</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Risk Allocation</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li>Target: 15–25% of portfolio (opportunistic bucket)</li>
+                    <li>Standard trade: 0.5–1.5 Risk Units per pair</li>
+                    <li>Max concurrent: 3–5 pairs</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Holding Period</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li><b>Mean Reversion</b>: 2–5 days</li>
+                    <li><b>Momentum</b>: 3–10 days</li>
+                    <li>Exit on z-score mean crossover or theme invalidation</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Correlation Guard</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li>Avoid stacking highly correlated pairs</li>
+                    <li>Overlap filter flags correlated signals automatically</li>
+                    <li>Diversify across tiers for uncorrelated exposure</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- Desk Insight Popup -->
+    <style>
+      .pairsInsightPopup{position:fixed;z-index:10000;width:440px;max-height:80vh;overflow-y:auto;border-radius:16px;background:rgba(28,28,30,.98);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08) inset;user-select:none;transition:opacity .15s ease;color:#fff;display:none}
+      .pairsInsightPopup.isDragging{cursor:grabbing;transition:none}
+      .pairsInsightHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.08);cursor:grab}
+      .pairsInsightHeader:active{cursor:grabbing}
+      .pairsInsightTitle{font-size:14px;font-weight:700;line-height:1.3;color:#fff;flex:1}
+      .pairsInsightClose{width:24px;height:24px;border-radius:6px;border:none;background:rgba(255,255,255,.12);color:rgba(255,255,255,.7);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s ease}
+      .pairsInsightClose:hover{background:rgba(255,255,255,.20);color:#fff}
+      .pairsInsightBody{padding:16px}
+      .pairsInsightSection{margin-bottom:16px}.pairsInsightSection:last-child{margin-bottom:0}
+      .pairsInsightSectionTitle{font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+      .pairsInsightText{font-size:12px;font-weight:500;line-height:1.5;color:rgba(255,255,255,.88)}
+      .pairsInsightLoading{text-align:center;padding:32px 16px;color:rgba(255,255,255,.6);font-size:12px}
+      .pairsInsightDot{display:inline-block;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.5);margin:0 2px;animation:pairsDotPulse 1.2s ease-in-out infinite}
+      .pairsInsightDot:nth-child(2){animation-delay:.2s}.pairsInsightDot:nth-child(3){animation-delay:.4s}
+      .pairsInsightSource{font-size:10px;color:rgba(255,255,255,.35);text-align:right;margin-top:12px;font-style:italic}
+      @keyframes pairsDotPulse{0%,100%{opacity:.3}50%{opacity:1}}
+      .pairsClick{cursor:pointer;transition:box-shadow .15s ease}.pairsClick:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
+    </style>
+    <div class="pairsInsightPopup" id="pairsInsightPopup">
+      <div class="pairsInsightHeader" id="pairsInsightHeader">
+        <span class="pairsInsightTitle" id="pairsInsightTitle">Desk Insight</span>
+        <button class="pairsInsightClose" id="pairsInsightClose" type="button">&times;</button>
+      </div>
+      <div class="pairsInsightBody" id="pairsInsightBody">
+        <div class="pairsInsightLoading"><span class="pairsInsightDot"></span><span class="pairsInsightDot"></span><span class="pairsInsightDot"></span><br>Generating desk insight…</div>
+      </div>
+    </div>
+
+    <script src="/static/ui_kit.js?v=3"></script>
+    <script src="/static/pairs.js?v=1"></script>
+    <script src="/static/nav.js"></script>
+  </body>
+</html>

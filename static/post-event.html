@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Engine 8 · Post-Event Trade Extension</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 8 Post-Event Trade Extension evaluator for directional follow-through after earnings and major catalysts." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      .decisionBadge {
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        display: inline-block;
+      }
+      .decisionBadge.continue {
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+      .decisionBadge.fade {
+        background: rgba(255, 149, 0, 0.14);
+        border: 1px solid rgba(255, 149, 0, 0.30);
+        color: rgba(180, 100, 0, 0.96);
+      }
+      .decisionBadge.pass {
+        background: rgba(11, 11, 15, 0.06);
+        border: 1px solid rgba(11, 11, 15, 0.12);
+        color: rgba(11, 11, 15, 0.70);
+      }
+      .evalGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .evalCard {
+        padding: 16px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+      }
+      .evalCardHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .evalCardLabel { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+      .evalCardValue { font-size: 22px; font-weight: 900; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .evalCardCaption { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 4px; }
+      .statsGrid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .historyTable { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+      .historyTable th { text-align: left; font-weight: 700; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .historyTable td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+      .historyTable tr:hover td { background: rgba(0,0,0,0.02); }
+      @media (max-width: 980px) {
+        .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .evalGrid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Engine 8 · Post-Event Trade Extension · Directional follow-through after earnings catalysts</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Engine 8 Controls">
+        <form id="e8Form" class="controlBarForm controlBarForm--engine2">
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Ticker
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Ticker help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Ticker selection</div>
+                  <div class="tipBody">
+                    <p>Enter a US equity ticker that has recently reported earnings or experienced a major catalyst.</p>
+                    <p><b>Key requirement</b>: This engine does NOT scan for new opportunities. It activates only after an existing event-driven trade has reached the post-event phase.</p>
+                    <p><b>Desk view</b>: Use this after your Engine 1 iron condor has resolved. If the earnings move was contained and your short premium trade is profitable (or within loss tolerance), Engine 8 evaluates whether a directional follow-through trade exists.</p>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <input id="ticker" type="text" class="controlInput" placeholder="e.g. AAPL" autocomplete="off" spellcheck="false" style="text-transform:uppercase; width:100px;" />
+          </div>
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Earnings Date (optional)
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Earnings date help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Earnings date override</div>
+                  <div class="tipBody">
+                    <p>Optionally specify the earnings date (YYYY-MM-DD). If left blank, the engine uses the most recent earnings event for the ticker.</p>
+                    <p><b>Desk view</b>: Only override this if you're evaluating a historical event or if the auto-detected date is wrong.</p>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <input id="earningsDate" type="date" class="controlInput" />
+          </div>
+          <div class="controlSpacer"></div>
+          <button id="runBtn" class="primaryButton" type="submit">
+            <span class="btnSpinner" aria-hidden="true"></span>
+            Evaluate
+          </button>
+        </form>
+        <div id="status" class="status">Enter a ticker and click "Evaluate" to assess post-event trade extension potential.</div>
+      </section>
+
+      <section class="results hidden" id="results">
+        <!-- Decision Banner -->
+        <section class="surface" id="decisionSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Extension Decision
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Decision help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Post-event extension decision</div>
+                  <div class="tipBody">
+                    <p>The engine produces only three possible outcomes:</p>
+                    <ul>
+                      <li><b>CONTINUE</b>: Enter a directional trade aligned with the post-event move. Continuation probability and macro context both support follow-through.</li>
+                      <li><b>FADE</b>: Enter a directional trade against the move. Overextension and mean-reversion conditions align — the gap is likely to partially reverse.</li>
+                      <li><b>PASS</b>: No trade. Edge is not clear enough. This is the most common and correct outcome — it preserves signal quality.</li>
+                    </ul>
+                    <p><b>Desk view</b>: PASS is the default. Only CONTINUE and FADE with high confidence (65+) deserve capital. When in doubt, respect the PASS.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-top:8px;">
+            <span id="decisionBadge" class="decisionBadge pass">—</span>
+            <span id="decisionDirection" style="font-size:14px; font-weight:700;">—</span>
+            <span id="decisionConfidence" style="font-size:13px; font-weight:600; color:var(--muted);">—</span>
+          </div>
+          <div id="decisionRationale" style="margin-top:10px; font-size:12px; color:var(--text); line-height:1.5;"></div>
+        </section>
+
+        <!-- Post-Event Snapshot -->
+        <section class="surface" id="snapshotSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Post-Event Snapshot
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Snapshot help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Post-event state capture</div>
+                  <div class="tipBody">
+                    <p>Captured at the time of evaluation — this snapshot defines the decision state:</p>
+                    <ul>
+                      <li><b>Actual vs Expected Move</b>: How the realized gap compares to the implied earnings move (EM). Moves within 1x EM are "contained." Above 1.5x EM signals a large displacement.</li>
+                      <li><b>ATR Multiple</b>: Move relative to the 14-day ATR. Context for whether the move is historically extreme for this ticker.</li>
+                      <li><b>Gap Structure</b>: Hold (price sustains), Fade (price reverses), or Stall (price consolidates near open).</li>
+                      <li><b>IV Crush</b>: Magnitude of implied volatility collapse post-event. Larger crush = more premium captured on original trade.</li>
+                    </ul>
+                    <p><b>Desk view</b>: Look for gap-and-hold with contained IV crush — that's where follow-through is highest. Gap-and-fade setups are FADE candidates if the reversal is sharp and ATR-excessive.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div class="evalGrid" id="snapshotGrid">
+            <div class="evalCard">
+              <div class="evalCardLabel">Actual Move</div>
+              <div id="snapActualMove" class="evalCardValue">—</div>
+              <div id="snapActualCaption" class="evalCardCaption">vs expected move</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">EM Multiple</div>
+              <div id="snapEmMultiple" class="evalCardValue">—</div>
+              <div class="evalCardCaption">actual / expected move</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">ATR Multiple</div>
+              <div id="snapAtrMultiple" class="evalCardValue">—</div>
+              <div class="evalCardCaption">move / ATR(14)</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Gap Structure</div>
+              <div id="snapGapStructure" class="evalCardValue" style="font-size:16px;">—</div>
+              <div class="evalCardCaption">hold / fade / stall</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">IV Crush</div>
+              <div id="snapIvCrush" class="evalCardValue">—</div>
+              <div class="evalCardCaption">post-event IV change</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Event Sentiment</div>
+              <div id="snapSentiment" class="evalCardValue" style="font-size:16px;">—</div>
+              <div class="evalCardCaption">LLM classification</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Displacement Classification -->
+        <section class="surface" id="displacementSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Displacement Classification
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Displacement help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Displacement classification</div>
+                  <div class="tipBody">
+                    <p>Each post-event state is classified across three dimensions:</p>
+                    <ul>
+                      <li><b>Magnitude</b>: Move relative to EM and ATR — small, moderate, large, or extreme</li>
+                      <li><b>Structure</b>: Gap-and-hold, gap-and-fade, or gap-and-consolidation</li>
+                      <li><b>Context</b>: Alignment with prior trend and broader market/sector direction</li>
+                    </ul>
+                    <p><b>Desk view</b>: "Large magnitude + gap-and-hold + aligned with prior trend" is the strongest CONTINUE setup. "Extreme magnitude + gap-and-fade + counter-trend" is the strongest FADE setup.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div class="taPanel">
+            <div class="taGrid taGrid--4">
+              <div class="taCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Magnitude
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Magnitude help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Move magnitude</div>
+                        <div class="tipBody">
+                          <p>Classifies the realized move relative to expectations:</p>
+                          <ul>
+                            <li><b>Small</b>: &lt; 0.5x EM — contained, low follow-through probability</li>
+                            <li><b>Moderate</b>: 0.5–1.0x EM — typical, could go either way</li>
+                            <li><b>Large</b>: 1.0–1.5x EM — significant, higher continuation probability</li>
+                            <li><b>Extreme</b>: &gt; 1.5x EM — potential exhaustion or breakaway</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="displaceMagnitude" class="taCardState">—</div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Structure
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Structure help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Gap structure</div>
+                        <div class="tipBody">
+                          <p>How price behaves after the initial gap:</p>
+                          <ul>
+                            <li><b>Hold</b>: Price sustains near the gap level — favors continuation</li>
+                            <li><b>Fade</b>: Price reverses toward pre-event close — favors mean reversion</li>
+                            <li><b>Stall</b>: Price consolidates in a narrow range — ambiguous, often a PASS</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="displaceStructure" class="taCardState">—</div>
+              </div>
+              <div class="taCard" style="grid-column: span 2;">
+                <div class="taCardTop">
+                  <div class="taCardTitle">
+                    Context Alignment
+                    <span class="tipWrap">
+                      <button class="tipBtn" type="button" aria-label="Context help" aria-expanded="false">i</button>
+                      <div class="tipPanel" role="tooltip">
+                        <div class="tipTitle">Trend and market context</div>
+                        <div class="tipBody">
+                          <p>Evaluates whether the post-event move aligns with broader conditions:</p>
+                          <ul>
+                            <li><b>Aligned</b>: Move direction matches prior trend + sector + market. High continuation probability.</li>
+                            <li><b>Counter</b>: Move opposes existing trend. Higher fade probability but also higher risk of breakdown continuation.</li>
+                            <li><b>Neutral</b>: Mixed signals. Typically results in a PASS decision.</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div id="displaceContext" class="taCardState" style="font-size:14px; line-height:1.4;">—</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Historical Patterns -->
+        <section class="surface" id="historySection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Historical Pattern Match
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="History help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Historical pattern analysis</div>
+                  <div class="tipBody">
+                    <p>For this ticker (or similar class), evaluates historical outcomes under similar post-event conditions:</p>
+                    <ul>
+                      <li><b>Continuation probability</b>: How often the 1–5 day follow-through continued in the gap direction</li>
+                      <li><b>Mean reversion probability</b>: How often the move reversed</li>
+                      <li><b>Average magnitude</b>: Typical follow-through or reversal size</li>
+                      <li><b>Confidence band</b>: Width based on sample size — more data = tighter band</li>
+                    </ul>
+                    <p><b>Desk view</b>: Small sample sizes (&lt; 10 events) produce wide confidence bands. Don't over-weight the exact probability — use it as directional guidance alongside the displacement classification.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div class="evalGrid" id="historyGrid">
+            <div class="evalCard">
+              <div class="evalCardLabel">Continuation Prob</div>
+              <div id="histContinuation" class="evalCardValue">—</div>
+              <div class="evalCardCaption">1–5 day follow-through</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Reversion Prob</div>
+              <div id="histReversion" class="evalCardValue">—</div>
+              <div class="evalCardCaption">mean reversion rate</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Avg Magnitude</div>
+              <div id="histMagnitude" class="evalCardValue">—</div>
+              <div class="evalCardCaption">follow-through size</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Sample Size</div>
+              <div id="histSample" class="evalCardValue">—</div>
+              <div class="evalCardCaption">matching events</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Trade Profile -->
+        <section class="surface" id="tradeSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Trade Profile
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Trade profile help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Suggested trade parameters</div>
+                  <div class="tipBody">
+                    <p>When the decision is CONTINUE or FADE, the engine provides a structured trade profile:</p>
+                    <ul>
+                      <li><b>Direction</b>: Long or Short</li>
+                      <li><b>Risk allocation</b>: 0.5–1.5 Risk Units (within opportunistic bucket, 10–20% of portfolio)</li>
+                      <li><b>Holding period</b>: 1–5 days — these are short-duration overlay trades</li>
+                      <li><b>Entry preference</b>: Open (immediate), pullback (wait for dip), or confirmation (wait for additional signal)</li>
+                    </ul>
+                    <p><b>Desk view</b>: Prefer shares for simplicity. Defined-risk options are acceptable but avoid complex structures. Keep this simple — it's a bolt-on to an existing position, not a standalone strategy.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div class="evalGrid" id="tradeGrid">
+            <div class="evalCard">
+              <div class="evalCardLabel">Direction</div>
+              <div id="tradeDirection" class="evalCardValue" style="font-size:16px;">—</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Risk Units</div>
+              <div id="tradeRiskUnits" class="evalCardValue">—</div>
+              <div class="evalCardCaption">suggested allocation</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Holding Period</div>
+              <div id="tradeHolding" class="evalCardValue">—</div>
+              <div class="evalCardCaption">days</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Entry Preference</div>
+              <div id="tradeEntry" class="evalCardValue" style="font-size:14px;">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- How to Use Section -->
+        <section class="surface" id="howToSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">How to Use Post-Event Extensions</h2>
+          </div>
+          <div class="taPanel">
+            <div class="taGrid taGrid--4">
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Activation Rules</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li>Only activates after an existing trade is active or recently closed</li>
+                    <li>The underlying event (earnings/catalyst) must have occurred</li>
+                    <li>Original trade must be profitable or within loss tolerance</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Risk Framework</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li>Operates within the opportunistic allocation bucket</li>
+                    <li>Typical allocation: 10–20% of portfolio</li>
+                    <li>0.5–1.5 Risk Units per trade</li>
+                    <li>Avoid stacking correlated exposures</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Instruments</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li><b>Shares</b>: Preferred for simplicity and flexibility</li>
+                    <li><b>Defined-risk options</b>: Acceptable (debit spreads, long puts/calls)</li>
+                    <li>No complex structures or intraday dependency</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Key Principle</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li>PASS is the most common and correct outcome</li>
+                    <li>This engine increases return per trade, not trade frequency</li>
+                    <li>Never deploy capital when edge is unclear</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- Desk Insight Popup -->
+    <style>
+      .e8InsightPopup{position:fixed;z-index:10000;width:440px;max-height:80vh;overflow-y:auto;border-radius:16px;background:rgba(28,28,30,.98);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08) inset;user-select:none;transition:opacity .15s ease;color:#fff;display:none}
+      .e8InsightPopup.isDragging{cursor:grabbing;transition:none}
+      .e8InsightHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.08);cursor:grab}
+      .e8InsightTitle{font-size:14px;font-weight:700;line-height:1.3;color:#fff;flex:1}
+      .e8InsightClose{width:24px;height:24px;border-radius:6px;border:none;background:rgba(255,255,255,.12);color:rgba(255,255,255,.7);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s ease}
+      .e8InsightClose:hover{background:rgba(255,255,255,.20);color:#fff}
+      .e8InsightBody{padding:16px}
+      .e8InsightSection{margin-bottom:16px}.e8InsightSection:last-child{margin-bottom:0}
+      .e8InsightSectionTitle{font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+      .e8InsightText{font-size:12px;font-weight:500;line-height:1.5;color:rgba(255,255,255,.88)}
+      .e8InsightLoading{text-align:center;padding:32px 16px;color:rgba(255,255,255,.6);font-size:12px}
+    </style>
+    <div class="e8InsightPopup" id="e8InsightPopup">
+      <div class="e8InsightHeader" id="e8InsightHeader">
+        <span class="e8InsightTitle" id="e8InsightTitle">Desk Insight</span>
+        <button class="e8InsightClose" id="e8InsightClose" type="button">&times;</button>
+      </div>
+      <div class="e8InsightBody" id="e8InsightBody">
+        <div class="e8InsightLoading">Generating desk insight…</div>
+      </div>
+    </div>
+
+    <script src="/static/ui_kit.js?v=3"></script>
+    <script src="/static/post-event.js?v=1"></script>
+    <script src="/static/nav.js"></script>
+  </body>
+</html>

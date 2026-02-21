@@ -389,6 +389,63 @@
             </div>
           </a>
 
+          <a class="engineCard" href="/pairs">
+            <div class="engineCardHeader">
+              <div class="engineBadge engineBadge--purple">E7</div>
+              <div class="engineCardName">Relative Value Pairs</div>
+              <div class="engineCardChip">Spread</div>
+            </div>
+            <div class="engineCardBody">
+              Monitors 20 fixed asset pairs across three tiers (index/style, sector rotation, macro/cross-asset)
+              using ratio-based z-score analysis, momentum confirmation, and LLM-powered theme validation.
+              Generates mean-reversion and momentum spread trades independent of market direction.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">EODHD Pairs</span>
+              <span class="engineCardTag">Z-Score</span>
+              <span class="engineCardTag">Theme Engine</span>
+              <span class="engineCardTag">Overlap Filter</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/post-event">
+            <div class="engineCardHeader">
+              <div class="engineBadge engineBadge--orange">E8</div>
+              <div class="engineCardName">Post-Event Extension</div>
+              <div class="engineCardChip">Follow-Through</div>
+            </div>
+            <div class="engineCardBody">
+              Evaluates whether a second directional trade should follow an existing earnings or catalyst position.
+              Captures post-event displacement, gap structure, IV crush, and historical pattern matching
+              to issue CONTINUE, FADE, or PASS decisions with confidence scoring.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">ORATS EM</span>
+              <span class="engineCardTag">Gap Analysis</span>
+              <span class="engineCardTag">Historical Patterns</span>
+              <span class="engineCardTag">LLM Sentiment</span>
+            </div>
+          </a>
+
+          <a class="engineCard" href="/flow-monitor">
+            <div class="engineCardHeader">
+              <div class="engineBadge engineBadge--green">FM</div>
+              <div class="engineCardName">Flow Monitor</div>
+              <div class="engineCardChip">Prediction Markets</div>
+            </div>
+            <div class="engineCardBody">
+              Real-time unusual activity detection across Kalshi and Polymarket prediction markets.
+              Surfaces large block trades, rapid contract movement, and volume anomalies to flag
+              event-driven catalysts before they appear in traditional markets.
+            </div>
+            <div class="engineCardTags">
+              <span class="engineCardTag">Kalshi</span>
+              <span class="engineCardTag">Polymarket</span>
+              <span class="engineCardTag">Unusual Activity</span>
+              <span class="engineCardTag">Event Detection</span>
+            </div>
+          </a>
+
           <a class="engineCard" href="/backtest">
             <div class="engineCardHeader">
               <div class="engineBadge engineBadge--dark">BT</div>
@@ -479,12 +536,13 @@
           <span class="dataSourceChip">ORATS LiveData API — US options surfaces, IV, expected move, skew, greeks</span>
           <span class="dataSourceChip">EODHD All-In-One — Global EOD equities, FX, commodities, sovereign yields, macro</span>
           <span class="dataSourceChip">Benzinga API — News, event risk, analyst ratings, macro calendar</span>
+          <span class="dataSourceChip">Kalshi + Polymarket — Prediction market contracts, volume, and unusual flow</span>
         </div>
       </section>
 
       <!-- CTA -->
       <section class="homeCta">
-        <div class="homeCtaText">8 trading engines. 3 market-data APIs. Zero intraday noise.</div>
+        <div class="homeCtaText">11 trading engines. 4 market-data APIs. Zero intraday noise.</div>
         <a class="primaryButton" href="/lead-lag" style="text-decoration:none;">Open Lead-Lag Engine</a>
       </section>
 
