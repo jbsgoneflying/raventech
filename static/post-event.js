@@ -81,12 +81,16 @@
     qs("paStrikeCaption").textContent = "Wing distance as % of spot (" + stSource + ").";
 
     /* Breach detail */
+    qs("paBreach1x").textContent = sum.breach_rate_pct != null ? fmt(sum.breach_rate_pct) + "%" : "—";
+    var hr = e1.holdRisk || {};
+    qs("paBreach15x").textContent = hr.breach_1_5x != null ? fmt(hr.breach_1_5x * 100) + "%" : "—";
+    qs("paBreach2x").textContent = hr.breach_2_0x != null ? fmt(hr.breach_2_0x * 100) + "%" : "—";
+    qs("paStockPrice").textContent = data.stock_price != null ? "$" + fmt(data.stock_price) : "—";
     qs("paUpBreach").textContent = sum.upBreachRatePct != null ? fmt(sum.upBreachRatePct) + "%" : "—";
     qs("paDownBreach").textContent = sum.downBreachRatePct != null ? fmt(sum.downBreachRatePct) + "%" : "—";
     qs("paUpOvershoot").textContent = sum.avgUpOvershootPct != null ? fmt(sum.avgUpOvershootPct) + "%" : "—";
     qs("paDownOvershoot").textContent = sum.avgDownOvershootPct != null ? fmt(sum.avgDownOvershootPct) + "%" : "—";
     qs("paTailBias").textContent = sum.tailBias || "—";
-    qs("paStockPrice").textContent = data.stock_price != null ? "$" + fmt(data.stock_price) : "—";
 
     /* IC structure */
     var tb = e1.tradeBuilder;

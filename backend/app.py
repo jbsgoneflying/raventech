@@ -4276,6 +4276,7 @@ async def engine8_evaluate(
             strike_targets = e1_result.get("strikeTargets")
             baseline = e1_result.get("baseline", {})
             playbook = e1_result.get("playbook")
+            hold_risk = e1_result.get("earningsHoldRisk", {})
 
             return {
                 "phase": "pre_earnings",
@@ -4322,6 +4323,10 @@ async def engine8_evaluate(
                     "regime": {
                         "label": regime.get("label"),
                         "guidance": regime.get("guidance"),
+                    },
+                    "holdRisk": {
+                        "breach_1_5x": (hold_risk.get("unconditional", {}).get("earnings_close", {}).get("1.5")),
+                        "breach_2_0x": (hold_risk.get("unconditional", {}).get("earnings_close", {}).get("2.0")),
                     },
                 },
                 "playbook": playbook,
