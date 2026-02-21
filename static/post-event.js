@@ -125,7 +125,8 @@
     deskPanel.style.display = "none";
     deskPanel.innerHTML = "";
     deskBtn.disabled = false;
-    deskBtnText.textContent = "Get GPT-5.2 Desk Notes";
+    deskBtnText.textContent = "Get Full Playbook Brief";
+    _rowPlaybookCache = {};
 
     if (!pb) {
       section.style.display = "";
@@ -605,12 +606,12 @@
     var btn = qs("pbDeskNotesBtn");
     var btnText = qs("pbDeskNotesBtnText");
     btn.disabled = true;
-    btnText.textContent = "Generating desk notes with GPT-5.2\u2026";
+    btnText.textContent = "Generating full playbook brief\u2026";
 
     var dotCount = 0;
     var dotInterval = setInterval(function () {
       dotCount = (dotCount + 1) % 4;
-      btnText.textContent = "Generating desk notes with GPT-5.2" + ".".repeat(dotCount);
+      btnText.textContent = "Generating full playbook brief" + ".".repeat(dotCount);
     }, 400);
 
     if (_deskNotesAbort) _deskNotesAbort.abort();
@@ -632,14 +633,14 @@
         _deskNotesCache[cacheKey] = data;
         renderDeskNotes(data);
         btn.disabled = false;
-        btnText.textContent = "Refresh Desk Notes";
+        btnText.textContent = "Refresh Playbook Brief";
       })
       .catch(function (err) {
         if (err.name === "AbortError") return;
         qs("pbDeskNotesPanel").innerHTML = '<div style="color:rgba(255,59,48,0.8); font-size:13px;">Error: ' + escHtml(err.message) + '</div>';
         qs("pbDeskNotesPanel").style.display = "";
         btn.disabled = false;
-        btnText.textContent = "Retry Desk Notes";
+        btnText.textContent = "Retry Playbook Brief";
       })
       .finally(function () {
         clearInterval(dotInterval);
