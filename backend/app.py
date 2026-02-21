@@ -202,6 +202,9 @@ def _path_is_public(path: str) -> bool:
     # Let’s Encrypt http-01 (if you choose to serve challenges through the app).
     if p.startswith("/.well-known/acme-challenge/"):
         return True
+    # Internal cron endpoints — called from localhost, no browser session.
+    if p == "/api/engine7-pairs/nightly-review":
+        return True
     return False
 
 
