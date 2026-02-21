@@ -37,15 +37,19 @@ def run_engine1_for_phase_a(
     earnings_date: Optional[dt.date] = None,
     today: Optional[dt.date] = None,
     benzinga_client: Any = None,
+    price_svc: Any = None,
 ) -> Dict[str, Any]:
-    """Run Engine 1 breach analysis and persist to Redis for Phase B.
+    """Run Engine 1 breach analysis + scenario playbook, persist to Redis.
 
-    Returns the full Engine 1 response dict with trade builder included.
+    Returns the full Engine 1 response dict with trade builder and playbook.
     """
     from backend.earnings_logic import compute_breach_stats
+    from backend.config import get_flags
 
     if today is None:
         today = dt.date.today()
+
+    flags = get_flags()
 
     tb_inputs: Dict[str, Any] = {
         "mode": "auto",
@@ -63,6 +67,43 @@ def run_engine1_for_phase_a(
         today=today,
         benzinga_client=benzinga_client,
     )
+
+    # Build scenario playbook from historical events with forward returns
+    try:
+        from backend.engine8_pipeline import _build_all_event_rows
+        from backend.engine8_playbook import compute_scenario_playbook
+
+        event_rows = _build_all_event_rows(
+            ticker=ticker.upper(),
+            current_earnings_date=earnings_date or today,
+            orats_client=orats_client,
+            price_svc=price_svc,
+            flags=flags,
+        )
+
+        current = result.get("current", {})
+        stock_px = current.get("stockPrice")
+        delayed_em = current.get("delayedImpliedMovePct")
+        eod_em = current.get("impliedMovePct")
+        em_pct = delayed_em or eod_em
+
+        playbook = compute_scenario_playbook(
+            all_event_rows=event_rows,
+            stock_price=stock_px,
+            em_pct=em_pct,
+            flags=flags,
+        )
+        result["playbook"] = playbook
+        LOG.info(
+            "Engine 8 bridge: playbook built for %s — %d events, %d scenarios, %d actionable",
+            ticker,
+            playbook["meta"]["total_historical_events"],
+            playbook["meta"]["scenarios_computed"],
+            playbook["meta"]["actionable_scenarios"],
+        )
+    except Exception as e:
+        LOG.warning("Engine 8 bridge: playbook build failed for %s: %s", ticker, e)
+        result["playbook"] = None
 
     if store is not None and earnings_date is not None:
         key = _redis_key(ticker, earnings_date.isoformat())

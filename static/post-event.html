@@ -67,6 +67,23 @@
       .historyTable th { text-align: left; font-weight: 700; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
       .historyTable td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
       .historyTable tr:hover td { background: rgba(0,0,0,0.02); }
+      .pbActionBadge { padding:3px 8px; border-radius:999px; font-size:11px; font-weight:800; letter-spacing:0.3px; display:inline-block; }
+      .pbActionBadge.continue { background:rgba(52,199,89,0.14); color:rgba(12,70,38,0.96); }
+      .pbActionBadge.fade { background:rgba(255,149,0,0.14); color:rgba(180,100,0,0.96); }
+      .pbActionBadge.pass { background:rgba(11,11,15,0.06); color:rgba(11,11,15,0.50); }
+      .pbConfBadge { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; }
+      .pbConfBadge.high { color:rgba(52,199,89,0.9); }
+      .pbConfBadge.medium { color:rgba(255,149,0,0.9); }
+      .pbConfBadge.low { color:rgba(11,11,15,0.45); }
+      .pbConfBadge.insufficient { color:rgba(11,11,15,0.30); }
+      .pbMagLabel { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; }
+      .pbMagLabel.contained { color:rgba(52,199,89,0.8); }
+      .pbMagLabel.extended { color:rgba(255,149,0,0.85); }
+      .pbMagLabel.extreme { color:rgba(255,59,48,0.85); }
+      .pbThresholdCard { text-align:center; }
+      .pbThresholdCard .evalCardValue { font-size:18px; }
+      .pbThresholdUp { color:rgba(52,199,89,0.9); }
+      .pbThresholdDown { color:rgba(255,59,48,0.9); }
       @media (max-width: 980px) {
         .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .evalGrid { grid-template-columns: 1fr; }
@@ -276,9 +293,66 @@
           <div class="evalGrid" id="phaseAIcGrid"></div>
         </section>
 
+        <!-- ── Earnings Playbook ── -->
+        <section class="surface" id="playbookSection" style="display:none;">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Earnings Playbook
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Playbook help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Pre-planned scenario matrix</div>
+                  <div class="tipBody">
+                    <p>Built from this ticker's historical earnings events. Each scenario shows what typically happens when the stock gaps a certain amount.</p>
+                    <p><b>Contained</b> (&lt;1.0× EM): Gap is within the expected move. Normal outcome.</p>
+                    <p><b>Extended</b> (1.0–1.5× EM): Gap exceeds expectations. Stronger signal.</p>
+                    <p><b>Extreme</b> (&gt;1.5× EM): Rare, large gap. Often fades.</p>
+                    <p><b>HOLD</b>: Price sustains the gap intraday. <b>FADE</b>: Price reverses intraday.</p>
+                    <p><b>Desk view</b>: Review the quick reference before earnings. When the gap occurs, match the scenario and execute the pre-planned action. No analysis needed in the moment.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+
+          <!-- Quick Reference -->
+          <div id="pbQuickRef" style="background:rgba(0,122,255,0.06); border:1px solid rgba(0,122,255,0.15); border-radius:10px; padding:14px 16px; margin-bottom:14px;">
+            <div style="font-size:11px; font-weight:700; color:rgba(0,60,160,0.8); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Quick Reference</div>
+            <div id="pbQuickRefList" style="font-size:13px; font-weight:600; line-height:1.7; color:var(--text);"></div>
+          </div>
+
+          <!-- Threshold Price Levels -->
+          <div id="pbThresholds" style="display:none; margin-bottom:14px;">
+            <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;">Threshold Price Levels</div>
+            <div class="evalGrid" id="pbThresholdGrid"></div>
+          </div>
+
+          <!-- Scenario Table -->
+          <div style="overflow-x:auto;">
+            <table class="historyTable" id="pbScenarioTable">
+              <thead>
+                <tr>
+                  <th>Scenario</th>
+                  <th>Direction</th>
+                  <th>Structure</th>
+                  <th>Events</th>
+                  <th>Cont. 1d</th>
+                  <th>Cont. 5d</th>
+                  <th>Avg Drift 5d</th>
+                  <th>Action</th>
+                  <th>Confidence</th>
+                </tr>
+              </thead>
+              <tbody id="pbScenarioBody"></tbody>
+            </table>
+          </div>
+
+          <div id="pbMeta" style="margin-top:10px; font-size:11px; color:var(--muted);"></div>
+        </section>
+
         <section class="surface">
           <div style="padding:4px 0; font-size:12px; color:var(--muted); line-height:1.5;">
-            <b>Next step</b>: After earnings are announced, return to this page and re-evaluate the ticker. Engine 8 will load this pre-earnings setup and run the full post-event extension analysis.
+            <b>Playbook is set</b>: Review the scenario matrix above. When earnings are announced, match the gap to a scenario and execute the pre-planned action. Optionally return after earnings to confirm the outcome.
           </div>
         </section>
       </section>
@@ -644,7 +718,7 @@
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/post-event.js?v=7"></script>
+    <script src="/static/post-event.js?v=8"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

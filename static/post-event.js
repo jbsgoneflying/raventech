@@ -110,6 +110,93 @@
     } else {
       icSection.style.display = "none";
     }
+
+    /* Playbook */
+    renderPlaybook(data.playbook);
+  }
+
+  /* ── Playbook Renderer ────────────────────────────────────────────── */
+  function renderPlaybook(pb) {
+    var section = qs("playbookSection");
+    if (!pb || !pb.scenarios || !pb.scenarios.length) {
+      section.style.display = "none";
+      return;
+    }
+    section.style.display = "";
+
+    /* Quick reference */
+    var qrList = qs("pbQuickRefList");
+    var refs = pb.quick_reference || [];
+    qrList.innerHTML = refs.map(function (line) {
+      return '<div style="padding:2px 0;">' + escHtml(line) + '</div>';
+    }).join("");
+
+    /* Threshold prices */
+    var thrEl = qs("pbThresholds");
+    var thrGrid = qs("pbThresholdGrid");
+    if (pb.thresholds && pb.thresholds.levels) {
+      thrEl.style.display = "";
+      var lvls = pb.thresholds.levels;
+      var thrHtml = "";
+      var multLabels = {"1.0x": "1.0× EM", "1.5x": "1.5× EM", "2.0x": "2.0× EM"};
+      var multKeys = ["1.0x", "1.5x", "2.0x"];
+      for (var mi = 0; mi < multKeys.length; mi++) {
+        var mk = multKeys[mi];
+        var lv = lvls[mk];
+        if (!lv) continue;
+        thrHtml +=
+          '<div class="evalCard pbThresholdCard">' +
+            '<div class="evalCardLabel">' + multLabels[mk] + ' (' + fmt(lv.gap_pct) + '%)</div>' +
+            '<div style="display:flex; justify-content:center; gap:16px; margin-top:4px;">' +
+              '<div><span class="pbThresholdUp">&#9650; $' + fmt(lv.up_price) + '</span></div>' +
+              '<div><span class="pbThresholdDown">&#9660; $' + fmt(lv.down_price) + '</span></div>' +
+            '</div>' +
+          '</div>';
+      }
+      thrGrid.innerHTML = thrHtml;
+    } else {
+      thrEl.style.display = "none";
+    }
+
+    /* Scenario table */
+    var tbody = qs("pbScenarioBody");
+    var rows = "";
+    for (var si = 0; si < pb.scenarios.length; si++) {
+      var s = pb.scenarios[si];
+      var magClass = s.magnitude === "contained" ? "contained" : s.magnitude === "extended" ? "extended" : "extreme";
+      var actClass = (s.action || "pass").toLowerCase();
+      var confClass = (s.confidence || "low").toLowerCase();
+      var cont1d = s.continuation_rate_1d != null ? Math.round(s.continuation_rate_1d * 100) + "%" : "—";
+      var cont5d = s.continuation_rate_5d != null ? Math.round(s.continuation_rate_5d * 100) + "%" : "—";
+      var avgDrift = s.avg_continuation_5d != null ? (s.avg_continuation_5d > 0 ? "+" : "") + fmt(s.avg_continuation_5d) + "%" : "—";
+      rows +=
+        '<tr>' +
+          '<td><span class="pbMagLabel ' + magClass + '">' + escHtml(s.magnitude || "") + '</span></td>' +
+          '<td style="font-weight:700;">' + escHtml(s.direction || "") + '</td>' +
+          '<td>' + escHtml(s.structure || "") + '</td>' +
+          '<td style="font-family:monospace;">' + (s.count || 0) + '</td>' +
+          '<td style="font-family:monospace;">' + cont1d + '</td>' +
+          '<td style="font-family:monospace; font-weight:700;">' + cont5d + '</td>' +
+          '<td style="font-family:monospace;">' + avgDrift + '</td>' +
+          '<td><span class="pbActionBadge ' + actClass + '">' + escHtml(s.action || "PASS") + '</span></td>' +
+          '<td><span class="pbConfBadge ' + confClass + '">' + escHtml(s.confidence || "") + '</span></td>' +
+        '</tr>';
+    }
+    tbody.innerHTML = rows;
+
+    /* Meta */
+    var meta = pb.meta || {};
+    qs("pbMeta").textContent =
+      meta.total_historical_events + " historical events analyzed · " +
+      meta.scenarios_computed + " scenarios computed · " +
+      meta.actionable_scenarios + " actionable · " +
+      "min " + meta.min_events_per_scenario + " events/scenario";
+  }
+
+  function escHtml(s) {
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
   }
 
   /* ── Phase B: Post-Earnings ──────────────────────────────────────── */

@@ -4263,6 +4263,7 @@ async def engine8_evaluate(
                     earnings_date=ed,
                     today=today,
                     benzinga_client=bz,
+                    price_svc=price_svc,
                 ),
             )
 
@@ -4274,6 +4275,7 @@ async def engine8_evaluate(
             expected_move = e1_result.get("expectedMove", {})
             strike_targets = e1_result.get("strikeTargets")
             baseline = e1_result.get("baseline", {})
+            playbook = e1_result.get("playbook")
 
             return {
                 "phase": "pre_earnings",
@@ -4322,6 +4324,7 @@ async def engine8_evaluate(
                         "guidance": regime.get("guidance"),
                     },
                 },
+                "playbook": playbook,
                 "decision": None,
             }
         except Exception as e:
