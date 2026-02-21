@@ -118,11 +118,24 @@
   /* ── Playbook Renderer ────────────────────────────────────────────── */
   function renderPlaybook(pb) {
     var section = qs("playbookSection");
-    if (!pb || !pb.scenarios || !pb.scenarios.length) {
-      section.style.display = "none";
+    if (!pb) {
+      section.style.display = "";
+      qs("pbQuickRefList").innerHTML = '<div style="color:var(--muted); font-style:italic;">Playbook unavailable — historical bar data could not be loaded. Try again when markets are open.</div>';
+      qs("pbThresholds").style.display = "none";
+      qs("pbScenarioBody").innerHTML = "";
+      qs("pbMeta").textContent = "";
       return;
     }
     section.style.display = "";
+
+    if (!pb.scenarios || !pb.scenarios.length) {
+      qs("pbQuickRefList").innerHTML = '<div style="color:var(--muted); font-style:italic;">Not enough historical data to build scenarios. Default: PASS on all outcomes.</div>';
+      qs("pbThresholds").style.display = "none";
+      qs("pbScenarioBody").innerHTML = "";
+      var meta = pb.meta || {};
+      qs("pbMeta").textContent = (meta.total_historical_events || 0) + " historical events analyzed — insufficient per-scenario data.";
+      return;
+    }
 
     /* Quick reference */
     var qrList = qs("pbQuickRefList");
@@ -163,7 +176,7 @@
     var rows = "";
     for (var si = 0; si < pb.scenarios.length; si++) {
       var s = pb.scenarios[si];
-      var magClass = s.magnitude === "contained" ? "contained" : s.magnitude === "extended" ? "extended" : "extreme";
+      var magClass = s.magnitude === "contained" ? "contained" : s.magnitude === "extended" ? "extended" : s.magnitude === "extreme" ? "extreme" : "all";
       var actClass = (s.action || "pass").toLowerCase();
       var confClass = (s.confidence || "low").toLowerCase();
       var cont1d = s.continuation_rate_1d != null ? Math.round(s.continuation_rate_1d * 100) + "%" : "—";

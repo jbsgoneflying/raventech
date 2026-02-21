@@ -73,6 +73,8 @@ def run_engine1_for_phase_a(
         from backend.engine8_pipeline import _build_all_event_rows
         from backend.engine8_playbook import compute_scenario_playbook
 
+        LOG.info("Engine 8 bridge: building event rows for %s (price_svc=%s)", ticker, type(price_svc).__name__ if price_svc else "None")
+
         event_rows = _build_all_event_rows(
             ticker=ticker.upper(),
             current_earnings_date=earnings_date or today,
@@ -81,11 +83,14 @@ def run_engine1_for_phase_a(
             flags=flags,
         )
 
+        LOG.info("Engine 8 bridge: got %d event rows for %s", len(event_rows), ticker)
+
         current = result.get("current", {})
         stock_px = current.get("stockPrice")
         delayed_em = current.get("delayedImpliedMovePct")
         eod_em = current.get("impliedMovePct")
         em_pct = delayed_em or eod_em
+        LOG.info("Engine 8 bridge: stock_px=%s, em_pct=%s for %s", stock_px, em_pct, ticker)
 
         playbook = compute_scenario_playbook(
             all_event_rows=event_rows,

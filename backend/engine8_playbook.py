@@ -38,7 +38,7 @@ _MAG_CONTAINED = "contained"   # < 1.0x EM
 _MAG_EXTENDED = "extended"     # 1.0x - 1.5x EM
 _MAG_EXTREME = "extreme"       # > 1.5x EM
 
-_SCENARIO_MIN_EVENTS = 3
+_SCENARIO_MIN_EVENTS = 2
 
 
 def _mag_bucket(move_vs_em: Optional[float]) -> str:
@@ -200,25 +200,38 @@ def compute_scenario_playbook(
         ev["_pb_mag"] = _mag_bucket(ev.get("move_vs_em"))
         ev["_pb_struct"] = _struct_simplify(ev.get("structure_bucket") or ev.get("gap_structure"))
 
-    # Build scenario matrix
+    # Build scenario matrix — strategy:
+    # 1. Try granular (mag × direction × structure) if enough events
+    # 2. Always add collapsed (mag × direction, structure=ANY)
+    # 3. Add "all" direction-level aggregates as baseline
     scenarios: List[Dict[str, Any]] = []
-    seen_keys = set()
 
     for mag in [_MAG_CONTAINED, _MAG_EXTENDED, _MAG_EXTREME]:
         for direction in ["UP", "DOWN"]:
-            # Full scenario with structure breakdown
+            # Collapsed (mag × direction) — always try this first
+            all_dir = [
+                ev for ev in all_event_rows
+                if ev["_pb_mag"] == mag and ev.get("direction") == direction
+            ]
+            if len(all_dir) >= _SCENARIO_MIN_EVENTS:
+                stats = _compute_scenario_stats(all_dir, direction)
+                action = _derive_action(stats, direction)
+                scenarios.append({
+                    "magnitude": mag,
+                    "direction": direction,
+                    "structure": "ANY",
+                    "key": f"{mag}_{direction}_ANY",
+                    **stats,
+                    **action,
+                })
+
+            # Granular structure breakdown (only if meaningfully different from collapsed)
             for struct in ["HOLD", "FADE"]:
-                key = (mag, direction, struct)
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-
                 matched = [
-                    ev for ev in all_event_rows
-                    if ev["_pb_mag"] == mag and ev.get("direction") == direction and ev["_pb_struct"] == struct
+                    ev for ev in all_dir
+                    if ev["_pb_struct"] == struct
                 ]
-
-                if len(matched) >= _SCENARIO_MIN_EVENTS:
+                if len(matched) >= _SCENARIO_MIN_EVENTS and len(matched) < len(all_dir):
                     stats = _compute_scenario_stats(matched, direction)
                     action = _derive_action(stats, direction)
                     scenarios.append({
@@ -230,24 +243,20 @@ def compute_scenario_playbook(
                         **action,
                     })
 
-            # Collapsed structure ("ANY") for when HOLD/FADE individually are too thin
-            all_dir = [
-                ev for ev in all_event_rows
-                if ev["_pb_mag"] == mag and ev.get("direction") == direction
-            ]
-            # Only add collapsed if we didn't get enough granular scenarios
-            granular_count = sum(1 for s in scenarios if s["magnitude"] == mag and s["direction"] == direction)
-            if granular_count == 0 and len(all_dir) >= _SCENARIO_MIN_EVENTS:
-                stats = _compute_scenario_stats(all_dir, direction)
-                action = _derive_action(stats, direction)
-                scenarios.append({
-                    "magnitude": mag,
-                    "direction": direction,
-                    "structure": "ANY",
-                    "key": f"{mag}_{direction}_ANY",
-                    **stats,
-                    **action,
-                })
+    # Baseline: direction-only aggregates (all magnitudes)
+    for direction in ["UP", "DOWN"]:
+        all_events_dir = [ev for ev in all_event_rows if ev.get("direction") == direction]
+        if len(all_events_dir) >= _SCENARIO_MIN_EVENTS:
+            stats = _compute_scenario_stats(all_events_dir, direction)
+            action = _derive_action(stats, direction)
+            scenarios.append({
+                "magnitude": "all",
+                "direction": direction,
+                "structure": "ANY",
+                "key": f"all_{direction}_ANY",
+                **stats,
+                **action,
+            })
 
     # Sort: highest-confidence actionable scenarios first
     action_priority = {"CONTINUE": 0, "FADE": 1, "PASS": 2}
@@ -260,6 +269,7 @@ def compute_scenario_playbook(
         thresholds = compute_threshold_prices(stock_price, em_pct)
 
     # Quick reference: summarize actionable scenarios into desk-ready lines
+    # Prefer magnitude-specific scenarios over "all" baseline
     quick_ref: List[str] = []
     for s in scenarios:
         if s.get("action") == "PASS":
@@ -270,7 +280,11 @@ def compute_scenario_playbook(
         act = s["action"]
         conf = s.get("confidence", "LOW")
 
-        if thresholds and thresholds.get("levels"):
+        if mag_label == "ALL":
+            dir_word = "up" if dir_label == "UP" else "down"
+            struct_note = f" with gap-and-{struct_label.lower()}" if struct_label != "ANY" else ""
+            quick_ref.append(f"Any {dir_word} gap{struct_note} → {act} ({conf})")
+        elif thresholds and thresholds.get("levels"):
             mult_key = "1.0x" if mag_label == "CONTAINED" else "1.5x" if mag_label == "EXTENDED" else "2.0x"
             lvl = thresholds["levels"].get(mult_key, {})
             price_ref = lvl.get("up_price") if dir_label == "UP" else lvl.get("down_price")
