@@ -224,8 +224,8 @@ class FeatureFlags:
     ENGINE5_US_IV_HIGH_THRESHOLD: float = 60.0            # IV rank > this = HIGH
     ENGINE5_VOL_ZSCORE_WINDOW: int = 60                   # Rolling z-score window (trading days)
 
-    # --- Engine 7: Thematic Relative Value / Pairs Engine (default OFF) ---
-    ENABLE_ENGINE7_PAIRS: bool = False
+    # --- Engine 7: Thematic Relative Value / Pairs Engine ---
+    ENABLE_ENGINE7_PAIRS: bool = True
     ENGINE7_CACHE_TTL_BARS: int = 6 * 3600          # 6h for daily bars
     ENGINE7_CACHE_TTL_SCAN: int = 30 * 60            # 30min for full scan
     ENGINE7_MAX_WORKERS: int = 8                     # Parallel workers
@@ -245,8 +245,8 @@ class FeatureFlags:
     GATE_PAIRS_REGIME_ALLOW: str = ""                # Empty = all regimes allowed
     GATE_PAIRS_VOL_STATE_ALLOW: str = ""             # Empty = all states allowed
 
-    # --- Engine 8: Post-Event Trade Extension (default OFF; decisioning engine) ---
-    ENABLE_ENGINE8_POST_EVENT: bool = False
+    # --- Engine 8: Post-Event Trade Extension ---
+    ENABLE_ENGINE8_POST_EVENT: bool = True
     ENGINE8_CACHE_TTL_EVAL: int = 30 * 60            # 30 min in-memory cache for evaluations
     ENGINE8_SNAPSHOT_TTL_S: int = 30 * 86400          # 30 days Redis TTL for persisted snapshots
     ENGINE8_LLM_RESULT_TTL_S: int = 90 * 86400        # 90 days Redis TTL for persisted LLM results
@@ -451,7 +451,7 @@ class FeatureFlags:
             ENGINE5_VOL_ZSCORE_WINDOW=_get_int("ENGINE5_VOL_ZSCORE_WINDOW", 60),
 
             # --- Engine 7 ---
-            ENABLE_ENGINE7_PAIRS=_get_bool("ENABLE_ENGINE7_PAIRS", False),
+            ENABLE_ENGINE7_PAIRS=_get_bool("ENABLE_ENGINE7_PAIRS", True),
             ENGINE7_CACHE_TTL_BARS=_get_int("ENGINE7_CACHE_TTL_BARS", 6 * 3600),
             ENGINE7_CACHE_TTL_SCAN=_get_int("ENGINE7_CACHE_TTL_SCAN", 30 * 60),
             ENGINE7_MAX_WORKERS=_get_int("ENGINE7_MAX_WORKERS", 8),
@@ -470,7 +470,7 @@ class FeatureFlags:
             GATE_PAIRS_VOL_STATE_ALLOW=os.getenv("GATE_PAIRS_VOL_STATE_ALLOW", ""),
 
             # --- Engine 8 ---
-            ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", False),
+            ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),
             ENGINE8_CACHE_TTL_EVAL=_get_int("ENGINE8_CACHE_TTL_EVAL", 30 * 60),
             ENGINE8_SNAPSHOT_TTL_S=_get_int("ENGINE8_SNAPSHOT_TTL_S", 30 * 86400),
             ENGINE8_LLM_RESULT_TTL_S=_get_int("ENGINE8_LLM_RESULT_TTL_S", 90 * 86400),
