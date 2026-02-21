@@ -122,6 +122,10 @@ def resolve_next_earnings(
 ) -> Optional[Dict[str, Any]]:
     """Resolve the next upcoming earnings date and timing from ORATS.
 
+    Tries /cores snapshot first (has nextErn/nextErnTod), then falls back
+    to /hist/earnings scanning for future dates. The fallback is needed
+    because /cores may not return data on weekends/holidays.
+
     Returns dict with 'earnings_date', 'timing', 'expected_move_pct' or None.
     """
     from backend.earnings_logic import classify_timing
@@ -129,38 +133,65 @@ def resolve_next_earnings(
     if today is None:
         today = dt.date.today()
 
+    # Strategy 1: ORATS /cores snapshot (best — has nextErn, nextErnTod, impErnMv)
     try:
         fields = "ticker,tradeDate,stockPrice,impErnMv,nextErn,nextErnTod,daysToNextErn"
         resp = orats_client.cores(ticker=ticker.upper(), fields=fields)
-        if not resp or not getattr(resp, "rows", None):
-            return None
-        row = resp.rows[0] if resp.rows else None
-        if not row:
-            return None
-
-        next_ern = row.get("nextErn")
-        if not next_ern:
-            return None
-        earn_date = dt.date.fromisoformat(str(next_ern)[:10])
-        if earn_date < today:
-            return None
-
-        timing = classify_timing(row.get("nextErnTod"))
-        days_to = (earn_date - today).days
-
-        imp = row.get("impErnMv")
-        em_pct = None
-        if imp is not None:
-            em_val = float(imp)
-            em_pct = abs(em_val) * 100.0 if abs(em_val) <= 1.0 else abs(em_val)
-
-        return {
-            "earnings_date": earn_date.isoformat(),
-            "timing": timing,
-            "days_to_earnings": days_to,
-            "expected_move_pct": round(em_pct, 2) if em_pct else None,
-            "stock_price": row.get("stockPrice"),
-        }
+        if resp and getattr(resp, "rows", None):
+            row = resp.rows[0] if resp.rows else None
+            if row:
+                next_ern = row.get("nextErn")
+                if next_ern:
+                    earn_date = dt.date.fromisoformat(str(next_ern)[:10])
+                    if earn_date >= today:
+                        timing = classify_timing(row.get("nextErnTod"))
+                        days_to = (earn_date - today).days
+                        imp = row.get("impErnMv")
+                        em_pct = None
+                        if imp is not None:
+                            em_val = float(imp)
+                            em_pct = abs(em_val) * 100.0 if abs(em_val) <= 1.0 else abs(em_val)
+                        return {
+                            "earnings_date": earn_date.isoformat(),
+                            "timing": timing,
+                            "days_to_earnings": days_to,
+                            "expected_move_pct": round(em_pct, 2) if em_pct else None,
+                            "stock_price": row.get("stockPrice"),
+                        }
     except Exception as e:
-        LOG.warning("Engine 8 bridge: resolve_next_earnings failed for %s: %s", ticker, e)
-        return None
+        LOG.debug("Engine 8 bridge: /cores lookup failed for %s: %s", ticker, e)
+
+    # Strategy 2: /hist/earnings — scan for future dates (works on weekends)
+    try:
+        resp = orats_client.hist_earnings(ticker.upper())
+        if resp and getattr(resp, "rows", None):
+            future = []
+            for r in resp.rows:
+                ed_str = r.get("earnDate")
+                if not ed_str:
+                    continue
+                ed = dt.date.fromisoformat(str(ed_str)[:10])
+                if ed >= today:
+                    future.append((ed, r))
+            if future:
+                future.sort(key=lambda x: x[0])
+                earn_date, row = future[0]
+                annc = row.get("anncTod") or row.get("annc_tod") or row.get("anncTOD")
+                timing = classify_timing(annc)
+                days_to = (earn_date - today).days
+                imp = row.get("impErnMv")
+                em_pct = None
+                if imp is not None:
+                    em_val = float(imp)
+                    em_pct = abs(em_val) * 100.0 if abs(em_val) <= 1.0 else abs(em_val)
+                return {
+                    "earnings_date": earn_date.isoformat(),
+                    "timing": timing,
+                    "days_to_earnings": days_to,
+                    "expected_move_pct": round(em_pct, 2) if em_pct else None,
+                    "stock_price": None,
+                }
+    except Exception as e:
+        LOG.debug("Engine 8 bridge: /hist/earnings lookup failed for %s: %s", ticker, e)
+
+    return None

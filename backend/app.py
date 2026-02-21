@@ -4238,36 +4238,35 @@ async def engine8_evaluate(
 
     # If no date provided, try to find next upcoming earnings first (Phase A),
     # then fall back to most recent past earnings (Phase B).
+    from backend.engine8_e1_bridge import resolve_next_earnings, run_engine1_for_phase_a
+
+    next_info = None
     if ed is None:
-        from backend.engine8_e1_bridge import resolve_next_earnings
         next_info = await asyncio.get_event_loop().run_in_executor(
             None, lambda: resolve_next_earnings(orats, ticker, today)
         )
+        LOG.info("Engine 8: resolve_next_earnings for %s returned: %s", ticker, next_info)
         if next_info and next_info.get("earnings_date"):
             ed = dt.date.fromisoformat(next_info["earnings_date"])
 
     # -- Detect phase ----------------------------------------------------------
-    is_pre_earnings = ed is not None and ed > today
+    is_pre_earnings = ed is not None and ed >= today
 
-    # For AMC on earnings day itself, still pre-earnings (gap hasn't happened)
-    if ed is not None and ed == today:
-        from backend.engine8_e1_bridge import resolve_next_earnings
-        next_info_check = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: resolve_next_earnings(orats, ticker, today)
-        )
-        if next_info_check and next_info_check.get("timing") == "AMC":
-            is_pre_earnings = True
+    # For BMO on earnings day, the gap already happened — that's Phase B
+    if ed is not None and ed == today and next_info and next_info.get("timing") == "BMO":
+        is_pre_earnings = False
+
+    LOG.info("Engine 8: ticker=%s ed=%s today=%s is_pre=%s", ticker, ed, today, is_pre_earnings)
 
     # =========================================================================
     # PHASE A: Pre-Earnings — run Engine 1, persist, return IC analysis
     # =========================================================================
     if is_pre_earnings:
         try:
-            from backend.engine8_e1_bridge import run_engine1_for_phase_a, resolve_next_earnings
-
-            next_info = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: resolve_next_earnings(orats, ticker, today)
-            )
+            if next_info is None:
+                next_info = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: resolve_next_earnings(orats, ticker, today)
+                )
 
             e1_result = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: run_engine1_for_phase_a(
