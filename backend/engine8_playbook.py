@@ -40,6 +40,7 @@ _MAG_EXTENDED = "extended"     # 1.0x - 1.5x EM
 _MAG_EXTREME = "extreme"       # > 1.5x EM
 
 _SCENARIO_MIN_EVENTS = 2
+_MATCHED_EVENTS_LIMIT = 8  # max historical events to attach per scenario for LLM context
 
 
 def _mag_bucket(move_vs_em: Optional[float]) -> str:
@@ -61,6 +62,33 @@ def _struct_simplify(structure_bucket: Optional[str]) -> str:
     if "FADE" in s:
         return "FADE"
     return "ANY"
+
+
+def _summarize_matched_events(events: List[dict]) -> List[Dict[str, Any]]:
+    """Return a compact summary of the most recent events for LLM context."""
+    dated = sorted(
+        events,
+        key=lambda e: str(e.get("earnings_date", "")),
+        reverse=True,
+    )[:_MATCHED_EVENTS_LIMIT]
+
+    summaries: List[Dict[str, Any]] = []
+    for ev in dated:
+        fwd = ev.get("forward_returns", {})
+        summaries.append({
+            "date": str(ev.get("earnings_date", ""))[:10],
+            "actual_move_pct": ev.get("actual_move_pct"),
+            "move_vs_em": ev.get("move_vs_em"),
+            "direction": ev.get("direction"),
+            "gap_structure": _struct_simplify(
+                ev.get("structure_bucket") or ev.get("gap_structure")
+            ),
+            "rel_volume": ev.get("rel_volume"),
+            "fwd_1d": fwd.get("1"),
+            "fwd_3d": fwd.get("3"),
+            "fwd_5d": fwd.get("5"),
+        })
+    return summaries
 
 
 def _compute_scenario_stats(events: List[dict], direction: str) -> Dict[str, Any]:
@@ -277,6 +305,7 @@ def compute_scenario_playbook(
                     "direction": direction,
                     "structure": "ANY",
                     "key": f"{mag}_{direction}_ANY",
+                    "matched_events": _summarize_matched_events(all_dir),
                     **stats,
                     **action,
                 })
@@ -295,6 +324,7 @@ def compute_scenario_playbook(
                         "direction": direction,
                         "structure": struct,
                         "key": f"{mag}_{direction}_{struct}",
+                        "matched_events": _summarize_matched_events(matched),
                         **stats,
                         **action,
                     })
@@ -310,6 +340,7 @@ def compute_scenario_playbook(
                 "direction": direction,
                 "structure": "ANY",
                 "key": f"all_{direction}_ANY",
+                "matched_events": _summarize_matched_events(all_events_dir),
                 **stats,
                 **action,
             })

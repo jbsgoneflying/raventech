@@ -4559,6 +4559,119 @@ def engine8_desk_notes(body: dict):
         raise HTTPException(status_code=500, detail=f"LLM error: {e}") from e
 
 
+# ---------------------------------------------------------------------------
+# Engine 8 – Per-Row Scenario Playbook (GPT-5.2 Trade Ticket)
+# ---------------------------------------------------------------------------
+
+_E8_ROW_PLAYBOOK_SYSTEM = """You are a senior quant on an options-focused systematic desk writing a trade ticket for ONE specific earnings scenario.
+
+Context: The desk runs short iron condors into earnings. After the event, the IC is closed or expires. The trader now needs to decide whether to deploy a directional follow-through trade based on the gap that occurred. Your job is to give them an actionable blueprint for THIS specific scenario.
+
+You will receive a JSON payload with:
+- scenario: a single row from the scenario matrix (magnitude bucket, direction, structure, continuation/reversion rates at 1d/3d/5d, drift, volume confirmation, hold %, optimal hold days, action, confidence, reason)
+- matched_events: the actual historical earnings events that fell into this bucket (dates, actual moves, forward returns, volume)
+- context.ticker, context.stock_price, context.em_pct
+- context.breach_stats: historical breach rate, overshoot, realized/implied ratio
+- context.thresholds: dollar price levels at 1.0x/1.5x/2.0x EM
+- context.strike_targets: IC wing distances at EM multiples
+
+Write a trade ticket in this exact JSON structure:
+
+{
+  "verdict": "CONTINUE or FADE or PASS",
+  "conviction": "HIGH or MEDIUM or LOW",
+  "one_liner": "One sentence: the core thesis for this scenario in plain desk language.",
+  "entry_plan": {
+    "trigger": "Exact condition that activates this trade. Reference dollar levels from thresholds.",
+    "instrument": "Specific instrument recommendation: shares, debit spread with strikes, or skip. Be concrete.",
+    "timing": "When to enter relative to the open — first 30 min, wait for structure confirmation, etc.",
+    "size": "Position sizing guidance as % of book or risk units. Scale to conviction."
+  },
+  "exit_plan": {
+    "profit_target": "Where to take profit — % of gap, dollar level, or % of max spread value.",
+    "stop_loss": "Hard stop condition — price level or % retracement that invalidates the thesis.",
+    "time_stop": "When to close if thesis hasn't played out. Reference optimal_hold_days.",
+    "hold_period": "Recommended hold in days. Reference the horizon with highest edge."
+  },
+  "risk_notes": "Breach rate context, tail risk, what the realized/implied ratio tells us about this name's tendency to surprise. 2-3 sentences.",
+  "historical_anchor": "Cite the matched events — how many, what happened, what the average drift was. Be specific with dates and numbers. 2-3 sentences.",
+  "what_if_wrong": "If this scenario plays out opposite to the action — what does the trader do? Flip, stop out, or wait? 2-3 sentences.",
+  "gamma_read": "If gamma/vol/regime data is provided, interpret it. If not, say 'No gamma context available for this evaluation.' 1-2 sentences.",
+  "desk_voice": "The senior quant's parting words. Is this a bread-and-butter setup or an edge case? How does it compare to the average earnings trade? Be direct. 2-3 sentences."
+}
+
+Rules:
+- Write as a senior quant on the desk, not a textbook. Be direct and practical.
+- Reference the ACTUAL numbers: continuation rates, drift percentages, event counts, dollar levels, dates from matched events.
+- If the action is PASS, the verdict must be PASS. Still fill out the blueprint explaining WHY there is no edge.
+- If continuation_rate_5d >= 70%, lean into the CONTINUE thesis hard. Cite the rate and sample size.
+- If high_vol_pct >= 60%, note that volume confirms the information content of the gap.
+- If hold_pct >= 50%, highlight that gap-and-hold is the strongest PEAD signal.
+- For FADE scenarios, look for low volume + high reversion rates. The instrument should be a reversal play.
+- For CONTINUE scenarios, the instrument should capture drift in the gap direction.
+- Keep each field concise — under 75 words per field.
+- Output valid JSON only."""
+
+
+@app.post("/api/engine8/row-playbook")
+def engine8_row_playbook(body: dict):
+    """Engine 8: Generate GPT-5.2 trade ticket for a single scenario row."""
+    scenario = body.get("scenario")
+    context = body.get("context", {})
+    if not scenario:
+        raise HTTPException(status_code=400, detail="Missing 'scenario' in request body")
+
+    try:
+        from backend.llm_client import _get_openai_client, _parse_desk_brief_json
+
+        client = _get_openai_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="OpenAI client unavailable — set OPENAI_API_KEY")
+
+        import json as _json
+        payload = {
+            "scenario": scenario,
+            "matched_events": scenario.get("matched_events", []),
+            "context": {
+                "ticker": context.get("ticker", ""),
+                "stock_price": context.get("stock_price"),
+                "em_pct": context.get("em_pct"),
+                "breach_stats": context.get("breach_stats", {}),
+                "thresholds": context.get("thresholds", {}),
+                "strike_targets": context.get("strike_targets", {}),
+            },
+        }
+        payload_str = _json.dumps(payload, default=str)
+        if len(payload_str) > 12000:
+            payload_str = payload_str[:12000]
+
+        resp = client.chat.completions.create(
+            model="gpt-5.2",
+            messages=[
+                {"role": "system", "content": _E8_ROW_PLAYBOOK_SYSTEM},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=0.3,
+            max_completion_tokens=2000,
+            timeout=45,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or ""
+        parsed = _parse_desk_brief_json(content)
+        if parsed is None:
+            raise HTTPException(status_code=502, detail="LLM returned unparseable response")
+
+        parsed["_source"] = "gpt-5.2"
+        parsed["_scenario_key"] = scenario.get("key", "")
+        return parsed
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Engine 8 row-playbook LLM failed")
+        raise HTTPException(status_code=500, detail=f"LLM error: {e}") from e
+
+
 @app.post("/api/front-layer/asset-insight")
 def api_front_layer_asset_insight(body: dict):
     """Generate a desk-level LLM insight for a single cross-asset stress reading.

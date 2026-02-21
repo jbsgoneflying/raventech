@@ -15,6 +15,8 @@
   function qs(id) { return document.getElementById(id) || _dummyEl; }
   var _lastPhaseAData = null;
   var _deskNotesCache = {};
+  var _rowPlaybookCache = {};
+  var _rowPlaybookAbort = null;
   function fmt(v, d) { return v == null ? "—" : Number(v).toFixed(d == null ? 2 : d); }
   function pct(v) { return v == null ? "—" : (Number(v) * 100).toFixed(1) + "%"; }
 
@@ -211,7 +213,7 @@
       var holdHtml = s.optimal_hold_days != null ? s.optimal_hold_days + "d" : "—";
 
       rows +=
-        '<tr>' +
+        '<tr class="pbScenarioRow" data-scenario-idx="' + si + '" style="cursor:pointer;">' +
           '<td><span class="pbMagLabel ' + magClass + '">' + (magLabels[s.magnitude] || escHtml(s.magnitude || "")) + '</span></td>' +
           '<td style="font-weight:700;' + dirColor + '">' + dirArrow + ' ' + escHtml(s.direction || "") + '</td>' +
           '<td>' + escHtml(s.structure || "") + '</td>' +
@@ -236,6 +238,151 @@
       meta.actionable_scenarios + " actionable · " +
       "min " + meta.min_events_per_scenario + " events/scenario";
   }
+
+  /* ── Row Playbook (per-scenario GPT-5.2 trade ticket) ────────────── */
+
+  function buildRowPlaybookPayload(scenario) {
+    var e1 = (_lastPhaseAData || {}).engine1 || {};
+    var sum = e1.summary || {};
+    var cur = e1.current || {};
+    var bl = e1.baseline || {};
+    var pb = (_lastPhaseAData || {}).playbook || {};
+    return {
+      scenario: scenario,
+      context: {
+        ticker: (_lastPhaseAData || {}).ticker || "",
+        stock_price: cur.stockPrice || (_lastPhaseAData || {}).stock_price,
+        em_pct: cur.impliedMovePct || cur.delayedImpliedMovePct,
+        breach_stats: {
+          breach_rate_pct: sum.breach_rate_pct,
+          avg_above_breach_pct: sum.avg_above_breach_pct,
+          events_used: sum.events_used,
+          avg_ratio_realized_to_implied: bl.avg_ratio_realized_to_implied,
+        },
+        thresholds: pb.thresholds || {},
+        strike_targets: e1.strikeTargets || {},
+      },
+    };
+  }
+
+  function renderRowPlaybook(data, detailTd) {
+    var sections = [
+      { key: "one_liner", title: null, cls: "rpOneLiner" },
+      { key: "entry_plan", title: "Entry Plan", cls: "rpEntry", nested: true },
+      { key: "exit_plan", title: "Exit Plan", cls: "rpExit", nested: true },
+      { key: "risk_notes", title: "Risk Notes", cls: "" },
+      { key: "historical_anchor", title: "Historical Anchor", cls: "" },
+      { key: "what_if_wrong", title: "What If Wrong", cls: "" },
+      { key: "gamma_read", title: "Gamma Read", cls: "" },
+      { key: "desk_voice", title: "Desk Voice", cls: "rpDeskVoice" },
+    ];
+
+    var verdict = (data.verdict || "PASS").toUpperCase();
+    var conviction = (data.conviction || "LOW").toUpperCase();
+    var verdictClass = verdict === "CONTINUE" ? "continue" : verdict === "FADE" ? "fade" : "pass";
+    var convClass = conviction === "HIGH" ? "high" : conviction === "MEDIUM" ? "medium" : "low";
+
+    var html = '<div class="rpCard">';
+    html += '<div class="rpHeader">';
+    html += '<span class="pbActionBadge ' + verdictClass + '" style="font-size:13px; padding:5px 14px;">' + escHtml(verdict) + '</span>';
+    html += '<span class="pbConfBadge ' + convClass + '" style="font-size:12px; margin-left:8px;">' + escHtml(conviction) + '</span>';
+    if (data._source) html += '<span class="rpSource">GPT-5.2 Trade Ticket</span>';
+    html += '</div>';
+
+    for (var i = 0; i < sections.length; i++) {
+      var sec = sections[i];
+      var val = data[sec.key];
+      if (!val) continue;
+
+      if (sec.nested && typeof val === "object") {
+        html += '<div class="rpSection">';
+        if (sec.title) html += '<div class="rpSectionTitle">' + escHtml(sec.title) + '</div>';
+        html += '<div class="rpNestedGrid">';
+        var nestedKeys = Object.keys(val);
+        for (var nk = 0; nk < nestedKeys.length; nk++) {
+          var nLabel = nestedKeys[nk].replace(/_/g, " ");
+          nLabel = nLabel.charAt(0).toUpperCase() + nLabel.slice(1);
+          html += '<div class="rpNestedItem">';
+          html += '<div class="rpNestedLabel">' + escHtml(nLabel) + '</div>';
+          html += '<div class="rpNestedValue">' + escHtml(val[nestedKeys[nk]]) + '</div>';
+          html += '</div>';
+        }
+        html += '</div></div>';
+      } else {
+        html += '<div class="rpSection ' + (sec.cls || "") + '">';
+        if (sec.title) html += '<div class="rpSectionTitle">' + escHtml(sec.title) + '</div>';
+        html += '<div class="rpText">' + escHtml(typeof val === "string" ? val : JSON.stringify(val)) + '</div>';
+        html += '</div>';
+      }
+    }
+
+    html += '</div>';
+    detailTd.innerHTML = html;
+  }
+
+  function onScenarioRowClick(e) {
+    var row = e.target.closest(".pbScenarioRow");
+    if (!row) return;
+    var idx = parseInt(row.getAttribute("data-scenario-idx"), 10);
+    var pb = ((_lastPhaseAData || {}).playbook || {}).scenarios;
+    if (!pb || !pb[idx]) return;
+
+    var existing = row.nextElementSibling;
+    if (existing && existing.classList.contains("pbRowDetail")) {
+      existing.remove();
+      row.classList.remove("pbRowActive");
+      return;
+    }
+
+    document.querySelectorAll(".pbRowDetail").forEach(function (r) { r.remove(); });
+    document.querySelectorAll(".pbRowActive").forEach(function (r) { r.classList.remove("pbRowActive"); });
+
+    var scenario = pb[idx];
+    var cacheKey = scenario.key || (scenario.magnitude + "_" + scenario.direction + "_" + scenario.structure);
+
+    var detailRow = document.createElement("tr");
+    detailRow.className = "pbRowDetail";
+    var detailTd = document.createElement("td");
+    detailTd.colSpan = 12;
+    detailTd.className = "rpDetailCell";
+    detailRow.appendChild(detailTd);
+
+    row.classList.add("pbRowActive");
+    row.parentNode.insertBefore(detailRow, row.nextSibling);
+
+    if (_rowPlaybookCache[cacheKey]) {
+      renderRowPlaybook(_rowPlaybookCache[cacheKey], detailTd);
+      return;
+    }
+
+    detailTd.innerHTML = '<div class="rpLoading"><span class="rpDot"></span> Generating trade ticket with GPT-5.2\u2026</div>';
+
+    if (_rowPlaybookAbort) _rowPlaybookAbort.abort();
+    _rowPlaybookAbort = new AbortController();
+
+    var payload = buildRowPlaybookPayload(scenario);
+
+    fetch("/api/engine8/row-playbook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: _rowPlaybookAbort.signal,
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || r.statusText); });
+        return r.json();
+      })
+      .then(function (data) {
+        _rowPlaybookCache[cacheKey] = data;
+        renderRowPlaybook(data, detailTd);
+      })
+      .catch(function (err) {
+        if (err.name === "AbortError") return;
+        detailTd.innerHTML = '<div class="rpError">Error: ' + escHtml(err.message) + '</div>';
+      });
+  }
+
+  qs("pbScenarioBody").addEventListener("click", onScenarioRowClick);
 
   function escHtml(s) {
     var d = document.createElement("div");
