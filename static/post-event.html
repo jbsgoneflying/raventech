@@ -107,19 +107,43 @@
           </div>
           <div class="controlGroup">
             <div class="controlLabel">
-              Earnings Date (optional)
+              Earnings Date
               <span class="tipWrap">
                 <button class="tipBtn" type="button" aria-label="Earnings date help" aria-expanded="false">i</button>
                 <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Earnings date override</div>
+                  <div class="tipTitle">Earnings date</div>
                   <div class="tipBody">
-                    <p>Optionally specify the earnings date (YYYY-MM-DD). If left blank, the engine uses the most recent earnings event for the ticker.</p>
-                    <p><b>Desk view</b>: Only override this if you're evaluating a historical event or if the auto-detected date is wrong.</p>
+                    <p>The date earnings are (or were) announced. Required — the engine uses this to determine whether you're in Phase A (pre-earnings) or Phase B (post-earnings).</p>
+                    <p><b>Phase A</b>: Set the upcoming earnings date before the event to run the pre-earnings IC analysis.</p>
+                    <p><b>Phase B</b>: After earnings, come back with the same date to run the post-event extension analysis.</p>
                   </div>
                 </div>
               </span>
             </div>
-            <input id="earningsDate" type="date" class="controlInput" />
+            <input id="earningsDate" type="date" class="controlInput" required />
+          </div>
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Timing
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Timing help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">BMO / AMC</div>
+                  <div class="tipBody">
+                    <p><b>BMO</b> (Before Market Open): Earnings released pre-market. The gap occurs at open on the earnings date.</p>
+                    <p><b>AMC</b> (After Market Close): Earnings released after hours. The gap occurs at the next day's open.</p>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <label style="display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; cursor:pointer;">
+                <input type="radio" name="timing" value="BMO" required /> BMO
+              </label>
+              <label style="display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; cursor:pointer;">
+                <input type="radio" name="timing" value="AMC" required /> AMC
+              </label>
+            </div>
           </div>
           <div class="controlSpacer"></div>
           <button id="runBtn" class="primaryButton" type="submit">
@@ -127,7 +151,7 @@
             Evaluate
           </button>
         </form>
-        <div id="status" class="status">Enter a ticker and click "Evaluate" to assess post-event trade extension potential.</div>
+        <div id="status" class="status">Enter a ticker, earnings date, and timing (BMO/AMC), then click "Evaluate."</div>
       </section>
 
       <!-- ══════════ PHASE A: Pre-Earnings ══════════ -->
@@ -589,7 +613,7 @@
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/post-event.js?v=5"></script>
+    <script src="/static/post-event.js?v=6"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

@@ -238,6 +238,7 @@ def evaluate_ticker(
     ticker: str,
     engine1_trade: Optional[dict],
     earnings_date: Optional[dt.date] = None,
+    earnings_timing: str = "UNK",
     orats_client: Any = None,
     price_svc: Any = None,
     store: Any = None,
@@ -254,43 +255,11 @@ def evaluate_ticker(
     if today is None:
         today = dt.date.today()
 
-    cache_key = (ticker.upper(), str(earnings_date), flags.cache_key_engine8())
+    cache_key = (ticker.upper(), str(earnings_date), earnings_timing, flags.cache_key_engine8())
     with _eval_lock:
         cached = _eval_cache.get(cache_key)
     if cached is not None:
         return cached
-
-    # -- Resolve earnings date + timing from ORATS if not provided -------------
-    from backend.earnings_logic import classify_timing as _classify_timing
-
-    earnings_timing: str = "UNK"
-    if earnings_date is None and orats_client is not None:
-        try:
-            resp = orats_client.hist_earnings(ticker)
-            rows = sorted(
-                [r for r in (resp.rows or []) if r.get("earnDate")],
-                key=lambda r: str(r["earnDate"]),
-                reverse=True,
-            )
-            for r in rows:
-                ed = _parse_date(str(r["earnDate"]))
-                if ed <= today:
-                    earnings_date = ed
-                    annc = r.get("anncTod") or r.get("annc_tod") or r.get("anncTOD")
-                    earnings_timing = _classify_timing(annc)
-                    break
-        except Exception as e:
-            LOG.warning("Engine 8 earnings date resolution failed for %s: %s", ticker, e)
-    elif earnings_date is not None and orats_client is not None:
-        try:
-            resp = orats_client.hist_earnings(ticker)
-            for r in (resp.rows or []):
-                if r.get("earnDate") and _parse_date(str(r["earnDate"])) == earnings_date:
-                    annc = r.get("anncTod") or r.get("annc_tod") or r.get("anncTOD")
-                    earnings_timing = _classify_timing(annc)
-                    break
-        except Exception:
-            pass
 
     # -- Fetch current price for activation -----------------------------------
     current_price: Optional[float] = None

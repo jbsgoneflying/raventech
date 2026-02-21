@@ -4195,13 +4195,19 @@ def api_front_layer_backfill_status():
 @app.get("/api/engine8/evaluate")
 async def engine8_evaluate(
     ticker: str = Query(..., description="US equity ticker"),
-    earnings_date: str = Query("", description="Earnings date override (YYYY-MM-DD); defaults to next/most recent"),
+    earnings_date: str = Query(..., description="Earnings date (YYYY-MM-DD)"),
+    timing: str = Query(..., description="BMO or AMC"),
 ):
     """Engine 8 lifecycle evaluation.
 
-    Automatically detects the phase:
-      Phase A (pre-earnings): Runs Engine 1 internally, returns IC analysis
-      Phase B (post-earnings): Loads persisted Engine 1 data, runs extension pipeline
+    All three parameters are required — the desk provides them:
+      - ticker: what to evaluate
+      - earnings_date: when earnings are/were
+      - timing: BMO (before market open) or AMC (after market close)
+
+    Phase detection is deterministic from earnings_date vs today:
+      Phase A (pre-earnings): earnings_date >= today (AMC same-day = pre)
+      Phase B (post-earnings): earnings_date < today (BMO same-day = post)
     """
     import asyncio
 
@@ -4212,6 +4218,15 @@ async def engine8_evaluate(
     ticker = ticker.strip().upper()
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker is required")
+
+    timing = timing.strip().upper()
+    if timing not in ("BMO", "AMC"):
+        raise HTTPException(status_code=400, detail="timing must be BMO or AMC")
+
+    try:
+        ed = dt.date.fromisoformat(earnings_date[:10])
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid earnings_date format (YYYY-MM-DD)")
 
     orats = _get_client_optional()
     if orats is None:
@@ -4228,45 +4243,17 @@ async def engine8_evaluate(
 
     bz = _get_benzinga_client_optional()
 
-    # -- Resolve earnings date -------------------------------------------------
-    ed: dt.date | None = None
-    if earnings_date:
-        try:
-            ed = dt.date.fromisoformat(earnings_date[:10])
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid earnings_date format (YYYY-MM-DD)")
-
-    # If no date provided, try to find next upcoming earnings first (Phase A),
-    # then fall back to most recent past earnings (Phase B).
-    from backend.engine8_e1_bridge import resolve_next_earnings, run_engine1_for_phase_a
-
-    next_info = None
-    if ed is None:
-        next_info = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: resolve_next_earnings(orats, ticker, today)
-        )
-        LOG.info("Engine 8: resolve_next_earnings for %s returned: %s", ticker, next_info)
-        if next_info and next_info.get("earnings_date"):
-            ed = dt.date.fromisoformat(next_info["earnings_date"])
-
-    # -- Detect phase ----------------------------------------------------------
-    is_pre_earnings = ed is not None and ed >= today
-
-    # For BMO on earnings day, the gap already happened — that's Phase B
-    if ed is not None and ed == today and next_info and next_info.get("timing") == "BMO":
-        is_pre_earnings = False
-
-    LOG.info("Engine 8: ticker=%s ed=%s today=%s is_pre=%s", ticker, ed, today, is_pre_earnings)
+    # -- Phase detection (deterministic) ---------------------------------------
+    is_pre_earnings = ed > today
+    if ed == today and timing == "AMC":
+        is_pre_earnings = True
 
     # =========================================================================
     # PHASE A: Pre-Earnings — run Engine 1, persist, return IC analysis
     # =========================================================================
     if is_pre_earnings:
         try:
-            if next_info is None:
-                next_info = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: resolve_next_earnings(orats, ticker, today)
-                )
+            from backend.engine8_e1_bridge import run_engine1_for_phase_a
 
             e1_result = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: run_engine1_for_phase_a(
@@ -4283,15 +4270,16 @@ async def engine8_evaluate(
             trade_builder = e1_result.get("tradeBuilder")
             go_no_go = e1_result.get("goNoGo", {})
             regime = e1_result.get("regime", {})
+            current = e1_result.get("current", {})
 
             return {
                 "phase": "pre_earnings",
                 "ticker": ticker,
-                "earnings_date": ed.isoformat() if ed else None,
-                "timing": next_info.get("timing", "UNK") if next_info else "UNK",
-                "countdown_days": (ed - today).days if ed else None,
-                "expected_move_pct": next_info.get("expected_move_pct") if next_info else None,
-                "stock_price": next_info.get("stock_price") if next_info else None,
+                "earnings_date": ed.isoformat(),
+                "timing": timing,
+                "countdown_days": (ed - today).days,
+                "expected_move_pct": current.get("impliedMovePct"),
+                "stock_price": current.get("stockPrice"),
                 "engine1": {
                     "summary": {
                         "breach_rate_pct": summary.get("breach_rate_pct"),
@@ -4324,7 +4312,7 @@ async def engine8_evaluate(
 
         engine1_trade = None
         e1_persisted = None
-        if ed is not None and store is not None:
+        if store is not None:
             e1_persisted = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: load_engine1_for_phase_b(
                     ticker=ticker, earnings_date=ed.isoformat(), store=store,
@@ -4333,7 +4321,7 @@ async def engine8_evaluate(
             if e1_persisted:
                 engine1_trade = e1_persisted
 
-        # Fall back to in-memory breach cache if no persisted data
+        # Fall back to in-memory breach cache
         if engine1_trade is None:
             try:
                 key = _breach_cache_key(ticker, 20, 5, 1.0, flags.cache_fingerprint())
@@ -4350,6 +4338,7 @@ async def engine8_evaluate(
                 ticker=ticker,
                 engine1_trade=engine1_trade,
                 earnings_date=ed,
+                earnings_timing=timing,
                 orats_client=orats,
                 price_svc=price_svc,
                 store=store,
@@ -4358,6 +4347,7 @@ async def engine8_evaluate(
         )
 
         result["phase"] = "post_earnings"
+        result["timing"] = timing
 
         # Attach Engine 1 summary for the IC outcome card
         if e1_persisted:

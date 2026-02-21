@@ -160,15 +160,21 @@
     var ticker = qs("ticker").value.trim().toUpperCase();
     if (!ticker) { statusEl.textContent = "Please enter a ticker."; return; }
 
-    var earningsDate = qs("earningsDate").value || "";
+    var earningsDate = qs("earningsDate").value;
+    if (!earningsDate) { statusEl.textContent = "Earnings date is required."; return; }
+
+    var timingRadio = document.querySelector('input[name="timing"]:checked');
+    if (!timingRadio) { statusEl.textContent = "Please select BMO or AMC."; return; }
+    var timing = timingRadio.value;
 
     var params = new URLSearchParams();
     params.set("ticker", ticker);
-    if (earningsDate) params.set("earnings_date", earningsDate);
+    params.set("earnings_date", earningsDate);
+    params.set("timing", timing);
 
     runBtn.disabled = true;
     runBtn.querySelector(".btnSpinner").style.display = "inline-block";
-    statusEl.textContent = "Evaluating " + ticker + "…";
+    statusEl.textContent = "Evaluating " + ticker + " (" + earningsDate + " " + timing + ")…";
     resultsEl.classList.add("hidden");
     phaseAEl.classList.add("hidden");
 
@@ -182,10 +188,10 @@
       .then(function (data) {
         if (data.phase === "pre_earnings") {
           renderPhaseA(data);
-          statusEl.textContent = "Pre-earnings analysis for " + ticker + " — earnings " + (data.earnings_date || "") + " (" + (data.timing || "UNK") + ").";
+          statusEl.textContent = "Pre-earnings analysis for " + ticker + " — earnings " + earningsDate + " (" + timing + ").";
         } else {
           renderPhaseB(data);
-          statusEl.textContent = "Post-earnings evaluation complete for " + ticker + ".";
+          statusEl.textContent = "Post-earnings evaluation for " + ticker + " — " + earningsDate + " (" + timing + ").";
         }
       })
       .catch(function (err) {
