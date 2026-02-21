@@ -422,7 +422,7 @@ def compute_engine7_scan(
         theme_result = _theme_cache.get(theme_cache_key)
 
     if theme_result is None:
-        headlines = fetch_headlines(date_str, lookback_days=3)
+        headlines = fetch_headlines(date_str, lookback_days=7)
         theme_result = classify_themes_deterministic(headlines)
         theme_result.date = date_str
         with _theme_cache_lock:
@@ -431,7 +431,7 @@ def compute_engine7_scan(
     # 4. Optional LLM annotation (INV-1: never affects scoring)
     llm_annotation = None
     if enable_llm_annotation:
-        headlines = fetch_headlines(date_str, lookback_days=3)
+        headlines = fetch_headlines(date_str, lookback_days=7)
         llm_annotation = annotate_themes_llm(
             headlines, date_str, store=redis_store,
         )
@@ -519,6 +519,8 @@ def compute_engine7_scan(
             "standardCount": len(standard),
             "watchlistCount": len(watchlist),
             "ineligibleCount": len(ineligible),
+            "headlineCount": theme_result.headline_count,
+            "activeThemeCount": len(theme_result.active_themes),
             "themeRequired": theme_required,
             "oratsEnabled": enable_orats,
             "llmAnnotationEnabled": enable_llm_annotation,
@@ -590,7 +592,7 @@ def analyze_single_pair_detail(
     )
 
     # Theme
-    headlines = fetch_headlines(date_str, lookback_days=3)
+    headlines = fetch_headlines(date_str, lookback_days=7)
     theme_result = classify_themes_deterministic(headlines)
     theme_result.date = date_str
     theme_score, theme_tags = score_theme_alignment(pair_def.pair_id, theme_result)

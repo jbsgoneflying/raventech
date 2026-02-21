@@ -9,7 +9,6 @@
   var statusEl   = document.getElementById("status");
   var resultsEl  = document.getElementById("results");
 
-  /* ── Helpers ────────────────────────────────────────────────────────── */
   function qs(id) { return document.getElementById(id); }
   function fmt(v, d) { return v == null ? "—" : Number(v).toFixed(d == null ? 2 : d); }
   function pct(v) { return v == null ? "—" : (Number(v) * 100).toFixed(1) + "%"; }
@@ -49,11 +48,11 @@
 
     var modeClass = (sig.mode || "").replace(/\s+/g, "_").toLowerCase();
     var modeLabel = sig.mode === "mean_reversion" ? "Mean Rev" : sig.mode === "momentum" ? "Momentum" : sig.mode || "—";
-    var score = sig.confidence || sig.score || 0;
+    var score = sig.confidence_score || 0;
 
     var html = '<div class="pairCardHeader">';
     html += '<div class="pairCardPair">';
-    html += '<span class="pairCardSymbol">' + (sig.longAsset || sig.long_asset || "?") + " / " + (sig.shortAsset || sig.short_asset || "?") + '</span>';
+    html += '<span class="pairCardSymbol">' + (sig.long_asset || "?") + " / " + (sig.short_asset || "?") + '</span>';
     html += '<span class="tierChip ' + tierClass(sig.tier) + '">' + tierLabel(sig.tier) + '</span>';
     html += '</div>';
     html += '<span class="pairCardMode ' + modeClass + '">' + modeLabel + '</span>';
@@ -61,19 +60,19 @@
     html += '</div>';
 
     html += '<div class="pairCardBody">';
-    html += '<div class="pairCardMetric"><span class="k">Z-Score</span><span class="v">' + fmt(sig.zScore || sig.z_score) + '</span></div>';
-    html += '<div class="pairCardMetric"><span class="k">ROC 5d</span><span class="v">' + pct(sig.roc5d || sig.roc_5d) + '</span></div>';
-    html += '<div class="pairCardMetric"><span class="k">ROC 10d</span><span class="v">' + pct(sig.roc10d || sig.roc_10d) + '</span></div>';
+    html += '<div class="pairCardMetric"><span class="k">Z-Score</span><span class="v">' + fmt(sig.z_score) + '</span></div>';
+    html += '<div class="pairCardMetric"><span class="k">ROC 5d</span><span class="v">' + pct(sig.momentum_5d_roc) + '</span></div>';
+    html += '<div class="pairCardMetric"><span class="k">ROC 10d</span><span class="v">' + pct(sig.momentum_10d_roc) + '</span></div>';
     html += '<div class="pairCardMetric"><span class="k">Confidence</span><span class="v">' + Math.round(score) + '</span></div>';
-    if (sig.suggestedRiskUnits || sig.risk_units) {
-      html += '<div class="pairCardMetric"><span class="k">Risk Units</span><span class="v">' + fmt(sig.suggestedRiskUnits || sig.risk_units, 1) + '</span></div>';
+    if (sig.risk_units) {
+      html += '<div class="pairCardMetric"><span class="k">Risk Units</span><span class="v">' + fmt(sig.risk_units, 1) + '</span></div>';
     }
-    if (sig.holdingPeriod || sig.holding_period) {
-      html += '<div class="pairCardMetric"><span class="k">Hold</span><span class="v">' + (sig.holdingPeriod || sig.holding_period) + 'd</span></div>';
+    if (sig.expected_hold_days) {
+      html += '<div class="pairCardMetric"><span class="k">Hold</span><span class="v">' + sig.expected_hold_days + 'd</span></div>';
     }
     html += '</div>';
 
-    var themes = sig.themes || sig.supportingThemes || sig.supporting_themes || [];
+    var themes = sig.theme_tags || [];
     if (themes.length) {
       html += '<div class="pairCardThemes">';
       themes.forEach(function (t) {
@@ -88,45 +87,54 @@
       html += '<div class="pairCardNotes" style="color:' + gateColor + ';">Gate: ' + (gd.action || "—") + (gd.reasons ? " — " + gd.reasons.join(", ") : "") + '</div>';
     }
 
+    if (sig.eligibility === "NOT_ELIGIBLE" && sig.ineligibility_reason) {
+      html += '<div class="pairCardNotes">Ineligible: ' + sig.ineligibility_reason + '</div>';
+    }
+
     card.innerHTML = html;
     return card;
   }
 
   /* ── Render results ────────────────────────────────────────────────── */
   function render(data) {
-    var aPlus    = data.aPlus || [];
-    var standard = data.standard || [];
-    var watchlist = data.watchlist || [];
+    var aPlus      = data.aPlus || [];
+    var standard   = data.standard || [];
+    var watchlist  = data.watchlist || [];
     var ineligible = data.ineligible || [];
-    var total = aPlus.length + standard.length + watchlist.length + ineligible.length;
+    var meta       = data.meta || {};
+    var activeThemes = data.activeThemes || [];
 
-    qs("statScanned").textContent  = total || "20";
+    qs("statScanned").textContent  = meta.pairsAnalyzed || (aPlus.length + standard.length + watchlist.length + ineligible.length) || "20";
     qs("statEligible").textContent = aPlus.length + standard.length + watchlist.length;
     qs("statAPlus").textContent    = aPlus.length;
-    qs("statThemes").textContent   = data.activeThemeCount || data.active_theme_count || "—";
-    qs("statsMeta").textContent    = data.asOf || data.as_of || new Date().toISOString().slice(0, 10);
+    qs("statThemes").textContent   = activeThemes.length;
+    qs("statsMeta").textContent    = meta.scanDate || new Date().toISOString().slice(0, 10);
 
     /* Themes section */
     var themesGrid = qs("themesGrid");
     themesGrid.innerHTML = "";
-    var themeNames = data.activeThemes || data.active_themes || [];
-    if (Array.isArray(themeNames) && themeNames.length) {
-      themeNames.forEach(function (t) {
-        var name = typeof t === "string" ? t : t.theme || t.name || "";
+    if (Array.isArray(activeThemes) && activeThemes.length) {
+      activeThemes.forEach(function (t) {
+        var name = typeof t === "string" ? t : t.label || t.theme || "";
         if (!name) return;
         var chip = document.createElement("span");
         chip.className = "themeChip";
         chip.textContent = name;
+        if (t.keyword_hits) {
+          chip.title = t.keyword_hits + " keyword hits, intensity " + (t.intensity || 0);
+        }
         themesGrid.appendChild(chip);
       });
     } else {
-      themesGrid.innerHTML = '<span style="color:var(--muted); font-size:12px;">No active themes detected</span>';
+      themesGrid.innerHTML = '<span style="color:var(--muted); font-size:12px;">No active themes detected — all pairs marked ineligible. Headlines may be sparse (weekend/holiday). Try again on a trading day.</span>';
     }
 
-    if (data.llmAnnotation || data.llm_annotation) {
+    var llmAnn = data.llmAnnotation;
+    if (llmAnn) {
       var note = qs("llmThemeNote");
       note.style.display = "block";
-      note.textContent = "LLM annotation: " + (data.llmAnnotation || data.llm_annotation);
+      var summary = typeof llmAnn === "string" ? llmAnn : llmAnn.macro_summary || JSON.stringify(llmAnn);
+      note.textContent = "LLM annotation: " + summary;
     }
 
     /* A+ */
@@ -160,6 +168,11 @@
     } else {
       wGrid.innerHTML = '<div class="emptyState"><div class="emptyStateTitle">No Watchlist Pairs</div><div class="emptyStateBody">No developing setups below threshold.</div></div>';
       qs("watchlistMeta").textContent = "0 pairs";
+    }
+
+    /* Show ineligible count in status */
+    if (ineligible.length && !aPlus.length && !standard.length && !watchlist.length) {
+      statusEl.textContent = "Scan complete. " + ineligible.length + " pairs ineligible (no active theme support). " + activeThemes.length + " themes active from " + (meta.headlineCount || "unknown") + " headlines.";
     }
   }
 

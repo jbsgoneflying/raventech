@@ -2438,7 +2438,7 @@ def engine7_pairs_themes(
                 today = _dt.date.today()
 
         date_str = today.isoformat()
-        headlines = fetch_headlines(date_str, lookback_days=3)
+        headlines = fetch_headlines(date_str, lookback_days=7)
         theme_result = classify_themes_deterministic(headlines)
 
         active = []

@@ -469,13 +469,18 @@ def annotate_themes_llm(
 # ---------------------------------------------------------------------------
 
 
-def fetch_headlines(date_str: str, lookback_days: int = 3) -> List[str]:
-    """Fetch recent headlines from EODHD.  Returns list of title strings."""
+def fetch_headlines(date_str: str, lookback_days: int = 7) -> List[str]:
+    """Fetch recent headlines from EODHD.  Returns list of title strings.
+
+    Default lookback is 7 days to ensure full coverage across weekends
+    and holidays when market news may be sparse.
+    """
     try:
         from backend.eodhd_client import EodhdClient
         import os as _os
         token = _os.getenv("EODHD_API_TOKEN", "")
         if not token:
+            _LOG.warning("Engine7 headline fetch: EODHD_API_TOKEN not set")
             return []
         client = EodhdClient(token=token)
         end = dt.date.fromisoformat(date_str)
@@ -491,6 +496,7 @@ def fetch_headlines(date_str: str, lookback_days: int = 3) -> List[str]:
             title = row.get("title") or ""
             if title.strip():
                 titles.append(title.strip())
+        _LOG.info("Engine7 headline fetch: %d headlines from %s to %s", len(titles), start.isoformat(), end.isoformat())
         return titles
     except Exception as exc:
         _LOG.warning("Engine7 headline fetch failed: %s", exc)
