@@ -2295,6 +2295,216 @@ async def engine5_global_summary():
 
 
 # ---------------------------------------------------------------------------
+# Engine 7: Thematic Relative Value (Pairs) Engine
+# ---------------------------------------------------------------------------
+
+_engine7_cache: TTLCache = TTLCache(maxsize=20, ttl=30 * 60)
+_engine7_cache_lock = threading.Lock()
+
+
+@app.get("/api/engine7-pairs")
+def engine7_pairs_scan(
+    request: Request,
+    date: Optional[str] = Query(None, description="Scan date (YYYY-MM-DD), defaults to today"),
+    min_score: int = Query(50, ge=0, le=100, description="Minimum confidence score to include"),
+    tier: Optional[int] = Query(None, description="Filter by tier: 1, 2, or 3"),
+    mode: Optional[str] = Query(None, description="Filter by mode: mean_reversion or momentum"),
+):
+    """Engine 7: Thematic Relative Value (Pairs) Scanner.
+
+    Evaluates 20 fixed asset pairs using ratio-based statistical analysis
+    combined with deterministic theme validation.
+
+    Returns signals categorised into four buckets:
+    - aPlus: ELIGIBLE, score >= 75, tradable
+    - standard: ELIGIBLE, score >= threshold, tradable
+    - watchlist: ELIGIBLE, below threshold, NOT tradable
+    - ineligible: NOT_ELIGIBLE (no theme support), NOT tradable
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE7_PAIRS:
+        raise HTTPException(
+            status_code=503,
+            detail="Engine 7 (Thematic Relative Value / Pairs) is disabled. Set ENABLE_ENGINE7_PAIRS=1 to enable.",
+        )
+
+    try:
+        from backend.engine7_screener import compute_engine7_scan
+
+        store = get_store_optional()
+
+        result = compute_engine7_scan(
+            as_of_date=date,
+            enable_orats=flags.ENGINE7_ENABLE_ORATS_VOL,
+            enable_llm_annotation=flags.ENGINE7_ENABLE_LLM_ANNOTATION,
+            theme_required=flags.ENGINE7_THEME_REQUIRED,
+            z_score_window=flags.ENGINE7_Z_SCORE_WINDOW,
+            z_entry_threshold=flags.ENGINE7_Z_ENTRY_THRESHOLD,
+            z_momentum_threshold=flags.ENGINE7_Z_MOMENTUM_THRESHOLD,
+            min_score=min_score,
+            aplus_threshold=flags.ENGINE7_APLUS_THRESHOLD,
+            max_concurrent=flags.ENGINE7_MAX_CONCURRENT_PAIRS,
+            max_workers=flags.ENGINE7_MAX_WORKERS,
+            overlap_corr_threshold=flags.ENGINE7_OVERLAP_CORR_THRESHOLD,
+            overlap_corr_window=flags.ENGINE7_OVERLAP_CORR_WINDOW,
+            redis_store=store,
+        )
+
+        # Apply optional filters
+        if tier is not None:
+            for key in ("aPlus", "standard", "watchlist", "ineligible"):
+                result[key] = [s for s in result.get(key, []) if s.get("tier") == tier]
+        if mode is not None:
+            m = str(mode).strip().lower()
+            for key in ("aPlus", "standard", "watchlist", "ineligible"):
+                result[key] = [s for s in result.get(key, []) if s.get("mode") == m]
+
+        # Inject gating (INV-4)
+        if flags.ENABLE_GATING:
+            try:
+                gate_ctx = _get_gate_context(flags)
+                from backend.gating import gate_engine7_pair
+                for key in ("aPlus", "standard"):
+                    for sig in result.get(key, []):
+                        if isinstance(sig, dict):
+                            gd = gate_engine7_pair(
+                                signal=sig,
+                                regime_label=gate_ctx.get("regime_label", ""),
+                                vol_direction=gate_ctx.get("vol_direction", ""),
+                                fp_score=gate_ctx.get("fp_score"),
+                                regime_allow=flags.GATE_PAIRS_REGIME_ALLOW,
+                                vol_state_allow=flags.GATE_PAIRS_VOL_STATE_ALLOW,
+                            )
+                            sig["gateDecision"] = gd.to_dict()
+            except Exception as gate_err:
+                LOG.warning("Gate injection failed for engine7: %s", gate_err)
+
+        return result
+
+    except Exception as exc:
+        LOG.exception("Engine7 scan failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Engine 7 scan failed: {exc}")
+
+
+@app.get("/api/engine7-pairs/themes")
+def engine7_pairs_themes(
+    request: Request,
+    date: Optional[str] = Query(None, description="Date (YYYY-MM-DD), defaults to today"),
+):
+    """Engine 7: Active themes from the deterministic classifier.
+
+    If LLM annotation is enabled and available, includes it as a separate
+    llmAnnotation field.  Shows which pairs each theme enables.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE7_PAIRS:
+        raise HTTPException(
+            status_code=503,
+            detail="Engine 7 (Thematic Relative Value / Pairs) is disabled.",
+        )
+
+    try:
+        import datetime as _dt
+        from backend.engine7_theme import (
+            THEME_PAIR_ELIGIBILITY,
+            annotate_themes_llm,
+            classify_themes_deterministic,
+            fetch_headlines,
+        )
+
+        today = _dt.date.today()
+        if date:
+            try:
+                today = _dt.date.fromisoformat(str(date)[:10])
+            except Exception:
+                today = _dt.date.today()
+
+        date_str = today.isoformat()
+        headlines = fetch_headlines(date_str, lookback_days=3)
+        theme_result = classify_themes_deterministic(headlines)
+
+        active = []
+        for t in theme_result.themes:
+            if not t.active:
+                continue
+            eligible_pairs = THEME_PAIR_ELIGIBILITY.get(t.theme, [])
+            active.append({
+                **t.to_dict(),
+                "eligiblePairs": eligible_pairs,
+            })
+
+        out: dict = {
+            "date": date_str,
+            "headlineCount": theme_result.headline_count,
+            "activeThemes": active,
+            "allThemes": [t.to_dict() for t in theme_result.themes],
+        }
+
+        if flags.ENGINE7_ENABLE_LLM_ANNOTATION:
+            store = get_store_optional()
+            llm_ann = annotate_themes_llm(headlines, date_str, store=store)
+            out["llmAnnotation"] = llm_ann
+
+        return out
+
+    except Exception as exc:
+        LOG.exception("Engine7 themes failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Engine 7 themes failed: {exc}")
+
+
+@app.get("/api/engine7-pairs/{pair_id}")
+def engine7_pairs_detail(
+    request: Request,
+    pair_id: str,
+    date: Optional[str] = Query(None, description="Scan date (YYYY-MM-DD), defaults to today"),
+):
+    """Engine 7: Single pair deep-dive analysis.
+
+    Returns full analysis for one pair including ratio chart data, z-score
+    history, theme alignment detail, ORATS overlay status, and overlap flags.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE7_PAIRS:
+        raise HTTPException(
+            status_code=503,
+            detail="Engine 7 (Thematic Relative Value / Pairs) is disabled.",
+        )
+
+    try:
+        from backend.engine7_screener import analyze_single_pair_detail
+
+        store = get_store_optional()
+
+        result = analyze_single_pair_detail(
+            pair_id=pair_id,
+            as_of_date=date,
+            enable_orats=flags.ENGINE7_ENABLE_ORATS_VOL,
+            enable_llm_annotation=flags.ENGINE7_ENABLE_LLM_ANNOTATION,
+            theme_required=flags.ENGINE7_THEME_REQUIRED,
+            z_score_window=flags.ENGINE7_Z_SCORE_WINDOW,
+            z_entry_threshold=flags.ENGINE7_Z_ENTRY_THRESHOLD,
+            z_momentum_threshold=flags.ENGINE7_Z_MOMENTUM_THRESHOLD,
+            min_score=flags.ENGINE7_MIN_SCORE_DEFAULT,
+            aplus_threshold=flags.ENGINE7_APLUS_THRESHOLD,
+            redis_store=store,
+        )
+
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Pair '{pair_id}' not found in library")
+
+        if "error" in result:
+            raise HTTPException(status_code=502, detail=result["error"])
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        LOG.exception("Engine7 detail failed for %s: %s", pair_id, exc)
+        raise HTTPException(status_code=500, detail=f"Engine 7 detail failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Raven-Tech 2.0 – Command Center & Flow Pressure
 # ---------------------------------------------------------------------------
 
@@ -3819,6 +4029,140 @@ def api_front_layer_backfill_status():
         },
         "days": days,
     }
+
+
+# ---------------------------------------------------------------------------
+# Engine 8: Post-Event Trade Extension
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/engine8/evaluate")
+async def engine8_evaluate(
+    ticker: str = Query(..., description="US equity ticker"),
+    earnings_date: str = Query("", description="Earnings date override (YYYY-MM-DD); defaults to most recent"),
+):
+    """Evaluate a ticker for post-event trade extension.
+
+    ``trade_outcome`` is NOT a parameter — it is derived deterministically
+    from the Engine 1 trade structure and current market price.
+    """
+    import asyncio
+
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE8_POST_EVENT:
+        raise HTTPException(status_code=404, detail="Engine 8 is not enabled")
+
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    orats = _get_client_optional()
+    if orats is None:
+        raise HTTPException(status_code=503, detail="ORATS client unavailable")
+
+    store = get_store_optional()
+
+    # Resolve PriceService
+    try:
+        from backend.price_service import get_price_service
+        price_svc = get_price_service()
+    except Exception:
+        price_svc = None
+
+    # Resolve Engine 1 trade for this ticker (most recent cached breach result)
+    engine1_trade = None
+    try:
+        key = _breach_cache_key(ticker, 20, 5, 1.0, flags.cache_fingerprint())
+        with _breach_cache_lock:
+            cached_breach = _breach_cache.get(key)
+        if cached_breach and isinstance(cached_breach, dict):
+            engine1_trade = cached_breach
+    except Exception:
+        pass
+
+    ed = None
+    if earnings_date:
+        try:
+            ed = dt.date.fromisoformat(earnings_date[:10])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid earnings_date format (YYYY-MM-DD)")
+
+    try:
+        from backend.engine8_pipeline import evaluate_ticker
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: evaluate_ticker(
+                ticker=ticker,
+                engine1_trade=engine1_trade,
+                earnings_date=ed,
+                orats_client=orats,
+                price_svc=price_svc,
+                store=store,
+                flags=flags,
+            ),
+        )
+        return result
+    except Exception as e:
+        LOG.exception("Engine 8 evaluation failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Engine 8 error: {e}") from e
+
+
+@app.get("/api/engine8/history")
+async def engine8_history(
+    ticker: str = Query(..., description="US equity ticker"),
+    n: int = Query(40, ge=1, le=100, description="Number of historical events"),
+):
+    """Return historical pattern analysis for a ticker (debugging/transparency)."""
+    import asyncio
+
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE8_POST_EVENT:
+        raise HTTPException(status_code=404, detail="Engine 8 is not enabled")
+
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    orats = _get_client_optional()
+    if orats is None:
+        raise HTTPException(status_code=503, detail="ORATS client unavailable")
+
+    try:
+        from backend.price_service import get_price_service
+        price_svc = get_price_service()
+    except Exception:
+        price_svc = None
+
+    try:
+        from backend.engine8_pipeline import _build_all_event_rows
+        from backend.config import FeatureFlags
+        from dataclasses import replace as dc_replace
+
+        effective_flags = dc_replace(flags, ENGINE8_LOOKBACK_EVENTS=n)
+
+        loop = asyncio.get_event_loop()
+        today = dt.date.today()
+
+        event_rows = await loop.run_in_executor(
+            None,
+            lambda: _build_all_event_rows(
+                ticker=ticker,
+                current_earnings_date=today,
+                orats_client=orats,
+                price_svc=price_svc,
+                flags=effective_flags,
+            ),
+        )
+        return {
+            "ticker": ticker,
+            "event_count": len(event_rows),
+            "events": event_rows,
+        }
+    except Exception as e:
+        LOG.exception("Engine 8 history failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Engine 8 history error: {e}") from e
 
 
 @app.post("/api/front-layer/asset-insight")

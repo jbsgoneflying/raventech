@@ -1,4 +1,4 @@
-"""Raven-Tech 2.0 – Gating layer for Engine 3 (Red Dog) and Engine 4 (Ichimoku).
+"""Raven-Tech 2.0 – Gating layer for Engine 3 (Red Dog), Engine 4 (Ichimoku), and Engine 7 (Pairs).
 
 Converts every scan result into one of three statuses:
   TRADABLE – green-lit for execution consideration
@@ -370,6 +370,107 @@ def gate_ichimoku(
             "fp_label": fp_label,
             "setup_direction": setup_direction,
             "high_events_within_days": high_events_within_days,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Engine 7: Thematic Relative Value (Pairs) gating  (INV-4)
+# ---------------------------------------------------------------------------
+#
+# All inputs are optional with safe defaults.  No gating on fake data.
+#
+# - regime_label / vol_direction: SOFT if missing (warn, don't suppress)
+# - fp_score: skipped entirely when None (pairs are spread trades)
+# - macro_proximity: omitted in v1 (hardcoded 0 in platform; not reliable)
+
+
+def gate_engine7_pair(
+    signal: Any,
+    regime_label: str = "",
+    vol_direction: str = "",
+    fp_score: Optional[float] = None,
+    *,
+    regime_allow: str = "",
+    vol_state_allow: str = "",
+) -> GateDecision:
+    """Gate an Engine 7 pairs signal.
+
+    INV-4: all inputs are optional.  Missing inputs produce SOFT reasons
+    (WATCH) but never SUPPRESS on their own.
+    """
+    pair_id = ""
+    if isinstance(signal, dict):
+        pair_id = signal.get("pair_id", "")
+
+    reasons: List[GateReason] = []
+
+    # Regime check – SOFT only
+    if regime_allow:
+        allowed_regimes = [s.strip() for s in regime_allow.split(",") if s.strip()]
+    else:
+        allowed_regimes = []  # empty = all allowed
+
+    if allowed_regimes:
+        r = _check_regime(regime_label, allowed_regimes, severity="SOFT")
+        if r:
+            reasons.append(r)
+    elif not regime_label:
+        reasons.append(GateReason(
+            code="REGIME_MISSING",
+            label="Regime data unavailable",
+            severity="SOFT",
+            detail="No regime data available; pairs gating is informational only",
+            source_value=None,
+            threshold_value=None,
+        ))
+
+    # Vol state check – SOFT only, informational
+    if vol_state_allow:
+        allowed_vol = [s.strip() for s in vol_state_allow.split(",") if s.strip()]
+    else:
+        allowed_vol = []
+
+    if allowed_vol:
+        r = _check_vol_state(vol_direction, allowed_vol, severity="SOFT")
+        if r:
+            reasons.append(r)
+    elif not vol_direction:
+        reasons.append(GateReason(
+            code="VOL_MISSING",
+            label="Vol state data unavailable",
+            severity="SOFT",
+            detail="No vol state data available; pairs gating is informational only",
+            source_value=None,
+            threshold_value=None,
+        ))
+
+    # Flow pressure – skip entirely when None (INV-4)
+    # Macro proximity – omitted in v1 (INV-4)
+
+    # Resolve
+    has_hard = any(r.severity == "HARD" for r in reasons)
+    has_soft = any(r.severity == "SOFT" for r in reasons)
+
+    if has_hard:
+        status = "SUPPRESS"
+    elif has_soft:
+        status = "WATCH"
+    else:
+        status = "TRADABLE"
+
+    return GateDecision(
+        ticker=pair_id,
+        engine="engine7_pairs",
+        status=status,
+        reasons=[r.to_dict() for r in reasons],
+        decided_at=dt.datetime.utcnow().isoformat() + "Z",
+        inputs={
+            "regime_label": regime_label,
+            "vol_direction": vol_direction,
+            "fp_score": fp_score,
+            "regime_allow": regime_allow,
+            "vol_state_allow": vol_state_allow,
         },
     )
 

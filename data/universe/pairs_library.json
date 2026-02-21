@@ -1,0 +1,162 @@
+[
+  {
+    "pair_id": "QQQ_IWM",
+    "long_ticker": "QQQ",
+    "short_ticker": "IWM",
+    "tier": 1,
+    "label": "Growth vs Small Caps",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "SPY_IWM",
+    "long_ticker": "SPY",
+    "short_ticker": "IWM",
+    "tier": 1,
+    "label": "Large vs Small Caps",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "QQQ_SPY",
+    "long_ticker": "QQQ",
+    "short_ticker": "SPY",
+    "tier": 1,
+    "label": "Tech vs Broad Market",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "RSP_SPY",
+    "long_ticker": "RSP",
+    "short_ticker": "SPY",
+    "tier": 1,
+    "label": "Equal Weight vs Cap Weight",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "SPHB_SPLV",
+    "long_ticker": "SPHB",
+    "short_ticker": "SPLV",
+    "tier": 1,
+    "label": "High Beta vs Low Volatility",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "SPY_EFA",
+    "long_ticker": "SPY",
+    "short_ticker": "EFA",
+    "tier": 1,
+    "label": "US vs International Developed",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "XLY_XLP",
+    "long_ticker": "XLY",
+    "short_ticker": "XLP",
+    "tier": 2,
+    "label": "Discretionary vs Staples",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "XLF_XLK",
+    "long_ticker": "XLF",
+    "short_ticker": "XLK",
+    "tier": 2,
+    "label": "Financials vs Tech",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "XLE_SPY",
+    "long_ticker": "XLE",
+    "short_ticker": "SPY",
+    "tier": 2,
+    "label": "Energy vs Market",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "XLI_XLU",
+    "long_ticker": "XLI",
+    "short_ticker": "XLU",
+    "tier": 2,
+    "label": "Industrials vs Utilities",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "XLB_XLI",
+    "long_ticker": "XLB",
+    "short_ticker": "XLI",
+    "tier": 2,
+    "label": "Materials vs Industrials",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "SOXX_IGV",
+    "long_ticker": "SOXX",
+    "short_ticker": "IGV",
+    "tier": 2,
+    "label": "Semis vs Software",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "XBI_XLV",
+    "long_ticker": "XBI",
+    "short_ticker": "XLV",
+    "tier": 2,
+    "label": "Biotech vs Healthcare",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "XHB_SPY",
+    "long_ticker": "XHB",
+    "short_ticker": "SPY",
+    "tier": 2,
+    "label": "Homebuilders vs Market",
+    "default_lookback_days": 40
+  },
+  {
+    "pair_id": "GLD_TLT",
+    "long_ticker": "GLD",
+    "short_ticker": "TLT",
+    "tier": 3,
+    "label": "Gold vs Bonds / Real Rates Proxy",
+    "default_lookback_days": 60
+  },
+  {
+    "pair_id": "USO_SPY",
+    "long_ticker": "USO",
+    "short_ticker": "SPY",
+    "tier": 3,
+    "label": "Oil vs Equities",
+    "default_lookback_days": 60
+  },
+  {
+    "pair_id": "UUP_SPY",
+    "long_ticker": "UUP",
+    "short_ticker": "SPY",
+    "tier": 3,
+    "label": "Dollar vs Equities",
+    "default_lookback_days": 60
+  },
+  {
+    "pair_id": "IBIT_QQQ",
+    "long_ticker": "IBIT",
+    "short_ticker": "QQQ",
+    "tier": 3,
+    "label": "Bitcoin Proxy vs Tech",
+    "default_lookback_days": 60
+  },
+  {
+    "pair_id": "VIXY_SPY",
+    "long_ticker": "VIXY",
+    "short_ticker": "SPY",
+    "tier": 3,
+    "label": "Volatility vs Equities",
+    "default_lookback_days": 60
+  },
+  {
+    "pair_id": "HYG_TLT",
+    "long_ticker": "HYG",
+    "short_ticker": "TLT",
+    "tier": 3,
+    "label": "Credit vs Treasuries",
+    "default_lookback_days": 60
+  }
+]

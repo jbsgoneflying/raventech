@@ -88,6 +88,7 @@ class EngineGates:
     red_dog: str = "allowed"             # allowed | watch | suppressed
     ichimoku: str = "allowed"            # allowed | selective | suppressed
     index_income: str = "allowed"        # allowed | reduced | suppressed
+    post_event_ext: str = "allowed"      # allowed | selective | suppressed
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -149,6 +150,7 @@ class DailyMarketState:
     news_themes: List[dict] = field(default_factory=list)
     sequencer_summary: dict = field(default_factory=dict)
     asymmetry_signals: List[dict] = field(default_factory=list)
+    post_event_extensions: List[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -184,28 +186,33 @@ def _derive_engine_gates(
             red_dog="allowed",      # Red Dog thrives in stress
             ichimoku="suppressed",
             index_income="suppressed",
+            post_event_ext="suppressed",
         )
     elif regime_label == "Risk-Off":
         red_dog = "allowed"
         ichimoku = "suppressed"
         earnings = "selective"
         index_income = "reduced"
+        post_event_ext = "suppressed"
     elif regime_label == "Transitional":
         red_dog = "watch" if flow_pressure_score > 65 else "allowed"
         ichimoku = "selective"
         earnings = "selective"
         index_income = "allowed" if flow_pressure_score > 40 else "reduced"
+        post_event_ext = "selective"
     else:  # Risk-On
         red_dog = "watch"  # Red Dog is contrarian, less useful in risk-on
         ichimoku = "allowed"
         earnings = "allowed"
         index_income = "allowed"
+        post_event_ext = "allowed"
 
     return EngineGates(
         earnings=earnings,
         red_dog=red_dog,
         ichimoku=ichimoku,
         index_income=index_income,
+        post_event_ext=post_event_ext,
     )
 
 
@@ -279,6 +286,7 @@ def build_daily_market_state(
     news_themes: Optional[List[dict]] = None,
     sequencer_summary: Optional[dict] = None,
     asymmetry_signals: Optional[List[dict]] = None,
+    post_event_extensions: Optional[List[dict]] = None,
 ) -> DailyMarketState:
     """Build a DailyMarketState from engine outputs.
 
@@ -332,6 +340,7 @@ def build_daily_market_state(
         news_themes=news_themes or [],
         sequencer_summary=sequencer_summary or {},
         asymmetry_signals=asymmetry_signals or [],
+        post_event_extensions=post_event_extensions or [],
     )
 
 
@@ -441,7 +450,7 @@ def compute_dms_diff(today: DailyMarketState, yesterday: DailyMarketState) -> di
             changes[field_name] = field_changes
 
     # Count changes in list fields
-    for list_field in ["earnings_candidates", "news_themes", "asymmetry_signals"]:
+    for list_field in ["earnings_candidates", "news_themes", "asymmetry_signals", "post_event_extensions"]:
         t_list = today_d.get(list_field, [])
         y_list = yesterday_d.get(list_field, [])
         if len(t_list) != len(y_list):

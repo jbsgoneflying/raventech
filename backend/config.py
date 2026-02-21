@@ -224,6 +224,51 @@ class FeatureFlags:
     ENGINE5_US_IV_HIGH_THRESHOLD: float = 60.0            # IV rank > this = HIGH
     ENGINE5_VOL_ZSCORE_WINDOW: int = 60                   # Rolling z-score window (trading days)
 
+    # --- Engine 7: Thematic Relative Value / Pairs Engine (default OFF) ---
+    ENABLE_ENGINE7_PAIRS: bool = False
+    ENGINE7_CACHE_TTL_BARS: int = 6 * 3600          # 6h for daily bars
+    ENGINE7_CACHE_TTL_SCAN: int = 30 * 60            # 30min for full scan
+    ENGINE7_MAX_WORKERS: int = 8                     # Parallel workers
+    ENGINE7_MIN_SCORE_DEFAULT: int = 50              # Minimum confidence threshold
+    ENGINE7_APLUS_THRESHOLD: int = 75                # A+ grade cutoff
+    ENGINE7_Z_SCORE_WINDOW: int = 40                 # Default rolling window (20-60)
+    ENGINE7_Z_ENTRY_THRESHOLD: float = 1.5           # Min |z| for mean-reversion
+    ENGINE7_Z_MOMENTUM_THRESHOLD: float = 1.0        # Min |z| for momentum mode
+    ENGINE7_MAX_CONCURRENT_PAIRS: int = 5            # Max positions
+    ENGINE7_THEME_REQUIRED: bool = True              # Enforce theme validation (INV-2)
+    ENGINE7_ENABLE_ORATS_VOL: bool = False           # Optional ORATS IV overlay (INV-5)
+    ENGINE7_ENABLE_LLM_ANNOTATION: bool = False      # Optional LLM theme annotation (INV-1)
+    ENGINE7_OVERLAP_CORR_THRESHOLD: float = 0.70     # Ratio-return correlation cap (INV-3)
+    ENGINE7_OVERLAP_CORR_WINDOW: int = 20            # Rolling correlation window (trading days)
+
+    # --- Engine 7: Gating (INV-4: all inputs optional with safe defaults) ---
+    GATE_PAIRS_REGIME_ALLOW: str = ""                # Empty = all regimes allowed
+    GATE_PAIRS_VOL_STATE_ALLOW: str = ""             # Empty = all states allowed
+
+    # --- Engine 8: Post-Event Trade Extension (default OFF; decisioning engine) ---
+    ENABLE_ENGINE8_POST_EVENT: bool = False
+    ENGINE8_CACHE_TTL_EVAL: int = 30 * 60            # 30 min in-memory cache for evaluations
+    ENGINE8_SNAPSHOT_TTL_S: int = 30 * 86400          # 30 days Redis TTL for persisted snapshots
+    ENGINE8_LLM_RESULT_TTL_S: int = 90 * 86400        # 90 days Redis TTL for persisted LLM results
+    ENGINE8_MAX_WORKERS: int = 5                       # Parallel evaluation workers
+    ENGINE8_CONFIDENCE_THRESHOLD: int = 65             # Min score for any trade
+    ENGINE8_CONTINUE_THRESHOLD: int = 65               # Min score for CONTINUE
+    ENGINE8_FADE_THRESHOLD: int = 70                   # Min score for FADE (higher bar)
+    ENGINE8_MIN_HISTORICAL_SAMPLE: int = 15            # Min similar events; below this, force PASS
+    ENGINE8_EM_RATIO_OVER: float = 1.20                # move_vs_em above this = "over"
+    ENGINE8_EM_RATIO_EXTREME: float = 1.50             # move_vs_em above this = "extreme"
+    ENGINE8_ATR_ELEVATED: float = 1.50                 # ATR multiple threshold
+    ENGINE8_ATR_EXTREME: float = 2.50                  # ATR multiple extreme threshold
+    ENGINE8_MAX_RISK_UNITS: float = 1.5                # Max risk allocation per trade
+    ENGINE8_MIN_RISK_UNITS: float = 0.5                # Min risk allocation per trade
+    ENGINE8_MAX_HOLDING_DAYS: int = 5                  # Max holding period
+    ENGINE8_CONTINUATION_PROB_MIN: float = 0.55        # Min probability for CONTINUE
+    ENGINE8_REVERSION_PROB_MIN: float = 0.55           # Min probability for FADE
+    ENGINE8_ENABLE_LLM_CLASSIFY: bool = True           # Use LLM for event classification
+    ENGINE8_LLM_MODEL_VERSION: str = "gpt-4o-2024-08-06"
+    ENGINE8_LOOKBACK_EVENTS: int = 40                  # Historical events to consider
+    ENGINE8_MAX_CONTROLLED_LOSS_PCT: float = 50.0      # Max % of entry credit loss for "controlled_loss"
+
     # --- Raven-Tech 2.0: Command Center & Flow Pressure ---
     ENABLE_COMMAND_CENTER: bool = True
     FLOW_PRESSURE_CACHE_TTL_S: int = 60           # in-memory TTL for flow pressure
@@ -404,6 +449,49 @@ class FeatureFlags:
             ENGINE5_US_IV_LOW_THRESHOLD=_get_float("ENGINE5_US_IV_LOW_THRESHOLD", 30.0),
             ENGINE5_US_IV_HIGH_THRESHOLD=_get_float("ENGINE5_US_IV_HIGH_THRESHOLD", 60.0),
             ENGINE5_VOL_ZSCORE_WINDOW=_get_int("ENGINE5_VOL_ZSCORE_WINDOW", 60),
+
+            # --- Engine 7 ---
+            ENABLE_ENGINE7_PAIRS=_get_bool("ENABLE_ENGINE7_PAIRS", False),
+            ENGINE7_CACHE_TTL_BARS=_get_int("ENGINE7_CACHE_TTL_BARS", 6 * 3600),
+            ENGINE7_CACHE_TTL_SCAN=_get_int("ENGINE7_CACHE_TTL_SCAN", 30 * 60),
+            ENGINE7_MAX_WORKERS=_get_int("ENGINE7_MAX_WORKERS", 8),
+            ENGINE7_MIN_SCORE_DEFAULT=_get_int("ENGINE7_MIN_SCORE_DEFAULT", 50),
+            ENGINE7_APLUS_THRESHOLD=_get_int("ENGINE7_APLUS_THRESHOLD", 75),
+            ENGINE7_Z_SCORE_WINDOW=_get_int("ENGINE7_Z_SCORE_WINDOW", 40),
+            ENGINE7_Z_ENTRY_THRESHOLD=_get_float("ENGINE7_Z_ENTRY_THRESHOLD", 1.5),
+            ENGINE7_Z_MOMENTUM_THRESHOLD=_get_float("ENGINE7_Z_MOMENTUM_THRESHOLD", 1.0),
+            ENGINE7_MAX_CONCURRENT_PAIRS=_get_int("ENGINE7_MAX_CONCURRENT_PAIRS", 5),
+            ENGINE7_THEME_REQUIRED=_get_bool("ENGINE7_THEME_REQUIRED", True),
+            ENGINE7_ENABLE_ORATS_VOL=_get_bool("ENGINE7_ENABLE_ORATS_VOL", False),
+            ENGINE7_ENABLE_LLM_ANNOTATION=_get_bool("ENGINE7_ENABLE_LLM_ANNOTATION", False),
+            ENGINE7_OVERLAP_CORR_THRESHOLD=_get_float("ENGINE7_OVERLAP_CORR_THRESHOLD", 0.70),
+            ENGINE7_OVERLAP_CORR_WINDOW=_get_int("ENGINE7_OVERLAP_CORR_WINDOW", 20),
+            GATE_PAIRS_REGIME_ALLOW=os.getenv("GATE_PAIRS_REGIME_ALLOW", ""),
+            GATE_PAIRS_VOL_STATE_ALLOW=os.getenv("GATE_PAIRS_VOL_STATE_ALLOW", ""),
+
+            # --- Engine 8 ---
+            ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", False),
+            ENGINE8_CACHE_TTL_EVAL=_get_int("ENGINE8_CACHE_TTL_EVAL", 30 * 60),
+            ENGINE8_SNAPSHOT_TTL_S=_get_int("ENGINE8_SNAPSHOT_TTL_S", 30 * 86400),
+            ENGINE8_LLM_RESULT_TTL_S=_get_int("ENGINE8_LLM_RESULT_TTL_S", 90 * 86400),
+            ENGINE8_MAX_WORKERS=_get_int("ENGINE8_MAX_WORKERS", 5),
+            ENGINE8_CONFIDENCE_THRESHOLD=_get_int("ENGINE8_CONFIDENCE_THRESHOLD", 65),
+            ENGINE8_CONTINUE_THRESHOLD=_get_int("ENGINE8_CONTINUE_THRESHOLD", 65),
+            ENGINE8_FADE_THRESHOLD=_get_int("ENGINE8_FADE_THRESHOLD", 70),
+            ENGINE8_MIN_HISTORICAL_SAMPLE=_get_int("ENGINE8_MIN_HISTORICAL_SAMPLE", 15),
+            ENGINE8_EM_RATIO_OVER=_get_float("ENGINE8_EM_RATIO_OVER", 1.20),
+            ENGINE8_EM_RATIO_EXTREME=_get_float("ENGINE8_EM_RATIO_EXTREME", 1.50),
+            ENGINE8_ATR_ELEVATED=_get_float("ENGINE8_ATR_ELEVATED", 1.50),
+            ENGINE8_ATR_EXTREME=_get_float("ENGINE8_ATR_EXTREME", 2.50),
+            ENGINE8_MAX_RISK_UNITS=_get_float("ENGINE8_MAX_RISK_UNITS", 1.5),
+            ENGINE8_MIN_RISK_UNITS=_get_float("ENGINE8_MIN_RISK_UNITS", 0.5),
+            ENGINE8_MAX_HOLDING_DAYS=_get_int("ENGINE8_MAX_HOLDING_DAYS", 5),
+            ENGINE8_CONTINUATION_PROB_MIN=_get_float("ENGINE8_CONTINUATION_PROB_MIN", 0.55),
+            ENGINE8_REVERSION_PROB_MIN=_get_float("ENGINE8_REVERSION_PROB_MIN", 0.55),
+            ENGINE8_ENABLE_LLM_CLASSIFY=_get_bool("ENGINE8_ENABLE_LLM_CLASSIFY", True),
+            ENGINE8_LLM_MODEL_VERSION=os.getenv("ENGINE8_LLM_MODEL_VERSION", "gpt-4o-2024-08-06"),
+            ENGINE8_LOOKBACK_EVENTS=_get_int("ENGINE8_LOOKBACK_EVENTS", 40),
+            ENGINE8_MAX_CONTROLLED_LOSS_PCT=_get_float("ENGINE8_MAX_CONTROLLED_LOSS_PCT", 50.0),
 
             # --- Raven-Tech 2.0 ---
             ENABLE_COMMAND_CENTER=_get_bool("ENABLE_COMMAND_CENTER", True),
@@ -600,6 +688,55 @@ class FeatureFlags:
             ("ENGINE5_US_IV_LOW_THRESHOLD", float(self.ENGINE5_US_IV_LOW_THRESHOLD)),
             ("ENGINE5_US_IV_HIGH_THRESHOLD", float(self.ENGINE5_US_IV_HIGH_THRESHOLD)),
             ("ENGINE5_VOL_ZSCORE_WINDOW", int(self.ENGINE5_VOL_ZSCORE_WINDOW)),
+        )
+
+    def cache_key_engine7(self) -> tuple:
+        """Engine 7 cache fingerprint (Thematic Relative Value / Pairs).
+
+        Excludes ENGINE7_ENABLE_LLM_ANNOTATION since LLM is annotation-only
+        and never affects deterministic scoring (INV-1).
+        """
+        return (
+            ("ENABLE_ENGINE7_PAIRS", bool(self.ENABLE_ENGINE7_PAIRS)),
+            ("ENGINE7_CACHE_TTL_BARS", int(self.ENGINE7_CACHE_TTL_BARS)),
+            ("ENGINE7_CACHE_TTL_SCAN", int(self.ENGINE7_CACHE_TTL_SCAN)),
+            ("ENGINE7_MAX_WORKERS", int(self.ENGINE7_MAX_WORKERS)),
+            ("ENGINE7_MIN_SCORE_DEFAULT", int(self.ENGINE7_MIN_SCORE_DEFAULT)),
+            ("ENGINE7_APLUS_THRESHOLD", int(self.ENGINE7_APLUS_THRESHOLD)),
+            ("ENGINE7_Z_SCORE_WINDOW", int(self.ENGINE7_Z_SCORE_WINDOW)),
+            ("ENGINE7_Z_ENTRY_THRESHOLD", float(self.ENGINE7_Z_ENTRY_THRESHOLD)),
+            ("ENGINE7_Z_MOMENTUM_THRESHOLD", float(self.ENGINE7_Z_MOMENTUM_THRESHOLD)),
+            ("ENGINE7_MAX_CONCURRENT_PAIRS", int(self.ENGINE7_MAX_CONCURRENT_PAIRS)),
+            ("ENGINE7_THEME_REQUIRED", bool(self.ENGINE7_THEME_REQUIRED)),
+            ("ENGINE7_ENABLE_ORATS_VOL", bool(self.ENGINE7_ENABLE_ORATS_VOL)),
+            ("ENGINE7_OVERLAP_CORR_THRESHOLD", float(self.ENGINE7_OVERLAP_CORR_THRESHOLD)),
+            ("ENGINE7_OVERLAP_CORR_WINDOW", int(self.ENGINE7_OVERLAP_CORR_WINDOW)),
+            ("GATE_PAIRS_REGIME_ALLOW", str(self.GATE_PAIRS_REGIME_ALLOW)),
+            ("GATE_PAIRS_VOL_STATE_ALLOW", str(self.GATE_PAIRS_VOL_STATE_ALLOW)),
+        )
+
+    def cache_key_engine8(self) -> tuple:
+        """Engine 8 cache fingerprint (Post-Event Trade Extension)."""
+        return (
+            ("ENABLE_ENGINE8_POST_EVENT", bool(self.ENABLE_ENGINE8_POST_EVENT)),
+            ("ENGINE8_CACHE_TTL_EVAL", int(self.ENGINE8_CACHE_TTL_EVAL)),
+            ("ENGINE8_CONFIDENCE_THRESHOLD", int(self.ENGINE8_CONFIDENCE_THRESHOLD)),
+            ("ENGINE8_CONTINUE_THRESHOLD", int(self.ENGINE8_CONTINUE_THRESHOLD)),
+            ("ENGINE8_FADE_THRESHOLD", int(self.ENGINE8_FADE_THRESHOLD)),
+            ("ENGINE8_MIN_HISTORICAL_SAMPLE", int(self.ENGINE8_MIN_HISTORICAL_SAMPLE)),
+            ("ENGINE8_EM_RATIO_OVER", float(self.ENGINE8_EM_RATIO_OVER)),
+            ("ENGINE8_EM_RATIO_EXTREME", float(self.ENGINE8_EM_RATIO_EXTREME)),
+            ("ENGINE8_ATR_ELEVATED", float(self.ENGINE8_ATR_ELEVATED)),
+            ("ENGINE8_ATR_EXTREME", float(self.ENGINE8_ATR_EXTREME)),
+            ("ENGINE8_MAX_RISK_UNITS", float(self.ENGINE8_MAX_RISK_UNITS)),
+            ("ENGINE8_MIN_RISK_UNITS", float(self.ENGINE8_MIN_RISK_UNITS)),
+            ("ENGINE8_MAX_HOLDING_DAYS", int(self.ENGINE8_MAX_HOLDING_DAYS)),
+            ("ENGINE8_CONTINUATION_PROB_MIN", float(self.ENGINE8_CONTINUATION_PROB_MIN)),
+            ("ENGINE8_REVERSION_PROB_MIN", float(self.ENGINE8_REVERSION_PROB_MIN)),
+            ("ENGINE8_ENABLE_LLM_CLASSIFY", bool(self.ENGINE8_ENABLE_LLM_CLASSIFY)),
+            ("ENGINE8_LLM_MODEL_VERSION", str(self.ENGINE8_LLM_MODEL_VERSION)),
+            ("ENGINE8_LOOKBACK_EVENTS", int(self.ENGINE8_LOOKBACK_EVENTS)),
+            ("ENGINE8_MAX_CONTROLLED_LOSS_PCT", float(self.ENGINE8_MAX_CONTROLLED_LOSS_PCT)),
         )
 
 
