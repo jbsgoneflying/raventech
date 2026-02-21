@@ -4763,6 +4763,357 @@ def engine8_row_playbook(body: dict):
         raise HTTPException(status_code=500, detail=f"LLM error: {e}") from e
 
 
+# ---------------------------------------------------------------------------
+# Engine 8.5 – Real-Time Activation Scanner (Post-Open GO / NO-GO)
+# ---------------------------------------------------------------------------
+
+def _compute_activation_metrics(
+    live_quote: dict,
+    phase_a: dict,
+    live_options_rows: list[dict] | None = None,
+) -> dict:
+    """Compute activation metrics from EODHD live quote + Phase A baseline.
+
+    live_quote: single row from EODHD get_live_quote() or get_us_quote_delayed()
+    phase_a:    the cached Phase A engine8/evaluate response
+    live_options_rows: raw ORATS live_strikes rows (optional, for IV crush)
+    """
+    e1 = phase_a.get("engine1", {})
+    cur = e1.get("current", {})
+    em = e1.get("expectedMove", {})
+
+    prev_close = (
+        live_quote.get("previousClosePrice")
+        or live_quote.get("previousClose")
+        or live_quote.get("close")
+        or cur.get("stockPrice")
+    )
+    last_price = (
+        live_quote.get("lastTradePrice")
+        or live_quote.get("close")
+        or 0
+    )
+    session_open = live_quote.get("open") or last_price
+    session_high = live_quote.get("high") or last_price
+    session_low = live_quote.get("low") or last_price
+    session_volume = live_quote.get("volume") or 0
+    avg_volume = live_quote.get("averageVolume") or 0
+
+    prev_close = float(prev_close) if prev_close else 0
+    last_price = float(last_price)
+    session_open = float(session_open)
+    session_high = float(session_high)
+    session_low = float(session_low)
+    session_volume = float(session_volume)
+    avg_volume = float(avg_volume)
+
+    em_pct = float(
+        cur.get("impliedMovePct")
+        or cur.get("delayedImpliedMovePct")
+        or em.get("expectedMovePct")
+        or 0
+    )
+
+    live_gap_pct = ((session_open - prev_close) / prev_close * 100) if prev_close else 0
+    gap_direction = "UP" if live_gap_pct > 0 else "DOWN"
+    gap_vs_em = (abs(live_gap_pct) / em_pct) if em_pct else 0
+
+    if abs(live_gap_pct) < 0.05:
+        magnitude_bucket = "flat"
+    elif gap_vs_em < 1.0:
+        magnitude_bucket = "contained"
+    elif gap_vs_em < 1.5:
+        magnitude_bucket = "extended"
+    else:
+        magnitude_bucket = "extreme"
+
+    gap_size = session_open - prev_close
+    retracement_pct = 0.0
+    if abs(gap_size) > 0.001:
+        if gap_direction == "UP":
+            retracement_pct = (session_open - last_price) / gap_size
+        else:
+            retracement_pct = (last_price - session_open) / abs(gap_size)
+    retracement_pct = max(0.0, min(retracement_pct, 2.0))
+
+    if retracement_pct < 0.30:
+        structure_read = "HOLD"
+    elif retracement_pct > 0.50:
+        structure_read = "FADE"
+    else:
+        structure_read = "STALL"
+
+    if avg_volume > 0:
+        vol_ratio = session_volume / avg_volume
+        if vol_ratio > 0.50:
+            volume_read = "HIGH"
+        elif vol_ratio < 0.20:
+            volume_read = "LOW"
+        else:
+            volume_read = "NORMAL"
+    else:
+        vol_ratio = 0
+        volume_read = "UNKNOWN"
+
+    # IV crush from live options (best-effort)
+    iv_crush_pct = None
+    pre_iv = cur.get("impErnMv") or cur.get("impliedMovePct")
+    if live_options_rows and pre_iv:
+        spot = last_price
+        atm_rows = sorted(
+            [r for r in live_options_rows if r.get("strike") and r.get("callMidIv")],
+            key=lambda r: abs(float(r.get("strike", 0)) - spot),
+        )
+        if atm_rows:
+            live_atm_iv = float(atm_rows[0].get("callMidIv") or atm_rows[0].get("putMidIv") or 0)
+            if live_atm_iv > 0 and float(pre_iv) > 0:
+                iv_crush_pct = round((live_atm_iv - float(pre_iv)) / float(pre_iv) * 100, 1)
+
+    # Options flow proxy (near-ATM put/call volume)
+    options_flow = None
+    if live_options_rows:
+        near_atm = [
+            r for r in live_options_rows
+            if r.get("strike") and abs(float(r.get("strike", 0)) - last_price) / max(last_price, 1) < 0.05
+        ]
+        total_call_vol = sum(float(r.get("callVolume", 0)) for r in near_atm)
+        total_put_vol = sum(float(r.get("putVolume", 0)) for r in near_atm)
+        pc_ratio = (total_put_vol / total_call_vol) if total_call_vol > 0 else None
+        options_flow = {
+            "nearAtmCallVolume": int(total_call_vol),
+            "nearAtmPutVolume": int(total_put_vol),
+            "putCallRatio": round(pc_ratio, 2) if pc_ratio is not None else None,
+        }
+
+    return {
+        "last_price": round(last_price, 2),
+        "prev_close": round(prev_close, 2),
+        "session_open": round(session_open, 2),
+        "session_high": round(session_high, 2),
+        "session_low": round(session_low, 2),
+        "session_volume": int(session_volume),
+        "avg_volume": int(avg_volume),
+        "volume_ratio": round(vol_ratio, 2),
+        "volume_read": volume_read,
+        "live_gap_pct": round(live_gap_pct, 2),
+        "gap_direction": gap_direction,
+        "gap_vs_em": round(gap_vs_em, 2),
+        "magnitude_bucket": magnitude_bucket,
+        "em_pct": round(em_pct, 2),
+        "retracement_pct": round(retracement_pct * 100, 1),
+        "structure_read": structure_read,
+        "iv_crush_pct": iv_crush_pct,
+        "options_flow": options_flow,
+    }
+
+
+def _match_playbook_scenario(metrics: dict, scenarios: list[dict]) -> dict | None:
+    """Find the playbook scenario row that best matches the live gap."""
+    if not scenarios:
+        return None
+    direction = metrics["gap_direction"]
+    bucket = metrics["magnitude_bucket"]
+
+    # Try exact match first (magnitude + direction + HOLD/FADE based on structure)
+    structure = metrics["structure_read"]
+    for s in scenarios:
+        s_mag = (s.get("magnitude") or "").lower()
+        s_dir = (s.get("direction") or "").upper()
+        s_struct = (s.get("structure") or "").upper()
+        if s_mag == bucket and s_dir == direction and s_struct == structure:
+            return s
+
+    # Relax structure constraint
+    for s in scenarios:
+        s_mag = (s.get("magnitude") or "").lower()
+        s_dir = (s.get("direction") or "").upper()
+        if s_mag == bucket and s_dir == direction:
+            return s
+
+    # Relax direction -- just match magnitude
+    for s in scenarios:
+        s_mag = (s.get("magnitude") or "").lower()
+        if s_mag == bucket:
+            return s
+
+    return scenarios[0] if scenarios else None
+
+
+_E8_ACTIVATION_SYSTEM = """You are a senior quant on a systematic desk issuing a real-time GO / NO-GO activation call for a post-earnings stock trade. This is NOT an options trade — the desk will BUY shares, SHORT shares, or PASS entirely.
+
+Context: The desk ran Engine 8 pre-earnings and built a scenario playbook. Earnings have now reported. The market has been open for ~30 minutes. You are reading live market data at T+30 min and deciding whether the pre-planned trade activates.
+
+You will receive a JSON payload with:
+- activation_metrics: real-time data from EODHD (last_price, session_open/high/low, volume, previous close, gap %, structure read, volume read)
+- matched_scenario: the pre-planned playbook row that matches the current gap (continuation rates, drift, action, confidence)
+- phase_a_context: pre-earnings baseline (breach rates, expected move, stock price, thresholds, strike targets for reference)
+- dealer_flow: real-time dealer gamma positioning for ticker and SPX (net gamma sign, walls, tail ignition)
+- playbook_quick_ref: the quick-reference bullet points from the playbook
+
+Write an activation note in this exact JSON structure:
+
+{
+  "activation": "GO or NO-GO or WAIT",
+  "action": "BUY or SHORT or PASS",
+  "conviction": "HIGH or MEDIUM or LOW",
+  "live_read": {
+    "gap": "One line: gap % vs EM, direction, magnitude bucket. Use actual numbers.",
+    "structure": "One line: is the gap holding, fading, or stalling? Reference session_open vs last_price vs high/low. Use actual prices.",
+    "volume": "One line: session volume vs average, what it means for information content.",
+    "iv_crush": "One line: IV crush magnitude if available, what it means for premium sellers.",
+    "gamma": "One line: dealer gamma read — is hedging flow amplifying or dampening? Reference walls."
+  },
+  "trade_ticket": {
+    "action": "BUY [N] shares at $X.XX or SHORT [N] shares at $X.XX — be specific with the current price.",
+    "stop_loss": "Hard stop price level and the logic behind it (EM threshold, session low, etc.).",
+    "profit_target": "Target price or % and hold period. Reference historical drift from matched scenario.",
+    "position_size": "Risk units or % of book. Scale to conviction and stop distance."
+  },
+  "desk_note": "3-4 sentences maximum. Senior quant voice. Be direct about why this is a GO or NO-GO. Reference the specific data — gap holding at X%, volume is Y% of daily, Z/N historical events continued. If PASS, say why clearly."
+}
+
+Rules:
+- This is a STOCK trade only. BUY shares or SHORT shares. No options, no spreads, no iron condors.
+- BUY when: gap UP + HOLD structure + volume confirms + historical continuation supports it.
+- SHORT when: gap DOWN + HOLD structure + volume confirms + historical continuation supports it (follow the gap direction, not fade it).
+- PASS when: structure is FADE or STALL, volume is LOW, historical edge is weak, or conviction is too low.
+- For FADE structure: default to PASS unless historical reversion rate is very high (>70%) AND volume confirms. Even then, conviction should be LOW.
+- WAIT when: structure is ambiguous (STALL) but metrics lean toward a trade — suggest checking again in 15-30 min.
+- Reference ACTUAL numbers from activation_metrics. Don't make up prices or percentages.
+- Keep each field concise. The desk_note is the most important field — make it count.
+- If dealer gamma is negative (amplifies), that SUPPORTS continuation trades. If positive (dampens), note it as headwind.
+- Output valid JSON only."""
+
+
+@app.post("/api/engine8/activation-scan")
+def engine8_activation_scan(body: dict):
+    """Engine 8.5: Real-time post-open activation scanner.
+
+    Request body: {
+      "ticker": "AAPL",
+      "earnings_date": "2026-02-20",
+      "timing": "AMC",
+      "phase_a": { ... cached Phase A response from engine8/evaluate ... }
+    }
+    """
+    ticker = (body.get("ticker") or "").strip().upper()
+    phase_a = body.get("phase_a") or {}
+    if not ticker:
+        raise HTTPException(status_code=400, detail="Missing 'ticker'")
+    if not phase_a.get("engine1"):
+        raise HTTPException(status_code=400, detail="Missing 'phase_a' with engine1 data — run Engine 8 pre-earnings first")
+
+    try:
+        from backend.llm_client import _get_openai_client, _parse_desk_brief_json
+
+        llm_client = _get_openai_client()
+        if llm_client is None:
+            raise HTTPException(status_code=503, detail="OpenAI client unavailable — set OPENAI_API_KEY")
+
+        # 1. Fetch live stock quote from EODHD
+        live_quote: dict = {}
+        try:
+            from backend.eodhd_client import EodhdClient
+            eodhd = EodhdClient.from_env()
+            eodhd_symbol = f"{ticker}.US"
+            us_resp = eodhd.get_us_quote_delayed(eodhd_symbol)
+            if us_resp.rows:
+                live_quote = us_resp.rows[0]
+            else:
+                simple_resp = eodhd.get_live_quote(eodhd_symbol)
+                if simple_resp.rows:
+                    live_quote = simple_resp.rows[0]
+        except Exception as eq_err:
+            LOG.warning("EODHD live quote failed for %s: %s", ticker, eq_err)
+
+        if not live_quote.get("lastTradePrice") and not live_quote.get("close"):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not fetch live quote for {ticker} — market may be closed or EODHD unavailable",
+            )
+
+        # 2. Fetch live options chain from ORATS (for IV crush + flow)
+        live_options_rows: list[dict] = []
+        orats = _get_client_optional()
+        if orats:
+            try:
+                resp = orats.live_strikes(
+                    ticker=ticker,
+                    fields="strike,callMidIv,putMidIv,callVolume,putVolume,callOpenInterest,putOpenInterest,gamma,spotPrice,stockPrice",
+                )
+                live_options_rows = resp.rows if resp and getattr(resp, "rows", None) else []
+            except Exception as orats_err:
+                LOG.warning("ORATS live_strikes failed for %s: %s", ticker, orats_err)
+
+        # 3. Compute activation metrics
+        metrics = _compute_activation_metrics(live_quote, phase_a, live_options_rows or None)
+
+        # 4. Match playbook scenario
+        pb = phase_a.get("playbook", {})
+        scenarios = pb.get("scenarios", [])
+        matched = _match_playbook_scenario(metrics, scenarios)
+
+        # 5. Fetch dealer gamma (reuse existing helper)
+        gamma_context: dict = {}
+        if orats:
+            ticker_gamma = _fetch_dealer_gamma_summary(orats, ticker)
+            if ticker_gamma:
+                gamma_context["ticker_gamma"] = ticker_gamma
+            spx_gamma = _fetch_dealer_gamma_summary(orats, "SPX")
+            if spx_gamma:
+                gamma_context["spx_gamma"] = spx_gamma
+
+        # 6. Build LLM payload
+        e1 = phase_a.get("engine1", {})
+        import json as _json
+        payload = {
+            "activation_metrics": metrics,
+            "matched_scenario": matched,
+            "phase_a_context": {
+                "ticker": ticker,
+                "em_pct": metrics["em_pct"],
+                "pre_stock_price": metrics["prev_close"],
+                "breach_stats": e1.get("summary", {}),
+                "thresholds": pb.get("thresholds", {}),
+                "hold_risk": e1.get("holdRisk", {}),
+            },
+            "dealer_flow": gamma_context if gamma_context else None,
+            "playbook_quick_ref": pb.get("quick_reference", []),
+        }
+
+        payload_str = _json.dumps(payload, default=str)
+        if len(payload_str) > 20000:
+            payload_str = payload_str[:20000]
+
+        # 7. Call GPT-5.2
+        resp = llm_client.chat.completions.create(
+            model="gpt-5.2",
+            messages=[
+                {"role": "system", "content": _E8_ACTIVATION_SYSTEM},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=0.25,
+            max_completion_tokens=1500,
+            timeout=60,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or ""
+        parsed = _parse_desk_brief_json(content)
+        if parsed is None:
+            raise HTTPException(status_code=502, detail="LLM returned unparseable response")
+
+        parsed["_source"] = "gpt-5.2"
+        parsed["_metrics"] = metrics
+        parsed["_matched_scenario_key"] = (matched or {}).get("key", "")
+        return parsed
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Engine 8.5 activation-scan failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Activation scan error: {e}") from e
+
+
 @app.post("/api/front-layer/asset-insight")
 def api_front_layer_asset_insight(body: dict):
     """Generate a desk-level LLM insight for a single cross-asset stress reading.

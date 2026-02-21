@@ -473,6 +473,17 @@
             </button>
             <div id="pbDeskNotesPanel" class="pbDeskNotesPanel" style="display:none;"></div>
           </div>
+
+          <!-- Activation Scanner (Engine 8.5) -->
+          <div id="activationScanWrap" style="margin-top:12px; display:none;">
+            <div style="border-top:1px solid rgba(255,255,255,.06); padding-top:14px;">
+              <div style="font-size:10px; font-weight:700; color:rgba(0,122,255,0.55); text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;">Earnings Day · T+30 min Post-Open</div>
+              <button type="button" id="activationScanBtn" class="pbDeskNotesBtn" style="background:rgba(52,199,89,0.10); border-color:rgba(52,199,89,0.25);">
+                <span id="activationScanBtnText">Run Activation Scanner</span>
+              </button>
+              <div style="margin-top:4px; font-size:10px; color:var(--muted);">Fetches live price, volume, and options data to issue a stock-only GO / NO-GO call.</div>
+            </div>
+          </div>
         </section>
 
         <section class="surface">
@@ -818,9 +829,9 @@
       </section>
     </main>
 
-    <!-- Desk Insight Popup -->
+    <!-- Activation Scanner Popup (Engine 8.5) -->
     <style>
-      .e8InsightPopup{position:fixed;z-index:10000;width:440px;max-height:80vh;overflow-y:auto;border-radius:16px;background:rgba(28,28,30,.98);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08) inset;user-select:none;transition:opacity .15s ease;color:#fff;display:none}
+      .e8InsightPopup{position:fixed;z-index:10000;width:480px;max-height:85vh;overflow-y:auto;border-radius:16px;background:rgba(28,28,30,.98);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08) inset;user-select:none;transition:opacity .15s ease;color:#fff;display:none}
       .e8InsightPopup.isDragging{cursor:grabbing;transition:none}
       .e8InsightHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.08);cursor:grab}
       .e8InsightTitle{font-size:14px;font-weight:700;line-height:1.3;color:#fff;flex:1}
@@ -831,10 +842,30 @@
       .e8InsightSectionTitle{font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
       .e8InsightText{font-size:12px;font-weight:500;line-height:1.5;color:rgba(255,255,255,.88)}
       .e8InsightLoading{text-align:center;padding:32px 16px;color:rgba(255,255,255,.6);font-size:12px}
+      .actBadge{display:inline-block;padding:5px 14px;border-radius:8px;font-size:13px;font-weight:800;letter-spacing:.04em}
+      .actBadge.go{background:rgba(52,199,89,0.15);border:1px solid rgba(52,199,89,0.35);color:rgba(52,199,89,0.95)}
+      .actBadge.no-go{background:rgba(255,59,48,0.15);border:1px solid rgba(255,59,48,0.35);color:rgba(255,59,48,0.95)}
+      .actBadge.wait{background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.35);color:rgba(255,204,0,0.95)}
+      .actBadge.buy{background:rgba(52,199,89,0.12);color:rgba(52,199,89,0.9)}
+      .actBadge.short{background:rgba(255,59,48,0.12);color:rgba(255,59,48,0.9)}
+      .actBadge.pass{background:rgba(142,142,147,0.12);color:rgba(142,142,147,0.9)}
+      .actConvBadge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;margin-left:8px}
+      .actConvBadge.high{background:rgba(52,199,89,0.10);color:rgba(52,199,89,0.8)}
+      .actConvBadge.medium{background:rgba(255,204,0,0.10);color:rgba(255,204,0,0.8)}
+      .actConvBadge.low{background:rgba(142,142,147,0.10);color:rgba(142,142,147,0.8)}
+      .actMetricBar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+      .actMetricItem{background:rgba(255,255,255,.04);border-radius:8px;padding:8px 10px;text-align:center}
+      .actMetricLabel{font-size:9px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+      .actMetricVal{font-size:15px;font-weight:700;color:#fff}
+      .actMetricSub{font-size:9px;color:rgba(255,255,255,.45);margin-top:1px}
+      .actTicketGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin:8px 0}
+      .actTicketItem .actTicketLabel{font-size:9px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+      .actTicketItem .actTicketVal{font-size:11px;font-weight:500;color:rgba(255,255,255,.88);line-height:1.4;word-wrap:break-word}
+      @media(max-width:560px){.e8InsightPopup{width:calc(100vw - 24px);left:12px!important;right:12px!important} .actMetricBar{grid-template-columns:repeat(2,1fr)} .actTicketGrid{grid-template-columns:1fr}}
     </style>
     <div class="e8InsightPopup" id="e8InsightPopup">
       <div class="e8InsightHeader" id="e8InsightHeader">
-        <span class="e8InsightTitle" id="e8InsightTitle">Desk Insight</span>
+        <span class="e8InsightTitle" id="e8InsightTitle">Activation Scanner</span>
         <button class="e8InsightClose" id="e8InsightClose" type="button">&times;</button>
       </div>
       <div class="e8InsightBody" id="e8InsightBody">
@@ -843,7 +874,7 @@
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/post-event.js?v=14"></script>
+    <script src="/static/post-event.js?v=15"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

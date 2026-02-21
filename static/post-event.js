@@ -17,6 +17,8 @@
   var _deskNotesCache = {};
   var _rowPlaybookCache = {};
   var _rowPlaybookAbort = null;
+  var _activationAbort = null;
+  var _activationCache = null;
   function fmt(v, d) { return v == null ? "—" : Number(v).toFixed(d == null ? 2 : d); }
   function pct(v) { return v == null ? "—" : (Number(v) * 100).toFixed(1) + "%"; }
 
@@ -116,7 +118,18 @@
 
     /* Playbook */
     _lastPhaseAData = data;
+    _activationCache = null;
     renderPlaybook(data.playbook);
+
+    /* Show Activation Scanner button if playbook has scenarios */
+    var actWrap = qs("activationScanWrap");
+    if (data.playbook && data.playbook.scenarios && data.playbook.scenarios.length > 0) {
+      actWrap.style.display = "";
+      qs("activationScanBtn").disabled = false;
+      qs("activationScanBtnText").textContent = "Run Activation Scanner";
+    } else {
+      actWrap.style.display = "none";
+    }
   }
 
   /* ── Playbook Renderer ────────────────────────────────────────────── */
@@ -645,6 +658,180 @@
         qs("pbDeskNotesPanel").style.display = "";
         btn.disabled = false;
         btnText.textContent = "Retry Playbook Brief";
+      })
+      .finally(function () {
+        clearInterval(dotInterval);
+      });
+  });
+
+  /* ── Activation Scanner (Engine 8.5) ──────────────────────────────── */
+
+  function renderActivationPopup(data) {
+    var popup = qs("e8InsightPopup");
+    var body = qs("e8InsightBody");
+
+    var activation = (data.activation || "NO-GO").toUpperCase();
+    var action = (data.action || "PASS").toUpperCase();
+    var conviction = (data.conviction || "LOW").toUpperCase();
+    var m = data._metrics || {};
+
+    var actClass = activation === "GO" ? "go" : activation === "WAIT" ? "wait" : "no-go";
+    var actionClass = action === "BUY" ? "buy" : action === "SHORT" ? "short" : "pass";
+    var convClass = conviction === "HIGH" ? "high" : conviction === "MEDIUM" ? "medium" : "low";
+
+    var html = '';
+
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">';
+    html += '<span class="actBadge ' + actClass + '">' + escHtml(activation) + '</span>';
+    html += '<span class="actBadge ' + actionClass + '" style="font-size:12px;padding:4px 12px;">' + escHtml(action) + '</span>';
+    html += '<span class="actConvBadge ' + convClass + '">' + escHtml(conviction) + ' conviction</span>';
+    html += '</div>';
+
+    html += '<div class="actMetricBar">';
+    html += '<div class="actMetricItem"><div class="actMetricLabel">Gap</div><div class="actMetricVal">' + (m.live_gap_pct != null ? (m.live_gap_pct > 0 ? "+" : "") + fmt(m.live_gap_pct) + "%" : "—") + '</div><div class="actMetricSub">' + escHtml((m.gap_vs_em != null ? fmt(m.gap_vs_em) + "x EM" : "") + " " + (m.gap_direction || "")) + '</div></div>';
+    html += '<div class="actMetricItem"><div class="actMetricLabel">Structure</div><div class="actMetricVal">' + escHtml(m.structure_read || "—") + '</div><div class="actMetricSub">' + (m.retracement_pct != null ? fmt(m.retracement_pct, 0) + "% retrace" : "") + '</div></div>';
+    html += '<div class="actMetricItem"><div class="actMetricLabel">Volume</div><div class="actMetricVal">' + escHtml(m.volume_read || "—") + '</div><div class="actMetricSub">' + (m.volume_ratio != null ? fmt(m.volume_ratio) + "x avg" : "") + '</div></div>';
+    html += '<div class="actMetricItem"><div class="actMetricLabel">Price</div><div class="actMetricVal">$' + fmt(m.last_price) + '</div><div class="actMetricSub">open $' + fmt(m.session_open) + '</div></div>';
+    html += '</div>';
+
+    var lr = data.live_read || {};
+    var lrKeys = ["gap", "structure", "volume", "iv_crush", "gamma"];
+    var lrHas = false;
+    for (var k = 0; k < lrKeys.length; k++) { if (lr[lrKeys[k]]) { lrHas = true; break; } }
+    if (lrHas) {
+      html += '<div class="e8InsightSection">';
+      html += '<div class="e8InsightSectionTitle">Live Read</div>';
+      for (var k = 0; k < lrKeys.length; k++) {
+        var lbl = lrKeys[k].replace(/_/g, " ");
+        lbl = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+        if (lr[lrKeys[k]]) {
+          html += '<div style="margin-bottom:6px;"><span style="font-size:10px;font-weight:700;color:rgba(255,255,255,.45);text-transform:uppercase;">' + escHtml(lbl) + '</span><div class="e8InsightText">' + escHtml(lr[lrKeys[k]]) + '</div></div>';
+        }
+      }
+      html += '</div>';
+    }
+
+    var tt = data.trade_ticket || {};
+    var ttKeys = Object.keys(tt);
+    if (ttKeys.length > 0) {
+      html += '<div class="e8InsightSection">';
+      html += '<div class="e8InsightSectionTitle">Trade Ticket</div>';
+      html += '<div class="actTicketGrid">';
+      for (var t = 0; t < ttKeys.length; t++) {
+        var ttLabel = ttKeys[t].replace(/_/g, " ");
+        ttLabel = ttLabel.charAt(0).toUpperCase() + ttLabel.slice(1);
+        html += '<div class="actTicketItem"><div class="actTicketLabel">' + escHtml(ttLabel) + '</div><div class="actTicketVal">' + escHtml(tt[ttKeys[t]]) + '</div></div>';
+      }
+      html += '</div></div>';
+    }
+
+    if (data.desk_note) {
+      html += '<div class="e8InsightSection">';
+      html += '<div class="e8InsightSectionTitle">Desk Note</div>';
+      html += '<div class="e8InsightText" style="font-style:italic;color:rgba(255,255,255,.75);">' + escHtml(data.desk_note) + '</div>';
+      html += '</div>';
+    }
+
+    if (data._source) {
+      html += '<div style="margin-top:12px;font-size:9px;color:rgba(255,255,255,.3);text-align:right;">Generated by ' + escHtml(data._source) + ' · Engine 8.5 Activation Scanner</div>';
+    }
+
+    body.innerHTML = html;
+    qs("e8InsightTitle").textContent = "Activation Scanner — " + ((_lastPhaseAData || {}).ticker || "").toUpperCase();
+
+    popup.style.display = "block";
+    popup.style.top = "80px";
+    popup.style.right = "24px";
+    popup.style.left = "auto";
+  }
+
+  function initPopupDrag() {
+    var popup = qs("e8InsightPopup");
+    var header = qs("e8InsightHeader");
+    var dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+
+    header.addEventListener("mousedown", function (e) {
+      if (e.target.closest(".e8InsightClose")) return;
+      dragging = true;
+      popup.classList.add("isDragging");
+      var rect = popup.getBoundingClientRect();
+      startX = e.clientX; startY = e.clientY;
+      origX = rect.left; origY = rect.top;
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      var dx = e.clientX - startX, dy = e.clientY - startY;
+      popup.style.left = (origX + dx) + "px";
+      popup.style.top = (origY + dy) + "px";
+      popup.style.right = "auto";
+    });
+    document.addEventListener("mouseup", function () {
+      if (dragging) { dragging = false; popup.classList.remove("isDragging"); }
+    });
+
+    qs("e8InsightClose").addEventListener("click", function () {
+      popup.style.display = "none";
+    });
+  }
+  initPopupDrag();
+
+  qs("activationScanBtn").addEventListener("click", function () {
+    if (!_lastPhaseAData) return;
+
+    var ticker = (_lastPhaseAData.ticker || "").toUpperCase();
+    if (!ticker) return;
+
+    _activationCache = null;
+
+    var btn = qs("activationScanBtn");
+    var btnText = qs("activationScanBtnText");
+    btn.disabled = true;
+    btnText.textContent = "Scanning live market data\u2026";
+
+    var dotCount = 0;
+    var dotInterval = setInterval(function () {
+      dotCount = (dotCount + 1) % 4;
+      btnText.textContent = "Scanning live market data" + ".".repeat(dotCount);
+    }, 400);
+
+    if (_activationAbort) _activationAbort.abort();
+    _activationAbort = new AbortController();
+
+    var payload = {
+      ticker: ticker,
+      earnings_date: _lastPhaseAData.earnings_date || "",
+      timing: _lastPhaseAData.timing || "",
+      phase_a: _lastPhaseAData,
+    };
+
+    fetch("/api/engine8/activation-scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: _activationAbort.signal,
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || r.statusText); });
+        return r.json();
+      })
+      .then(function (data) {
+        _activationCache = data;
+        renderActivationPopup(data);
+        btn.disabled = false;
+        btnText.textContent = "Re-scan (refresh live data)";
+      })
+      .catch(function (err) {
+        if (err.name === "AbortError") return;
+        var popup = qs("e8InsightPopup");
+        qs("e8InsightTitle").textContent = "Activation Scanner — Error";
+        qs("e8InsightBody").innerHTML = '<div style="color:rgba(255,59,48,0.8);font-size:13px;padding:16px;">Error: ' + escHtml(err.message) + '</div>';
+        popup.style.display = "block";
+        popup.style.top = "80px";
+        popup.style.right = "24px";
+        popup.style.left = "auto";
+        btn.disabled = false;
+        btnText.textContent = "Retry Activation Scanner";
       })
       .finally(function () {
         clearInterval(dotInterval);

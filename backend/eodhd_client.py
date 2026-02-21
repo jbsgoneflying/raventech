@@ -108,6 +108,7 @@ class EodhdClient:
 
     Covers:
     - End-of-day historical prices (equities, indices, FX, commodities, bonds)
+    - Live / delayed stock quotes (real-time OHLCV + extended US quotes)
     - US Treasury yield/bill/long-term rate endpoints
     - Macro indicator endpoint
     """
@@ -119,6 +120,8 @@ class EodhdClient:
         timeout_s: float = 30.0,
         cache_ttl_s: int = 6 * 60 * 60,
         cache_maxsize: int = 5_000,
+        live_cache_ttl_s: int = 30,
+        live_cache_maxsize: int = 500,
     ) -> None:
         self._log = logging.getLogger(self.__class__.__name__)
         self._token = token
@@ -126,6 +129,8 @@ class EodhdClient:
         self._timeout_s = timeout_s
         self._cache = TTLCache(maxsize=cache_maxsize, ttl=cache_ttl_s)
         self._cache_lock = threading.Lock()
+        self._live_cache = TTLCache(maxsize=live_cache_maxsize, ttl=live_cache_ttl_s)
+        self._live_cache_lock = threading.Lock()
 
     @classmethod
     def from_env(cls) -> "EodhdClient":
@@ -146,6 +151,14 @@ class EodhdClient:
     def _cache_set(self, key: Tuple[Any, ...], value: EodhdResponse) -> None:
         with self._cache_lock:
             self._cache[key] = value
+
+    def _live_cache_get(self, key: Tuple[Any, ...]) -> Optional[EodhdResponse]:
+        with self._live_cache_lock:
+            return self._live_cache.get(key)
+
+    def _live_cache_set(self, key: Tuple[Any, ...], value: EodhdResponse) -> None:
+        with self._live_cache_lock:
+            self._live_cache[key] = value
 
     # -- generic GET with retry + rate-limit handling ------------------------
 
@@ -211,6 +224,99 @@ class EodhdClient:
             # Single-object response
             return [data]
         return []
+
+    # -- live GET with short-TTL cache ---------------------------------------
+
+    def _get_live(self, url: str, params: Dict[str, Any]) -> EodhdResponse:
+        """GET with short-TTL live cache (30s) for real-time / delayed quotes."""
+        key = ("GET_LIVE", url, tuple(sorted((k, str(v)) for k, v in params.items() if k != "api_token")))
+        cached = self._live_cache_get(key)
+        if cached is not None:
+            return cached
+
+        q = dict(params)
+        q["api_token"] = self._token
+
+        last_err: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                status, headers, body = _http_get(url, q, self._timeout_s)
+            except Exception as exc:
+                last_err = exc
+                time.sleep(min(2.0 * attempt, 8.0))
+                continue
+
+            if status == 429:
+                retry_after = headers.get("Retry-After")
+                sleep_s = float(retry_after) if retry_after else min(2.0 * attempt, 8.0)
+                self._log.warning("EODHD 429 rate-limited (live); sleeping %.1fs (attempt %d/3)", sleep_s, attempt)
+                time.sleep(sleep_s)
+                continue
+
+            if status in (401, 403):
+                snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                raise EodhdError(f"EODHD auth error {status}: {snippet}")
+
+            if status >= 400:
+                snippet = (body.decode("utf-8", errors="ignore") or "")[:500]
+                raise EodhdError(f"EODHD error {status} for {url}: {snippet}")
+
+            data = json.loads(body.decode("utf-8") or "[]")
+            rows = self._normalize_rows(data)
+            out = EodhdResponse(rows=rows, raw=data)
+            self._live_cache_set(key, out)
+            return out
+
+        if last_err:
+            raise EodhdError(f"EODHD live request failed after 3 attempts: {last_err}") from last_err
+        raise EodhdError("EODHD live request failed after 3 attempts (unknown)")
+
+    # -----------------------------------------------------------------------
+    # Public API: Live / Delayed Stock Quotes
+    # -----------------------------------------------------------------------
+
+    def get_live_quote(
+        self,
+        symbol: str,
+        *,
+        extra_symbols: Optional[str] = None,
+    ) -> EodhdResponse:
+        """Live (delayed) OHLCV snapshot for one or more tickers.
+
+        GET /api/real-time/{SYMBOL}?s=SYM2,SYM3&fmt=json
+        Returns: code, timestamp, gmtoffset, open, high, low, close, volume,
+                 previousClose, change, change_p
+        Delay: 15-20 min for stocks, ~1 min for FX.
+        Cost: 1 API call per ticker.
+        """
+        url = f"{self._base_url}/real-time/{symbol}"
+        params: Dict[str, Any] = {"fmt": "json"}
+        if extra_symbols:
+            params["s"] = extra_symbols
+        return self._get_live(url, params)
+
+    def get_us_quote_delayed(
+        self,
+        symbols: str,
+    ) -> EodhdResponse:
+        """Extended delayed quote for US equities with bid/ask, volume, MAs.
+
+        GET /api/us-quote-delayed?s=AAPL.US,TSLA.US&fmt=json
+        Returns per symbol: lastTradePrice, bidPrice/Size, askPrice/Size,
+        open, high, low, volume, previousClosePrice, change, changePercent,
+        fiftyDayAveragePrice, twoHundredDayAveragePrice, averageVolume,
+        fiftyTwoWeekHigh, fiftyTwoWeekLow, marketCap, pe, etc.
+        Cost: 1 API call per ticker.
+        """
+        url = f"{self._base_url}/us-quote-delayed"
+        params: Dict[str, Any] = {"fmt": "json", "s": symbols}
+        resp = self._get_live(url, params)
+        raw = resp.raw
+        if isinstance(raw, dict) and "data" in raw:
+            data_obj = raw["data"]
+            if isinstance(data_obj, dict):
+                return EodhdResponse(rows=list(data_obj.values()), raw=raw)
+        return resp
 
     # -----------------------------------------------------------------------
     # Public API: EOD Historical Prices
