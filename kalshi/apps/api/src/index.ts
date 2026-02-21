@@ -126,9 +126,18 @@ async function main() {
   app.use(cors());
   app.use(express.json());
 
-  // Health check
+  // Health check (includes memory stats for monitoring)
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", ...getIngestionStats() });
+    const mem = process.memoryUsage();
+    res.json({
+      status: "ok",
+      ...getIngestionStats(),
+      memory: {
+        rss_mb: Math.round(mem.rss / 1024 / 1024),
+        heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+        heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
+      },
+    });
   });
 
   // API routes
@@ -166,10 +175,18 @@ async function main() {
     }
   }, 5_000);
 
-  // 6. Periodic metrics logging
+  // 6. Periodic metrics logging (with memory tracking)
   const metricsInterval = setInterval(() => {
     const stats = getIngestionStats();
-    logger.info(stats, "Ingestion metrics");
+    const mem = process.memoryUsage();
+    logger.info({
+      ...stats,
+      memory: {
+        rss_mb: Math.round(mem.rss / 1024 / 1024),
+        heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+        heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
+      },
+    }, "Ingestion metrics");
   }, 60_000);
 
   // ─── Graceful shutdown ─────────────────────────────────────

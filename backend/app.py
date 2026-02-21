@@ -2443,18 +2443,103 @@ def engine7_nightly_review(
 
 @app.get("/api/engine7-pairs/dynamic-themes")
 def engine7_dynamic_themes():
-    """Engine 7: View current dynamic themes (active + pending)."""
+    """Engine 7: View current dynamic themes (active + pending) and review status."""
     try:
-        from backend.engine7_llm_review import _read_store
+        from backend.engine7_llm_review import _read_store, _LLM_MODEL, _MAX_ACTIVE_DYNAMIC, _EXPIRY_DAYS
         store = _read_store()
+        themes = store.get("themes", {})
+        active = {k: v for k, v in themes.items() if v.get("status") == "active"}
+        pending = {k: v for k, v in themes.items() if v.get("status") == "pending"}
         return {
             "lastReview": store.get("last_review"),
-            "themes": store.get("themes", {}),
+            "model": _LLM_MODEL,
+            "maxActive": _MAX_ACTIVE_DYNAMIC,
+            "expiryDays": _EXPIRY_DAYS,
+            "activeCount": len(active),
+            "pendingCount": len(pending),
+            "active": active,
+            "pending": pending,
+            "themes": themes,
             "auditLog": store.get("audit_log", [])[-20:],
         }
     except Exception as exc:
         LOG.exception("Engine7 dynamic themes read failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+_E7_DESK_VIEW_SYSTEM = """You are a senior quant on a systematic relative-value desk.
+A junior trader has clicked on a pair trade signal and needs your guidance.
+
+You will receive a JSON payload describing a specific pair signal: the two assets,
+trade mode (mean reversion or momentum), z-score, momentum metrics, confidence score,
+active themes, tier, and other context.
+
+Write a concise desk briefing in this exact JSON structure:
+
+{
+  "thesis": "2-3 sentences: WHY this pair, what is the structural relationship, why the spread is dislocated right now.",
+  "market_context": "1-2 sentences: what macro/narrative backdrop supports this trade. Reference the active themes.",
+  "how_to_enter": "2-3 sentences: specific entry mechanics — which leg to buy, which to sell, sizing guidance (risk units), and where the spread needs to be.",
+  "how_to_exit": "2-3 sentences: target exit conditions — z-score mean reversion level, time stop, or momentum exhaustion signal.",
+  "what_breaks_it": "2-3 sentences: the specific scenario that invalidates this trade — theme reversal, correlation breakdown, or regime shift.",
+  "risk_management": "1-2 sentences: position sizing, max loss, correlation considerations with other active pairs.",
+  "learning_note": "1-2 sentences: a teaching moment — what general principle this trade illustrates about relative value or spread trading."
+}
+
+Rules:
+- Write as a senior quant talking to a junior: clear, direct, no jargon without explanation.
+- Reference the ACTUAL data in the signal (z-score value, momentum readings, themes).
+- Be specific about the two assets — use their full names, not just tickers.
+- If it's a mean reversion trade, explain the z-score reversion thesis.
+- If it's a momentum trade, explain the trend-break continuation thesis.
+- Keep each field under 80 words.
+- Output valid JSON only."""
+
+
+@app.post("/api/engine7-pairs/desk-view")
+def engine7_desk_view(body: dict):
+    """Engine 7: Generate a GPT-5.2 senior quant desk view for a pair signal."""
+    signal = body.get("signal")
+    if not signal:
+        raise HTTPException(status_code=400, detail="Missing 'signal' in request body")
+
+    try:
+        from backend.llm_client import _get_openai_client, _parse_desk_brief_json
+
+        client = _get_openai_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="OpenAI client unavailable")
+
+        import json as _json
+        payload = _json.dumps(signal, default=str)
+        if len(payload) > 8000:
+            payload = payload[:8000]
+
+        resp = client.chat.completions.create(
+            model="gpt-5.2",
+            messages=[
+                {"role": "system", "content": _E7_DESK_VIEW_SYSTEM},
+                {"role": "user", "content": payload},
+            ],
+            temperature=0.3,
+            max_tokens=1200,
+            timeout=30,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or ""
+        parsed = _parse_desk_brief_json(content)
+        if parsed is None:
+            raise HTTPException(status_code=502, detail="LLM returned unparseable response")
+
+        parsed["_source"] = "gpt-5.2"
+        parsed["_pair"] = signal.get("pair_id", "")
+        return parsed
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        LOG.exception("Engine7 desk-view failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Desk view generation failed: {exc}")
 
 
 @app.get("/api/engine7-pairs/themes")

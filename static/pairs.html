@@ -162,6 +162,107 @@
       .emptyStateTitle { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
       .emptyStateBody { font-size: 13px; font-weight: 500; }
       .pairCardNotes { margin-top: 8px; font-size: 11px; color: var(--muted); font-weight: 500; line-height: 1.35; }
+
+      /* LLM Review Status Panel */
+      .llmStatusPanel {
+        margin-top: 16px;
+        padding: 16px 20px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+      }
+      .llmStatusHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .llmStatusTitle {
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: -0.2px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .llmStatusDot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+      }
+      .llmStatusDot--ok { background: #34c759; box-shadow: 0 0 6px rgba(52,199,89,0.5); }
+      .llmStatusDot--stale { background: #ff9f0a; box-shadow: 0 0 6px rgba(255,159,10,0.4); }
+      .llmStatusDot--never { background: #ff3b30; box-shadow: 0 0 6px rgba(255,59,48,0.4); }
+      .llmStatusMeta {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .llmStatusGrid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      @media (max-width: 700px) {
+        .llmStatusGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      .llmStatCard {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.55);
+      }
+      .llmStatLabel { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+      .llmStatValue { font-size: 20px; font-weight: 900; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 2px; }
+      .llmStatCaption { font-size: 10px; font-weight: 500; color: var(--muted); margin-top: 1px; }
+      .llmThemeRow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .llmThemeRow:last-child { border-bottom: none; }
+      .llmThemeBadge {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        flex-shrink: 0;
+      }
+      .llmThemeBadge--active { background: rgba(52,199,89,0.12); border: 1px solid rgba(52,199,89,0.25); color: rgba(12,70,38,0.90); }
+      .llmThemeBadge--pending { background: rgba(255,159,10,0.12); border: 1px solid rgba(255,159,10,0.25); color: rgba(160,90,0,0.90); }
+      .llmThemeName { font-weight: 700; flex: 1; }
+      .llmThemeDetail { color: var(--muted); font-weight: 500; }
+      .llmAuditRow {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 4px 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .llmAuditAction {
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 10px;
+        letter-spacing: 0.3px;
+        flex-shrink: 0;
+        width: 60px;
+      }
+      .llmAuditAction--activate { color: #34c759; }
+      .llmAuditAction--promote { color: #34c759; }
+      .llmAuditAction--pending { color: #ff9f0a; }
+      .llmAuditAction--expire { color: #ff3b30; }
+      .llmAuditAction--demote { color: #ff9f0a; }
+      .llmNoData { font-size: 12px; color: var(--muted); font-weight: 500; padding: 8px 0; }
     </style>
   </head>
   <body>
@@ -266,6 +367,60 @@
           </button>
         </form>
         <div id="status" class="status">Click "Scan Pairs" to evaluate 20 fixed asset pairs across all tiers.</div>
+      </section>
+
+      <!-- LLM Review Status (loads on page open) -->
+      <section class="llmStatusPanel" id="llmStatusPanel">
+        <div class="llmStatusHeader">
+          <div class="llmStatusTitle">
+            <span class="llmStatusDot llmStatusDot--never" id="llmStatusDot"></span>
+            Nightly LLM Review
+            <span class="tipWrap">
+              <button class="tipBtn" type="button" aria-label="LLM review help" aria-expanded="false">i</button>
+              <div class="tipPanel" role="tooltip">
+                <div class="tipTitle">Automated Theme Intelligence</div>
+                <div class="tipBody">
+                  <p>Every night at 11:00 PM CST, GPT-5.2 analyzes ~800 financial headlines to identify emerging macro narratives not covered by the static theme list.</p>
+                  <ul>
+                    <li><b>Track 1 (Immediate)</b>: Themes with >= 10% headline saturation activate instantly for the next morning's scan</li>
+                    <li><b>Track 2 (Confirmation)</b>: Lower-saturation themes need 2 of 3 consecutive nightly confirmations before activating</li>
+                    <li><b>Auto-expiry</b>: Dynamic themes drop off after 7 days without reinforcement</li>
+                    <li><b>Max 3</b> concurrent dynamic themes to keep noise down</li>
+                  </ul>
+                  <p><b>Desk view</b>: Green dot = reviewed in the last 36 hours. Amber = stale (>36h). Red = never run. If stale, contact ops.</p>
+                </div>
+              </div>
+            </span>
+          </div>
+          <div class="llmStatusMeta" id="llmStatusMeta">Loading…</div>
+        </div>
+        <div class="llmStatusGrid" id="llmStatusGrid">
+          <div class="llmStatCard">
+            <div class="llmStatLabel">Last Review</div>
+            <div class="llmStatValue" id="llmLastReview">—</div>
+            <div class="llmStatCaption" id="llmLastReviewAge">—</div>
+          </div>
+          <div class="llmStatCard">
+            <div class="llmStatLabel">Model</div>
+            <div class="llmStatValue" id="llmModel" style="font-size:14px;">—</div>
+            <div class="llmStatCaption">Nightly review model</div>
+          </div>
+          <div class="llmStatCard">
+            <div class="llmStatLabel">Active Dynamic</div>
+            <div class="llmStatValue" id="llmActiveCount">—</div>
+            <div class="llmStatCaption" id="llmActiveMax">of — max</div>
+          </div>
+          <div class="llmStatCard">
+            <div class="llmStatLabel">Pending</div>
+            <div class="llmStatValue" id="llmPendingCount">—</div>
+            <div class="llmStatCaption">Awaiting confirmation</div>
+          </div>
+        </div>
+        <div id="llmThemesList"></div>
+        <details id="llmAuditDetails" style="margin-top:8px;">
+          <summary style="cursor:pointer; font-size:12px; font-weight:700; color:var(--muted);">Audit Log</summary>
+          <div id="llmAuditLog" style="margin-top:6px;"></div>
+        </details>
       </section>
 
       <section class="results hidden" id="results">

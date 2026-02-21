@@ -102,6 +102,9 @@ export async function discoverPolymarketMarkets(): Promise<void> {
       }, "Polymarket sample event structure");
     }
 
+    const MIN_VOLUME_FOR_WS = 1_000; // Only subscribe to WS for markets with >$1k volume
+    let skippedLowVolume = 0;
+
     for (const event of events) {
       for (const market of event.markets ?? []) {
         if (!market.conditionId) continue;
@@ -131,7 +134,13 @@ export async function discoverPolymarketMarkets(): Promise<void> {
             });
           upserted++;
 
-          // Collect token map entries and asset IDs for WS subscription
+          // Only subscribe to WS feeds for markets with meaningful volume
+          const vol = market.volumeNum ?? (market.volume ? parseFloat(market.volume) : 0);
+          if (!market.active || market.closed || vol < MIN_VOLUME_FOR_WS) {
+            skippedLowVolume++;
+            continue;
+          }
+
           for (const [outcome, tokenId] of Object.entries(normalized.clob_token_ids)) {
             tokenMapEntries.push({ assetId: tokenId, conditionId: market.conditionId });
             allAssetIds.push(tokenId);
@@ -153,7 +162,7 @@ export async function discoverPolymarketMarkets(): Promise<void> {
     }
 
     logger.info(
-      { upserted, events: events.length, tokens: allAssetIds.length, durationMs: Date.now() - start },
+      { upserted, events: events.length, tokens: allAssetIds.length, skippedLowVolume, durationMs: Date.now() - start },
       "Polymarket discovery complete"
     );
   } catch (err) {
