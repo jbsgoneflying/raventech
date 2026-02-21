@@ -46,7 +46,7 @@ _LOG = logging.getLogger(__name__)
 # change to prevent stale results from replaying.
 # ---------------------------------------------------------------------------
 
-_CACHE_VERSION = "v4"
+_CACHE_VERSION = "v5"
 
 _bars_cache: TTLCache = TTLCache(maxsize=200, ttl=6 * 3600)
 _bars_cache_lock = threading.Lock()
@@ -523,6 +523,15 @@ def compute_engine7_scan(
     for bucket in (a_plus, standard, watchlist, ineligible):
         bucket.sort(key=lambda x: x.get("confidence_score", 0), reverse=True)
 
+    # Load dynamic theme info for meta
+    try:
+        from backend.engine7_llm_review import load_dynamic_themes
+        dynamic_themes = load_dynamic_themes()
+        dynamic_theme_ids = set(dynamic_themes.keys())
+    except Exception:
+        dynamic_themes = {}
+        dynamic_theme_ids = set()
+
     # Build theme diagnostics (all candidates, not just active)
     theme_diagnostics = []
     for t in theme_result.themes:
@@ -533,6 +542,7 @@ def compute_engine7_scan(
             "keyword_hits": t.keyword_hits,
             "intensity": t.intensity,
             "sample_keywords": t.sample_keywords,
+            "dynamic": t.theme in dynamic_theme_ids,
         })
 
     result = {
@@ -558,6 +568,8 @@ def compute_engine7_scan(
             "recencyDecay": "60% recent (1.0x) / 40% older (0.5x)",
             "activeThemeCount": len(theme_result.active_themes),
             "activeThemeNames": theme_result.active_themes,
+            "dynamicThemeCount": len(dynamic_theme_ids),
+            "dynamicThemeNames": sorted(dynamic_theme_ids),
             "themeRequired": theme_required,
             "oratsEnabled": enable_orats,
             "llmAnnotationEnabled": enable_llm_annotation,

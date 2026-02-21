@@ -273,10 +273,31 @@ def classify_themes_deterministic(
 
     Each headline is lower-cased and matched against keyword sets.
     A theme activates when hit_ratio >= activation_threshold.
+
+    Static themes from THEME_KEYWORD_MAP are the immutable bedrock.
+    Active dynamic themes from the LLM nightly review are merged in
+    additively — they can never overwrite or remove static themes.
     """
     if not headlines:
         _LOG.warning("Engine7 theme classifier: 0 headlines supplied — all themes will be inactive")
         return ThemeResult(themes=[], active_themes=[], headline_count=0)
+
+    # Merge static + dynamic keyword maps (dynamic never overwrites static)
+    merged_map: Dict[str, dict] = dict(THEME_KEYWORD_MAP)
+    try:
+        from backend.engine7_llm_review import load_dynamic_themes
+        dynamic = load_dynamic_themes()
+        dynamic_ids = set()
+        for tid, tdef in dynamic.items():
+            if tid not in merged_map:
+                merged_map[tid] = tdef
+                dynamic_ids.add(tid)
+        if dynamic_ids:
+            _LOG.info("Engine7 theme classifier: merged %d dynamic themes: %s",
+                      len(dynamic_ids), sorted(dynamic_ids))
+    except Exception as exc:
+        _LOG.debug("Engine7 theme classifier: dynamic theme load skipped: %s", exc)
+        dynamic_ids = set()
 
     n = len(headlines)
     lower_headlines = [h.lower() for h in headlines]
@@ -288,7 +309,7 @@ def classify_themes_deterministic(
     for idx, (orig, low) in enumerate(zip(headlines[:25], lower_headlines[:25])):
         matched_themes_for_hl: List[str] = []
         matched_kw_for_hl: List[str] = []
-        for theme_id, tdef in THEME_KEYWORD_MAP.items():
+        for theme_id, tdef in merged_map.items():
             for kw in tdef["keywords"]:
                 if kw in low:
                     matched_themes_for_hl.append(theme_id)
@@ -324,7 +345,7 @@ def classify_themes_deterministic(
     headline_weights = [_RECENT_WEIGHT if i < recent_boundary else _OLDER_WEIGHT for i in range(n)]
     total_weight = sum(headline_weights)
 
-    for theme_id, tdef in THEME_KEYWORD_MAP.items():
+    for theme_id, tdef in merged_map.items():
         kws = tdef["keywords"]
         threshold = tdef.get("activation_threshold", 0.02)
         raw_hits = 0
@@ -344,9 +365,12 @@ def classify_themes_deterministic(
         intensity = min(100.0, hit_ratio * 500.0)  # 20% weighted ratio -> 100
         active = hit_ratio >= threshold and raw_hits >= 1
 
+        is_dynamic = theme_id in dynamic_ids
+        tag = " [DYNAMIC]" if is_dynamic else ""
         _LOG.info(
-            "  THEME %-22s | raw=%3d weighted=%.1f ratio=%.4f threshold=%.4f intensity=%6.2f → %s",
-            theme_id, raw_hits, weighted_hits, hit_ratio, threshold, intensity, "ACTIVE" if active else "inactive",
+            "  THEME %-22s | raw=%3d weighted=%.1f ratio=%.4f threshold=%.4f intensity=%6.2f → %s%s",
+            theme_id, raw_hits, weighted_hits, hit_ratio, threshold, intensity,
+            "ACTIVE" if active else "inactive", tag,
         )
 
         results.append(ThemeClassification(
@@ -375,19 +399,34 @@ def classify_themes_deterministic(
 # ---------------------------------------------------------------------------
 
 
+def _get_merged_eligibility() -> Dict[str, List[dict]]:
+    """Merge static THEME_PAIR_ELIGIBILITY with dynamic theme pair mappings."""
+    merged = dict(THEME_PAIR_ELIGIBILITY)
+    try:
+        from backend.engine7_llm_review import load_dynamic_themes
+        for tid, tdef in load_dynamic_themes().items():
+            if tid not in merged:
+                merged[tid] = tdef.get("pair_mappings", [])
+    except Exception:
+        pass
+    return merged
+
+
 def score_theme_alignment(pair_id: str, theme_result: ThemeResult) -> Tuple[float, List[str]]:
     """Return (score 0-100, matching_theme_tags) for a pair given active themes.
 
     Score is 0 when no active theme covers the pair (-> NOT_ELIGIBLE under INV-2).
+    Checks both static and dynamic theme pair eligibility maps.
     """
     if not theme_result.active_themes:
         return 0.0, []
 
+    eligibility = _get_merged_eligibility()
     matching_tags: List[str] = []
     total_intensity = 0.0
 
     for theme_id in theme_result.active_themes:
-        eligible_pairs = THEME_PAIR_ELIGIBILITY.get(theme_id, [])
+        eligible_pairs = eligibility.get(theme_id, [])
         for ep in eligible_pairs:
             if ep.get("pair_id") == pair_id:
                 matching_tags.append(theme_id)
@@ -408,10 +447,12 @@ def get_theme_bias(pair_id: str, theme_result: ThemeResult) -> Optional[str]:
     """Return the expected directional bias for a pair from active themes.
 
     Returns "long_ratio", "short_ratio", or None if no theme applies / mixed.
+    Checks both static and dynamic theme pair eligibility maps.
     """
+    eligibility = _get_merged_eligibility()
     biases: List[str] = []
     for theme_id in theme_result.active_themes:
-        eligible_pairs = THEME_PAIR_ELIGIBILITY.get(theme_id, [])
+        eligible_pairs = eligibility.get(theme_id, [])
         for ep in eligible_pairs:
             if ep.get("pair_id") == pair_id:
                 biases.append(ep.get("bias", ""))

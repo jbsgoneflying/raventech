@@ -2412,6 +2412,48 @@ def engine7_clear_cache():
     return {"status": "ok", "message": "Engine 7 scan and theme caches cleared"}
 
 
+@app.post("/api/engine7-pairs/nightly-review")
+def engine7_nightly_review(
+    date: Optional[str] = Query(None, description="Review date (YYYY-MM-DD), defaults to today"),
+):
+    """Engine 7: Run the LLM nightly theme review pipeline.
+
+    Analyzes recent headlines with gpt-5.2 to identify emerging macro
+    narratives not covered by the static theme list.  New themes are
+    auto-promoted via a two-track system (immediate at 10%+ saturation,
+    or after 2-of-3 consecutive nightly confirmations).
+
+    Call via cron: 0 5 * * * curl -X POST http://localhost:8000/api/engine7-pairs/nightly-review
+    """
+    try:
+        from backend.engine7_llm_review import review_and_propose
+        from backend.engine7_screener import clear_engine7_caches
+
+        result = review_and_propose(date_str=date)
+        clear_engine7_caches()
+        return result
+
+    except Exception as exc:
+        LOG.exception("Engine7 nightly review failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Engine 7 nightly review failed: {exc}")
+
+
+@app.get("/api/engine7-pairs/dynamic-themes")
+def engine7_dynamic_themes():
+    """Engine 7: View current dynamic themes (active + pending)."""
+    try:
+        from backend.engine7_llm_review import _read_store
+        store = _read_store()
+        return {
+            "lastReview": store.get("last_review"),
+            "themes": store.get("themes", {}),
+            "auditLog": store.get("audit_log", [])[-20:],
+        }
+    except Exception as exc:
+        LOG.exception("Engine7 dynamic themes read failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/engine7-pairs/themes")
 def engine7_pairs_themes(
     request: Request,

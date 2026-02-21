@@ -130,24 +130,32 @@
     diagLines.push("Window: " + (meta.headlineWindowStart || "?") + " → " + (meta.headlineWindowEnd || "?"));
     if (meta.recencyDecay) diagLines.push("Decay: " + meta.recencyDecay);
     diagLines.push("Active themes: " + (meta.activeThemeCount || 0) + " / " + diagThemes.length + " candidates");
+    if (meta.dynamicThemeCount) {
+      diagLines.push("Dynamic: " + meta.dynamicThemeCount + " (" + (meta.dynamicThemeNames || []).join(", ") + ")");
+    }
     if (meta.activeThemeNames && meta.activeThemeNames.length) {
       diagLines.push("Active: " + meta.activeThemeNames.join(", "));
     }
     statusEl.textContent = diagLines.join(" · ");
 
     /* Themes section */
+    var dynamicNames = new Set(meta.dynamicThemeNames || []);
     var themesGrid = qs("themesGrid");
     themesGrid.innerHTML = "";
     if (Array.isArray(activeThemes) && activeThemes.length) {
       activeThemes.forEach(function (t) {
         var name = typeof t === "string" ? t : t.label || t.theme || "";
+        var themeId = typeof t === "string" ? t : t.theme || "";
         if (!name) return;
         var chip = document.createElement("span");
-        chip.className = "themeChip";
-        chip.textContent = name;
-        if (t.keyword_hits) {
-          chip.title = t.keyword_hits + " keyword hits, intensity " + (t.intensity || 0);
-        }
+        var isDynamic = dynamicNames.has(themeId);
+        chip.className = "themeChip" + (isDynamic ? " themeChip--dynamic" : "");
+        chip.textContent = name + (isDynamic ? " [Dynamic]" : "");
+        var tipParts = [];
+        if (t.keyword_hits) tipParts.push(t.keyword_hits + " keyword hits");
+        if (t.intensity) tipParts.push("intensity " + t.intensity);
+        if (isDynamic) tipParts.push("LLM-sourced theme");
+        chip.title = tipParts.join(", ");
         themesGrid.appendChild(chip);
       });
     } else {
@@ -165,11 +173,13 @@
       sumEl.textContent = "Theme Diagnostics (" + diagThemes.length + " candidates)";
       diagEl.appendChild(sumEl);
       var table = '<table style="width:100%; border-collapse:collapse; margin-top:4px; font-size:11px;">';
-      table += '<tr style="text-align:left;"><th>Theme</th><th>Hits</th><th>Intensity</th><th>Status</th><th>Keywords</th></tr>';
+      table += '<tr style="text-align:left;"><th>Theme</th><th>Source</th><th>Hits</th><th>Intensity</th><th>Status</th><th>Keywords</th></tr>';
       diagThemes.forEach(function (td) {
         var color = td.active ? "var(--accent)" : "var(--muted)";
+        var source = td.dynamic ? "LLM" : "Static";
         table += '<tr style="color:' + color + ';">';
         table += '<td>' + (td.label || td.theme) + '</td>';
+        table += '<td>' + source + '</td>';
         table += '<td>' + td.keyword_hits + '</td>';
         table += '<td>' + (td.intensity || 0) + '</td>';
         table += '<td>' + (td.active ? "ACTIVE" : "inactive") + '</td>';
