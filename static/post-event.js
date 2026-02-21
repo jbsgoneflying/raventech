@@ -48,11 +48,6 @@
     var regime = e1.regime || {};
     qs("paRegimeLabel").textContent = regime.label || "—";
 
-    var guidance = regime.guidance || {};
-    var gateRaw = guidance.tradeGate || "";
-    var gateLabel = gateRaw === "NO_TRADE" ? "No Trade" : gateRaw === "CAUTION" ? "Caution" : gateRaw === "OK" ? "OK" : "—";
-    qs("paGoNoGo").textContent = gateLabel;
-
     /* ORATS EM (EOD + delayed) */
     var eodEmPct = cur.impliedMovePct;
     var delayedEmPct = cur.delayedImpliedMovePct;
@@ -174,6 +169,7 @@
     /* Scenario table */
     var tbody = qs("pbScenarioBody");
     var rows = "";
+    var magLabels = {"contained": "< 1× EM", "extended": "1–1.5× EM", "extreme": "> 1.5× EM", "all": "Any size"};
     for (var si = 0; si < pb.scenarios.length; si++) {
       var s = pb.scenarios[si];
       var magClass = s.magnitude === "contained" ? "contained" : s.magnitude === "extended" ? "extended" : s.magnitude === "extreme" ? "extreme" : "all";
@@ -181,11 +177,14 @@
       var confClass = (s.confidence || "low").toLowerCase();
       var cont1d = s.continuation_rate_1d != null ? Math.round(s.continuation_rate_1d * 100) + "%" : "—";
       var cont5d = s.continuation_rate_5d != null ? Math.round(s.continuation_rate_5d * 100) + "%" : "—";
-      var avgDrift = s.avg_continuation_5d != null ? (s.avg_continuation_5d > 0 ? "+" : "") + fmt(s.avg_continuation_5d) + "%" : "—";
+      var driftVal = s.avg_continuation_5d;
+      var avgDrift = driftVal != null ? (driftVal > 0 ? "+" : "") + fmt(driftVal) + "%" : "—";
+      var dirArrow = s.direction === "UP" ? "&#9650;" : "&#9660;";
+      var dirColor = s.direction === "UP" ? "color:rgba(52,199,89,0.9)" : "color:rgba(255,59,48,0.85)";
       rows +=
         '<tr>' +
-          '<td><span class="pbMagLabel ' + magClass + '">' + escHtml(s.magnitude || "") + '</span></td>' +
-          '<td style="font-weight:700;">' + escHtml(s.direction || "") + '</td>' +
+          '<td><span class="pbMagLabel ' + magClass + '">' + (magLabels[s.magnitude] || escHtml(s.magnitude || "")) + '</span></td>' +
+          '<td style="font-weight:700;' + dirColor + '">' + dirArrow + ' ' + escHtml(s.direction || "") + '</td>' +
           '<td>' + escHtml(s.structure || "") + '</td>' +
           '<td style="font-family:monospace;">' + (s.count || 0) + '</td>' +
           '<td style="font-family:monospace;">' + cont1d + '</td>' +

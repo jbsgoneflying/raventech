@@ -215,9 +215,15 @@
                 <div class="taCardInterp">Market + single-name stress overlay.</div>
               </div>
               <div class="taCard">
-                <div class="taCardTop"><div class="taCardTitle">Trade gate</div></div>
-                <div id="paGoNoGo" class="taCardState">—</div>
-                <div class="taCardInterp">OK / Caution / No trade (informational).</div>
+                <div class="taCardTop">
+                  <div class="taCardTitle">Strike Targets (EM)</div>
+                </div>
+                <div class="emTargetGrid" id="paStrikeTargetGrid">
+                  <div class="emRow emBox--white"><span class="k">1.0× EM</span><span id="paStWhite" class="v mono">—</span></div>
+                  <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span id="paStBlue" class="v mono">—</span></div>
+                  <div class="emRow emBox--red"><span class="k">2.0× EM</span><span id="paStRed" class="v mono">—</span></div>
+                </div>
+                <div id="paStrikeCaption" class="taCardInterp">Wing distance as % of spot.</div>
               </div>
               <div class="taCard">
                 <div class="taCardTop">
@@ -236,17 +242,6 @@
                 </div>
                 <div id="paStraddleEm" class="taCardState mono">—</div>
                 <div id="paStraddleEmCaption" class="taCardInterp">ATM-forward straddle method</div>
-              </div>
-              <div class="taCard">
-                <div class="taCardTop">
-                  <div class="taCardTitle">Strike Targets (EM)</div>
-                </div>
-                <div class="emTargetGrid" id="paStrikeTargetGrid">
-                  <div class="emRow emBox--white"><span class="k">1.0× EM</span><span id="paStWhite" class="v mono">—</span></div>
-                  <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span id="paStBlue" class="v mono">—</span></div>
-                  <div class="emRow emBox--red"><span class="k">2.0× EM</span><span id="paStRed" class="v mono">—</span></div>
-                </div>
-                <div id="paStrikeCaption" class="taCardInterp">Wing distance as % of spot.</div>
               </div>
             </div>
           </div>
@@ -333,13 +328,13 @@
             <table class="historyTable" id="pbScenarioTable">
               <thead>
                 <tr>
-                  <th>Scenario</th>
+                  <th>Gap Size</th>
                   <th>Direction</th>
                   <th>Structure</th>
                   <th>Events</th>
                   <th>Cont. 1d</th>
                   <th>Cont. 5d</th>
-                  <th>Avg Drift 5d</th>
+                  <th>5d Drift (% of gap)</th>
                   <th>Action</th>
                   <th>Confidence</th>
                 </tr>
@@ -719,7 +714,7 @@
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/post-event.js?v=9"></script>
+    <script src="/static/post-event.js?v=11"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

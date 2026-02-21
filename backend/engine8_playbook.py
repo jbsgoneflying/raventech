@@ -195,9 +195,16 @@ def compute_scenario_playbook(
     if flags is None:
         flags = get_flags()
 
-    # Re-bucket events into playbook magnitude buckets
+    # Re-bucket events into playbook magnitude buckets.
+    # When move_vs_em is null (historical EM unavailable), approximate using
+    # the CURRENT EM as denominator — not perfect but close enough for bucketing.
     for ev in all_event_rows:
-        ev["_pb_mag"] = _mag_bucket(ev.get("move_vs_em"))
+        mve = ev.get("move_vs_em")
+        if mve is None and em_pct and em_pct > 0:
+            amp = ev.get("actual_move_pct")
+            if amp is not None:
+                mve = abs(amp) / em_pct
+        ev["_pb_mag"] = _mag_bucket(mve)
         ev["_pb_struct"] = _struct_simplify(ev.get("structure_bucket") or ev.get("gap_structure"))
 
     # Build scenario matrix — strategy:
@@ -258,18 +265,29 @@ def compute_scenario_playbook(
                 **action,
             })
 
-    # Sort: highest-confidence actionable scenarios first
-    action_priority = {"CONTINUE": 0, "FADE": 1, "PASS": 2}
-    conf_priority = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "INSUFFICIENT": 3}
-    scenarios.sort(key=lambda s: (action_priority.get(s.get("action", "PASS"), 2), conf_priority.get(s.get("confidence", "LOW"), 2)))
+    # Sort: magnitude-specific first (contained → extended → extreme), then "all" baseline.
+    # Within each magnitude, UP before DOWN.
+    mag_order = {_MAG_CONTAINED: 0, _MAG_EXTENDED: 1, _MAG_EXTREME: 2, "all": 3}
+    dir_order = {"UP": 0, "DOWN": 1}
+    struct_order = {"ANY": 0, "HOLD": 1, "FADE": 2}
+    scenarios.sort(key=lambda s: (
+        mag_order.get(s.get("magnitude", "all"), 3),
+        dir_order.get(s.get("direction", "DOWN"), 1),
+        struct_order.get(s.get("structure", "ANY"), 0),
+    ))
 
     # Threshold prices
     thresholds = None
     if stock_price and em_pct and stock_price > 0 and em_pct > 0:
         thresholds = compute_threshold_prices(stock_price, em_pct)
 
-    # Quick reference: summarize actionable scenarios into desk-ready lines
-    # Prefer magnitude-specific scenarios over "all" baseline
+    # Quick reference: summarize actionable scenarios into desk-ready lines.
+    # Skip "all" baseline if we have magnitude-specific scenarios for that direction.
+    has_mag_specific = {d: False for d in ("UP", "DOWN")}
+    for s in scenarios:
+        if s.get("action") != "PASS" and s["magnitude"] != "all":
+            has_mag_specific[s["direction"]] = True
+
     quick_ref: List[str] = []
     for s in scenarios:
         if s.get("action") == "PASS":
@@ -279,11 +297,16 @@ def compute_scenario_playbook(
         struct_label = s["structure"]
         act = s["action"]
         conf = s.get("confidence", "LOW")
+        n = s.get("count", 0)
+        c5 = s.get("continuation_rate_5d")
+        rate_note = f" — {round(c5 * 100)}% cont. over 5d" if c5 is not None else ""
 
         if mag_label == "ALL":
+            if has_mag_specific.get(dir_label):
+                continue
             dir_word = "up" if dir_label == "UP" else "down"
             struct_note = f" with gap-and-{struct_label.lower()}" if struct_label != "ANY" else ""
-            quick_ref.append(f"Any {dir_word} gap{struct_note} → {act} ({conf})")
+            quick_ref.append(f"Any {dir_word} gap{struct_note} → {act} ({conf}, {n} events{rate_note})")
         elif thresholds and thresholds.get("levels"):
             mult_key = "1.0x" if mag_label == "CONTAINED" else "1.5x" if mag_label == "EXTENDED" else "2.0x"
             lvl = thresholds["levels"].get(mult_key, {})
@@ -292,13 +315,13 @@ def compute_scenario_playbook(
                 dir_word = "above" if dir_label == "UP" else "below"
                 struct_note = f" with gap-and-{struct_label.lower()}" if struct_label != "ANY" else ""
                 quick_ref.append(
-                    f"If opens {dir_word} ${price_ref}{struct_note} → {act} ({conf})"
+                    f"If opens {dir_word} ${price_ref}{struct_note} → {act} ({conf}, {n} events{rate_note})"
                 )
         else:
-            gap_range = "<1.0x EM" if mag_label == "CONTAINED" else "1.0-1.5x EM" if mag_label == "EXTENDED" else ">1.5x EM"
+            gap_range = "<1.0× EM" if mag_label == "CONTAINED" else "1.0–1.5× EM" if mag_label == "EXTENDED" else ">1.5× EM"
             struct_note = f", gap-and-{struct_label.lower()}" if struct_label != "ANY" else ""
             quick_ref.append(
-                f"{dir_label} gap {gap_range}{struct_note} → {act} ({conf})"
+                f"{dir_label} gap {gap_range}{struct_note} → {act} ({conf}, {n} events{rate_note})"
             )
 
     if not quick_ref:
