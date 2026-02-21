@@ -26,7 +26,18 @@
     qs("decisionDirection").textContent = dir ? (dir.toLowerCase() === "long" ? "Long" : "Short") : "—";
     var conf = dec.confidence_score != null ? dec.confidence_score : data.confidence;
     qs("decisionConfidence").textContent = conf != null ? "Confidence: " + Math.round(conf) + " / 100" : "";
-    qs("decisionRationale").textContent = dec.pass_reason || data.rationale || data.summary || "";
+    var rationale = "";
+    if (dec.pass_reason) {
+      var reasonMap = {
+        "activation_failed": "Activation failed — earnings date or post-event data unavailable.",
+        "insufficient_historical_sample": "Insufficient historical data for this ticker under similar conditions.",
+        "regime_blocked": "Regime overlay blocked — volatility regime is too stressed for new directional trades.",
+        "below_threshold": "Confidence below threshold — edge is not clear enough. PASS is correct here.",
+        "tied_candidates": "CONTINUE and FADE scored equally — ambiguous signal, PASS is safest.",
+      };
+      rationale = reasonMap[dec.pass_reason] || dec.pass_reason.replace(/_/g, " ");
+    }
+    qs("decisionRationale").textContent = rationale;
 
     /* Snapshot */
     var snap = data.snapshot || {};

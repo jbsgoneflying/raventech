@@ -204,25 +204,34 @@ def check_activation(
     max_controlled_loss_pct: float = 50.0,
     today: Optional[dt.date] = None,
 ) -> ActivationResult:
-    """Run all four activation checks and return the result.
+    """Run activation checks and return the result.
 
-    All parameters except ``ticker`` may be None / missing; individual
-    checks will emit HARD reasons for any that are absent.
+    HARD gates (block evaluation):
+      - Earnings date must exist and be in the past
+      - At least one post-event price bar must be available
+
+    SOFT gates (informational only, do not block):
+      - Engine 1 trade presence and trade outcome derivation
+        Engine 8 works standalone for any post-earnings ticker.
     """
     if today is None:
         today = dt.date.today()
 
-    reasons: list[ActivationReason] = []
+    hard_reasons: list[ActivationReason] = []
+    soft_reasons: list[ActivationReason] = []
 
+    # SOFT: Engine 1 trade context (informational)
     r = _check_engine1_trade(engine1_trade)
     if r:
-        reasons.append(r)
+        r.severity = "SOFT"
+        soft_reasons.append(r)
 
+    # HARD: event must have occurred
     r = _check_event_occurred(earnings_date, today)
     if r:
-        reasons.append(r)
+        hard_reasons.append(r)
 
-    # Derive trade outcome
+    # Derive trade outcome (best-effort, does not block)
     outcome = "unknown"
     trade_builder: dict = {}
     if engine1_trade and isinstance(engine1_trade, dict):
@@ -230,15 +239,18 @@ def check_activation(
     if trade_builder and current_price is not None:
         outcome = derive_trade_outcome(trade_builder, current_price, max_controlled_loss_pct)
 
+    # SOFT: trade outcome (informational when Engine 1 context is missing)
     r = _check_trade_outcome(outcome)
     if r:
-        reasons.append(r)
+        r.severity = "SOFT"
+        soft_reasons.append(r)
 
+    # HARD: post-event price data
     r = _check_post_event_data(has_post_event_bar)
     if r:
-        reasons.append(r)
+        hard_reasons.append(r)
 
-    activated = len(reasons) == 0
+    activated = len(hard_reasons) == 0
 
     trade_context: Dict[str, Any] = {}
     if trade_builder:
@@ -257,6 +269,6 @@ def check_activation(
         ticker=ticker,
         activated=activated,
         derived_trade_outcome=outcome,
-        reasons=[r.to_dict() for r in reasons],
+        reasons=[r.to_dict() for r in hard_reasons + soft_reasons],
         trade_context=trade_context,
     )
