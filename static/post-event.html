@@ -223,7 +223,10 @@
                 </div>
               </span>
             </div>
-            <input id="ticker" type="text" class="controlInput" placeholder="e.g. AAPL" autocomplete="off" spellcheck="false" style="text-transform:uppercase; width:100px;" />
+            <div class="tickerInputRow">
+              <img id="e8TickerLogo" class="tickerLogo hidden" src="" alt="" />
+              <input id="ticker" type="text" class="controlInput" placeholder="e.g. AAPL" autocomplete="off" spellcheck="false" style="text-transform:uppercase; width:100px;" />
+            </div>
           </div>
           <div class="controlGroup">
             <div class="controlLabel">
@@ -287,30 +290,10 @@
           </div>
         </section>
 
-        <!-- Top Row: Core metrics (mirrors Engine 1 top section) -->
+        <!-- Top Row: Core metrics -->
         <section class="surface" id="phaseACoreMetrics">
           <div class="taPanel">
             <div class="taGrid taGrid--4">
-              <div class="taCard">
-                <div class="taCardTop"><div class="taCardTitle">Breach rate</div></div>
-                <div id="paBreachRate" class="taCardState mono">—</div>
-                <div class="taCardInterp">Share of usable events that breached (k-controlled).</div>
-              </div>
-              <div class="taCard">
-                <div class="taCardTop"><div class="taCardTitle">Avg overshoot if breached</div></div>
-                <div id="paAvgOvershoot" class="taCardState mono">—</div>
-                <div class="taCardInterp">Tail severity conditional on breach.</div>
-              </div>
-              <div class="taCard">
-                <div class="taCardTop"><div class="taCardTitle">Avg realized / implied</div></div>
-                <div id="paAvgRealizedImplied" class="taCardState mono">—</div>
-                <div class="taCardInterp">Baseline ratio across usable events.</div>
-              </div>
-              <div class="taCard">
-                <div class="taCardTop"><div class="taCardTitle">Events used</div></div>
-                <div id="paEventsUsed" class="taCardState mono">—</div>
-                <div class="taCardInterp">Usable / Found in lookback window.</div>
-              </div>
               <div class="taCard">
                 <div class="taCardTop"><div class="taCardTitle">Regime</div></div>
                 <div id="paRegimeLabel" class="taCardState">—</div>
@@ -361,12 +344,12 @@
             <div class="evalCard">
               <div class="evalCardLabel">1.5× EM Breach</div>
               <div id="paBreach15x" class="evalCardValue">—</div>
-              <div class="evalCardCaption">move exceeds 1.5× expected move</div>
+              <div class="evalCardCaption">close-to-close exceeds 1.5× EM</div>
             </div>
             <div class="evalCard">
               <div class="evalCardLabel">2.0× EM Breach</div>
               <div id="paBreach2x" class="evalCardValue">—</div>
-              <div class="evalCardCaption">move exceeds 2.0× expected move</div>
+              <div class="evalCardCaption">close-to-close exceeds 2.0× EM</div>
             </div>
             <div class="evalCard">
               <div class="evalCardLabel">Stock Price</div>
@@ -399,6 +382,23 @@
               <div class="evalCardLabel">Tail Bias</div>
               <div id="paTailBias" class="evalCardValue" style="font-size:16px;">—</div>
               <div class="evalCardCaption">up vs down skew</div>
+            </div>
+          </div>
+          <div class="evalGrid" style="margin-top:0;">
+            <div class="evalCard">
+              <div class="evalCardLabel">Avg Realized / Implied</div>
+              <div id="paAvgRealizedImplied" class="evalCardValue">—</div>
+              <div class="evalCardCaption">baseline ratio across usable events</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Events Used</div>
+              <div id="paEventsUsed" class="evalCardValue">—</div>
+              <div class="evalCardCaption">usable / found in lookback window</div>
+            </div>
+            <div class="evalCard">
+              <div class="evalCardLabel">Trade Gate</div>
+              <div id="paTradeGate" class="evalCardValue" style="font-size:16px;">—</div>
+              <div class="evalCardCaption">OK / Caution / No trade (risk-first)</div>
             </div>
           </div>
         </section>
@@ -876,7 +876,7 @@
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/post-event.js?v=16"></script>
+    <script src="/static/post-event.js?v=17"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

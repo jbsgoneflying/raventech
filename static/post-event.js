@@ -13,6 +13,25 @@
 
   var _dummyEl = document.createElement("span");
   function qs(id) { return document.getElementById(id) || _dummyEl; }
+
+  function setE8TickerLogo(ticker) {
+    var img = document.getElementById("e8TickerLogo");
+    if (!img) return;
+    var t = String(ticker || "").trim().toUpperCase();
+    if (!t) { img.classList.add("hidden"); img.removeAttribute("src"); return; }
+    var src = "https://financialmodelingprep.com/image-stock/" + encodeURIComponent(t) + ".png";
+    img.src = src;
+    img.alt = t + " logo";
+    img.classList.remove("hidden");
+    img.onerror = function () { img.classList.add("hidden"); };
+  }
+
+  var tickerInput = document.getElementById("ticker");
+  if (tickerInput) {
+    setE8TickerLogo(tickerInput.value);
+    tickerInput.addEventListener("input", function () { setE8TickerLogo(tickerInput.value); });
+  }
+
   var _lastPhaseAData = null;
   var _deskNotesCache = {};
   var _rowPlaybookCache = {};
@@ -40,25 +59,23 @@
     var bl = e1.baseline || {};
 
     /* Core metrics row */
-    qs("paBreachRate").textContent = sum.breach_rate_pct != null ? fmt(sum.breach_rate_pct) + "%" : "—";
-
-    var avgOs = sum.avg_above_breach_pct;
-    qs("paAvgOvershoot").textContent = avgOs != null ? fmt(avgOs) + "%" : "—";
-
-    qs("paAvgRealizedImplied").textContent = bl.avg_ratio_realized_to_implied != null ? fmt(bl.avg_ratio_realized_to_implied) + "×" : "—";
-
-    var evUsed = sum.events_used;
-    var evFound = sum.events_found;
-    qs("paEventsUsed").textContent = evUsed != null ? evUsed + (evFound != null ? " / " + evFound : "") : "—";
-
     var regime = e1.regime || {};
     qs("paRegimeLabel").textContent = regime.label || "—";
 
     /* ORATS EM (EOD + delayed) */
     var eodEmPct = cur.impliedMovePct;
     var delayedEmPct = cur.delayedImpliedMovePct;
-    qs("paOratsEm").textContent = eodEmPct != null ? fmt(eodEmPct) + "%" : "—";
-    qs("paOratsEmCaption").textContent = cur.asOfDate ? "As of: " + cur.asOfDate + " · EOD (used for breach history)" : "EOD (used for breach history)";
+    var avgImpliedPct = sum.avg_implied_all_pct;
+    if (eodEmPct != null) {
+      qs("paOratsEm").textContent = fmt(eodEmPct) + "%";
+      qs("paOratsEmCaption").textContent = cur.asOfDate ? "As of: " + cur.asOfDate + " · EOD (used for breach history)" : "EOD (used for breach history)";
+    } else if (avgImpliedPct != null) {
+      qs("paOratsEm").textContent = fmt(avgImpliedPct) + "%";
+      qs("paOratsEmCaption").textContent = "Avg implied across " + (sum.events_used || "—") + " events (EOD unavailable)";
+    } else {
+      qs("paOratsEm").textContent = "—";
+      qs("paOratsEmCaption").textContent = "EOD (used for breach history)";
+    }
     qs("paDelayedEm").textContent = delayedEmPct != null ? fmt(delayedEmPct) + "%" : "—";
     var delayedNote = cur.delayedUpdatedAt ? "Updated: " + cur.delayedUpdatedAt : cur.delayedTradeDate ? "As of: " + cur.delayedTradeDate : "";
     qs("paDelayedEmCaption").textContent = (delayedNote ? delayedNote + " · " : "") + "15-min delayed" + (delayedEmPct != null ? " · Used for strike targets" : "");
@@ -93,6 +110,16 @@
     qs("paUpOvershoot").textContent = sum.avgUpOvershootPct != null ? fmt(sum.avgUpOvershootPct) + "%" : "—";
     qs("paDownOvershoot").textContent = sum.avgDownOvershootPct != null ? fmt(sum.avgDownOvershootPct) + "%" : "—";
     qs("paTailBias").textContent = sum.tailBias || "—";
+
+    /* Breach detail row 3 */
+    qs("paAvgRealizedImplied").textContent = bl.avg_ratio_realized_to_implied != null ? fmt(bl.avg_ratio_realized_to_implied) + "×" : "—";
+    var evUsed = sum.events_used;
+    var evFound = sum.events_found;
+    qs("paEventsUsed").textContent = evUsed != null ? evUsed + (evFound != null ? " / " + evFound : "") : "—";
+    var goNoGo = e1.goNoGo || {};
+    var gateVal = (goNoGo.guidance || {}).tradeGate || goNoGo.tradeGate || "";
+    var gateTxt = gateVal === "NO_TRADE" ? "No Trade" : gateVal === "CAUTION" ? "Caution" : gateVal === "OK" ? "OK" : "—";
+    qs("paTradeGate").textContent = gateTxt;
 
     /* IC structure */
     var tb = e1.tradeBuilder;
