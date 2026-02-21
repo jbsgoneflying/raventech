@@ -77,11 +77,12 @@ THEME_KEYWORD_MAP: Dict[str, dict] = {
         "keywords": [
             "ai revenue", "ai growth", "ai investment", "ai spending",
             "ai demand", "ai adoption", "ai infrastructure", "gpu demand",
-            "data center", "artificial intelligence grow", "ai capex",
-            "generative ai", "ai chip demand", "nvidia revenue",
-            "cloud ai", "ai enterprise",
+            "data center", "artificial intelligence", "ai capex",
+            "generative ai", "ai chip", "nvidia", "cloud ai", "ai enterprise",
+            "openai", "chatgpt", "copilot", "machine learning",
+            "semiconductor", "gpu", "ai server", "ai model",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "ai_deceleration": {
         "label": "AI Deceleration",
@@ -90,7 +91,7 @@ THEME_KEYWORD_MAP: Dict[str, dict] = {
             "ai bubble", "ai overinvest", "ai disappoint", "ai fatigue",
             "ai layoff", "ai cost cut", "ai scaling back",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "rates_rising": {
         "label": "Rates Rising",
@@ -98,9 +99,11 @@ THEME_KEYWORD_MAP: Dict[str, dict] = {
             "rate hike", "rates higher", "yield rise", "bond sell",
             "treasury sell", "hawkish", "inflation surprise", "cpi hot",
             "sticky inflation", "tightening", "higher for longer",
-            "fed hawk", "rate increase", "10-year rise", "yield surge",
+            "fed hawk", "rate increase", "yield surge",
+            "treasury yield", "10-year", "bond yield", "inflation",
+            "interest rate", "fed rate",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "rates_falling": {
         "label": "Rates Falling",
@@ -108,37 +111,41 @@ THEME_KEYWORD_MAP: Dict[str, dict] = {
             "rate cut", "rates lower", "yield fall", "bond rally",
             "treasury rally", "dovish", "inflation cool", "cpi soft",
             "disinflation", "easing", "fed dove", "rate decrease",
-            "pivot", "yield drop",
+            "pivot", "yield drop", "fed cut", "rate reduction",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "risk_off": {
         "label": "Risk-Off",
         "keywords": [
             "risk off", "flight to safety", "market fear", "vix spike",
-            "sell off", "panic", "recession fear", "credit stress",
+            "sell off", "selloff", "panic", "recession", "credit stress",
             "bank risk", "contagion", "safe haven", "volatility spike",
-            "crash", "correction", "bear market",
+            "crash", "correction", "bear market", "market drop",
+            "market decline", "stock fall", "downturn", "slump",
+            "tariff", "trade war", "geopolitical",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "risk_on": {
         "label": "Risk-On",
         "keywords": [
             "risk on", "risk appetite", "market rally", "bull market",
-            "optimism", "all time high", "breakout", "melt up",
-            "euphoria", "fomo", "momentum", "equity inflow",
+            "optimism", "all time high", "all-time high", "record high",
+            "breakout", "melt up", "euphoria", "fomo", "equity inflow",
+            "market surge", "stock rally", "s&p 500 rise", "nasdaq rise",
+            "market gain", "rally", "market climb",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "liquidity_expansion": {
         "label": "Liquidity Expansion",
         "keywords": [
             "liquidity inject", "qe", "quantitative easing", "fed balance sheet",
             "reverse repo decline", "tga drawdown", "money supply grow",
-            "liquidity flush", "stimulus", "fiscal spend",
+            "liquidity flush", "stimulus", "fiscal spend", "fiscal stimulus",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "liquidity_tightening": {
         "label": "Liquidity Tightening",
@@ -147,7 +154,7 @@ THEME_KEYWORD_MAP: Dict[str, dict] = {
             "reverse repo rise", "money supply shrink", "credit tighten",
             "lending standard", "dollar shortage", "funding stress",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "energy_shock": {
         "label": "Energy Shock",
@@ -155,9 +162,10 @@ THEME_KEYWORD_MAP: Dict[str, dict] = {
             "oil spike", "oil surge", "energy crisis", "opec cut",
             "gasoline price", "natural gas surge", "energy shock",
             "crude spike", "oil embargo", "refinery", "oil supply",
-            "energy shortage", "brent surge",
+            "energy shortage", "brent surge", "oil price",
+            "crude oil", "opec", "energy price",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
     "sector_rotation": {
         "label": "Sector Rotation",
@@ -165,9 +173,10 @@ THEME_KEYWORD_MAP: Dict[str, dict] = {
             "sector rotation", "rotation into", "rotation out of",
             "value over growth", "growth over value", "small cap rotation",
             "defensive rotation", "cyclical rotation", "style rotation",
-            "broadening", "market breadth",
+            "broadening", "market breadth", "small cap", "value stock",
+            "growth stock", "defensive", "cyclical",
         ],
-        "activation_threshold": 0.02,
+        "activation_threshold": 0.01,
     },
 }
 
@@ -266,11 +275,43 @@ def classify_themes_deterministic(
     A theme activates when hit_ratio >= activation_threshold.
     """
     if not headlines:
+        _LOG.warning("Engine7 theme classifier: 0 headlines supplied — all themes will be inactive")
         return ThemeResult(themes=[], active_themes=[], headline_count=0)
 
     n = len(headlines)
     lower_headlines = [h.lower() for h in headlines]
     results: List[ThemeClassification] = []
+
+    # Per-headline match log (top 25 headlines + their matches)
+    headline_matches: List[Dict[str, Any]] = []
+
+    for idx, (orig, low) in enumerate(zip(headlines[:25], lower_headlines[:25])):
+        matched_themes_for_hl: List[str] = []
+        matched_kw_for_hl: List[str] = []
+        for theme_id, tdef in THEME_KEYWORD_MAP.items():
+            for kw in tdef["keywords"]:
+                if kw in low:
+                    matched_themes_for_hl.append(theme_id)
+                    matched_kw_for_hl.append(kw)
+                    break
+        headline_matches.append({
+            "idx": idx,
+            "title": orig[:120],
+            "themes": matched_themes_for_hl,
+            "keywords": matched_kw_for_hl,
+        })
+
+    matched_count = sum(1 for hm in headline_matches if hm["themes"])
+    _LOG.info(
+        "Engine7 theme classifier: %d headlines, %d/%d of top-25 matched at least one theme",
+        n, matched_count, min(25, n),
+    )
+    for hm in headline_matches:
+        if hm["themes"]:
+            _LOG.info(
+                "  [%d] MATCH themes=%s kw=%s | %s",
+                hm["idx"], hm["themes"], hm["keywords"], hm["title"],
+            )
 
     for theme_id, tdef in THEME_KEYWORD_MAP.items():
         kws = tdef["keywords"]
@@ -290,6 +331,11 @@ def classify_themes_deterministic(
         intensity = min(100.0, hit_ratio * 500.0)  # 20% hit ratio -> 100
         active = hit_ratio >= threshold and hits >= 1
 
+        _LOG.info(
+            "  THEME %-22s | hits=%3d ratio=%.4f threshold=%.4f intensity=%6.2f → %s",
+            theme_id, hits, hit_ratio, threshold, intensity, "ACTIVE" if active else "inactive",
+        )
+
         results.append(ThemeClassification(
             theme=theme_id,
             label=tdef["label"],
@@ -300,6 +346,10 @@ def classify_themes_deterministic(
         ))
 
     active_themes = [t.theme for t in results if t.active]
+    _LOG.info(
+        "Engine7 theme classifier RESULT: %d active themes out of %d candidates → %s",
+        len(active_themes), len(results), active_themes or "NONE",
+    )
     return ThemeResult(
         themes=results,
         active_themes=active_themes,
@@ -470,34 +520,70 @@ def annotate_themes_llm(
 
 
 def fetch_headlines(date_str: str, lookback_days: int = 7) -> List[str]:
-    """Fetch recent headlines from EODHD.  Returns list of title strings.
+    """Fetch recent headlines from EODHD (primary) with Benzinga fallback.
 
     Default lookback is 7 days to ensure full coverage across weekends
     and holidays when market news may be sparse.
     """
+    import os as _os
+
+    end = dt.date.fromisoformat(date_str)
+    start = end - dt.timedelta(days=lookback_days)
+    titles: List[str] = []
+
+    # --- Primary source: EODHD ---
     try:
         from backend.eodhd_client import EodhdClient
-        import os as _os
         token = _os.getenv("EODHD_API_TOKEN", "")
         if not token:
-            _LOG.warning("Engine7 headline fetch: EODHD_API_TOKEN not set")
-            return []
-        client = EodhdClient(token=token)
-        end = dt.date.fromisoformat(date_str)
-        start = end - dt.timedelta(days=lookback_days)
-        resp = client.get_news(
-            topic="market",
-            from_date=start.isoformat(),
-            to_date=end.isoformat(),
-            limit=200,
-        )
-        titles: List[str] = []
-        for row in (resp.rows or []):
-            title = row.get("title") or ""
-            if title.strip():
-                titles.append(title.strip())
-        _LOG.info("Engine7 headline fetch: %d headlines from %s to %s", len(titles), start.isoformat(), end.isoformat())
-        return titles
+            _LOG.warning("Engine7 headline fetch: EODHD_API_TOKEN not set — skipping EODHD")
+        else:
+            client = EodhdClient(token=token)
+            resp = client.get_news(
+                topic="market",
+                from_date=start.isoformat(),
+                to_date=end.isoformat(),
+                limit=200,
+            )
+            for row in (resp.rows or []):
+                title = row.get("title") or ""
+                if title.strip():
+                    titles.append(title.strip())
+            _LOG.info(
+                "Engine7 headline fetch [EODHD]: %d headlines, window=%s→%s",
+                len(titles), start.isoformat(), end.isoformat(),
+            )
     except Exception as exc:
-        _LOG.warning("Engine7 headline fetch failed: %s", exc)
-        return []
+        _LOG.warning("Engine7 headline fetch [EODHD] failed: %s", exc)
+
+    # --- Fallback: Benzinga news if EODHD returned nothing ---
+    if not titles:
+        try:
+            from backend.benzinga_client import BenzingaClient
+            bz_key = _os.getenv("BENZINGA_API_KEY", "")
+            if bz_key:
+                bz = BenzingaClient(api_key=bz_key)
+                bz_resp = bz.get_news(
+                    from_date=start.isoformat(),
+                    to_date=end.isoformat(),
+                    page_size=200,
+                )
+                for row in (bz_resp if isinstance(bz_resp, list) else (bz_resp.rows if hasattr(bz_resp, "rows") else [])):
+                    title = row.get("title") or row.get("headline") or "" if isinstance(row, dict) else ""
+                    if title.strip():
+                        titles.append(title.strip())
+                _LOG.info(
+                    "Engine7 headline fetch [Benzinga fallback]: %d headlines, window=%s→%s",
+                    len(titles), start.isoformat(), end.isoformat(),
+                )
+        except Exception as bz_exc:
+            _LOG.warning("Engine7 headline fetch [Benzinga fallback] failed: %s", bz_exc)
+
+    if not titles:
+        _LOG.warning(
+            "Engine7 headline fetch: 0 headlines from ALL sources (window=%s→%s). "
+            "Theme classifier will produce no active themes.",
+            start.isoformat(), end.isoformat(),
+        )
+
+    return titles

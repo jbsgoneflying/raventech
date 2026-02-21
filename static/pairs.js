@@ -42,13 +42,14 @@
   }
 
   /* ── Build a pair card ─────────────────────────────────────────────── */
-  function buildPairCard(sig) {
+  function buildPairCard(sig, isIneligible) {
     var card = document.createElement("div");
-    card.className = "pairCard pairsClick";
+    card.className = "pairCard pairsClick" + (isIneligible ? " pairCard--ineligible" : "");
 
     var modeClass = (sig.mode || "").replace(/\s+/g, "_").toLowerCase();
     var modeLabel = sig.mode === "mean_reversion" ? "Mean Rev" : sig.mode === "momentum" ? "Momentum" : sig.mode || "—";
     var score = sig.confidence_score || 0;
+    var priceScore = sig.price_only_score;
 
     var html = '<div class="pairCardHeader">';
     html += '<div class="pairCardPair">';
@@ -56,7 +57,11 @@
     html += '<span class="tierChip ' + tierClass(sig.tier) + '">' + tierLabel(sig.tier) + '</span>';
     html += '</div>';
     html += '<span class="pairCardMode ' + modeClass + '">' + modeLabel + '</span>';
-    html += '<span class="pairCardGrade ' + gradeClass(score) + '">' + gradeLabel(score) + " · " + Math.round(score) + '</span>';
+    if (isIneligible && priceScore != null) {
+      html += '<span class="pairCardGrade" style="opacity:0.6;" title="Price-only score (no theme weight)">P: ' + priceScore + '</span>';
+    } else {
+      html += '<span class="pairCardGrade ' + gradeClass(score) + '">' + gradeLabel(score) + " · " + Math.round(score) + '</span>';
+    }
     html += '</div>';
 
     html += '<div class="pairCardBody">';
@@ -64,6 +69,13 @@
     html += '<div class="pairCardMetric"><span class="k">ROC 5d</span><span class="v">' + pct(sig.momentum_5d_roc) + '</span></div>';
     html += '<div class="pairCardMetric"><span class="k">ROC 10d</span><span class="v">' + pct(sig.momentum_10d_roc) + '</span></div>';
     html += '<div class="pairCardMetric"><span class="k">Confidence</span><span class="v">' + Math.round(score) + '</span></div>';
+
+    if (isIneligible) {
+      html += '<div class="pairCardMetric"><span class="k">Score (Z)</span><span class="v">' + fmt(sig.score_z) + '</span></div>';
+      html += '<div class="pairCardMetric"><span class="k">Score (Mom)</span><span class="v">' + fmt(sig.score_momentum) + '</span></div>';
+      html += '<div class="pairCardMetric"><span class="k">Score (Trend)</span><span class="v">' + fmt(sig.score_trend) + '</span></div>';
+    }
+
     if (sig.risk_units) {
       html += '<div class="pairCardMetric"><span class="k">Risk Units</span><span class="v">' + fmt(sig.risk_units, 1) + '</span></div>';
     }
@@ -88,7 +100,7 @@
     }
 
     if (sig.eligibility === "NOT_ELIGIBLE" && sig.ineligibility_reason) {
-      html += '<div class="pairCardNotes">Ineligible: ' + sig.ineligibility_reason + '</div>';
+      html += '<div class="pairCardNotes" style="color:var(--caution);">Ineligible: ' + sig.ineligibility_reason + '</div>';
     }
 
     card.innerHTML = html;
@@ -97,18 +109,30 @@
 
   /* ── Render results ────────────────────────────────────────────────── */
   function render(data) {
-    var aPlus      = data.aPlus || [];
-    var standard   = data.standard || [];
-    var watchlist  = data.watchlist || [];
-    var ineligible = data.ineligible || [];
-    var meta       = data.meta || {};
-    var activeThemes = data.activeThemes || [];
+    var aPlus         = data.aPlus || [];
+    var standard      = data.standard || [];
+    var watchlist     = data.watchlist || [];
+    var ineligible    = data.ineligible || [];
+    var meta          = data.meta || {};
+    var activeThemes  = data.activeThemes || [];
+    var diagThemes    = data.themeDiagnostics || [];
 
     qs("statScanned").textContent  = meta.pairsAnalyzed || (aPlus.length + standard.length + watchlist.length + ineligible.length) || "20";
     qs("statEligible").textContent = aPlus.length + standard.length + watchlist.length;
     qs("statAPlus").textContent    = aPlus.length;
-    qs("statThemes").textContent   = activeThemes.length;
+    qs("statThemes").textContent   = (meta.activeThemeCount != null ? meta.activeThemeCount : activeThemes.length);
     qs("statsMeta").textContent    = meta.scanDate || new Date().toISOString().slice(0, 10);
+
+    /* Headline / scan diagnostics banner */
+    var diagLines = [];
+    diagLines.push("Headlines: " + (meta.headlineCount || 0) + " | Window: " + (meta.headlineWindowStart || "?") + " → " + (meta.headlineWindowEnd || "?"));
+    diagLines.push("Source: " + (meta.headlineSource || "EODHD"));
+    diagLines.push("Active themes: " + (meta.activeThemeCount || 0) + " / " + diagThemes.length + " candidates");
+    if (meta.activeThemeNames && meta.activeThemeNames.length) {
+      diagLines.push("Active: " + meta.activeThemeNames.join(", "));
+    }
+    diagLines.push("Cache version: " + (meta.cacheVersion || "?"));
+    statusEl.textContent = diagLines.join(" · ");
 
     /* Themes section */
     var themesGrid = qs("themesGrid");
@@ -126,7 +150,36 @@
         themesGrid.appendChild(chip);
       });
     } else {
-      themesGrid.innerHTML = '<span style="color:var(--muted); font-size:12px;">No active themes detected — all pairs marked ineligible. Headlines may be sparse (weekend/holiday). Try again on a trading day.</span>';
+      var noThemeHtml = '<span style="color:var(--muted); font-size:12px;">No active themes detected (' + (meta.headlineCount || 0) + ' headlines scanned). ';
+      noThemeHtml += 'All ' + ineligible.length + ' pairs shown below with price-only scoring.</span>';
+      themesGrid.innerHTML = noThemeHtml;
+    }
+
+    /* Theme diagnostics (all candidates — collapsible) */
+    if (diagThemes.length) {
+      var diagEl = document.createElement("details");
+      diagEl.style.cssText = "margin-top:8px; font-size:12px; color:var(--muted);";
+      var sumEl = document.createElement("summary");
+      sumEl.style.cursor = "pointer";
+      sumEl.textContent = "Theme Diagnostics (" + diagThemes.length + " candidates)";
+      diagEl.appendChild(sumEl);
+      var table = '<table style="width:100%; border-collapse:collapse; margin-top:4px; font-size:11px;">';
+      table += '<tr style="text-align:left;"><th>Theme</th><th>Hits</th><th>Intensity</th><th>Status</th><th>Keywords</th></tr>';
+      diagThemes.forEach(function (td) {
+        var color = td.active ? "var(--accent)" : "var(--muted)";
+        table += '<tr style="color:' + color + ';">';
+        table += '<td>' + (td.label || td.theme) + '</td>';
+        table += '<td>' + td.keyword_hits + '</td>';
+        table += '<td>' + (td.intensity || 0) + '</td>';
+        table += '<td>' + (td.active ? "ACTIVE" : "inactive") + '</td>';
+        table += '<td>' + (td.sample_keywords || []).join(", ") + '</td>';
+        table += '</tr>';
+      });
+      table += '</table>';
+      var tableDiv = document.createElement("div");
+      tableDiv.innerHTML = table;
+      diagEl.appendChild(tableDiv);
+      themesGrid.appendChild(diagEl);
     }
 
     var llmAnn = data.llmAnnotation;
@@ -142,7 +195,7 @@
     aplusGrid.innerHTML = "";
     if (aPlus.length) {
       qs("aplusMeta").textContent = aPlus.length + " pair" + (aPlus.length !== 1 ? "s" : "");
-      aPlus.forEach(function (s) { aplusGrid.appendChild(buildPairCard(s)); });
+      aPlus.forEach(function (s) { aplusGrid.appendChild(buildPairCard(s, false)); });
     } else {
       aplusGrid.innerHTML = '<div class="emptyState"><div class="emptyStateTitle">No A+ Pairs</div><div class="emptyStateBody">No pairs reached the A+ confidence threshold (75+). Check standard and watchlist sections.</div></div>';
       qs("aplusMeta").textContent = "0 pairs";
@@ -153,7 +206,7 @@
     stdGrid.innerHTML = "";
     if (standard.length) {
       qs("standardMeta").textContent = standard.length + " pair" + (standard.length !== 1 ? "s" : "");
-      standard.forEach(function (s) { stdGrid.appendChild(buildPairCard(s)); });
+      standard.forEach(function (s) { stdGrid.appendChild(buildPairCard(s, false)); });
     } else {
       stdGrid.innerHTML = '<div class="emptyState"><div class="emptyStateTitle">No Standard Pairs</div><div class="emptyStateBody">No eligible pairs in the standard range.</div></div>';
       qs("standardMeta").textContent = "0 pairs";
@@ -164,15 +217,21 @@
     wGrid.innerHTML = "";
     if (watchlist.length) {
       qs("watchlistMeta").textContent = watchlist.length + " pair" + (watchlist.length !== 1 ? "s" : "");
-      watchlist.forEach(function (s) { wGrid.appendChild(buildPairCard(s)); });
+      watchlist.forEach(function (s) { wGrid.appendChild(buildPairCard(s, false)); });
     } else {
       wGrid.innerHTML = '<div class="emptyState"><div class="emptyStateTitle">No Watchlist Pairs</div><div class="emptyStateBody">No developing setups below threshold.</div></div>';
       qs("watchlistMeta").textContent = "0 pairs";
     }
 
-    /* Show ineligible count in status */
-    if (ineligible.length && !aPlus.length && !standard.length && !watchlist.length) {
-      statusEl.textContent = "Scan complete. " + ineligible.length + " pairs ineligible (no active theme support). " + activeThemes.length + " themes active from " + (meta.headlineCount || "unknown") + " headlines.";
+    /* Ineligible — always rendered as cards so z-score/momentum is visible */
+    var inelGrid = qs("ineligibleGrid");
+    inelGrid.innerHTML = "";
+    if (ineligible.length) {
+      qs("ineligibleMeta").textContent = ineligible.length + " pair" + (ineligible.length !== 1 ? "s" : "") + " — price-only scoring shown";
+      ineligible.forEach(function (s) { inelGrid.appendChild(buildPairCard(s, true)); });
+    } else {
+      inelGrid.innerHTML = '<div class="emptyState"><div class="emptyStateTitle">No Ineligible Pairs</div><div class="emptyStateBody">All pairs have active theme support.</div></div>';
+      qs("ineligibleMeta").textContent = "0 pairs";
     }
   }
 
@@ -203,7 +262,6 @@
       .then(function (data) {
         render(data);
         resultsEl.classList.remove("hidden");
-        statusEl.textContent = "Scan complete.";
       })
       .catch(function (err) {
         statusEl.textContent = "Error: " + err.message;
@@ -214,6 +272,29 @@
         if (window.RavenLoading) window.RavenLoading.hide();
       });
   });
+
+  /* ── Clear cache button ───────────────────────────────────────────── */
+  var clearBtn = document.getElementById("clearCacheBtn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", function () {
+      clearBtn.disabled = true;
+      clearBtn.textContent = "Clearing…";
+      fetch("/api/engine7-pairs/clear-cache", { method: "POST" })
+        .then(function (r) { return r.json(); })
+        .then(function () {
+          clearBtn.textContent = "Cleared ✓";
+          setTimeout(function () {
+            clearBtn.textContent = "Clear Cache & Rescan";
+            clearBtn.disabled = false;
+            form.dispatchEvent(new Event("submit", { cancelable: true }));
+          }, 500);
+        })
+        .catch(function () {
+          clearBtn.textContent = "Clear Cache & Rescan";
+          clearBtn.disabled = false;
+        });
+    });
+  }
 
   /* ── Tooltip behaviour ─────────────────────────────────────────────── */
   document.addEventListener("click", function (e) {

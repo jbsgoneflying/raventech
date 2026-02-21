@@ -42,7 +42,11 @@ _LOG = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Caches (module-level singletons)
+# Bump _CACHE_VERSION when keyword lists, scoring weights, or bucketing logic
+# change to prevent stale results from replaying.
 # ---------------------------------------------------------------------------
+
+_CACHE_VERSION = "v3"
 
 _bars_cache: TTLCache = TTLCache(maxsize=200, ttl=6 * 3600)
 _bars_cache_lock = threading.Lock()
@@ -52,6 +56,15 @@ _scan_cache_lock = threading.Lock()
 
 _theme_cache: TTLCache = TTLCache(maxsize=10, ttl=30 * 60)
 _theme_cache_lock = threading.Lock()
+
+
+def clear_engine7_caches() -> None:
+    """Force-clear all in-memory caches (scan + theme).  Bars kept."""
+    with _scan_cache_lock:
+        _scan_cache.clear()
+    with _theme_cache_lock:
+        _theme_cache.clear()
+    _LOG.info("Engine7 in-memory caches cleared (scan + theme)")
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +304,7 @@ def check_exposure_overlap(
                 score_trend=sig.score_trend,
                 score_theme=sig.score_theme,
                 score_orats=sig.score_orats,
+                price_only_score=sig.price_only_score,
             )
         flagged.append(sig)
 
@@ -355,6 +369,7 @@ def check_exposure_overlap(
                     score_trend=sig.score_trend,
                     score_theme=sig.score_theme,
                     score_orats=sig.score_orats,
+                    price_only_score=sig.price_only_score,
                 )
             final.append(sig)
         return final
@@ -398,12 +413,14 @@ def compute_engine7_scan(
 
     date_str = today.isoformat()
 
-    # Check scan cache
-    cache_key = (date_str, min_score, z_score_window)
+    # Check scan cache (versioned to bust stale results after code changes)
+    cache_key = (_CACHE_VERSION, date_str, min_score, z_score_window)
     with _scan_cache_lock:
         cached = _scan_cache.get(cache_key)
     if cached is not None:
+        _LOG.debug("Engine7 scan cache HIT for %s", cache_key)
         return cached
+    _LOG.info("Engine7 scan cache MISS for %s — running fresh scan", cache_key)
 
     # 1. Load pair library
     library = load_pair_library()
@@ -417,7 +434,7 @@ def compute_engine7_scan(
     all_bars = fetch_bars_for_tickers(all_tickers, today, lookback_days=max_lookback, max_workers=max_workers)
 
     # 3. Deterministic theme classification (INV-1)
-    theme_cache_key = f"theme:{date_str}"
+    theme_cache_key = f"theme:{_CACHE_VERSION}:{date_str}"
     with _theme_cache_lock:
         theme_result = _theme_cache.get(theme_cache_key)
 
@@ -506,6 +523,18 @@ def compute_engine7_scan(
     for bucket in (a_plus, standard, watchlist, ineligible):
         bucket.sort(key=lambda x: x.get("confidence_score", 0), reverse=True)
 
+    # Build theme diagnostics (all candidates, not just active)
+    theme_diagnostics = []
+    for t in theme_result.themes:
+        theme_diagnostics.append({
+            "theme": t.theme,
+            "label": t.label,
+            "active": t.active,
+            "keyword_hits": t.keyword_hits,
+            "intensity": t.intensity,
+            "sample_keywords": t.sample_keywords,
+        })
+
     result = {
         "aPlus": a_plus,
         "standard": standard,
@@ -513,6 +542,7 @@ def compute_engine7_scan(
         "ineligible": ineligible,
         "meta": {
             "scanDate": date_str,
+            "cacheVersion": _CACHE_VERSION,
             "pairsAnalyzed": len(signals),
             "tradableCount": len(a_plus) + len(standard),
             "aPlusCount": len(a_plus),
@@ -520,7 +550,11 @@ def compute_engine7_scan(
             "watchlistCount": len(watchlist),
             "ineligibleCount": len(ineligible),
             "headlineCount": theme_result.headline_count,
+            "headlineWindowStart": (today - dt.timedelta(days=7)).isoformat(),
+            "headlineWindowEnd": date_str,
+            "headlineSource": "EODHD (primary) + Benzinga (fallback)",
             "activeThemeCount": len(theme_result.active_themes),
+            "activeThemeNames": theme_result.active_themes,
             "themeRequired": theme_required,
             "oratsEnabled": enable_orats,
             "llmAnnotationEnabled": enable_llm_annotation,
@@ -529,6 +563,7 @@ def compute_engine7_scan(
             "overlapCorrThreshold": overlap_corr_threshold,
         },
         "activeThemes": [t.to_dict() for t in theme_result.themes if t.active],
+        "themeDiagnostics": theme_diagnostics,
     }
 
     if llm_annotation:

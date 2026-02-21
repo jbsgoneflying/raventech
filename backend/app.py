@@ -2404,6 +2404,14 @@ def engine7_pairs_scan(
         raise HTTPException(status_code=500, detail=f"Engine 7 scan failed: {exc}")
 
 
+@app.post("/api/engine7-pairs/clear-cache")
+def engine7_clear_cache():
+    """Force-clear Engine 7 in-memory caches (scan + theme). Bars kept."""
+    from backend.engine7_screener import clear_engine7_caches
+    clear_engine7_caches()
+    return {"status": "ok", "message": "Engine 7 scan and theme caches cleared"}
+
+
 @app.get("/api/engine7-pairs/themes")
 def engine7_pairs_themes(
     request: Request,

@@ -125,6 +125,10 @@ class PairSignal:
     score_theme: float
     score_orats: float
 
+    # Price-only score (z + momentum + trend, ignoring theme weight)
+    # Lets the desk verify statistical scoring even when no themes are active.
+    price_only_score: int = 0
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["theme_tags"] = list(self.theme_tags)
@@ -405,8 +409,13 @@ def score_pair(
     analysis: PairAnalysis,
     theme_score: float,
     orats_data: Optional[Dict[str, Any]] = None,
-) -> Tuple[int, str, Dict[str, float]]:
-    """Composite confidence scorer.  Returns (score, grade, component_scores).
+) -> Tuple[int, str, Dict[str, float], int]:
+    """Composite confidence scorer.
+
+    Returns (score, grade, component_scores, price_only_score).
+
+    price_only_score uses z + momentum + trend only (no theme, no orats)
+    so the desk can evaluate statistical quality even when themes are inactive.
 
     INV-5: if orats_data is None, weights renormalise across price-only
     components.
@@ -449,6 +458,15 @@ def score_pair(
 
     score = int(round(min(100.0, max(0.0, raw))))
 
+    # Price-only score: z + momentum + trend, renormalised to 100
+    _w_price = {"z": 46, "momentum": 31, "trend": 23}  # ~30:20:15 renormalised
+    price_raw = (
+        comp_z * _w_price["z"]
+        + comp_mom * _w_price["momentum"]
+        + comp_trend * _w_price["trend"]
+    ) / 100.0
+    price_only_score = int(round(min(100.0, max(0.0, price_raw))))
+
     if score >= 75:
         grade = "A+"
     elif score >= 60:
@@ -465,7 +483,7 @@ def score_pair(
         "score_theme": round(comp_theme, 2),
         "score_orats": round(comp_orats, 2) if use_orats else 0.0,
     }
-    return score, grade, components
+    return score, grade, components, price_only_score
 
 
 # ---------------------------------------------------------------------------
@@ -564,13 +582,15 @@ def build_signal(
     """Assemble a PairSignal from analysis + theme results.
 
     INV-2: when theme_required and theme_score == 0, eligibility = NOT_ELIGIBLE.
+    Full scoring is always computed so z-score/momentum data is visible
+    even for ineligible pairs.
     """
-    score, grade, components = score_pair(analysis, theme_score, orats_data)
+    score, grade, components, price_only_score = score_pair(analysis, theme_score, orats_data)
 
     # Eligibility (INV-2)
     if theme_required and theme_score <= 0:
         eligibility = "NOT_ELIGIBLE"
-        ineligibility_reason = "no_theme_support"
+        ineligibility_reason = "NO_ACTIVE_THEME"
         tradable = False
     elif score >= min_score:
         eligibility = "ELIGIBLE"
@@ -612,4 +632,5 @@ def build_signal(
         score_trend=components["score_trend"],
         score_theme=components["score_theme"],
         score_orats=components["score_orats"],
+        price_only_score=price_only_score,
     )

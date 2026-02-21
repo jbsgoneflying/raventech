@@ -30,6 +30,13 @@
         background: rgba(255,255,255,0.88);
         transform: translateY(-1px);
       }
+      .pairCard--ineligible {
+        opacity: 0.75;
+        border-left: 3px solid var(--caution, #f59e0b);
+      }
+      .pairCard--ineligible:hover {
+        opacity: 1;
+      }
       .pairCardHeader {
         display: flex;
         align-items: center;
@@ -245,6 +252,9 @@
             <span class="btnSpinner" aria-hidden="true"></span>
             Scan Pairs
           </button>
+          <button id="clearCacheBtn" class="secondaryButton" type="button" style="margin-left:8px; font-size:12px; padding:6px 12px;">
+            Clear Cache &amp; Rescan
+          </button>
         </form>
         <div id="status" class="status">Click "Scan Pairs" to evaluate 20 fixed asset pairs across all tiers.</div>
       </section>
@@ -403,6 +413,15 @@
             <div class="sectionMeta muted" id="watchlistMeta">—</div>
           </div>
           <div id="watchlistGrid" class="pairsGrid"></div>
+        </section>
+
+        <!-- Ineligible Pairs Section -->
+        <section class="pairsSection">
+          <div class="sectionHeading">
+            <h3>Ineligible Pairs (NO_ACTIVE_THEME)</h3>
+            <span id="ineligibleMeta" class="sectionMeta muted">—</span>
+          </div>
+          <div id="ineligibleGrid" class="pairsGrid"></div>
         </section>
 
         <!-- How to Trade Section -->
