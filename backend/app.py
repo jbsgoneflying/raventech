@@ -5259,6 +5259,7 @@ def engine9_scan():
     from backend.engine9_watchlist import (
         TIERS, TIER_1_BDCS, TIER_2_ALT_MANAGERS, TIER_3_CREDIT_ETFS, TIER_4_VOL_HEDGES,
         compute_ticker_score, compute_forced_seller_map, compute_put_skew_25d, compute_iv_rank,
+        get_structural_profile,
     )
     from backend.eodhd_client import EodhdClient
 
@@ -5571,10 +5572,11 @@ def engine9_scan():
     for t in TIER_1_BDCS + TIER_2_ALT_MANAGERS:
         p = price_data.get(t, [])
         chg20 = (p[-1] / p[-21] - 1) * 100 if len(p) >= 21 else None
+        profile = get_structural_profile(t)
         fsd[t] = {
-            "leverage": None,
-            "liquidity_mismatch": None,
-            "retail_exposure": None,
+            "leverage": profile.get("leverage"),
+            "liquidity_mismatch": profile.get("liquidity_mismatch"),
+            "retail_exposure": profile.get("retail_exposure"),
             "put_skew_25d": _skew_for(t),
             "price_20d_pct": chg20,
             "insider_net_30d": insider_30_data.get(t, 0) if insider_30_data else None,

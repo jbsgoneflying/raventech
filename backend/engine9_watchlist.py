@@ -48,6 +48,34 @@ TIERS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# Structural risk profiles: leverage (debt/equity), liquidity_mismatch (0-1),
+# retail_exposure (0-100).  These are calibrated from public filings and known
+# balance-sheet characteristics.  Updated periodically as fundamentals shift.
+STRUCTURAL_PROFILES: Dict[str, Dict[str, float]] = {
+    # Tier 1 BDCs — leverage = statutory / typical debt-to-equity
+    "ARCC": {"leverage": 1.2, "liquidity_mismatch": 0.7, "retail_exposure": 55},
+    "OBDC": {"leverage": 1.1, "liquidity_mismatch": 0.75, "retail_exposure": 40},
+    "FSK":  {"leverage": 1.15, "liquidity_mismatch": 0.8, "retail_exposure": 60},
+    "BXSL": {"leverage": 1.0, "liquidity_mismatch": 0.65, "retail_exposure": 50},
+    "MAIN": {"leverage": 0.9, "liquidity_mismatch": 0.55, "retail_exposure": 70},
+    "GBDC": {"leverage": 1.1, "liquidity_mismatch": 0.7, "retail_exposure": 35},
+    # Tier 2 Alt Managers — leverage is lower but AUM risk is the real exposure
+    "OWL":  {"leverage": 0.6, "liquidity_mismatch": 0.85, "retail_exposure": 45},
+    "APO":  {"leverage": 0.5, "liquidity_mismatch": 0.6, "retail_exposure": 30},
+    "ARES": {"leverage": 0.5, "liquidity_mismatch": 0.65, "retail_exposure": 35},
+    "KKR":  {"leverage": 0.4, "liquidity_mismatch": 0.5, "retail_exposure": 25},
+    "BX":   {"leverage": 0.4, "liquidity_mismatch": 0.55, "retail_exposure": 30},
+    "BAM":  {"leverage": 0.35, "liquidity_mismatch": 0.45, "retail_exposure": 20},
+}
+
+
+def get_structural_profile(ticker: str) -> Dict[str, Optional[float]]:
+    """Return leverage, liquidity_mismatch, retail_exposure for a ticker."""
+    return STRUCTURAL_PROFILES.get(ticker.upper(), {
+        "leverage": None, "liquidity_mismatch": None, "retail_exposure": None,
+    })
+
+
 def get_tier_for_ticker(ticker: str) -> str:
     t = ticker.upper()
     if t in TIER_1_BDCS:

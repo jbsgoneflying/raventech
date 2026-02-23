@@ -322,11 +322,14 @@
       wrap.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:13px;">No forced seller data.</div>';
       return;
     }
-    var html = '<table class="e9Table"><thead><tr><th>Ticker</th><th>Fragility</th><th>Put Skew</th><th>Price 20d %</th><th>Insider 30d</th><th></th></tr></thead><tbody>';
+    var html = '<table class="e9Table"><thead><tr><th>Ticker</th><th>Fragility</th><th>Leverage</th><th>Liq. Mismatch</th><th>Retail Exp.</th><th>Put Skew</th><th>Price 20d %</th><th>Insider 30d</th><th></th></tr></thead><tbody>';
     entries.forEach(function (e) {
       var fc = e.fragility_score >= 60 ? "e9FragHigh" : e.fragility_score >= 30 ? "e9FragMed" : "e9FragLow";
       var pc = (e.price_20d_pct != null && e.price_20d_pct < 0) ? "e9Negative" : "";
       html += '<tr><td class="e9Ticker">' + e.ticker + '</td><td class="' + fc + '">' + fmt(e.fragility_score, 0) + '</td>' +
+        '<td>' + fmt(e.leverage, 2) + 'x</td>' +
+        '<td>' + (e.liquidity_mismatch != null ? (e.liquidity_mismatch * 100).toFixed(0) + '%' : '—') + '</td>' +
+        '<td>' + (e.retail_exposure != null ? e.retail_exposure.toFixed(0) + '%' : '—') + '</td>' +
         '<td>' + fmt(e.put_skew_25d, 3) + '</td><td class="' + pc + '">' + fmt(e.price_20d_pct, 2) + '%</td>' +
         '<td>' + fmtDollar(e.insider_net_30d) + '</td>' +
         '<td>' + insightBtn("ticker", e.ticker, e, e.ticker + " — Forced Seller") + '</td></tr>';
