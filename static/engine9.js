@@ -4,6 +4,7 @@
 
   var _scanData = null;
   var _spreadChart = null;
+  var _spreadData = null;
   var _refreshTimer = null;
   var _abortCtrl = null;
 
@@ -55,6 +56,7 @@
      Contextual LLM Insight System
      ════════════════════════════════════════════════════════════════════ */
   var _insightCache = {};
+  var _insightRegistry = [];
 
   function requestInsight(type, key, data, title) {
     var cacheKey = type + ":" + key;
@@ -131,10 +133,19 @@
   }
 
   function insightBtn(type, key, data, title) {
-    return '<button class="e9InsightBtn" onclick="window._e9Insight(\'' + type + '\',\'' +
-      esc(key) + '\',' + JSON.stringify(data || {}).replace(/'/g, "\\'") + ',\'' + esc(title || key) + '\')"><span class="ico">&#9432;</span> Explain</button>';
+    var idx = _insightRegistry.length;
+    _insightRegistry.push({ type: type, key: key, data: data, title: title });
+    return '<button class="e9InsightBtn" data-insight-idx="' + idx + '"><span class="ico">&#9432;</span> Explain</button>';
   }
-  window._e9Insight = function (type, key, data, title) { requestInsight(type, key, data, title); };
+
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest(".e9InsightBtn");
+    if (!btn) return;
+    var idx = parseInt(btn.getAttribute("data-insight-idx"), 10);
+    if (isNaN(idx) || !_insightRegistry[idx]) return;
+    var entry = _insightRegistry[idx];
+    requestInsight(entry.type, entry.key, entry.data, entry.title);
+  });
 
   /* ════════════════════════════════════════════════════════════════════
      Scan
@@ -144,6 +155,7 @@
     btn.disabled = true; btn.textContent = "Scanning...";
     $("e9Loading").style.display = "block";
     _insightCache = {};
+    _insightRegistry = [];
 
     if (_abortCtrl) _abortCtrl.abort();
     _abortCtrl = new AbortController();
@@ -354,6 +366,9 @@
   }
 
   function renderSpreadChart(data) {
+    _spreadData = data;
+    var chartBtn = $("e9ChartInsightBtn");
+    if (chartBtn) chartBtn.style.display = "";
     var hy = data.hy_oas || {}, ig = data.ig_oas || {}, curve = data.curve_2s10s || {};
     var dates = hy.dates || ig.dates || [];
     if (_spreadChart) _spreadChart.destroy();
@@ -492,6 +507,34 @@
     initDrag("e9DeskPopup", "e9DeskPopupHeader", "e9DeskPopupClose");
     initDrag("e9ThesisPopup", "e9ThesisPopupHeader", "e9ThesisPopupClose");
     initDrag("e9InsightPopup", "e9InsightPopupHeader", "e9InsightPopupClose");
+
+    var chartBtn = $("e9ChartInsightBtn");
+    if (chartBtn) {
+      chartBtn.addEventListener("click", function () {
+        var chartContext = {};
+        if (_spreadData) {
+          var hy = _spreadData.hy_oas || {};
+          var ig = _spreadData.ig_oas || {};
+          var curve = _spreadData.curve_2s10s || {};
+          var hyVals = hy.values || [];
+          var igVals = ig.values || [];
+          var curveVals = curve.values || [];
+          chartContext = {
+            hy_oas_latest: hyVals.length ? hyVals[hyVals.length - 1] : null,
+            hy_oas_30d_ago: hyVals.length > 22 ? hyVals[hyVals.length - 23] : null,
+            hy_oas_90d_ago: hyVals.length > 66 ? hyVals[hyVals.length - 67] : null,
+            ig_oas_latest: igVals.length ? igVals[igVals.length - 1] : null,
+            ig_oas_30d_ago: igVals.length > 22 ? igVals[igVals.length - 23] : null,
+            curve_2s10s_latest: curveVals.length ? curveVals[curveVals.length - 1] : null,
+            curve_2s10s_30d_ago: curveVals.length > 22 ? curveVals[curveVals.length - 23] : null,
+            data_points: hyVals.length,
+            date_range_start: (hy.dates || [])[0] || null,
+            date_range_end: (hy.dates || [])[(hy.dates || []).length - 1] || null,
+          };
+        }
+        requestInsight("chart", "credit_spread_history", chartContext, "Credit Spread History");
+      });
+    }
 
     startAutoRefresh();
   }
