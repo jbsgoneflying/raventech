@@ -5251,6 +5251,7 @@ def engine9_scan():
     from backend.fred_client import FredClient, SERIES_HY_OAS, SERIES_IG_OAS, SERIES_DGS2, SERIES_DGS10, SERIES_FEDFUNDS
     from backend.engine9_signals import (
         compute_bdc_divergence, compute_spread_signal, compute_nlp_delta_of_language,
+        compute_nlp_from_llm_analyses, analyze_transcript_llm,
         compute_insider_signal, compute_correlation_breakdown, compute_etf_nav_deviation,
         compute_funding_stress, compute_time_compression, compute_weighted_composite,
         evaluate_triggers, evaluate_thesis_health, SignalResult,
@@ -5345,27 +5346,44 @@ def engine9_scan():
         except Exception as e:
             LOG.warning("VIX price fetch failed: %s", e)
 
+    # ── Fetch BDC book values from EODHD fundamentals ──
+    bdc_book_values: dict[str, float | None] = {}
+    if eodhd:
+        def _fetch_bv(ticker: str):
+            try:
+                return ticker, eodhd.get_book_value(f"{ticker}.US")
+            except Exception:
+                return ticker, None
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futs = {pool.submit(_fetch_bv, tk): tk for tk in TIER_1_BDCS}
+            for fut in as_completed(futs):
+                t, bv = fut.result()
+                bdc_book_values[t] = bv
+
     # ── Compute Signals ──
     signal_results: list[SignalResult] = []
 
     # Signal 1: BDC Divergence (aggregate across Tier 1)
     bdc_scores = []
+    bdc_details = []
     for bdc in TIER_1_BDCS:
         p = price_data.get(bdc, [])
+        bv = bdc_book_values.get(bdc)
         sig = compute_bdc_divergence(
             prices_30d=p[-30:] if len(p) >= 30 else p,
             prices_60d=p[-60:] if len(p) >= 60 else p,
             prices_90d=p[-90:] if len(p) >= 90 else p,
-            last_book_value=None,
+            last_book_value=bv,
             current_price=p[-1] if p else None,
         )
         bdc_scores.append(sig.score)
+        bdc_details.append({"ticker": bdc, "score": sig.score, "book_value": bv, "price": p[-1] if p else None})
     avg_bdc = sum(bdc_scores) / len(bdc_scores) if bdc_scores else 0
     bdc_signal = SignalResult(
         key="bdc_divergence", label="BDC Divergence",
         score=round(avg_bdc, 1), weight=0.25,
         detail=f"Avg across {len(TIER_1_BDCS)} BDCs", triggered=avg_bdc > 40,
-        data={"avg_score": round(avg_bdc, 1), "bdc_count": len(TIER_1_BDCS)},
+        data={"avg_score": round(avg_bdc, 1), "bdc_count": len(TIER_1_BDCS), "per_bdc": bdc_details},
     )
     signal_results.append(bdc_signal)
 
@@ -5373,49 +5391,106 @@ def engine9_scan():
     spread_signal = compute_spread_signal(hy_oas_values, vix_prices)
     signal_results.append(spread_signal)
 
-    # Signal 3: NLP Delta-of-Language (use API Ninjas transcripts if available)
+    # Signal 3: NLP Delta-of-Language (LLM-powered for all Tier 1+2)
     nlp_signal = SignalResult(
         key="nlp_language", label="NLP Language Drift",
         score=0, weight=0.05, detail="Awaiting transcript data",
     )
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    nlp_tickers = TIER_1_BDCS + TIER_2_ALT_MANAGERS
+    analyses_by_ticker: dict[str, list[dict]] = {}
     if ninjas:
-        all_transcripts: list[dict] = []
-        for t in (TIER_1_BDCS[:2] + TIER_2_ALT_MANAGERS[:2]):
+        from backend.engine9_store import load_transcript_history as _load_th
+        def _analyze_ticker_transcripts(tkr: str):
+            cached_analyses = _load_th(tkr, quarters=4)
+            if len(cached_analyses) >= 2:
+                return tkr, cached_analyses
             try:
-                transcripts = ninjas.get_transcript_history(t, quarters=4)
-                all_transcripts.extend(transcripts)
+                raw_transcripts = ninjas.get_transcript_history(tkr, quarters=4)
             except Exception:
-                pass
-        if all_transcripts:
-            nlp_signal = compute_nlp_delta_of_language(all_transcripts)
+                raw_transcripts = []
+            results = list(cached_analyses)
+            for rt in raw_transcripts:
+                y = rt.get("year")
+                q = rt.get("quarter")
+                if not y or not q:
+                    continue
+                already = any(a.get("_year") == y and a.get("_quarter") == q for a in results)
+                if already:
+                    continue
+                text = rt.get("transcript", "")
+                if openai_key and len(text) > 200:
+                    analysis = analyze_transcript_llm(tkr, y, q, text, openai_key)
+                    if analysis:
+                        results.append(analysis)
+            return tkr, results
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futs = {pool.submit(_analyze_ticker_transcripts, tk): tk for tk in nlp_tickers}
+            for fut in as_completed(futs):
+                try:
+                    tk, analyses = fut.result()
+                    if analyses:
+                        analyses_by_ticker[tk] = analyses
+                except Exception as e:
+                    LOG.warning("Transcript analysis failed: %s", e)
+
+        if analyses_by_ticker:
+            nlp_signal = compute_nlp_from_llm_analyses(analyses_by_ticker)
+        else:
+            all_transcripts: list[dict] = []
+            for t in nlp_tickers[:4]:
+                try:
+                    transcripts = ninjas.get_transcript_history(t, quarters=4)
+                    all_transcripts.extend(transcripts)
+                except Exception:
+                    pass
+            if all_transcripts:
+                nlp_signal = compute_nlp_delta_of_language(all_transcripts)
     signal_results.append(nlp_signal)
 
-    # Signal 4: Insider Selling (aggregate)
+    # Signal 4: Insider Selling (per-ticker with Redis baselines)
+    from backend.engine9_store import (
+        store_insider_latest, load_insider_latest,
+        update_insider_baseline, load_insider_baseline,
+    )
     insider_totals = {"net_30d": 0, "net_60d": 0, "net_90d": 0, "txn_count": 0}
+    insider_30_data: dict[str, float] = {}
+    insider_per_ticker: list[dict] = []
+    all_tickers_for_insider = TIER_1_BDCS + TIER_2_ALT_MANAGERS
     if ninjas:
-        for t in (TIER_1_BDCS + TIER_2_ALT_MANAGERS):
+        def _fetch_insider(tkr: str):
             try:
-                data = ninjas.get_insider_net_selling(t, days=90)
-                insider_totals["net_30d"] += data.get("net_selling", 0) if data.get("days", 90) <= 30 else 0
-                insider_totals["net_60d"] += data.get("net_selling", 0) if data.get("days", 90) <= 60 else 0
-                insider_totals["net_90d"] += data.get("net_selling", 0)
-                insider_totals["txn_count"] += data.get("transaction_count", 0)
+                return tkr, ninjas.get_insider_net_selling(tkr, days=90)
             except Exception:
-                pass
-        insider_30_data = {}
-        for t in (TIER_1_BDCS + TIER_2_ALT_MANAGERS):
-            try:
-                d = ninjas.get_insider_net_selling(t, days=30)
-                insider_30_data[t] = d.get("net_selling", 0)
-            except Exception:
-                insider_30_data[t] = 0
-    else:
-        insider_30_data = {}
+                return tkr, {}
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futs = {pool.submit(_fetch_insider, tk): tk for tk in all_tickers_for_insider}
+            for fut in as_completed(futs):
+                t, data = fut.result()
+                net_90 = data.get("net_selling", 0)
+                txn_ct = data.get("transaction_count", 0)
+                insider_totals["net_90d"] += net_90
+                insider_totals["txn_count"] += txn_ct
+                monthly_net = net_90 / 3.0 if net_90 else 0
+                insider_30_data[t] = monthly_net
+                store_insider_latest(t, data)
+                baseline = update_insider_baseline(t, monthly_net)
+                baseline_avg = baseline.get("avg", 0)
+                anomaly = abs(monthly_net / baseline_avg) if baseline_avg else 0
+                insider_per_ticker.append({
+                    "ticker": t, "net_90d": net_90, "monthly_net": round(monthly_net, 2),
+                    "baseline_avg": round(baseline_avg, 2), "anomaly_ratio": round(anomaly, 2),
+                    "txn_count": txn_ct,
+                })
+        insider_totals["net_30d"] = sum(insider_30_data.values())
 
     insider_signal = compute_insider_signal(
         insider_totals["net_30d"], insider_totals["net_60d"],
         insider_totals["net_90d"], insider_totals["txn_count"],
     )
+    insider_signal.data = insider_signal.data or {}
+    insider_signal.data["per_ticker"] = insider_per_ticker
     signal_results.append(insider_signal)
 
     # Signal 5: Correlation Breakdown
@@ -5438,6 +5513,40 @@ def engine9_scan():
     # Signal 8: Time Compression
     tc_signal = compute_time_compression(signal_results, {})
     signal_results.append(tc_signal)
+
+    # ── News Cycle Signal (context overlay, not scored) ──
+    from backend.engine9_signals import filter_credit_news, score_news_with_llm
+    from backend.engine9_store import store_news_scan, load_news_scan
+    news_data: dict = {}
+    today_str_news = dt.date.today().isoformat()
+    cached_news = load_news_scan(today_str_news)
+    if cached_news:
+        news_data = cached_news
+    elif eodhd:
+        try:
+            all_news_articles: list[dict] = []
+            week_ago = (dt.date.today() - dt.timedelta(days=7)).isoformat()
+            for tk in (TIER_1_BDCS[:3] + TIER_2_ALT_MANAGERS[:3]):
+                try:
+                    resp = eodhd.get_news(ticker=f"{tk}.US", from_date=week_ago, limit=20)
+                    all_news_articles.extend(resp.rows or [])
+                except Exception:
+                    pass
+            try:
+                topic_resp = eodhd.get_news(topic="credit", from_date=week_ago, limit=30)
+                all_news_articles.extend(topic_resp.rows or [])
+            except Exception:
+                pass
+
+            relevant = filter_credit_news(all_news_articles)
+            relevant = relevant[:20]
+            if relevant and openai_key:
+                news_data = score_news_with_llm(relevant, openai_key)
+            else:
+                news_data = {"articles": relevant, "llm_scored": False, "avg_relevance": 0}
+            store_news_scan(today_str_news, news_data)
+        except Exception as e:
+            LOG.warning("News cycle scan failed: %s", e)
 
     # ── Composite & Phase ──
     composite = compute_weighted_composite(signal_results, tc_signal.triggered)
@@ -5523,6 +5632,7 @@ def engine9_scan():
             "insider_net_30d": e.insider_net_30d,
         } for e in forced_map],
         "watchlist": watchlist_by_tier,
+        "news": news_data,
         "updated_at": dt.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -5680,8 +5790,13 @@ Respond ONLY with valid JSON containing these fields:
             ],
             temperature=0.4,
             max_tokens=2000,
+            response_format={"type": "json_object"},
         )
-        text = resp.choices[0].message.content or ""
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
         try:
             parsed = json.loads(text)
             return parsed
@@ -5689,3 +5804,90 @@ Respond ONLY with valid JSON containing these fields:
             return {"raw_text": text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM call failed: {type(e).__name__}: {e}")
+
+
+@app.post("/api/engine9/thesis-scan")
+def engine9_thesis_scan(body: dict):
+    """
+    On-demand GPT-5.2 analysis: new risks, new instruments, scenario projection,
+    non-obvious connections across all Engine 9 data.
+    """
+    import openai
+    from backend.engine9_store import store_thesis, load_thesis
+
+    cached = load_thesis()
+    force_refresh = body.get("force", False)
+    if cached and not force_refresh:
+        return cached
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    scan_data = body.get("scan_data") or {}
+    news_data = body.get("news_data") or {}
+
+    system_prompt = """You are a senior credit research analyst at a quantitative hedge fund.
+You specialize in detecting structural breaks in private credit markets before they become
+consensus trades. You have access to our proprietary Engine 9 signal data.
+
+Analyze ALL the data provided and return ONLY valid JSON with these keys:
+
+{
+  "new_risks": [
+    {"risk": "specific risk description", "probability": "low/medium/high", "timeline": "days/weeks/months", "impact": "description of market impact"}
+  ],
+  "new_instruments_to_watch": [
+    {"ticker": "SYMBOL", "rationale": "why this should be on our radar", "signal_type": "leading/coincident/lagging"}
+  ],
+  "scenario_projection_30d": {
+    "base_case": {"probability": "X%", "description": "what happens", "positioning": "how to position"},
+    "bull_case": {"probability": "X%", "description": "what happens", "positioning": "how to position"},
+    "bear_case": {"probability": "X%", "description": "what happens", "positioning": "how to position"}
+  },
+  "non_obvious_connections": [
+    {"observation": "what you noticed", "implication": "what it means for positioning"}
+  ],
+  "signal_gaps": ["things our engine should be tracking but isn't"],
+  "conviction_level": "low/medium/high",
+  "one_liner": "single sentence thesis summary for the desk"
+}
+
+Think deeply. Look for patterns across signals that individually seem minor but collectively
+indicate something. Consider second-order effects. What are the forced sellers going to do next?
+Where does liquidity break first?"""
+
+    payload_parts = []
+    if scan_data:
+        payload_parts.append(f"SIGNAL DATA:\n{json.dumps(scan_data, default=str)[:8000]}")
+    if news_data:
+        payload_parts.append(f"\nNEWS DATA:\n{json.dumps(news_data, default=str)[:3000]}")
+
+    user_msg = "\n".join(payload_parts) if payload_parts else "No scan data available."
+
+    try:
+        client = openai.OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.5,
+            max_tokens=3000,
+            response_format={"type": "json_object"},
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        try:
+            parsed = json.loads(text)
+            parsed["generated_at"] = dt.datetime.utcnow().isoformat() + "Z"
+            store_thesis(parsed)
+            return parsed
+        except json.JSONDecodeError:
+            return {"raw_text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Thesis scan failed: {type(e).__name__}: {e}")

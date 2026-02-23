@@ -183,6 +183,43 @@
       .e9DeskContent { font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
       .e9DeskContent h3 { font-size: 12px; font-weight: 700; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 
+      /* ── News Cards ── */
+      .e9NewsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+      .e9NewsCard {
+        padding: 12px 14px; border-radius: var(--radius-card); border: 1px solid var(--border);
+        background: var(--surfaceSolid); font-size: 11px;
+      }
+      .e9NewsTitle { font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
+      .e9NewsTitle a { color: var(--text); text-decoration: none; }
+      .e9NewsTitle a:hover { text-decoration: underline; }
+      .e9NewsMeta { font-size: 10px; color: var(--muted); display: flex; gap: 12px; margin-bottom: 4px; }
+      .e9NewsRel { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; font-size: 10px; }
+      .e9NewsRel.high { color: var(--red); }
+      .e9NewsRel.med { color: var(--amber); }
+      .e9NewsRel.low { color: var(--muted); }
+      .e9NewsKw { font-size: 9px; color: var(--muted); }
+      .e9NewsSummary {
+        padding: 10px 14px; border-radius: var(--radius-card); background: var(--hover);
+        border: 1px solid var(--border); font-size: 11px; font-weight: 600; margin-bottom: 12px;
+      }
+
+      /* ── Thesis Popup ── */
+      .e9ThesisSection { margin-bottom: 14px; }
+      .e9ThesisSection h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 6px; }
+      .e9ScenarioGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .e9ScenarioCard {
+        padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surfaceSolid); font-size: 10px;
+      }
+      .e9ScenarioCard .label { font-weight: 700; margin-bottom: 4px; }
+      .e9ScenarioCard .prob { font-size: 16px; font-weight: 800; }
+      .e9RiskItem, .e9ConnectionItem, .e9InstrItem {
+        padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 11px; line-height: 1.4;
+      }
+      .e9OneLiner {
+        font-size: 13px; font-weight: 700; padding: 10px 14px; border-radius: var(--radius-card);
+        background: var(--hover); border: 1px solid var(--border); margin-bottom: 14px;
+      }
+
       /* ── Section dividers ── */
       .e9Divider {
         font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
@@ -213,6 +250,7 @@
       <div class="e9BtnRow">
         <button class="e9ScanBtn" id="e9ScanBtn">Run Full Scan</button>
         <button class="e9DeskBtn" id="e9DeskNotesBtn" disabled>Desk Notes</button>
+        <button class="e9DeskBtn" id="e9ThesisScanBtn" disabled>Thesis Discovery</button>
         <span class="e9Updated" id="e9Updated"></span>
       </div>
 
@@ -254,6 +292,10 @@
         <div class="e9Divider">Signal Grid</div>
         <div class="e9SignalGrid" id="e9SignalGrid"></div>
 
+        <!-- Section B2: News Cycle -->
+        <div class="e9Divider">News Cycle — Credit Stress</div>
+        <div id="e9NewsWrap" style="margin-bottom:18px;"></div>
+
         <!-- Section C: Forced Seller Map -->
         <div class="e9Divider">Forced Seller Map</div>
         <div id="e9ForcedWrap"></div>
@@ -285,8 +327,22 @@
       </div>
     </div>
 
+    <!-- Thesis Discovery Popup -->
+    <div class="e9DeskPopup" id="e9ThesisPopup" style="left:20px;right:auto;width:560px;">
+      <div class="e9DeskPopupHeader">
+        <span class="e9DeskPopupTitle">Thesis Discovery — GPT-5.2</span>
+        <button class="e9DeskPopupClose" id="e9ThesisPopupClose">&times;</button>
+      </div>
+      <div class="e9DeskContent" id="e9ThesisContent">
+        <div class="e9Loading">
+          <div class="e9Spinner"></div>
+          <div>Running thesis analysis...</div>
+        </div>
+      </div>
+    </div>
+
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/engine9.js?v=2"></script>
+    <script src="/static/engine9.js?v=3"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

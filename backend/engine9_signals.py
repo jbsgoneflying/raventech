@@ -195,7 +195,7 @@ def compute_spread_signal(
 
 
 # ---------------------------------------------------------------------------
-# Signal 3: NLP Delta-of-Language
+# Signal 3: NLP Delta-of-Language (LLM-powered with keyword fallback)
 # ---------------------------------------------------------------------------
 
 HEDGING_PHRASES = [
@@ -210,38 +210,161 @@ CONFIDENCE_PHRASES = [
     "outperformed", "exceeded expectations", "confident",
 ]
 
+_TRANSCRIPT_ANALYSIS_SYSTEM = """You are a senior credit analyst specializing in private credit, BDCs, and alternative asset managers. Analyze the following earnings call transcript excerpt and return a JSON object with exactly these keys:
+
+{
+  "hedging_score": <0-10, higher = more hedging/cautious language>,
+  "confidence_score": <0-10, higher = more forward confidence>,
+  "stress_indicators": [<list of specific phrases or themes indicating stress>],
+  "tone_shift_vs_prior": "<brief narrative: is management becoming more defensive, cautious, or confident compared to what you'd expect?>",
+  "forward_guidance_sentiment": <-1.0 to +1.0, negative = guarded/reducing, positive = expanding/optimistic>,
+  "key_risks_mentioned": [<list of specific risks management flagged>],
+  "liquidity_language_detected": <true/false, whether gating/redemption/liquidity restriction language appears>
+}
+
+Focus on:
+- Shifts toward hedging language ("prudent", "disciplined", "selective", "monitoring conditions")
+- Reduction in forward confidence (fewer "strong demand", "robust pipeline" phrases)
+- Mentions of gating, redemptions, covenant modifications, non-accrual increases
+- Changes in how management describes their portfolio quality and funding access
+
+Be precise. This feeds a quantitative signal system."""
+
 
 def _count_phrases(text: str, phrases: List[str]) -> int:
     text_lower = text.lower()
     return sum(text_lower.count(p) for p in phrases)
 
 
+def analyze_transcript_llm(
+    ticker: str, year: int, quarter: int,
+    transcript_text: str, api_key: str,
+) -> Optional[dict]:
+    """Send transcript to GPT for structured tone analysis. Result is cached in Redis."""
+    import json as _json
+    from backend.engine9_store import store_transcript_analysis, load_transcript_analysis
+
+    cached = load_transcript_analysis(ticker, year, quarter)
+    if cached:
+        return cached
+
+    if not api_key or not transcript_text or len(transcript_text.strip()) < 200:
+        return None
+
+    try:
+        import openai
+        client = openai.OpenAI(api_key=api_key)
+        trimmed = transcript_text[:15000]
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": _TRANSCRIPT_ANALYSIS_SYSTEM},
+                {"role": "user", "content": f"Ticker: {ticker} | {year} Q{quarter}\n\n{trimmed}"},
+            ],
+            temperature=0.2,
+            max_tokens=800,
+            response_format={"type": "json_object"},
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        analysis = _json.loads(text)
+        analysis["_ticker"] = ticker
+        analysis["_year"] = year
+        analysis["_quarter"] = quarter
+        store_transcript_analysis(ticker, year, quarter, analysis)
+        return analysis
+    except Exception as e:
+        LOG.warning("LLM transcript analysis failed for %s %dQ%d: %s", ticker, year, quarter, e)
+        return None
+
+
+def compute_nlp_from_llm_analyses(analyses_by_ticker: Dict[str, List[dict]]) -> SignalResult:
+    """
+    Compute NLP signal from cached LLM transcript analyses.
+    
+    For each ticker, compare most recent quarter to prior quarters to find
+    delta-of-language: hedging acceleration, confidence erosion, stress emergence.
+    """
+    key = "nlp_language"
+    if not analyses_by_ticker:
+        return SignalResult(key=key, label="NLP Language Drift", score=0, weight=0.05,
+                           detail="No transcript analyses available", data={})
+
+    ticker_deltas = []
+    per_ticker = {}
+
+    for ticker, analyses in analyses_by_ticker.items():
+        if len(analyses) < 2:
+            continue
+        analyses_sorted = sorted(analyses, key=lambda a: (a.get("_year", 0), a.get("_quarter", 0)), reverse=True)
+        latest = analyses_sorted[0]
+        priors = analyses_sorted[1:]
+
+        latest_hedge = latest.get("hedging_score", 5)
+        latest_conf = latest.get("confidence_score", 5)
+        latest_fwd = latest.get("forward_guidance_sentiment", 0)
+        latest_liq = latest.get("liquidity_language_detected", False)
+
+        avg_prior_hedge = statistics.mean([a.get("hedging_score", 5) for a in priors])
+        avg_prior_conf = statistics.mean([a.get("confidence_score", 5) for a in priors])
+        avg_prior_fwd = statistics.mean([a.get("forward_guidance_sentiment", 0) for a in priors])
+
+        hedge_delta = (latest_hedge - avg_prior_hedge) / max(avg_prior_hedge, 1) * 100
+        conf_delta = (avg_prior_conf - latest_conf) / max(avg_prior_conf, 1) * 100
+        fwd_delta = avg_prior_fwd - latest_fwd
+
+        ticker_score = (
+            _clamp(hedge_delta * 3, 0, 100) * 0.35
+            + _clamp(conf_delta * 3, 0, 100) * 0.30
+            + _clamp(fwd_delta * 50, 0, 100) * 0.20
+            + (100 if latest_liq else 0) * 0.15
+        )
+        ticker_deltas.append(ticker_score)
+        per_ticker[ticker] = {
+            "hedge_delta": round(hedge_delta, 1),
+            "conf_delta": round(conf_delta, 1),
+            "fwd_delta": round(fwd_delta, 3),
+            "liquidity_flag": latest_liq,
+            "score": round(ticker_score, 1),
+            "quarters": len(analyses),
+        }
+
+    if not ticker_deltas:
+        return SignalResult(key=key, label="NLP Language Drift", score=0, weight=0.05,
+                           detail="Insufficient cross-quarter data", data={})
+
+    score = _clamp(statistics.mean(ticker_deltas))
+    detail = f"LLM-analyzed {len(ticker_deltas)} tickers, avg drift={score:.0f}"
+    return SignalResult(
+        key=key, label="NLP Language Drift", score=round(score, 1), weight=0.05,
+        detail=detail, triggered=score > 40,
+        data={"per_ticker": per_ticker, "method": "llm", "tickers_analyzed": len(ticker_deltas)},
+    )
+
+
 def compute_nlp_delta_of_language(
     transcripts: List[Dict[str, Any]],
 ) -> SignalResult:
-    """
-    Delta-of-language across last 4 quarters.
-
-    Score = sentiment_delta(40%) + hedging_accel(35%) + confidence_reduction(25%)
-    """
+    """Keyword-based fallback when LLM analyses aren't available."""
     key = "nlp_language"
     if len(transcripts) < 2:
         return SignalResult(key=key, label="NLP Language Drift", score=0, weight=0.05,
                            detail="Need 2+ quarters of transcripts", data={})
 
-    hedging_counts: List[int] = []
-    confidence_counts: List[int] = []
+    hedging_counts: List[float] = []
+    confidence_counts: List[float] = []
     sentiment_scores: List[float] = []
 
     for t in transcripts:
         text = t.get("transcript") or ""
         word_count = max(len(text.split()), 1)
-
         h = _count_phrases(text, HEDGING_PHRASES)
         c = _count_phrases(text, CONFIDENCE_PHRASES)
         hedging_counts.append(h / word_count * 10000)
         confidence_counts.append(c / word_count * 10000)
-
         sent = t.get("overall_sentiment")
         if sent is not None:
             try:
@@ -280,7 +403,7 @@ def compute_nlp_delta_of_language(
     score = _clamp(score)
 
     detail = (
-        f"Sentiment delta={sentiment_delta_score:.0f}, "
+        f"Keyword fallback: Sentiment Δ={sentiment_delta_score:.0f}, "
         f"Hedging accel={hedging_accel_score:.0f}, "
         f"Confidence drop={confidence_reduction_score:.0f}"
     )
@@ -292,6 +415,7 @@ def compute_nlp_delta_of_language(
             "hedging_accel": round(hedging_accel_score, 1),
             "confidence_reduction": round(confidence_reduction_score, 1),
             "quarters_analyzed": len(transcripts),
+            "method": "keyword_fallback",
         },
     )
 
@@ -700,3 +824,91 @@ def evaluate_thesis_health(
     })
 
     return indicators
+
+
+# ---------------------------------------------------------------------------
+# News Cycle Signal (context overlay, not scored in composite)
+# ---------------------------------------------------------------------------
+
+CREDIT_STRESS_KEYWORDS = [
+    "gating", "redemption", "default", "downgrade", "covenant",
+    "leverage", "liquidity", "writedown", "non-accrual", "credit stress",
+    "forced selling", "margin call", "distressed", "impairment",
+    "restructuring", "bankruptcy", "CLO", "private credit",
+    "warehouse line", "funding pressure",
+]
+
+
+def filter_credit_news(articles: List[dict]) -> List[dict]:
+    """Filter news articles for credit-stress relevant headlines."""
+    relevant = []
+    for article in articles:
+        title = (article.get("title") or "").lower()
+        content = (article.get("content") or article.get("text") or "").lower()[:500]
+        combined = f"{title} {content}"
+        matched = [kw for kw in CREDIT_STRESS_KEYWORDS if kw in combined]
+        if matched:
+            relevant.append({
+                "title": article.get("title", ""),
+                "date": article.get("date", ""),
+                "link": article.get("link", ""),
+                "source": article.get("source", ""),
+                "matched_keywords": matched,
+            })
+    return relevant
+
+
+def score_news_with_llm(headlines: List[dict], api_key: str) -> dict:
+    """Send top credit headlines to GPT for relevance scoring."""
+    import json as _json
+
+    if not api_key or not headlines:
+        return {"articles": headlines, "llm_scored": False, "avg_relevance": 0}
+
+    try:
+        import openai
+        client = openai.OpenAI(api_key=api_key)
+        headline_text = "\n".join(
+            f"{i+1}. [{a.get('date','')}] {a.get('title','')}"
+            for i, a in enumerate(headlines[:15])
+        )
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": (
+                    "You are a credit research analyst. Rate each headline for relevance to "
+                    "private credit stress. Return JSON: {\"scores\": [{\"index\": 1, \"relevance\": 0-10, "
+                    "\"why\": \"brief reason\"},...], \"summary\": \"1-2 sentence overall assessment\"}"
+                )},
+                {"role": "user", "content": headline_text},
+            ],
+            temperature=0.2,
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        parsed = _json.loads(text)
+        scores = parsed.get("scores", [])
+        for s in scores:
+            idx = s.get("index", 0) - 1
+            if 0 <= idx < len(headlines):
+                headlines[idx]["llm_relevance"] = s.get("relevance", 0)
+                headlines[idx]["llm_reason"] = s.get("why", "")
+
+        avg_rel = (
+            statistics.mean([s.get("relevance", 0) for s in scores])
+            if scores else 0
+        )
+        return {
+            "articles": headlines,
+            "llm_scored": True,
+            "avg_relevance": round(avg_rel, 1),
+            "summary": parsed.get("summary", ""),
+        }
+    except Exception as e:
+        LOG.warning("News LLM scoring failed: %s", e)
+        return {"articles": headlines, "llm_scored": False, "avg_relevance": 0}

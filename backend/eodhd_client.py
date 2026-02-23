@@ -540,3 +540,30 @@ class EodhdClient:
         if sort:
             params["sort"] = sort
         return self._get(url, params)
+
+    # -----------------------------------------------------------------------
+    # Public API: Fundamentals
+    # -----------------------------------------------------------------------
+
+    def get_fundamentals(self, symbol: str) -> dict:
+        """Fetch fundamental data for a ticker (Highlights, Financials, etc.).
+
+        symbol: EODHD format, e.g. "ARCC.US"
+        Returns raw dict with keys like Highlights, Financials, etc.
+        """
+        url = f"{self._base_url}/fundamentals/{symbol}"
+        params: Dict[str, Any] = {"fmt": "json"}
+        resp = self._get(url, params)
+        return resp.raw if resp and hasattr(resp, "raw") else {}
+
+    def get_book_value(self, symbol: str) -> Optional[float]:
+        """Extract book value per share from fundamentals Highlights."""
+        try:
+            data = self.get_fundamentals(symbol)
+            highlights = data.get("Highlights") or {}
+            bv = highlights.get("BookValue")
+            if bv is not None:
+                return float(bv)
+        except Exception:
+            pass
+        return None
