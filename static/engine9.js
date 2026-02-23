@@ -185,6 +185,16 @@
     renderNews(data.news || {});
     renderForcedSellerMap(data.forced_seller_map || []);
     renderWatchlist(data.watchlist || {});
+    showSectionInsightButtons();
+  }
+
+  function showSectionInsightButtons() {
+    var ids = ["e9PhaseInsight", "e9TriggersInsight", "e9ThesisHealthInsight",
+               "e9SignalGridInsight", "e9NewsInsight", "e9ForcedInsight", "e9WatchInsight"];
+    ids.forEach(function (id) {
+      var btn = $(id);
+      if (btn) btn.style.display = "";
+    });
   }
 
   /* ── Phase + Triggers + Thesis Health ── */
@@ -508,33 +518,105 @@
     initDrag("e9ThesisPopup", "e9ThesisPopupHeader", "e9ThesisPopupClose");
     initDrag("e9InsightPopup", "e9InsightPopupHeader", "e9InsightPopupClose");
 
-    var chartBtn = $("e9ChartInsightBtn");
-    if (chartBtn) {
-      chartBtn.addEventListener("click", function () {
-        var chartContext = {};
-        if (_spreadData) {
-          var hy = _spreadData.hy_oas || {};
-          var ig = _spreadData.ig_oas || {};
-          var curve = _spreadData.curve_2s10s || {};
-          var hyVals = hy.values || [];
-          var igVals = ig.values || [];
-          var curveVals = curve.values || [];
-          chartContext = {
-            hy_oas_latest: hyVals.length ? hyVals[hyVals.length - 1] : null,
-            hy_oas_30d_ago: hyVals.length > 22 ? hyVals[hyVals.length - 23] : null,
-            hy_oas_90d_ago: hyVals.length > 66 ? hyVals[hyVals.length - 67] : null,
-            ig_oas_latest: igVals.length ? igVals[igVals.length - 1] : null,
-            ig_oas_30d_ago: igVals.length > 22 ? igVals[igVals.length - 23] : null,
-            curve_2s10s_latest: curveVals.length ? curveVals[curveVals.length - 1] : null,
-            curve_2s10s_30d_ago: curveVals.length > 22 ? curveVals[curveVals.length - 23] : null,
-            data_points: hyVals.length,
-            date_range_start: (hy.dates || [])[0] || null,
-            date_range_end: (hy.dates || [])[(hy.dates || []).length - 1] || null,
-          };
-        }
-        requestInsight("chart", "credit_spread_history", chartContext, "Credit Spread History");
+    /* ── Section-level insight buttons ── */
+
+    function bindSectionInsight(btnId, type, key, title, dataFn) {
+      var btn = $(btnId);
+      if (btn) btn.addEventListener("click", function () {
+        requestInsight(type, key, dataFn(), title);
       });
     }
+
+    bindSectionInsight("e9PhaseInsight", "section", "phase_composite", "Phase & Composite Score", function () {
+      var comp = (_scanData || {}).composite || {};
+      var triggers = (_scanData || {}).triggers || [];
+      return {
+        phase: comp.phase, phase_label: comp.phase_label, composite: comp.composite,
+        phase_action: comp.phase_action,
+        active_triggers: triggers.filter(function (t) { return t.active; }).map(function (t) { return t.name + ": " + t.condition; }),
+        total_triggers: triggers.length
+      };
+    });
+
+    bindSectionInsight("e9TriggersInsight", "section", "execution_triggers", "Execution Triggers", function () {
+      var triggers = (_scanData || {}).triggers || [];
+      return {
+        triggers: triggers.map(function (t) { return { name: t.name, level: t.level, active: t.active, condition: t.condition }; }),
+        phase: ((_scanData || {}).composite || {}).phase,
+        composite: ((_scanData || {}).composite || {}).composite
+      };
+    });
+
+    bindSectionInsight("e9ThesisHealthInsight", "section", "thesis_health", "Thesis Health Indicators", function () {
+      var th = (_scanData || {}).thesis_health || [];
+      return {
+        indicators: th.map(function (i) { return { name: i.name, healthy: i.healthy, detail: i.detail }; }),
+        phase: ((_scanData || {}).composite || {}).phase
+      };
+    });
+
+    bindSectionInsight("e9SignalGridInsight", "section", "signal_grid_overview", "Signal Grid Overview", function () {
+      var sigs = (_scanData || {}).signals || [];
+      return {
+        signal_count: sigs.length,
+        signals_summary: sigs.map(function (s) { return { label: s.label, key: s.key, score: s.score, weight: s.weight, triggered: s.triggered }; }),
+        composite: ((_scanData || {}).composite || {}).composite,
+        phase: ((_scanData || {}).composite || {}).phase
+      };
+    });
+
+    bindSectionInsight("e9NewsInsight", "section", "news_cycle", "News Cycle — Credit Stress", function () {
+      var news = (_scanData || {}).news || {};
+      var articles = (news.articles || []).slice(0, 8);
+      return {
+        article_count: (news.articles || []).length,
+        top_articles: articles.map(function (a) { return { title: a.title, date: (a.date || "").substring(0, 10), source: a.source, relevance: a.llm_relevance, keywords: a.matched_keywords }; }),
+        summary: news.summary || null
+      };
+    });
+
+    bindSectionInsight("e9ForcedInsight", "section", "forced_seller_map", "Forced Seller Map", function () {
+      var fsm = (_scanData || {}).forced_seller_map || [];
+      return {
+        tickers: fsm.map(function (f) { return { ticker: f.ticker, fragility: f.fragility, price_20d_pct: f.price_20d_pct, put_skew: f.put_skew, insider_30d: f.insider_30d }; }),
+        most_fragile: fsm.length ? fsm[0].ticker : null,
+        count: fsm.length
+      };
+    });
+
+    bindSectionInsight("e9WatchInsight", "section", "tiered_watchlist", "Tiered Watchlist Overview", function () {
+      var wl = (_scanData || {}).watchlist || {};
+      var summary = {};
+      Object.keys(wl).forEach(function (tier) {
+        summary[tier] = { count: (wl[tier] || []).length, tickers: (wl[tier] || []).map(function (t) { return t.ticker; }) };
+      });
+      return { tiers: summary, phase: ((_scanData || {}).composite || {}).phase };
+    });
+
+    bindSectionInsight("e9ChartInsightBtn", "chart", "credit_spread_history", "Credit Spread History", function () {
+      var chartContext = {};
+      if (_spreadData) {
+        var hy = _spreadData.hy_oas || {};
+        var ig = _spreadData.ig_oas || {};
+        var curve = _spreadData.curve_2s10s || {};
+        var hyVals = hy.values || [];
+        var igVals = ig.values || [];
+        var curveVals = curve.values || [];
+        chartContext = {
+          hy_oas_latest: hyVals.length ? hyVals[hyVals.length - 1] : null,
+          hy_oas_30d_ago: hyVals.length > 22 ? hyVals[hyVals.length - 23] : null,
+          hy_oas_90d_ago: hyVals.length > 66 ? hyVals[hyVals.length - 67] : null,
+          ig_oas_latest: igVals.length ? igVals[igVals.length - 1] : null,
+          ig_oas_30d_ago: igVals.length > 22 ? igVals[igVals.length - 23] : null,
+          curve_2s10s_latest: curveVals.length ? curveVals[curveVals.length - 1] : null,
+          curve_2s10s_30d_ago: curveVals.length > 22 ? curveVals[curveVals.length - 23] : null,
+          data_points: hyVals.length,
+          date_range_start: (hy.dates || [])[0] || null,
+          date_range_end: (hy.dates || [])[(hy.dates || []).length - 1] || null,
+        };
+      }
+      return chartContext;
+    });
 
     startAutoRefresh();
   }

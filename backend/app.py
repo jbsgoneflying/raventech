@@ -5795,6 +5795,12 @@ def engine9_explain(body: dict):
 
 A junior analyst or portfolio manager is looking at our proprietary Engine 9 Credit Stress Drift dashboard and needs your expert interpretation of a specific element. Explain it as if you're teaching someone who is smart but new to this specific domain.
 
+Context types:
+- "signal": a single signal card (spread_acceleration, bdc_divergence, etc.)
+- "ticker": an individual instrument (ARCC, OWL, HYG, etc.)
+- "section": an entire dashboard section overview (signal grid, forced seller map, watchlist, execution triggers, thesis health, news cycle, phase composite). For section overviews, synthesize all the data points into a cohesive narrative — how the pieces fit together, what the section is telling us as a whole, and what the aggregate picture means for positioning.
+- "chart": a visual chart (credit spread history). Interpret the trend, inflection points, and what the shape of the curve tells us about market regime.
+
 Your response must be valid JSON with these keys:
 {
   "headline": "1-line summary of what this means right now",
