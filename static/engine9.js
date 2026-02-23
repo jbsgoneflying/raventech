@@ -58,6 +58,7 @@
   /* ── Render All ── */
   function renderAll(data) {
     $("e9Loading").style.display = "none";
+    $("e9Content").style.display = "";
     renderPhase(data);
     renderSignals(data.signals || []);
     renderForcedSellerMap(data.forced_seller_map || []);
@@ -70,11 +71,9 @@
     var phase = comp.phase || 1;
     var badge = $("e9PhaseBadge");
     badge.setAttribute("data-phase", phase);
-    badge.style.display = "";
     $("e9PhaseNum").textContent = phase;
     $("e9PhaseLabel").textContent = comp.phase_label || "";
     $("e9Composite").textContent = "Composite: " + fmt(comp.composite, 1);
-    $("e9PhaseRow").style.display = "";
 
     var action = $("e9ActionBanner");
     if (comp.phase_action) {
@@ -125,7 +124,6 @@
 
   /* ── Section B: Signal Grid ── */
   function renderSignals(signals) {
-    $("e9SigTitle").style.display = "";
     var grid = $("e9SignalGrid");
     grid.innerHTML = "";
     signals.forEach(function (sig) {
@@ -147,7 +145,6 @@
 
   /* ── Section C: Forced Seller Map ── */
   function renderForcedSellerMap(entries) {
-    $("e9ForcedTitle").style.display = "";
     var wrap = $("e9ForcedWrap");
     if (!entries.length) {
       wrap.innerHTML = '<div style="padding:12px;color:var(--e9-muted);font-size:13px;">No forced seller data available</div>';
@@ -178,7 +175,6 @@
 
   /* ── Section D: Tiered Watchlist ── */
   function renderWatchlist(watchlist) {
-    $("e9WatchTitle").style.display = "";
     var wrap = $("e9WatchWrap");
     wrap.innerHTML = "";
 
@@ -255,8 +251,6 @@
   }
 
   function renderSpreadChart(data) {
-    $("e9ChartTitle").style.display = "";
-    $("e9ChartWrap").style.display = "";
     var canvas = $("e9SpreadChart");
 
     var hy = data.hy_oas || {};

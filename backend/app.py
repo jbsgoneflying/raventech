@@ -5317,9 +5317,10 @@ def engine9_scan():
             return []
         try:
             start = (dt.date.today() - dt.timedelta(days=days)).isoformat()
-            resp = eodhd.get_eod(ticker + ".US", start)
+            resp = eodhd.get_eod(f"{ticker}.US", from_date=start)
             return [float(r.get("adjusted_close") or r.get("close", 0)) for r in (resp.rows or []) if r.get("adjusted_close") or r.get("close")]
-        except Exception:
+        except Exception as e:
+            LOG.warning("Engine 9 price fetch failed for %s: %s", ticker, e)
             return []
 
     all_tickers = TIER_1_BDCS + TIER_2_ALT_MANAGERS + TIER_3_CREDIT_ETFS + TIER_4_VOL_HEDGES + ["SPY"]
@@ -5334,8 +5335,15 @@ def engine9_scan():
             except Exception:
                 price_data[t] = []
 
-    # ── Fetch VIX for spread signal ──
-    vix_prices = _fetch_prices("VIX") if eodhd else []
+    # ── Fetch VIX for spread signal (EODHD uses VIX.INDX) ──
+    vix_prices: list[float] = []
+    if eodhd:
+        try:
+            start = (dt.date.today() - dt.timedelta(days=365)).isoformat()
+            resp = eodhd.get_eod("VIX.INDX", from_date=start)
+            vix_prices = [float(r.get("adjusted_close") or r.get("close", 0)) for r in (resp.rows or []) if r.get("adjusted_close") or r.get("close")]
+        except Exception as e:
+            LOG.warning("VIX price fetch failed: %s", e)
 
     # ── Compute Signals ──
     signal_results: list[SignalResult] = []
@@ -5591,13 +5599,14 @@ def engine9_ticker_detail(ticker: str):
     if eodhd:
         try:
             start = (dt.date.today() - dt.timedelta(days=120)).isoformat()
-            resp = eodhd.get_eod(ticker + ".US", start)
+            resp = eodhd.get_eod(f"{ticker}.US", from_date=start)
             prices = [float(r.get("adjusted_close") or r.get("close", 0)) for r in (resp.rows or []) if r.get("adjusted_close") or r.get("close")]
             result["prices"] = prices[-60:]
             result["price"] = prices[-1] if prices else None
             result["change_5d"] = round((prices[-1] / prices[-6] - 1) * 100, 2) if len(prices) >= 6 else None
             result["change_20d"] = round((prices[-1] / prices[-21] - 1) * 100, 2) if len(prices) >= 21 else None
-        except Exception:
+        except Exception as e:
+            LOG.warning("Engine 9 ticker detail price fetch failed for %s: %s", ticker, e)
             result["prices"] = []
 
     if orats:
