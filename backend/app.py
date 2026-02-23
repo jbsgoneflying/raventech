@@ -5799,6 +5799,7 @@ Context types:
 - "signal": a single signal card (spread_acceleration, bdc_divergence, etc.)
 - "ticker": an individual instrument (ARCC, OWL, HYG, etc.)
 - "section": an entire dashboard section overview (signal grid, forced seller map, watchlist, execution triggers, thesis health, news cycle, phase composite). For section overviews, synthesize all the data points into a cohesive narrative — how the pieces fit together, what the section is telling us as a whole, and what the aggregate picture means for positioning.
+- "tier": a specific watchlist tier (tier1 BDCs, tier2 Alt Managers, tier3 Credit ETFs, tier4 Vol/Tail Hedges). Explain the role this tier plays in credit stress detection, why these instruments matter as a group, how to read the aggregate data, and what this tier's current readings mean for the overall thesis.
 - "chart": a visual chart (credit spread history). Interpret the trend, inflection points, and what the shape of the curve tells us about market regime.
 
 Your response must be valid JSON with these keys:

@@ -345,9 +345,19 @@
     tierOrder.forEach(function (tierKey) {
       var tickers = watchlist[tierKey] || [];
       if (!tickers.length) return;
+      var tierLabel = tierLabels[tierKey] || tierKey;
+      var tierData = {
+        tier: tierKey, label: tierLabel, count: tickers.length,
+        tickers: tickers.map(function (t) {
+          return { ticker: t.ticker, price: t.price, change_5d_pct: t.change_5d_pct, change_20d_pct: t.change_20d_pct, signal_score: t.signal_score, conviction: t.conviction };
+        }),
+        phase: ((_scanData || {}).composite || {}).phase
+      };
+
       var group = document.createElement("div"); group.className = "e9TierGroup";
       var header = document.createElement("div"); header.className = "e9TierHeader";
-      header.innerHTML = '<span class="e9TierChevron">&#9654;</span><span class="e9TierBadge ' + tierKey + '">' + tierKey.toUpperCase().replace("TIER", "T") + '</span><span>' + (tierLabels[tierKey] || tierKey) + ' (' + tickers.length + ')</span>';
+      header.innerHTML = '<span class="e9TierChevron">&#9654;</span><span class="e9TierBadge ' + tierKey + '">' + tierKey.toUpperCase().replace("TIER", "T") + '</span><span>' + tierLabel + ' (' + tickers.length + ')</span>' +
+        '<span style="margin-left:auto;">' + insightBtn("tier", tierKey, tierData, tierLabel) + '</span>';
       var body = document.createElement("div"); body.className = "e9TierBody";
       var table = '<table class="e9Table"><thead><tr><th>Ticker</th><th>Price</th><th>5d %</th><th>20d %</th><th>Score</th><th>Conviction</th><th></th></tr></thead><tbody>';
       tickers.forEach(function (t) {
@@ -360,7 +370,10 @@
       });
       table += '</tbody></table>';
       body.innerHTML = table;
-      header.addEventListener("click", function () { header.classList.toggle("open"); body.classList.toggle("open"); });
+      header.addEventListener("click", function (e) {
+        if (e.target.closest(".e9InsightBtn")) return;
+        header.classList.toggle("open"); body.classList.toggle("open");
+      });
       group.appendChild(header); group.appendChild(body); wrap.appendChild(group);
     });
     var first = wrap.querySelector(".e9TierHeader");
