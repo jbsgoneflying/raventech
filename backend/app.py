@@ -5251,7 +5251,7 @@ def engine9_scan():
     from backend.fred_client import FredClient, SERIES_HY_OAS, SERIES_IG_OAS, SERIES_DGS2, SERIES_DGS10, SERIES_FEDFUNDS
     from backend.engine9_signals import (
         compute_bdc_divergence, compute_spread_signal, compute_nlp_delta_of_language,
-        compute_nlp_from_llm_analyses, analyze_transcript_llm,
+        compute_nlp_from_llm_analyses,
         compute_insider_signal, compute_correlation_breakdown, compute_etf_nav_deviation,
         compute_funding_stress, compute_time_compression, compute_weighted_composite,
         evaluate_triggers, evaluate_thesis_health, SignalResult,
@@ -5346,7 +5346,7 @@ def engine9_scan():
         except Exception as e:
             LOG.warning("VIX price fetch failed: %s", e)
 
-    # ── Fetch BDC book values from EODHD fundamentals ──
+    # ── Fetch BDC book values from EODHD fundamentals (with timeout) ──
     bdc_book_values: dict[str, float | None] = {}
     if eodhd:
         def _fetch_bv(ticker: str):
@@ -5354,11 +5354,14 @@ def engine9_scan():
                 return ticker, eodhd.get_book_value(f"{ticker}.US")
             except Exception:
                 return ticker, None
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futs = {pool.submit(_fetch_bv, tk): tk for tk in TIER_1_BDCS}
-            for fut in as_completed(futs):
-                t, bv = fut.result()
-                bdc_book_values[t] = bv
+        try:
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                futs = {pool.submit(_fetch_bv, tk): tk for tk in TIER_1_BDCS}
+                for fut in as_completed(futs, timeout=15):
+                    t, bv = fut.result()
+                    bdc_book_values[t] = bv
+        except TimeoutError:
+            LOG.warning("BDC book value fetch timed out after 15s")
 
     # ── Compute Signals ──
     signal_results: list[SignalResult] = []
@@ -5391,7 +5394,10 @@ def engine9_scan():
     spread_signal = compute_spread_signal(hy_oas_values, vix_prices)
     signal_results.append(spread_signal)
 
-    # Signal 3: NLP Delta-of-Language (LLM-powered for all Tier 1+2)
+    # Signal 3: NLP Delta-of-Language
+    # Phase 1: Check Redis for cached LLM analyses (fast path, no API calls)
+    # Phase 2: If no cache, fall back to keyword analysis on a few transcripts
+    # LLM transcript analysis is triggered lazily via /api/engine9/thesis-scan
     nlp_signal = SignalResult(
         key="nlp_language", label="NLP Language Drift",
         score=0, weight=0.05, detail="Awaiting transcript data",
@@ -5399,54 +5405,25 @@ def engine9_scan():
     openai_key = os.getenv("OPENAI_API_KEY", "")
     nlp_tickers = TIER_1_BDCS + TIER_2_ALT_MANAGERS
     analyses_by_ticker: dict[str, list[dict]] = {}
-    if ninjas:
-        from backend.engine9_store import load_transcript_history as _load_th
-        def _analyze_ticker_transcripts(tkr: str):
-            cached_analyses = _load_th(tkr, quarters=4)
-            if len(cached_analyses) >= 2:
-                return tkr, cached_analyses
+
+    from backend.engine9_store import load_transcript_history as _load_th
+    for tk in nlp_tickers:
+        cached = _load_th(tk, quarters=4)
+        if cached:
+            analyses_by_ticker[tk] = cached
+
+    if analyses_by_ticker:
+        nlp_signal = compute_nlp_from_llm_analyses(analyses_by_ticker)
+    elif ninjas:
+        all_transcripts: list[dict] = []
+        for t in nlp_tickers[:4]:
             try:
-                raw_transcripts = ninjas.get_transcript_history(tkr, quarters=4)
+                transcripts = ninjas.get_transcript_history(t, quarters=4)
+                all_transcripts.extend(transcripts)
             except Exception:
-                raw_transcripts = []
-            results = list(cached_analyses)
-            for rt in raw_transcripts:
-                y = rt.get("year")
-                q = rt.get("quarter")
-                if not y or not q:
-                    continue
-                already = any(a.get("_year") == y and a.get("_quarter") == q for a in results)
-                if already:
-                    continue
-                text = rt.get("transcript", "")
-                if openai_key and len(text) > 200:
-                    analysis = analyze_transcript_llm(tkr, y, q, text, openai_key)
-                    if analysis:
-                        results.append(analysis)
-            return tkr, results
-
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futs = {pool.submit(_analyze_ticker_transcripts, tk): tk for tk in nlp_tickers}
-            for fut in as_completed(futs):
-                try:
-                    tk, analyses = fut.result()
-                    if analyses:
-                        analyses_by_ticker[tk] = analyses
-                except Exception as e:
-                    LOG.warning("Transcript analysis failed: %s", e)
-
-        if analyses_by_ticker:
-            nlp_signal = compute_nlp_from_llm_analyses(analyses_by_ticker)
-        else:
-            all_transcripts: list[dict] = []
-            for t in nlp_tickers[:4]:
-                try:
-                    transcripts = ninjas.get_transcript_history(t, quarters=4)
-                    all_transcripts.extend(transcripts)
-                except Exception:
-                    pass
-            if all_transcripts:
-                nlp_signal = compute_nlp_delta_of_language(all_transcripts)
+                pass
+        if all_transcripts:
+            nlp_signal = compute_nlp_delta_of_language(all_transcripts)
     signal_results.append(nlp_signal)
 
     # Signal 4: Insider Selling (per-ticker with Redis baselines)
@@ -5464,25 +5441,28 @@ def engine9_scan():
                 return tkr, ninjas.get_insider_net_selling(tkr, days=90)
             except Exception:
                 return tkr, {}
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            futs = {pool.submit(_fetch_insider, tk): tk for tk in all_tickers_for_insider}
-            for fut in as_completed(futs):
-                t, data = fut.result()
-                net_90 = data.get("net_selling", 0)
-                txn_ct = data.get("transaction_count", 0)
-                insider_totals["net_90d"] += net_90
-                insider_totals["txn_count"] += txn_ct
-                monthly_net = net_90 / 3.0 if net_90 else 0
-                insider_30_data[t] = monthly_net
-                store_insider_latest(t, data)
-                baseline = update_insider_baseline(t, monthly_net)
-                baseline_avg = baseline.get("avg", 0)
-                anomaly = abs(monthly_net / baseline_avg) if baseline_avg else 0
-                insider_per_ticker.append({
-                    "ticker": t, "net_90d": net_90, "monthly_net": round(monthly_net, 2),
-                    "baseline_avg": round(baseline_avg, 2), "anomaly_ratio": round(anomaly, 2),
-                    "txn_count": txn_ct,
-                })
+        try:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                futs = {pool.submit(_fetch_insider, tk): tk for tk in all_tickers_for_insider}
+                for fut in as_completed(futs, timeout=20):
+                    t, data = fut.result()
+                    net_90 = data.get("net_selling", 0)
+                    txn_ct = data.get("transaction_count", 0)
+                    insider_totals["net_90d"] += net_90
+                    insider_totals["txn_count"] += txn_ct
+                    monthly_net = net_90 / 3.0 if net_90 else 0
+                    insider_30_data[t] = monthly_net
+                    store_insider_latest(t, data)
+                    baseline = update_insider_baseline(t, monthly_net)
+                    baseline_avg = baseline.get("avg", 0)
+                    anomaly = abs(monthly_net / baseline_avg) if baseline_avg else 0
+                    insider_per_ticker.append({
+                        "ticker": t, "net_90d": net_90, "monthly_net": round(monthly_net, 2),
+                        "baseline_avg": round(baseline_avg, 2), "anomaly_ratio": round(anomaly, 2),
+                        "txn_count": txn_ct,
+                    })
+        except TimeoutError:
+            LOG.warning("Insider data fetch timed out after 20s")
         insider_totals["net_30d"] = sum(insider_30_data.values())
 
     insider_signal = compute_insider_signal(
@@ -5526,24 +5506,15 @@ def engine9_scan():
         try:
             all_news_articles: list[dict] = []
             week_ago = (dt.date.today() - dt.timedelta(days=7)).isoformat()
-            for tk in (TIER_1_BDCS[:3] + TIER_2_ALT_MANAGERS[:3]):
+            for tk in (TIER_1_BDCS[:2] + TIER_2_ALT_MANAGERS[:2]):
                 try:
-                    resp = eodhd.get_news(ticker=f"{tk}.US", from_date=week_ago, limit=20)
+                    resp = eodhd.get_news(ticker=f"{tk}.US", from_date=week_ago, limit=15)
                     all_news_articles.extend(resp.rows or [])
                 except Exception:
                     pass
-            try:
-                topic_resp = eodhd.get_news(topic="credit", from_date=week_ago, limit=30)
-                all_news_articles.extend(topic_resp.rows or [])
-            except Exception:
-                pass
-
             relevant = filter_credit_news(all_news_articles)
-            relevant = relevant[:20]
-            if relevant and openai_key:
-                news_data = score_news_with_llm(relevant, openai_key)
-            else:
-                news_data = {"articles": relevant, "llm_scored": False, "avg_relevance": 0}
+            relevant = relevant[:15]
+            news_data = {"articles": relevant, "llm_scored": False, "avg_relevance": 0}
             store_news_scan(today_str_news, news_data)
         except Exception as e:
             LOG.warning("News cycle scan failed: %s", e)
@@ -5811,9 +5782,14 @@ def engine9_thesis_scan(body: dict):
     """
     On-demand GPT-5.2 analysis: new risks, new instruments, scenario projection,
     non-obvious connections across all Engine 9 data.
+    Also triggers LLM transcript analysis + news scoring if not cached.
     """
     import openai
-    from backend.engine9_store import store_thesis, load_thesis
+    from backend.engine9_store import store_thesis, load_thesis, load_news_scan, store_news_scan
+    from backend.engine9_signals import (
+        analyze_transcript_llm, filter_credit_news, score_news_with_llm,
+    )
+    from backend.engine9_watchlist import TIER_1_BDCS, TIER_2_ALT_MANAGERS
 
     cached = load_thesis()
     force_refresh = body.get("force", False)
@@ -5821,6 +5797,38 @@ def engine9_thesis_scan(body: dict):
         return cached
 
     api_key = os.getenv("OPENAI_API_KEY")
+
+    # Trigger LLM transcript analysis for tickers that don't have cached results
+    if api_key:
+        ninjas = _get_api_ninjas_client_optional()
+        if ninjas:
+            from backend.engine9_store import load_transcript_history as _load_th
+            nlp_tickers = TIER_1_BDCS + TIER_2_ALT_MANAGERS
+            for tkr in nlp_tickers:
+                existing = _load_th(tkr, quarters=4)
+                if len(existing) >= 2:
+                    continue
+                try:
+                    raw = ninjas.get_transcript_history(tkr, quarters=4)
+                    for rt in raw:
+                        y, q = rt.get("year"), rt.get("quarter")
+                        if not y or not q:
+                            continue
+                        already = any(a.get("_year") == y and a.get("_quarter") == q for a in existing)
+                        if already:
+                            continue
+                        text = rt.get("transcript", "")
+                        if len(text) > 200:
+                            analyze_transcript_llm(tkr, y, q, text, api_key)
+                except Exception as e:
+                    LOG.warning("Thesis scan: transcript analysis for %s failed: %s", tkr, e)
+
+        # Score news with LLM if not already done
+        today_str_news = dt.date.today().isoformat()
+        cached_news = load_news_scan(today_str_news)
+        if cached_news and not cached_news.get("llm_scored") and cached_news.get("articles"):
+            scored = score_news_with_llm(cached_news["articles"], api_key)
+            store_news_scan(today_str_news, scored)
     if not api_key:
         raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
