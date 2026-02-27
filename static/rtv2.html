@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · RTv2.0</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      /* ── RTv2.0 Desk OS ────────────────────────────────── */
+      .rv2Grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
+      .rv2Grid--2col { grid-template-columns: 1fr 1fr; }
+      .rv2Span2 { grid-column: span 2; }
+      .rv2Span3 { grid-column: span 3; }
+
+      .rv2Card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
+      .rv2Card--green  { border-left: 4px solid var(--green); }
+      .rv2Card--blue   { border-left: 4px solid var(--blue); }
+      .rv2Card--amber  { border-left: 4px solid var(--amber); }
+      .rv2Card--red    { border-left: 4px solid var(--red); }
+      .rv2Card--purple { border-left: 4px solid #8b5cf6; }
+
+      .rv2CardTitle { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 8px; }
+      .rv2BigVal { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+      .rv2Sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+      /* pills */
+      .rv2Pill { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+      .rv2Pill--green  { background: rgba(52,199,89,0.14); color: #1b8a3e; }
+      .rv2Pill--amber  { background: rgba(255,149,0,0.14); color: #995c00; }
+      .rv2Pill--orange { background: rgba(255,120,0,0.14); color: #b35500; }
+      .rv2Pill--red    { background: rgba(255,59,48,0.14); color: #cc2f26; }
+      .rv2Pill--blue   { background: rgba(0,122,255,0.12); color: #0060cc; }
+      .rv2Pill--purple { background: rgba(139,92,246,0.12); color: #6d28d9; }
+      .rv2Pill--gray   { background: rgba(142,142,147,0.12); color: #636366; }
+
+      /* bar chart */
+      .rv2Bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; }
+      .rv2Bar .label { min-width: 100px; color: var(--muted); font-weight: 600; }
+      .rv2Bar .track { flex: 1; height: 7px; background: var(--border); border-radius: 4px; overflow: hidden; }
+      .rv2Bar .fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+      .rv2Bar .fill--green { background: var(--green); }
+      .rv2Bar .fill--blue  { background: var(--blue); }
+      .rv2Bar .fill--amber { background: var(--amber); }
+      .rv2Bar .fill--red   { background: var(--red); }
+      .rv2Bar .val { font-weight: 700; min-width: 50px; text-align: right; }
+
+      /* position table */
+      .rv2Table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .rv2Table th { text-align: left; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+      .rv2Table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      .rv2Table tr:hover { background: var(--hover); }
+      .rv2Table .mono { font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace; font-size: 11px; }
+
+      /* health dots */
+      .rv2Dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+      .rv2Dot--green  { background: #34c759; }
+      .rv2Dot--blue   { background: #007aff; }
+      .rv2Dot--amber  { background: #ff9500; }
+      .rv2Dot--orange { background: #ff7800; }
+      .rv2Dot--red    { background: #ff3b30; }
+
+      /* form */
+      .rv2Form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }
+      .rv2Form label { font-weight: 600; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+      .rv2Form input, .rv2Form select, .rv2Form textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; background: var(--bg); color: var(--fg); }
+      .rv2Form textarea { grid-column: span 2; resize: vertical; min-height: 50px; }
+      .rv2FormFull { grid-column: span 2; }
+
+      /* perf badges */
+      .rv2PerfBadge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+
+      /* action buttons */
+      .rv2Btn { display: inline-block; padding: 5px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; border: none; transition: background 0.15s; }
+      .rv2Btn--green { background: rgba(52,199,89,0.15); color: #1b8a3e; }
+      .rv2Btn--green:hover { background: rgba(52,199,89,0.25); }
+      .rv2Btn--amber { background: rgba(255,149,0,0.15); color: #995c00; }
+      .rv2Btn--amber:hover { background: rgba(255,149,0,0.25); }
+      .rv2Btn--red { background: rgba(255,59,48,0.15); color: #cc2f26; }
+      .rv2Btn--red:hover { background: rgba(255,59,48,0.25); }
+      .rv2Btn--blue { background: rgba(0,122,255,0.12); color: #0060cc; }
+      .rv2Btn--blue:hover { background: rgba(0,122,255,0.22); }
+
+      /* empty state */
+      .rv2Empty { text-align: center; padding: 30px 20px; color: var(--muted); font-size: 13px; }
+
+      @media (max-width: 1100px) { .rv2Grid { grid-template-columns: 1fr; } .rv2Span2, .rv2Span3 { grid-column: span 1; } .rv2Grid--2col { grid-template-columns: 1fr; } }
+      @media (max-width: 640px) { .rv2Form { grid-template-columns: 1fr; } .rv2FormFull, .rv2Form textarea { grid-column: span 1; } }
+    </style>
+  </head>
+  <body>
+    <div class="ravenLoadingOverlay" id="ravenOverlay">
+      <img class="ravenLoadingLogo" src="/static/RavenONLY.png" alt="" />
+      <div class="ravenLoadingProgress"><div class="ravenLoadingProgressFill" id="ravenProgressFill"></div></div>
+      <div class="ravenLoadingStatus" id="ravenStatus">Initialising RTv2.0…</div>
+    </div>
+    <div id="ravenTopLoader"></div>
+
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">RTv2.0</div>
+            <div class="appSubtitle">Unified Trading Desk · Portfolio Operating System</div>
+          </div>
+        </div>
+      </header>
+
+      <!-- ── Control bar ───────────────────────────────────────── -->
+      <section class="controlBar" aria-label="RTv2 Controls">
+        <form id="rv2Form" class="controlBarForm" onsubmit="return false">
+          <div class="controlGroup">
+            <label class="controlLabel">RTv2.0 Dashboard</label>
+          </div>
+          <div class="controlSpacer"></div>
+          <button class="btn" type="button" id="rv2Refresh" onclick="rv2Load()">Refresh Dashboard</button>
+        </form>
+      </section>
+
+      <!-- ── Row 1: Context cards (Regime · Flow · Vol) ────────── -->
+      <div class="rv2Grid" id="rv2ContextRow">
+        <div class="rv2Card rv2Card--green" id="rv2RegimeCard">
+          <div class="rv2CardTitle">Regime</div>
+          <div class="rv2BigVal" id="rv2RegimeVal">—</div>
+          <div class="rv2Sub" id="rv2RegimeSub"></div>
+        </div>
+        <div class="rv2Card rv2Card--blue" id="rv2FlowCard">
+          <div class="rv2CardTitle">Flow Pressure</div>
+          <div class="rv2BigVal" id="rv2FlowVal">—</div>
+          <div class="rv2Sub" id="rv2FlowSub"></div>
+        </div>
+        <div class="rv2Card rv2Card--amber" id="rv2VolCard">
+          <div class="rv2CardTitle">Volatility State</div>
+          <div class="rv2BigVal" id="rv2VolVal">—</div>
+          <div class="rv2Sub" id="rv2VolSub"></div>
+        </div>
+      </div>
+
+      <!-- ── Row 2: Allocation + Risk ──────────────────────────── -->
+      <div class="rv2Grid rv2Grid--2col">
+        <div class="rv2Card rv2Card--purple">
+          <div class="rv2CardTitle">Capital Allocation</div>
+          <div id="rv2AllocBars"></div>
+          <div class="rv2Sub" id="rv2AllocSummary"></div>
+        </div>
+        <div class="rv2Card rv2Card--red">
+          <div class="rv2CardTitle">Risk Dashboard</div>
+          <div id="rv2RiskContent"></div>
+        </div>
+      </div>
+
+      <!-- ── Row 3: Position Intelligence (full width) ─────────── -->
+      <div class="rv2Grid" style="grid-template-columns:1fr">
+        <div class="rv2Card">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div class="rv2CardTitle">Position Intelligence</div>
+            <div id="rv2HealthPills"></div>
+          </div>
+          <div id="rv2PositionsTable"></div>
+        </div>
+      </div>
+
+      <!-- ── Row 4: Idea Queue + Lifecycle ─────────────────────── -->
+      <div class="rv2Grid rv2Grid--2col">
+        <div class="rv2Card">
+          <div class="rv2CardTitle">Unified Idea Queue</div>
+          <div id="rv2QueueTable"></div>
+        </div>
+        <div class="rv2Card">
+          <div class="rv2CardTitle">Performance Scorecard</div>
+          <div id="rv2PerfContent"></div>
+        </div>
+      </div>
+
+      <!-- ── Row 5: Manual Trade Entry ─────────────────────────── -->
+      <div class="rv2Grid" style="grid-template-columns:1fr">
+        <div class="rv2Card">
+          <div class="rv2CardTitle">Manual Trade Entry</div>
+          <div class="rv2Form" id="rv2ManualForm">
+            <div><label>Ticker</label><input id="mTicker" placeholder="AAPL" required /></div>
+            <div><label>Direction</label><select id="mDirection"><option value="long">Long</option><option value="short">Short</option></select></div>
+            <div><label>Entry Price</label><input id="mEntryPrice" type="number" step="0.01" required /></div>
+            <div><label>Units</label><input id="mUnits" type="number" step="1" required /></div>
+            <div><label>Trade Type</label>
+              <select id="mTradeType">
+                <option value="trend_continuation">Trend Continuation</option>
+                <option value="mean_reversion">Mean Reversion</option>
+                <option value="premium_decay">Premium Decay</option>
+                <option value="event_continuation">Event Continuation</option>
+                <option value="event_fade">Event Fade</option>
+                <option value="relative_value">Relative Value</option>
+              </select>
+            </div>
+            <div><label>Bucket</label>
+              <select id="mBucket">
+                <option value="directional">Directional</option>
+                <option value="income_core">Income Core</option>
+                <option value="opportunistic">Opportunistic</option>
+              </select>
+            </div>
+            <div><label>Thesis Stop</label><input id="mStop" type="number" step="0.01" required /></div>
+            <div><label>Thesis Target</label><input id="mTarget" type="number" step="0.01" required /></div>
+            <div><label>Max Holding Days</label><input id="mMaxDays" type="number" value="10" /></div>
+            <div><label>Sector</label><input id="mSector" placeholder="Technology" /></div>
+            <textarea id="mInvalidation" placeholder="Invalidation conditions (one per line)"></textarea>
+            <textarea id="mNotes" placeholder="Notes (optional)"></textarea>
+            <div class="rv2FormFull"><button class="btn" type="button" onclick="rv2SubmitManual()">Submit Manual Trade</button></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <script src="/static/rtv2.js"></script>
+  </body>
+</html>

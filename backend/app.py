@@ -70,6 +70,7 @@ from backend.front_layer_llm import (
     generate_morning_brief, generate_weekly_roadmap, detect_asymmetries,
     generate_asset_insight, generate_card_insight,
 )
+from backend.rtv2_api import router as rtv2_router
 
 
 try:
@@ -91,6 +92,7 @@ _configure_logging()
 LOG = logging.getLogger("app")
 
 app = FastAPI(title="ORATS Earnings Implied Move Breach", version="1.0.0")
+app.include_router(rtv2_router)
 
 # ---- Invite-code gate (lightweight) ----
 # Intended for private beta access so we don't expose paid ORATS/Benzinga keys to the public internet.
@@ -637,6 +639,15 @@ def credit_stress_page():
     p = STATIC_DIR / "engine9.html"
     if not p.exists():
         raise HTTPException(status_code=500, detail="Missing static/engine9.html")
+    return FileResponse(str(p))
+
+
+@app.get("/rtv2")
+def rtv2_page():
+    """RTv2.0 Unified Trading Desk Dashboard."""
+    p = STATIC_DIR / "rtv2.html"
+    if not p.exists():
+        raise HTTPException(status_code=500, detail="Missing static/rtv2.html")
     return FileResponse(str(p))
 
 
