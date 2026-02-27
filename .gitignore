@@ -28,6 +28,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Cursor IDE
+.cursor/
+
 # OS
 .DS_Store
 
