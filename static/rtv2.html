@@ -12,6 +12,7 @@
       /* ── RTv2.0 Desk OS ────────────────────────────────── */
       .rv2Grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
       .rv2Grid--2col { grid-template-columns: 1fr 1fr; }
+      .rv2Grid--4col { grid-template-columns: 1fr 1fr 1fr 1fr; }
       .rv2Span2 { grid-column: span 2; }
       .rv2Span3 { grid-column: span 3; }
 
@@ -26,7 +27,6 @@
       .rv2BigVal { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
       .rv2Sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-      /* pills */
       .rv2Pill { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
       .rv2Pill--green  { background: rgba(52,199,89,0.14); color: #1b8a3e; }
       .rv2Pill--amber  { background: rgba(255,149,0,0.14); color: #995c00; }
@@ -36,7 +36,6 @@
       .rv2Pill--purple { background: rgba(139,92,246,0.12); color: #6d28d9; }
       .rv2Pill--gray   { background: rgba(142,142,147,0.12); color: #636366; }
 
-      /* bar chart */
       .rv2Bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; }
       .rv2Bar .label { min-width: 100px; color: var(--muted); font-weight: 600; }
       .rv2Bar .track { flex: 1; height: 7px; background: var(--border); border-radius: 4px; overflow: hidden; }
@@ -47,14 +46,12 @@
       .rv2Bar .fill--red   { background: var(--red); }
       .rv2Bar .val { font-weight: 700; min-width: 50px; text-align: right; }
 
-      /* position table */
       .rv2Table { width: 100%; border-collapse: collapse; font-size: 12px; }
       .rv2Table th { text-align: left; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
       .rv2Table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
       .rv2Table tr:hover { background: var(--hover); }
       .rv2Table .mono { font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace; font-size: 11px; }
 
-      /* health dots */
       .rv2Dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
       .rv2Dot--green  { background: #34c759; }
       .rv2Dot--blue   { background: #007aff; }
@@ -62,17 +59,12 @@
       .rv2Dot--orange { background: #ff7800; }
       .rv2Dot--red    { background: #ff3b30; }
 
-      /* form */
       .rv2Form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }
       .rv2Form label { font-weight: 600; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
       .rv2Form input, .rv2Form select, .rv2Form textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; background: var(--bg); color: var(--fg); }
       .rv2Form textarea { grid-column: span 2; resize: vertical; min-height: 50px; }
       .rv2FormFull { grid-column: span 2; }
 
-      /* perf badges */
-      .rv2PerfBadge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
-
-      /* action buttons */
       .rv2Btn { display: inline-block; padding: 5px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; border: none; transition: background 0.15s; }
       .rv2Btn--green { background: rgba(52,199,89,0.15); color: #1b8a3e; }
       .rv2Btn--green:hover { background: rgba(52,199,89,0.25); }
@@ -83,10 +75,45 @@
       .rv2Btn--blue { background: rgba(0,122,255,0.12); color: #0060cc; }
       .rv2Btn--blue:hover { background: rgba(0,122,255,0.22); }
 
-      /* empty state */
       .rv2Empty { text-align: center; padding: 30px 20px; color: var(--muted); font-size: 13px; }
 
-      @media (max-width: 1100px) { .rv2Grid { grid-template-columns: 1fr; } .rv2Span2, .rv2Span3 { grid-column: span 1; } .rv2Grid--2col { grid-template-columns: 1fr; } }
+      /* Alert banner */
+      .rv2Banner { padding: 10px 16px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-top: 12px; display: none; }
+      .rv2Banner--red { background: rgba(255,59,48,0.10); border: 1px solid rgba(255,59,48,0.25); color: #cc2f26; }
+      .rv2Banner--amber { background: rgba(255,149,0,0.10); border: 1px solid rgba(255,149,0,0.25); color: #995c00; }
+
+      /* Desk brief */
+      .rv2Brief p { margin: 6px 0; font-size: 13px; line-height: 1.5; color: var(--fg); }
+      .rv2Brief strong { color: var(--fg); }
+
+      /* Gate badges */
+      .rv2Gate { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-right: 4px; }
+      .rv2Gate--TRADABLE  { background: rgba(52,199,89,0.14); color: #1b8a3e; }
+      .rv2Gate--WATCH     { background: rgba(255,149,0,0.14); color: #995c00; }
+      .rv2Gate--SUPPRESS  { background: rgba(255,59,48,0.14); color: #cc2f26; }
+      .rv2Gate--selective  { background: rgba(0,122,255,0.12); color: #0060cc; }
+      .rv2Gate--allowed    { background: rgba(52,199,89,0.14); color: #1b8a3e; }
+      .rv2Gate--suppressed { background: rgba(255,59,48,0.14); color: #cc2f26; }
+
+      /* Sequencer timeline */
+      .rv2SeqDay { margin-bottom: 8px; }
+      .rv2SeqDay .dayLabel { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 3px; }
+      .rv2SeqEvent { font-size: 11px; padding: 2px 0; color: var(--fg); }
+      .rv2SeqEvent .fromTo { font-size: 10px; color: var(--muted); }
+
+      /* Progress steps for refresh */
+      .rv2Steps { font-size: 11px; color: var(--muted); margin-top: 8px; }
+      .rv2Steps .step { padding: 2px 0; }
+      .rv2Steps .step.done { color: var(--green); }
+      .rv2Steps .step.active { color: var(--fg); font-weight: 600; }
+      .rv2Steps .step.error { color: var(--red); }
+
+      /* Age coloring for queue */
+      .rv2Age--fresh { color: var(--green); }
+      .rv2Age--warm  { color: var(--amber); }
+      .rv2Age--stale { color: var(--red); }
+
+      @media (max-width: 1100px) { .rv2Grid { grid-template-columns: 1fr; } .rv2Span2, .rv2Span3 { grid-column: span 1; } .rv2Grid--2col, .rv2Grid--4col { grid-template-columns: 1fr; } }
       @media (max-width: 640px) { .rv2Form { grid-template-columns: 1fr; } .rv2FormFull, .rv2Form textarea { grid-column: span 1; } }
     </style>
   </head>
@@ -120,8 +147,13 @@
         </form>
       </section>
 
-      <!-- ── Row 1: Context cards (Regime · Flow · Vol) ────────── -->
-      <div class="rv2Grid" id="rv2ContextRow">
+      <!-- ── E9 Credit Stress Banner (hidden by default) ──────── -->
+      <div class="rv2Banner rv2Banner--red" id="rv2E9Banner"></div>
+      <!-- ── Transition / Divergence Banner ────────────────────── -->
+      <div class="rv2Banner rv2Banner--amber" id="rv2CautionBanner"></div>
+
+      <!-- ── Row 1: Regime · Flow · Vol · Engine Gates ─────────── -->
+      <div class="rv2Grid rv2Grid--4col" id="rv2ContextRow">
         <div class="rv2Card rv2Card--green" id="rv2RegimeCard">
           <div class="rv2CardTitle">Regime</div>
           <div class="rv2BigVal" id="rv2RegimeVal">—</div>
@@ -137,9 +169,29 @@
           <div class="rv2BigVal" id="rv2VolVal">—</div>
           <div class="rv2Sub" id="rv2VolSub"></div>
         </div>
+        <div class="rv2Card" id="rv2GateCard">
+          <div class="rv2CardTitle">Engine Gates</div>
+          <div id="rv2GateContent" style="font-size:11px">—</div>
+        </div>
       </div>
 
-      <!-- ── Row 2: Allocation + Risk ──────────────────────────── -->
+      <!-- ── Row 2: Desk Brief + Alerts ────────────────────────── -->
+      <div class="rv2Grid rv2Grid--2col">
+        <div class="rv2Card">
+          <div class="rv2CardTitle">Desk Brief</div>
+          <div class="rv2Brief" id="rv2DeskBrief">
+            <div class="rv2Empty">Click <strong>Refresh Dashboard</strong> to generate the desk brief.</div>
+          </div>
+        </div>
+        <div class="rv2Card">
+          <div class="rv2CardTitle">State Flip Alerts</div>
+          <div id="rv2AlertsContent">
+            <div class="rv2Empty">No alerts this week.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Row 3: Allocation + Risk ──────────────────────────── -->
       <div class="rv2Grid rv2Grid--2col">
         <div class="rv2Card rv2Card--purple">
           <div class="rv2CardTitle">Capital Allocation</div>
@@ -152,7 +204,7 @@
         </div>
       </div>
 
-      <!-- ── Row 3: Position Intelligence (full width) ─────────── -->
+      <!-- ── Row 4: Position Intelligence (full width) ─────────── -->
       <div class="rv2Grid" style="grid-template-columns:1fr">
         <div class="rv2Card">
           <div style="display:flex;align-items:center;justify-content:space-between">
@@ -163,11 +215,21 @@
         </div>
       </div>
 
-      <!-- ── Row 4: Idea Queue + Lifecycle ─────────────────────── -->
-      <div class="rv2Grid rv2Grid--2col">
+      <!-- ── Row 5: Unified Idea Queue (full width) ───────────── -->
+      <div class="rv2Grid" style="grid-template-columns:1fr">
         <div class="rv2Card">
           <div class="rv2CardTitle">Unified Idea Queue</div>
           <div id="rv2QueueTable"></div>
+        </div>
+      </div>
+
+      <!-- ── Row 6: Sequencer + Performance ────────────────────── -->
+      <div class="rv2Grid rv2Grid--2col">
+        <div class="rv2Card">
+          <div class="rv2CardTitle">Weekly Sequencer</div>
+          <div id="rv2SequencerContent">
+            <div class="rv2Empty">Click <strong>Refresh Dashboard</strong> to load sequencer data.</div>
+          </div>
         </div>
         <div class="rv2Card">
           <div class="rv2CardTitle">Performance Scorecard</div>
@@ -175,7 +237,7 @@
         </div>
       </div>
 
-      <!-- ── Row 5: Manual Trade Entry ─────────────────────────── -->
+      <!-- ── Row 7: Manual Trade Entry ─────────────────────────── -->
       <div class="rv2Grid" style="grid-template-columns:1fr">
         <div class="rv2Card">
           <div class="rv2CardTitle">Manual Trade Entry</div>
