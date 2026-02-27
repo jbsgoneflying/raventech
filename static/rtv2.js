@@ -43,7 +43,7 @@ function setProgress(pct) {
 }
 
 
-/* ── Main load ──────────────────────────────────────────────── */
+/* ── Main load (passive — reads cached state) ──────────────── */
 async function rv2Load() {
   showOverlay('Loading RTv2.0 dashboard…');
   setProgress(10);
@@ -62,6 +62,67 @@ async function rv2Load() {
     setProgress(100);
     setTimeout(hideOverlay, 2000);
   }
+}
+
+/* ── Full refresh (bootstraps engines → ingests signals → returns dashboard) */
+async function rv2Refresh() {
+  showOverlay('Bootstrapping engines…');
+  setProgress(5);
+  const btn = $('rv2Refresh');
+  if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+
+  try {
+    $('ravenStatus').textContent = 'Running Engine 5 (regime), Engine 3 (Red Dog), Engine 4 (Ichimoku)…';
+    setProgress(10);
+
+    const resp = await fetch(API + '/refresh', { method: 'POST' });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Refresh failed: ' + resp.status);
+    }
+    setProgress(70);
+
+    $('ravenStatus').textContent = 'Rendering dashboard…';
+    _data = await resp.json();
+    setProgress(85);
+    renderAll(_data);
+
+    // Show ingestion summary
+    const ref = _data._refresh || {};
+    const msg = `Scanned: ${(ref.engines_scanned || []).join(', ') || 'none'} · ` +
+                `Signals: ${ref.signals_extracted || 0} · Trades queued: ${ref.trades_created || 0}`;
+    renderRefreshStatus(msg, ref.engine_status || {});
+
+    setProgress(100);
+    setTimeout(hideOverlay, 300);
+  } catch (e) {
+    console.error('RTv2 refresh error:', e);
+    $('ravenStatus').textContent = 'Refresh failed: ' + e.message;
+    setProgress(100);
+    setTimeout(hideOverlay, 2000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Refresh Dashboard'; }
+  }
+}
+
+function renderRefreshStatus(msg, engineStatus) {
+  let el = $('rv2RefreshStatus');
+  if (!el) {
+    const bar = document.querySelector('.controlBar');
+    if (bar) {
+      el = document.createElement('div');
+      el.id = 'rv2RefreshStatus';
+      el.style.cssText = 'font-size:11px;color:var(--muted);padding:6px 16px;border-top:1px solid var(--border)';
+      bar.parentNode.insertBefore(el, bar.nextSibling);
+    }
+  }
+  if (!el) return;
+  let html = msg;
+  for (const [eid, st] of Object.entries(engineStatus)) {
+    const ok = st === 'ok' || st === 'no_data';
+    html += ` · <span class="rv2Pill rv2Pill--${ok ? 'green' : 'red'}">${h(eid)}: ${h(st)}</span>`;
+  }
+  el.innerHTML = html;
 }
 
 
@@ -83,7 +144,8 @@ function renderContextCards(d) {
   $('rv2RegimeVal').textContent = regime;
   $('rv2RegimeVal').className = 'rv2BigVal';
   const rc = d.regime_card || {};
-  $('rv2RegimeSub').textContent = (rc.drivers || []).join(' · ') || 'No drivers reported';
+  const driversText = (rc.drivers || []).join(' · ');
+  $('rv2RegimeSub').textContent = driversText || (regime === 'Transitional' ? 'Click Refresh Dashboard to load regime data' : 'No drivers reported');
 
   // Flow
   const fc = d.flow_card || {};
@@ -116,7 +178,7 @@ function renderAllocation(d) {
       <span class="val">${fmt(used,1)} / ${fmt(max,1)} RU</span>
     </div>`;
   }
-  container.innerHTML = html || '<div class="rv2Empty">No allocation data</div>';
+  container.innerHTML = html || '<div class="rv2Empty">No allocation data. Click <strong>Refresh Dashboard</strong> to bootstrap engines.</div>';
 
   const a = d.allocation || {};
   $('rv2AllocSummary').textContent = `Regime: ${a.regime || '—'} · Total RU: ${fmt(a.total_used_ru,1)} / ${fmt(a.portfolio_ru_cap,0)}`;
@@ -167,7 +229,7 @@ function renderPositions(d) {
 
   const container = $('rv2PositionsTable');
   if (!positions.length) {
-    container.innerHTML = '<div class="rv2Empty">No active positions. Use Manual Trade Entry below or run engines to source ideas.</div>';
+    container.innerHTML = '<div class="rv2Empty">No active positions. Click <strong>Refresh Dashboard</strong> to scan engines, or use <strong>Manual Trade Entry</strong> below.</div>';
     return;
   }
 
@@ -211,7 +273,7 @@ function renderQueue(d) {
   const queue = d.queue || [];
   const container = $('rv2QueueTable');
   if (!queue.length) {
-    container.innerHTML = '<div class="rv2Empty">No ideas in queue. Run engines to source ideas.</div>';
+    container.innerHTML = '<div class="rv2Empty">No ideas in queue. Click <strong>Refresh Dashboard</strong> to scan Engine 3 (Red Dog), Engine 4 (Ichimoku), and others.</div>';
     return;
   }
 
@@ -248,7 +310,7 @@ function renderPerformance(d) {
   const buckets = perf.buckets || {};
 
   if (!Object.keys(engines).length && !Object.keys(buckets).length) {
-    container.innerHTML = '<div class="rv2Empty">No performance data yet. Close trades to build the scorecard.</div>';
+    container.innerHTML = '<div class="rv2Empty">No performance data yet. Close trades to build the scorecard. Metrics accumulate after trades are completed.</div>';
     return;
   }
 

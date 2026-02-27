@@ -69,7 +69,7 @@ from backend.rtv2_risk_manager import (
     check_trade_risk,
     build_risk_dashboard,
 )
-from backend.daily_market_state import load_dms
+from backend.daily_market_state import load_dms as _load_dms_by_date, DailyMarketState
 from backend.rtv2_integration import ingest_engine_signals
 
 LOG = logging.getLogger(__name__)
@@ -84,10 +84,12 @@ def _store():
 
 
 def _get_dms_dict() -> Optional[dict]:
+    """Load today's DailyMarketState from Redis."""
     store = _store()
     if store is None:
         return None
-    dms = load_dms(store)
+    today = dt.date.today().isoformat()
+    dms = _load_dms_by_date(today, store)
     if dms is None:
         return None
     return dms.to_dict()
@@ -769,3 +771,144 @@ def api_ingest(body: dict):
         portfolio_capital=PORTFOLIO_CAPITAL,
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Refresh: bootstrap engines → build DMS → ingest signals → return init
+# ---------------------------------------------------------------------------
+
+@router.post("/refresh")
+def api_rtv2_refresh():
+    """Full desk refresh: run engine scans, fetch DMS, ingest signals, return init payload.
+
+    This is the primary action behind the 'Refresh Dashboard' button.
+    It delegates to the app's existing engine helpers to bootstrap E3/E4/E5,
+    reads the latest tradable ideas, feeds them through the RTv2.0 scoring
+    and lifecycle pipeline, then returns the complete dashboard state.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from backend.config import get_flags
+
+    store = _store()
+    flags = get_flags()
+    status: Dict[str, str] = {}
+
+    # -- Step 1: Bootstrap Engine 5 (regime/vol — feeds gating) -----------
+    try:
+        from backend.app import _ensure_engine5_snapshot
+        snap = _ensure_engine5_snapshot(flags)
+        status["engine5"] = "ok" if snap else "no_data"
+    except Exception as exc:
+        LOG.warning("RTv2 refresh: Engine 5 bootstrap failed: %s", exc)
+        status["engine5"] = f"error: {exc}"
+
+    # -- Step 2: Bootstrap Engines 3 & 4 in parallel ----------------------
+    try:
+        from backend.app import _ensure_engine3_cache, _ensure_engine4_cache
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f3 = pool.submit(_ensure_engine3_cache, flags)
+            f4 = pool.submit(_ensure_engine4_cache, flags)
+            try:
+                f3.result(timeout=300)
+                status["engine3"] = "ok"
+            except Exception as exc:
+                status["engine3"] = f"error: {exc}"
+            try:
+                f4.result(timeout=300)
+                status["engine4"] = "ok"
+            except Exception as exc:
+                status["engine4"] = f"error: {exc}"
+    except Exception as exc:
+        LOG.warning("RTv2 refresh: Engine 3/4 bootstrap failed: %s", exc)
+        status["engine3"] = status.get("engine3", f"error: {exc}")
+        status["engine4"] = status.get("engine4", f"error: {exc}")
+
+    # -- Step 3: Collect tradable ideas from cached engine outputs ---------
+    engine_outputs: Dict[str, Any] = {}
+    try:
+        from backend.app import (
+            _engine3_cache, _engine3_cache_lock,
+            _engine4_cache, _engine4_cache_lock,
+        )
+        # E3 Red Dog setups
+        with _engine3_cache_lock:
+            for _k, v in list(_engine3_cache.items()):
+                if isinstance(v, dict):
+                    setups = (v.get("aPlus") or []) + (v.get("watchlist") or []) + (v.get("standard") or [])
+                    if setups:
+                        engine_outputs["E3"] = setups
+                break
+
+        # E4 Ichimoku setups
+        with _engine4_cache_lock:
+            for _k, v in list(_engine4_cache.items()):
+                if isinstance(v, dict):
+                    setups = (v.get("actionable") or []) + (v.get("structure") or [])
+                    if setups:
+                        engine_outputs["E4"] = setups
+                break
+    except Exception as exc:
+        LOG.warning("RTv2 refresh: failed to read engine caches: %s", exc)
+
+    # -- Step 4: Load / build DMS -----------------------------------------
+    dms = _get_dms_dict()
+    if dms is None:
+        try:
+            from backend.app import _build_live_dms, _dms_cache
+            today_str = dt.date.today().isoformat()
+            dms = _build_live_dms(today_str, store)
+            if dms:
+                _dms_cache[f"dms:{today_str}"] = dms
+        except Exception as exc:
+            LOG.warning("RTv2 refresh: DMS build failed: %s", exc)
+
+    # E1: earnings candidates from DMS
+    if dms:
+        e1_data = dms.get("earnings_candidates")
+        if isinstance(e1_data, list) and e1_data:
+            engine_outputs["E1"] = e1_data
+
+    # -- Step 5: Gate results from DMS ------------------------------------
+    gate_results: Dict[str, dict] = {}
+    if dms and isinstance(dms.get("engine_gates"), dict):
+        for k, v in dms["engine_gates"].items():
+            gate_results[k] = {"status": v} if isinstance(v, str) else v
+
+    # -- Step 6: Ingest all signals through RTv2.0 pipeline ---------------
+    ingest_result: Dict[str, Any] = {"signals_extracted": 0, "trades_created": 0}
+    if engine_outputs:
+        try:
+            ingest_result = ingest_engine_signals(
+                engine_outputs,
+                dms=dms,
+                gate_results=gate_results,
+                store=store,
+                portfolio_capital=PORTFOLIO_CAPITAL,
+            )
+        except Exception as exc:
+            LOG.warning("RTv2 refresh: ingestion failed: %s", exc)
+
+    # -- Step 7: Run auto-expiration on stale ideas -----------------------
+    if store:
+        try:
+            from backend.rtv2_trade_lifecycle import check_expirations, load_active_trades as _load_at
+            trades = _load_at(store)
+            check_expirations(trades)
+            for t in trades:
+                persist_trade(t, store)
+        except Exception:
+            pass
+
+    # -- Step 8: Build full init payload ----------------------------------
+    init_payload = api_rtv2_init()
+
+    # Merge engine bootstrap status + ingestion summary into response
+    init_payload["_refresh"] = {
+        "engine_status": status,
+        "signals_extracted": ingest_result.get("signals_extracted", 0),
+        "trades_created": ingest_result.get("trades_created", 0),
+        "engines_scanned": list(engine_outputs.keys()),
+    }
+
+    return init_payload
