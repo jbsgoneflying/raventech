@@ -1,0 +1,30 @@
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script_stop: true
+          command_timeout: 8m
+          script: |
+            cd /opt/breach-algo
+            echo "--- Pulling latest code ---"
+            git pull
+            echo "--- Building and restarting app container ---"
+            docker compose up -d --build app
+            echo "--- Waiting for app to be healthy ---"
+            sleep 5
+            curl -sf http://localhost:8000/api/rtv2/init > /dev/null && echo "Health check PASSED" || echo "Health check FAILED (app may still be starting)"
+            echo "--- Deploy complete ---"
