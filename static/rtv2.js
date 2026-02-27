@@ -73,6 +73,7 @@ async function rv2Load() {
     _data = await resp.json();
     setProgress(80);
     renderAll();
+    loadIntelligence();
     setProgress(100);
     setTimeout(hideOverlay, 300);
   } catch (e) {
@@ -168,9 +169,22 @@ async function rv2Refresh() {
     setProgress(90);
 
     // ── Step 5: Render ──
-    setStatus('Step 5/5 — Rendering dashboard…');
+    setStatus('Step 5/6 — Rendering dashboard…');
     renderAll();
     renderRefreshSummary(refreshStatus);
+    setProgress(92);
+
+    // ── Step 6: Regenerate intelligence brief ──
+    setStatus('Step 6/6 — Generating intelligence brief…');
+    try {
+      const intelResp = await fetch(API + '/intelligence/refresh', { method: 'POST' });
+      if (intelResp.ok) {
+        _intel = await intelResp.json();
+        renderIntelligence();
+      }
+    } catch (e) {
+      console.error('Intelligence refresh in pipeline:', e);
+    }
     setProgress(100);
     setTimeout(hideOverlay, 400);
 
@@ -722,6 +736,141 @@ async function rv2TightenTrade(tradeId) {
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || resp.statusText); }
     rv2Load();
   } catch (e) { alert('Tighten error: ' + e.message); }
+}
+
+
+/* ══════════════════════════════════════════════════════════════ */
+/*  INTELLIGENCE BRIEF                                           */
+/* ══════════════════════════════════════════════════════════════ */
+
+let _intel = null;
+
+const INTEL_SECTIONS = [
+  { key: 'where_are_we',    label: 'Where Are We?',             icon: '📍' },
+  { key: 'what_changed',    label: 'What Changed?',             icon: '🔄' },
+  { key: 'risk_radar',      label: 'What Should Worry Us?',     icon: '⚠️' },
+  { key: 'opportunities',   label: 'What Should Excite Us?',    icon: '🎯' },
+  { key: 'book_review',     label: "How's Our Book?",           icon: '📊' },
+  { key: 'historical_echoes', label: 'When Did This Happen Before?', icon: '🕰️' },
+  { key: 'action_items',    label: 'What To Do Today',          icon: '✅' },
+];
+
+async function loadIntelligence() {
+  try {
+    const resp = await fetch(API + '/intelligence');
+    if (resp.ok) {
+      _intel = await resp.json();
+      renderIntelligence();
+    }
+  } catch (e) {
+    console.error('Intelligence load error:', e);
+  }
+}
+
+async function refreshIntelligence() {
+  const btn = $('rv2IntelRefreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+  const loading = $('rv2IntelLoading');
+  if (loading) { loading.style.display = 'block'; loading.textContent = 'Generating intelligence brief… this may take 10-20 seconds.'; }
+
+  try {
+    const resp = await fetch(API + '/intelligence/refresh', { method: 'POST' });
+    if (resp.ok) {
+      _intel = await resp.json();
+      renderIntelligence();
+    } else {
+      const err = await resp.json().catch(() => ({}));
+      if (loading) loading.textContent = 'Brief generation failed: ' + (err.detail || resp.statusText);
+    }
+  } catch (e) {
+    console.error('Intelligence refresh error:', e);
+    if (loading) loading.textContent = 'Brief generation failed: ' + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Regenerate Brief'; }
+  }
+}
+
+function renderIntelligence() {
+  if (!_intel) return;
+  const container = $('rv2IntelBody');
+  if (!container) return;
+
+  const meta = _intel._meta || {};
+  const metaEl = $('rv2IntelMeta');
+  if (metaEl) {
+    const ts = meta.generated_at ? new Date(meta.generated_at).toLocaleTimeString() : '';
+    const model = meta.llm ? meta.model : 'deterministic';
+    metaEl.textContent = ts ? ` · Generated ${ts} via ${model}` : '';
+  }
+
+  let html = '';
+  for (const sec of INTEL_SECTIONS) {
+    const data = _intel[sec.key];
+    if (!data) continue;
+
+    const urgency = (data.urgency || 'low').toLowerCase();
+    const headline = h(data.headline || '');
+    const detail = data.detail || '';
+    const isActionItems = sec.key === 'action_items';
+    const openClass = isActionItems ? ' open' : '';
+
+    html += '<div class="rv2IntelSection' + openClass + '" data-section="' + sec.key + '">';
+    html += '<div class="rv2IntelSectionHead" onclick="toggleIntelSection(this)">';
+    html += '<span class="rv2IntelUrgency rv2IntelUrgency--' + urgency + '">' + urgency + '</span>';
+    html += '<span class="rv2IntelHeadline">' + sec.icon + ' ' + sec.label + ' — ' + headline + '</span>';
+    html += '<span class="rv2IntelChevron">▶</span>';
+    html += '</div>';
+    html += '<div class="rv2IntelBody">';
+
+    if (isActionItems && _intel._meta && _intel._meta.llm === false) {
+      html += renderActionItemsHTML(_intel);
+    } else {
+      const paragraphs = detail.split('\n\n');
+      for (const p of paragraphs) {
+        if (p.trim()) html += '<p>' + h(p.trim()) + '</p>';
+      }
+      if (!paragraphs.some(p => p.trim())) {
+        html += '<p>' + h(detail) + '</p>';
+      }
+    }
+
+    html += '</div></div>';
+  }
+
+  container.innerHTML = html;
+  const loading = $('rv2IntelLoading');
+  if (loading) loading.style.display = 'none';
+}
+
+function renderActionItemsHTML(intel) {
+  const ctx = intel;
+  let html = '';
+  const sections = ['where_are_we', 'risk_radar', 'opportunities', 'book_review'];
+  for (const sec of sections) {
+    const data = ctx[sec];
+    if (data && data.detail) {
+      const lines = data.detail.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let priority = 'green';
+        if (trimmed.startsWith('[RED]')) priority = 'red';
+        else if (trimmed.startsWith('[AMBER]')) priority = 'amber';
+        else if (trimmed.startsWith('[GREEN]')) priority = 'green';
+        const text = trimmed.replace(/^\[(RED|AMBER|GREEN)\]\s*/i, '');
+        html += '<div class="rv2ActionItem">';
+        html += '<div class="rv2ActionDot rv2ActionDot--' + priority + '"></div>';
+        html += '<div class="rv2ActionText">' + h(text) + '</div>';
+        html += '</div>';
+      }
+    }
+  }
+  return html || '<p>No action items.</p>';
+}
+
+function toggleIntelSection(el) {
+  const section = el.parentElement;
+  section.classList.toggle('open');
 }
 
 

@@ -784,3 +784,150 @@ def api_ingest(body: dict):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Desk Intelligence — Morning Brief
+# ---------------------------------------------------------------------------
+
+@router.get("/intelligence")
+def api_get_intelligence():
+    """Return cached intelligence brief or generate a fresh one."""
+    from backend.desk_intelligence_llm import load_cached_brief, cache_brief
+    from backend.desk_intelligence_llm import generate_morning_brief as _gen_brief
+
+    cached = load_cached_brief()
+    if cached:
+        return cached
+
+    ctx = _build_intelligence_context()
+    brief = _gen_brief(ctx)
+    cache_brief(brief)
+    return brief
+
+
+@router.post("/intelligence/refresh")
+def api_refresh_intelligence():
+    """Force-regenerate the intelligence brief (clears cache)."""
+    from backend.desk_intelligence_llm import clear_cache, cache_brief
+    from backend.desk_intelligence_llm import generate_morning_brief as _gen_brief
+
+    clear_cache()
+    ctx = _build_intelligence_context()
+    brief = _gen_brief(ctx)
+    cache_brief(brief)
+    return brief
+
+
+@router.get("/intelligence/history")
+def api_intelligence_history(limit: int = Query(7, ge=1, le=30)):
+    """Return past intelligence briefs for comparison."""
+    from backend.desk_intelligence_llm import load_brief_history
+    return {"briefs": load_brief_history(limit)}
+
+
+def _build_intelligence_context() -> dict:
+    """Assemble the full context dict for desk intelligence."""
+    from backend.desk_intelligence import gather_intelligence_context
+
+    store = _store()
+    dms = _get_dms_dict()
+    regime = _get_regime(dms)
+
+    # Active positions
+    active_raw = []
+    if store:
+        try:
+            active_raw = [t.to_dict() if hasattr(t, "to_dict") else t
+                          for t in load_active_trades(store)]
+        except Exception:
+            pass
+
+    # Evaluate positions
+    positions = active_raw
+    if dms and positions:
+        try:
+            prices = {}
+            for p in positions:
+                ticker = p.get("ticker", "")
+                entry = p.get("entry_price", 0)
+                if ticker and entry:
+                    prices[ticker] = entry  # use entry as fallback
+            positions = evaluate_all_positions(positions, prices, dms)
+        except Exception:
+            pass
+
+    # Idea queue
+    queue = []
+    if store:
+        try:
+            all_trades = [t.to_dict() if hasattr(t, "to_dict") else t
+                          for t in load_active_trades(store)]
+            queue = [t for t in all_trades
+                     if (t.get("lifecycle_state") or "").upper() == "QUEUED"]
+        except Exception:
+            pass
+
+    # Risk dashboard
+    risk_data = None
+    try:
+        risk = build_risk_dashboard(
+            active_positions=positions,
+            regime=regime,
+            portfolio_capital=PORTFOLIO_CAPITAL,
+        )
+        risk_data = risk.to_dict() if hasattr(risk, "to_dict") else risk
+    except Exception:
+        pass
+
+    # Performance
+    perf = None
+    try:
+        perf = {
+            "engines": {eid: (m.to_dict() if hasattr(m, "to_dict") else m)
+                        for eid in ("E1", "E2", "E3", "E4", "E5", "E7", "E8")
+                        if (m := load_engine_metrics(eid, store)) is not None}
+            if store else {},
+        }
+    except Exception:
+        pass
+
+    # News themes from DMS
+    news_themes = []
+    if dms:
+        news_themes = dms.get("news_themes") or []
+
+    # E9 credit stress — try loading from DMS cross-asset stress
+    e9_data = None
+    if dms:
+        e9_data = dms.get("cross_asset_stress")
+
+    # Macro events
+    macro_events = []
+    if dms:
+        nr = dms.get("news_risk") or {}
+        if isinstance(nr, dict):
+            week = nr.get("week_ahead") or []
+            macro_events = week if isinstance(week, list) else []
+
+    # Sequencer — load from command center cache
+    sequencer = None
+    try:
+        from backend.app import _sequencer_cache
+        for _k, v in list(_sequencer_cache.items()):
+            sequencer = v
+            break
+    except Exception:
+        pass
+
+    return gather_intelligence_context(
+        dms=dms,
+        positions=positions,
+        queue=queue,
+        risk_dashboard=risk_data,
+        performance=perf,
+        e9_data=e9_data,
+        news_themes=news_themes,
+        macro_events=macro_events,
+        sequencer=sequencer,
+    )
+
+

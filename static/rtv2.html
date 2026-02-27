@@ -113,6 +113,39 @@
       .rv2Age--warm  { color: var(--amber); }
       .rv2Age--stale { color: var(--red); }
 
+      /* Intelligence Brief */
+      .rv2Intel { margin-top: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+      .rv2IntelHeader { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+      .rv2IntelTitle { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg); }
+      .rv2IntelMeta { font-size: 10px; color: var(--muted); }
+      .rv2IntelActions { display: flex; gap: 8px; align-items: center; }
+      .rv2IntelSection { border-bottom: 1px solid var(--border); }
+      .rv2IntelSection:last-child { border-bottom: none; }
+      .rv2IntelSectionHead { display: flex; align-items: center; gap: 10px; padding: 12px 18px; cursor: pointer; user-select: none; }
+      .rv2IntelSectionHead:hover { background: rgba(0,0,0,0.02); }
+      .rv2IntelUrgency { font-size: 8px; font-weight: 800; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.06em; flex-shrink: 0; }
+      .rv2IntelUrgency--low { background: rgba(52,199,89,0.12); color: #1b8a3e; }
+      .rv2IntelUrgency--medium { background: rgba(0,122,255,0.12); color: #0060cc; }
+      .rv2IntelUrgency--high { background: rgba(255,149,0,0.14); color: #995c00; }
+      .rv2IntelUrgency--critical { background: rgba(255,59,48,0.14); color: #cc2f26; }
+      .rv2IntelHeadline { font-size: 13px; font-weight: 600; color: var(--fg); flex: 1; }
+      .rv2IntelChevron { font-size: 10px; color: var(--muted); transition: transform 0.2s; flex-shrink: 0; }
+      .rv2IntelSection.open .rv2IntelChevron { transform: rotate(90deg); }
+      .rv2IntelBody { display: none; padding: 0 18px 14px 18px; }
+      .rv2IntelSection.open .rv2IntelBody { display: block; }
+      .rv2IntelBody p { font-size: 13px; line-height: 1.65; color: var(--fg); margin: 0 0 10px 0; white-space: pre-wrap; }
+      .rv2IntelLoading { padding: 40px 18px; text-align: center; font-size: 13px; color: var(--muted); }
+
+      /* Action items */
+      .rv2ActionItem { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+      .rv2ActionItem:last-child { border-bottom: none; }
+      .rv2ActionDot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+      .rv2ActionDot--red { background: var(--red); }
+      .rv2ActionDot--amber { background: var(--amber); }
+      .rv2ActionDot--green { background: var(--green); }
+      .rv2ActionText { font-size: 12px; line-height: 1.5; color: var(--fg); }
+      .rv2ActionText strong { font-weight: 600; }
+
       @media (max-width: 1100px) { .rv2Grid { grid-template-columns: 1fr; } .rv2Span2, .rv2Span3 { grid-column: span 1; } .rv2Grid--2col, .rv2Grid--4col { grid-template-columns: 1fr; } }
       @media (max-width: 640px) { .rv2Form { grid-template-columns: 1fr; } .rv2FormFull, .rv2Form textarea { grid-column: span 1; } }
     </style>
@@ -151,6 +184,22 @@
       <div class="rv2Banner rv2Banner--red" id="rv2E9Banner"></div>
       <!-- ── Transition / Divergence Banner ────────────────────── -->
       <div class="rv2Banner rv2Banner--amber" id="rv2CautionBanner"></div>
+
+      <!-- ── Intelligence Brief ────────────────────────────────── -->
+      <div class="rv2Intel" id="rv2Intel">
+        <div class="rv2IntelHeader">
+          <div>
+            <span class="rv2IntelTitle">Morning Intelligence Brief</span>
+            <span class="rv2IntelMeta" id="rv2IntelMeta"></span>
+          </div>
+          <div class="rv2IntelActions">
+            <button class="btn" type="button" id="rv2IntelRefreshBtn" onclick="refreshIntelligence()" style="font-size:11px;padding:4px 12px;">Regenerate Brief</button>
+          </div>
+        </div>
+        <div id="rv2IntelBody">
+          <div class="rv2IntelLoading" id="rv2IntelLoading">Click <strong>Refresh Dashboard</strong> or <strong>Regenerate Brief</strong> to generate the morning intelligence brief.</div>
+        </div>
+      </div>
 
       <!-- ── Row 1: Regime · Flow · Vol · Engine Gates ─────────── -->
       <div class="rv2Grid rv2Grid--4col" id="rv2ContextRow">
