@@ -202,6 +202,40 @@ def _pick_spot_from_live_rows(rows: List[dict]) -> Optional[float]:
     return None
 
 
+def _row_dte_days(row: dict, *, trade_date: dt.date) -> Optional[float]:
+    """Prefer ORATS-provided dte; otherwise compute from expirDate - trade_date."""
+    dte = _to_float(row.get("dte"))
+    if dte is not None:
+        return float(dte)
+    exp = row.get("expirDate") or row.get("expiryDate") or row.get("exp_date") or row.get("expDate")
+    if not exp:
+        return None
+    try:
+        exp_dt = _parse_date(str(exp))
+        return float((exp_dt - trade_date).days)
+    except Exception:
+        return None
+
+
+def _first_row(rows) -> Optional[dict]:
+    if not rows or not isinstance(rows, list):
+        return None
+    for r in rows:
+        if isinstance(r, dict):
+            return r
+    return None
+
+
+def _cache_get(cache, lock, key):
+    with lock:
+        return cache.get(key)
+
+
+def _cache_set(cache, lock, key, val):
+    with lock:
+        cache[key] = val
+
+
 def _pct_ret(a: float, b: float) -> float:
     return (b / a - 1.0) * 100.0
 
