@@ -3,13 +3,9 @@ import datetime as dt
 import pytest
 
 from backend.config import FeatureFlags
-from backend.spx_ic_engine import (
-    backtest_weekly_ic_risk,
-    beta_binomial_mean,
-    compute_engine2_spx_ic,
-    pctile,
-    _pick_weekly_close_expiry_date,
-)
+from backend.spx_ic import compute_engine2_spx_ic
+from backend.spx_ic.backtest import backtest_weekly_ic_risk, beta_binomial_mean, pctile
+from backend.spx_ic.utils import _pick_weekly_close_expiry_date
 
 
 class FakeResp:
