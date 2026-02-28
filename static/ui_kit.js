@@ -666,3 +666,153 @@ window.RavenLoading = (function() {
   };
 })();
 
+/**
+ * Make a popup element draggable by its header.
+ * Supports mouse + touch, constrains to viewport, adds/removes .isDragging.
+ *
+ * @param {HTMLElement} popupEl   – the popup container to reposition
+ * @param {HTMLElement} headerEl  – the drag handle (usually the popup header bar)
+ * @param {object}      [opts]
+ * @param {string}      [opts.closeSelector]  – CSS selector; clicks on this skip drag
+ * @param {boolean}     [opts.constrain=true] – keep popup within viewport
+ */
+function initDrag(popupEl, headerEl, opts) {
+  if (!popupEl || !headerEl) return;
+  const o = Object.assign({ constrain: true }, opts);
+  let dragging = false, offsetX = 0, offsetY = 0;
+
+  function pointer(e) {
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  function onDown(e) {
+    if (o.closeSelector && e.target.closest(o.closeSelector)) return;
+    dragging = true;
+    popupEl.classList.add("isDragging");
+    const p = pointer(e);
+    const r = popupEl.getBoundingClientRect();
+    offsetX = p.x - r.left;
+    offsetY = p.y - r.top;
+    e.preventDefault();
+  }
+
+  function onMove(e) {
+    if (!dragging) return;
+    const p = pointer(e);
+    let x = p.x - offsetX;
+    let y = p.y - offsetY;
+    if (o.constrain) {
+      x = Math.max(0, Math.min(x, window.innerWidth - popupEl.offsetWidth));
+      y = Math.max(0, Math.min(y, window.innerHeight - popupEl.offsetHeight));
+    }
+    popupEl.style.left = x + "px";
+    popupEl.style.top = y + "px";
+    popupEl.style.right = "auto";
+    popupEl.style.bottom = "auto";
+  }
+
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    popupEl.classList.remove("isDragging");
+  }
+
+  headerEl.addEventListener("mousedown", onDown);
+  headerEl.addEventListener("touchstart", onDown, { passive: false });
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("touchmove", onMove, { passive: false });
+  document.addEventListener("mouseup", onUp);
+  document.addEventListener("touchend", onUp);
+}
+
+/**
+ * Reusable card-insight popup (Pattern A) used by Engines 1-5.
+ *
+ * @param {object} opts
+ * @param {HTMLElement} opts.popupEl   – popup container
+ * @param {HTMLElement} opts.titleEl   – title text element
+ * @param {HTMLElement} opts.bodyEl    – body content element
+ * @param {string}      opts.prefix    – CSS class prefix (e.g. "e1Insight")
+ * @param {object}      [opts.labels]  – key → display-label map
+ * @param {boolean}     [opts.renderMeta] – render _meta block (Engine 5 style)
+ */
+function InsightPopup(opts) {
+  this.popupEl = opts.popupEl;
+  this.titleEl = opts.titleEl;
+  this.bodyEl  = opts.bodyEl;
+  this.pfx     = opts.prefix;
+  this.labels  = opts.labels || {};
+  this.meta    = !!opts.renderMeta;
+  this._cache  = {};
+  this._esc    = typeof escapeHtml === "function" ? escapeHtml : function (s) { return String(s ?? ""); };
+}
+
+InsightPopup.prototype.open = function (title, x, y) {
+  this.titleEl.textContent = title;
+  this.bodyEl.innerHTML =
+    "<div class='" + this.pfx + "Loading'><span class='" + this.pfx + "Dot'></span>" +
+    "<span class='" + this.pfx + "Dot'></span><span class='" + this.pfx + "Dot'></span>" +
+    "<br>Generating desk insight\u2026</div>";
+  this.popupEl.style.left = Math.min(x, window.innerWidth - 460) + "px";
+  this.popupEl.style.top  = Math.min(y, window.innerHeight - 300) + "px";
+  this.popupEl.style.display = "block";
+};
+
+InsightPopup.prototype.render = function (data) {
+  var esc = this._esc;
+  if (!data) { this.bodyEl.innerHTML = "<div class='" + this.pfx + "Loading'>No insight data.</div>"; return; }
+  var html = "";
+  if (data._fallback_reason) {
+    html += "<div style='background:rgba(255,107,107,.15);border:1px solid rgba(255,107,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ff6b6b;'>" +
+      esc(data._fallback_reason) + "</div>";
+  }
+  if (this.meta && data._meta) {
+    html += "<div class='" + this.pfx + "Meta'>";
+    for (var mk in data._meta) {
+      html += "<div class='" + this.pfx + "MetaItem'><div style='font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:rgba(255,255,255,0.45);'>" +
+        esc(mk.replace(/_/g, " ")) + "</div><div class='" + this.pfx + "MetaValue'>" + esc(String(data._meta[mk])) + "</div></div>";
+    }
+    html += "</div>";
+  }
+  var skip = new Set(["_source", "_meta", "_card_type", "_fallback_reason"]);
+  for (var key in data) {
+    if (skip.has(key)) continue;
+    var label = this.labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    var isDesk = key === "desk_takeaway";
+    html += "<div class='" + this.pfx + "Section'><div class='" + this.pfx + "SectionTitle'>" + esc(label) +
+      "</div><div class='" + this.pfx + "Text'" + (isDesk ? " style='color:#34c759;font-weight:600;'" : "") +
+      ">" + esc(String(data[key])) + "</div></div>";
+  }
+  if (data._source) html += "<div class='" + this.pfx + "Source'>Source: " + esc(data._source) + "</div>";
+  this.bodyEl.innerHTML = html;
+};
+
+InsightPopup.prototype.fetch = function (cardType, cardData, title, x, y, ctx) {
+  var self = this;
+  var cacheKey = cardType + ":" + JSON.stringify(cardData).substring(0, 100);
+  if (self._cache[cacheKey]) { self.open(title, x, y); self.render(self._cache[cacheKey]); return; }
+  self.open(title, x, y);
+  var esc = self._esc;
+
+  window.fetch("/api/front-layer/card-insight", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ card_type: cardType, card_data: cardData, dms_summary: ctx || {} }),
+  })
+  .then(function (r) { return r.json(); })
+  .then(function (resp) {
+    if (resp.error || resp.detail) {
+      self.bodyEl.innerHTML = "<div class='" + self.pfx + "Loading' style='color:#ff6b6b;'>Error: " + esc(resp.error || resp.detail || "Unknown") + "</div>";
+      return;
+    }
+    self._cache[cacheKey] = resp;
+    self.render(resp);
+  })
+  .catch(function () {
+    self.bodyEl.innerHTML = "<div class='" + self.pfx + "Loading' style='color:#ff6b6b;'>Failed to load insight.</div>";
+  });
+};
+
+InsightPopup.prototype.clearCache = function () { this._cache = {}; };
+

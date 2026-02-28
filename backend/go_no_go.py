@@ -15,7 +15,8 @@ from backend.benzinga_client import BenzingaClient
 from backend.config import get_flags
 from backend.market_calendar import market_structure_events_by_date, opex_events_by_date
 from backend.macro_events import macro_events_by_date
-from backend.spx_ic_engine import compute_live_levels, fetch_dailies_ohlc_range, fetch_hist_cores_range, fetch_trading_bars
+from backend.spx_ic.live_levels import compute_live_levels
+from backend.spx_ic.ohlc import fetch_dailies_ohlc_range, fetch_hist_cores_range, fetch_trading_bars
 
 
 State = str  # PASS|FAIL|MISSING

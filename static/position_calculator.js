@@ -9,7 +9,7 @@
 
   let posCalcOpen = false;
   let currentSignal = null;
-  let dragState = { isDragging: false, offsetX: 0, offsetY: 0 };
+  let _posCalcDragBound = false;
 
   // Persist account settings in localStorage
   const STORAGE_KEY = "ravenPosCalcSettings";
@@ -191,10 +191,10 @@
     }
 
     // Drag functionality
-    const header = calc.querySelector(".posCalcHeader");
-    if (header) {
-      header.addEventListener("mousedown", startDrag);
-      header.addEventListener("touchstart", startDrag, { passive: false });
+    if (!_posCalcDragBound) {
+      const header = calc.querySelector(".posCalcHeader");
+      if (header) initDrag(calc, header, { closeSelector: ".posCalcCloseBtn" });
+      _posCalcDragBound = true;
     }
 
     // Risk buttons
@@ -239,66 +239,7 @@
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Drag Logic
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  function startDrag(e) {
-    const calc = document.getElementById("positionCalculator");
-    if (!calc) return;
-    if (e.target.closest(".posCalcCloseBtn")) return;
-
-    dragState.isDragging = true;
-    calc.classList.add("isDragging");
-
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    const rect = calc.getBoundingClientRect();
-    dragState.offsetX = clientX - rect.left;
-    dragState.offsetY = clientY - rect.top;
-
-    e.preventDefault();
-  }
-
-  function onDrag(e) {
-    if (!dragState.isDragging) return;
-
-    const calc = document.getElementById("positionCalculator");
-    if (!calc) return;
-
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    let newX = clientX - dragState.offsetX;
-    let newY = clientY - dragState.offsetY;
-
-    const maxX = window.innerWidth - calc.offsetWidth;
-    const maxY = window.innerHeight - calc.offsetHeight;
-    newX = Math.max(0, Math.min(newX, maxX));
-    newY = Math.max(0, Math.min(newY, maxY));
-
-    calc.style.left = newX + "px";
-    calc.style.top = newY + "px";
-    calc.style.right = "auto";
-    calc.style.bottom = "auto";
-
-    e.preventDefault();
-  }
-
-  function endDrag() {
-    if (!dragState.isDragging) return;
-    dragState.isDragging = false;
-
-    const calc = document.getElementById("positionCalculator");
-    if (calc) calc.classList.remove("isDragging");
-  }
-
-  // Global drag listeners
-  document.addEventListener("mousemove", onDrag);
-  document.addEventListener("touchmove", onDrag, { passive: false });
-  document.addEventListener("mouseup", endDrag);
-  document.addEventListener("touchend", endDrag);
+  // (Drag logic handled by initDrag in ui_kit.js)
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Calculator Logic

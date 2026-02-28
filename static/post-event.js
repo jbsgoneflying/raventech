@@ -772,36 +772,10 @@
     popup.style.left = "auto";
   }
 
-  function initPopupDrag() {
-    const popup = qs("e8InsightPopup");
-    const header = qs("e8InsightHeader");
-    let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
-
-    header.addEventListener("mousedown", function (e) {
-      if (e.target.closest(".e8InsightClose")) return;
-      dragging = true;
-      popup.classList.add("isDragging");
-      const rect = popup.getBoundingClientRect();
-      startX = e.clientX; startY = e.clientY;
-      origX = rect.left; origY = rect.top;
-      e.preventDefault();
-    });
-    document.addEventListener("mousemove", function (e) {
-      if (!dragging) return;
-      const dx = e.clientX - startX, dy = e.clientY - startY;
-      popup.style.left = (origX + dx) + "px";
-      popup.style.top = (origY + dy) + "px";
-      popup.style.right = "auto";
-    });
-    document.addEventListener("mouseup", function () {
-      if (dragging) { dragging = false; popup.classList.remove("isDragging"); }
-    });
-
-    qs("e8InsightClose").addEventListener("click", function () {
-      popup.style.display = "none";
-    });
-  }
-  initPopupDrag();
+  initDrag(qs("e8InsightPopup"), qs("e8InsightHeader"), { closeSelector: ".e8InsightClose" });
+  qs("e8InsightClose").addEventListener("click", function () {
+    qs("e8InsightPopup").style.display = "none";
+  });
 
   qs("activationScanBtn").addEventListener("click", function () {
     if (!_lastPhaseAData) return;

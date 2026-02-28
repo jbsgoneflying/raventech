@@ -533,41 +533,7 @@
   var insightClose  = document.getElementById("miInsightClose");
   var insightBody   = document.getElementById("miInsightBody");
 
-  var _dragState = { isDragging: false, offsetX: 0, offsetY: 0 };
-
-  function startInsightDrag(e) {
-    if (!insightPopup) return;
-    if (e.target.closest(".miInsightClose")) return;
-    _dragState.isDragging = true;
-    insightPopup.classList.add("isDragging");
-    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    var rect = insightPopup.getBoundingClientRect();
-    _dragState.offsetX = clientX - rect.left;
-    _dragState.offsetY = clientY - rect.top;
-    e.preventDefault();
-  }
-
-  function doInsightDrag(e) {
-    if (!_dragState.isDragging || !insightPopup) return;
-    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    var newX = Math.max(0, Math.min(clientX - _dragState.offsetX, window.innerWidth - insightPopup.offsetWidth));
-    var newY = Math.max(0, Math.min(clientY - _dragState.offsetY, window.innerHeight - insightPopup.offsetHeight));
-    insightPopup.style.left = newX + "px";
-    insightPopup.style.top = newY + "px";
-  }
-
-  function endInsightDrag() {
-    if (!_dragState.isDragging) return;
-    if (insightPopup) insightPopup.classList.remove("isDragging");
-    _dragState.isDragging = false;
-  }
-
-  document.addEventListener("mousemove", doInsightDrag);
-  document.addEventListener("mouseup", endInsightDrag);
-  document.addEventListener("touchmove", doInsightDrag, { passive: false });
-  document.addEventListener("touchend", endInsightDrag);
+  initDrag(insightPopup, insightHeader, { closeSelector: ".miInsightClose" });
 
   function openPopup(title, clickEvent) {
     if (!insightPopup) return;
@@ -586,11 +552,6 @@
     insightPopup.style.left = posX + "px";
     insightPopup.style.top = posY + "px";
     insightPopup.style.display = "block";
-
-    insightHeader.removeEventListener("mousedown", startInsightDrag);
-    insightHeader.removeEventListener("touchstart", startInsightDrag);
-    insightHeader.addEventListener("mousedown", startInsightDrag);
-    insightHeader.addEventListener("touchstart", startInsightDrag, { passive: false });
   }
 
   function hideInsightPopup() { if (insightPopup) insightPopup.style.display = "none"; }

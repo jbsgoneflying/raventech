@@ -7,7 +7,7 @@
   "use strict";
 
   let calculatorOpen = false;
-  let dragState = { isDragging: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 };
+  let _calcDragBound = false;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Calculator HTML Template
@@ -110,16 +110,11 @@
     }
 
     // Drag functionality
-    const header = calc.querySelector(".calcHeader");
-    if (header) {
-      header.addEventListener("mousedown", startDrag);
-      header.addEventListener("touchstart", startDrag, { passive: false });
+    if (!_calcDragBound) {
+      const header = calc.querySelector(".calcHeader");
+      if (header) initDrag(calc, header, { closeSelector: ".calcCloseBtn" });
+      _calcDragBound = true;
     }
-
-    document.addEventListener("mousemove", onDrag);
-    document.addEventListener("touchmove", onDrag, { passive: false });
-    document.addEventListener("mouseup", endDrag);
-    document.addEventListener("touchend", endDrag);
 
     // Wing size buttons
     const wingBtns = calc.querySelectorAll(".calcWingBtn");
@@ -160,64 +155,6 @@
         // Future: switch panels based on data-tab
       });
     });
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Drag Logic
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  function startDrag(e) {
-    const calc = document.getElementById("ravenCalculator");
-    if (!calc) return;
-
-    // Don't drag if clicking close button
-    if (e.target.closest(".calcCloseBtn")) return;
-
-    dragState.isDragging = true;
-    calc.classList.add("isDragging");
-
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    const rect = calc.getBoundingClientRect();
-    dragState.offsetX = clientX - rect.left;
-    dragState.offsetY = clientY - rect.top;
-
-    e.preventDefault();
-  }
-
-  function onDrag(e) {
-    if (!dragState.isDragging) return;
-
-    const calc = document.getElementById("ravenCalculator");
-    if (!calc) return;
-
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    let newX = clientX - dragState.offsetX;
-    let newY = clientY - dragState.offsetY;
-
-    // Keep within viewport bounds
-    const maxX = window.innerWidth - calc.offsetWidth;
-    const maxY = window.innerHeight - calc.offsetHeight;
-    newX = Math.max(0, Math.min(newX, maxX));
-    newY = Math.max(0, Math.min(newY, maxY));
-
-    calc.style.left = newX + "px";
-    calc.style.top = newY + "px";
-    calc.style.right = "auto";
-    calc.style.bottom = "auto";
-
-    e.preventDefault();
-  }
-
-  function endDrag() {
-    if (!dragState.isDragging) return;
-    dragState.isDragging = false;
-
-    const calc = document.getElementById("ravenCalculator");
-    if (calc) calc.classList.remove("isDragging");
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

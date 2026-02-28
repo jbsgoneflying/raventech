@@ -3123,81 +3123,36 @@ document.addEventListener("DOMContentLoaded", () => {
   // Desk Insight Popup — LLM-powered card insights for Engine 1
   // ---------------------------------------------------------------------------
 
-  var _e1InsightCache = {};
+  var e1Popup = $("e1InsightPopup");
+  initDrag(e1Popup, $("e1InsightHeader"), { closeSelector: "#e1InsightClose" });
+  var e1Close = $("e1InsightClose");
+  if (e1Close) e1Close.addEventListener("click", function () { e1Popup.style.display = "none"; });
 
-  var e1Popup       = $("e1InsightPopup");
-  var e1PopupHeader = $("e1InsightHeader");
-  var e1PopupTitle  = $("e1InsightTitle");
-  var e1PopupClose  = $("e1InsightClose");
-  var e1PopupBody   = $("e1InsightBody");
-
-  // ── Drag logic ──
-  (function () {
-    var ox = 0, oy = 0, sx = 0, sy = 0, dragging = false;
-    function onDown(ev) {
-      if (ev.target === e1PopupClose) return;
-      dragging = true; ox = ev.clientX; oy = ev.clientY;
-      var r = e1Popup.getBoundingClientRect(); sx = r.left; sy = r.top;
-      e1Popup.classList.add("isDragging");
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    }
-    function onMove(ev) { if (!dragging) return; e1Popup.style.left = (sx + ev.clientX - ox) + "px"; e1Popup.style.top  = (sy + ev.clientY - oy) + "px"; }
-    function onUp() { dragging = false; e1Popup.classList.remove("isDragging"); document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); }
-    if (e1PopupHeader) e1PopupHeader.addEventListener("mousedown", onDown);
-  })();
-
-  if (e1PopupClose) e1PopupClose.addEventListener("click", function () { e1Popup.style.display = "none"; });
-
-  function e1OpenPopup(title, x, y) {
-    e1PopupTitle.textContent = title;
-    e1PopupBody.innerHTML = "<div class='e1InsightLoading'><span class='e1InsightDot'></span><span class='e1InsightDot'></span><span class='e1InsightDot'></span><br>Generating desk insight\u2026</div>";
-    e1Popup.style.left = Math.min(x, window.innerWidth - 460) + "px";
-    e1Popup.style.top  = Math.min(y, window.innerHeight - 300) + "px";
-    e1Popup.style.display = "block";
-  }
-
-  var _e1Labels = {
-    decision_summary:"Decision Summary",key_risks:"Key Risks",what_to_watch:"What to Watch",execution_guidance:"Execution Guidance",
-    hold_risk_assessment:"Hold Risk Assessment",conditional_vs_unconditional:"Conditional vs Unconditional",drift_analysis:"Drift Analysis",structure_implications:"Structure Implications",
-    what_simulation_says:"What the Simulation Says",put_vs_call_skew:"Put vs Call Skew",tail_risk:"Tail Risk",wing_optimization:"Wing Optimization",
-    regime_read:"Regime Read",gate_implications:"Gate Implications",tail_multiplier_impact:"Tail Multiplier Impact",
-    skew_read:"Skew Read",wing_recommendation:"Wing Recommendation",directional_risk:"Directional Risk",structure_selection:"Structure Selection",
-    event_risk_level:"Event Risk Level",top_drivers:"Top Drivers",impact_on_trade:"Impact on Trade",
-    dealer_positioning:"Dealer Positioning",tail_ignition_risk:"Tail Ignition Risk",gamma_earnings_interaction:"Gamma-Earnings Interaction",
-    seasonal_pattern:"Seasonal Pattern",current_quarter:"Current Quarter",statistical_significance:"Statistical Significance",
-    strike_map:"Strike Map",symmetric_vs_asymmetric:"Symmetric vs Asymmetric",tail_multiplier_effect:"Tail Multiplier Effect",
-    oi_clusters:"OI Clusters",trade_implications:"Trade Implications",
-    // Earnings Playbook cards
-    iv_read:"IV Read",earnings_context:"Earnings Context",z_score_significance:"Z-Score Significance",risk_implication:"Risk Implication",
-    median_richness:"Median Richness",tail_richness:"Tail Richness",premium_quality:"Premium Quality",structure_guidance:"Structure Guidance",
-    dollar_volume:"Dollar Volume",spread_quality:"Spread Quality",oi_coverage:"OI & Coverage",execution_risk:"Execution Risk",
-    dealer_gamma_backdrop:"Dealer Gamma Backdrop",index_sensitivity:"Index Sensitivity",vol_acceleration:"Vol Acceleration",tail_risks:"Tail Risks",
-    desk_takeaway:"Desk Takeaway",
-  };
-
-  function e1RenderInsight(data) {
-    if (!data) { e1PopupBody.innerHTML = "<div class='e1InsightLoading'>No insight data.</div>"; return; }
-    var html = "";
-    if (data._fallback_reason) {
-      html += "<div style='background:rgba(255,107,107,.15);border:1px solid rgba(255,107,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ff6b6b;'>" + escapeHtml(data._fallback_reason) + "</div>";
-    }
-    var skip = new Set(["_source","_meta","_card_type","_fallback_reason"]);
-    for (var key in data) {
-      if (skip.has(key)) continue;
-      var label = _e1Labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-      var isDesk = key === "desk_takeaway";
-      html += "<div class='e1InsightSection'><div class='e1InsightSectionTitle'>" + escapeHtml(label) + "</div><div class='e1InsightText'" + (isDesk ? " style='color:#34c759;font-weight:600;'" : "") + ">" + escapeHtml(String(data[key])) + "</div></div>";
-    }
-    if (data._source) html += "<div class='e1InsightSource'>Source: " + escapeHtml(data._source) + "</div>";
-    e1PopupBody.innerHTML = html;
-  }
+  var e1Insight = new InsightPopup({
+    popupEl: e1Popup,
+    titleEl: $("e1InsightTitle"),
+    bodyEl:  $("e1InsightBody"),
+    prefix:  "e1Insight",
+    labels: {
+      decision_summary:"Decision Summary",key_risks:"Key Risks",what_to_watch:"What to Watch",execution_guidance:"Execution Guidance",
+      hold_risk_assessment:"Hold Risk Assessment",conditional_vs_unconditional:"Conditional vs Unconditional",drift_analysis:"Drift Analysis",structure_implications:"Structure Implications",
+      what_simulation_says:"What the Simulation Says",put_vs_call_skew:"Put vs Call Skew",tail_risk:"Tail Risk",wing_optimization:"Wing Optimization",
+      regime_read:"Regime Read",gate_implications:"Gate Implications",tail_multiplier_impact:"Tail Multiplier Impact",
+      skew_read:"Skew Read",wing_recommendation:"Wing Recommendation",directional_risk:"Directional Risk",structure_selection:"Structure Selection",
+      event_risk_level:"Event Risk Level",top_drivers:"Top Drivers",impact_on_trade:"Impact on Trade",
+      dealer_positioning:"Dealer Positioning",tail_ignition_risk:"Tail Ignition Risk",gamma_earnings_interaction:"Gamma-Earnings Interaction",
+      seasonal_pattern:"Seasonal Pattern",current_quarter:"Current Quarter",statistical_significance:"Statistical Significance",
+      strike_map:"Strike Map",symmetric_vs_asymmetric:"Symmetric vs Asymmetric",tail_multiplier_effect:"Tail Multiplier Effect",
+      oi_clusters:"OI Clusters",trade_implications:"Trade Implications",
+      iv_read:"IV Read",earnings_context:"Earnings Context",z_score_significance:"Z-Score Significance",risk_implication:"Risk Implication",
+      median_richness:"Median Richness",tail_richness:"Tail Richness",premium_quality:"Premium Quality",structure_guidance:"Structure Guidance",
+      dollar_volume:"Dollar Volume",spread_quality:"Spread Quality",oi_coverage:"OI & Coverage",execution_risk:"Execution Risk",
+      dealer_gamma_backdrop:"Dealer Gamma Backdrop",index_sensitivity:"Index Sensitivity",vol_acceleration:"Vol Acceleration",tail_risks:"Tail Risks",
+      desk_takeaway:"Desk Takeaway",
+    },
+  });
 
   function e1FetchInsight(cardType, cardData, title, x, y) {
-    var cacheKey = cardType + ":" + JSON.stringify(cardData).substring(0, 100);
-    if (_e1InsightCache[cacheKey]) { e1OpenPopup(title, x, y); e1RenderInsight(_e1InsightCache[cacheKey]); return; }
-    e1OpenPopup(title, x, y);
-
     var ctx = {};
     if (lastPayload) {
       ctx.ticker = lastPayload.ticker;
@@ -3205,19 +3160,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ctx.summary = lastPayload.summary || {};
       ctx.current = lastPayload.current || {};
     }
-
-    fetch("/api/front-layer/card-insight", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ card_type: cardType, card_data: cardData, dms_summary: ctx }),
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (resp) {
-      if (resp.error) { e1PopupBody.innerHTML = "<div class='e1InsightLoading' style='color:#ff6b6b;'>Error: " + escapeHtml(resp.error || resp.detail || "Unknown") + "</div>"; return; }
-      _e1InsightCache[cacheKey] = resp;
-      e1RenderInsight(resp);
-    })
-    .catch(function () { e1PopupBody.innerHTML = "<div class='e1InsightLoading' style='color:#ff6b6b;'>Failed to load insight.</div>"; });
+    e1Insight.fetch(cardType, cardData, title, x, y, ctx);
   }
 
   // ── Click: Decision Panel ──

@@ -17,12 +17,7 @@
     popupOpen: false,
   };
 
-  // Drag state for popup
-  const dragState = {
-    isDragging: false,
-    offsetX: 0,
-    offsetY: 0,
-  };
+  initDrag($("eventPopup"), $("popupHeader"), { closeSelector: ".eventPopupClose" });
 
   // -----------------------------------------------------------------------------
   // DOM Helpers
@@ -181,64 +176,7 @@
     return null;
   }
 
-  // -----------------------------------------------------------------------------
-  // Popup Drag Functionality
-  // -----------------------------------------------------------------------------
-
-  function startDrag(e) {
-    const popup = $("eventPopup");
-    if (!popup) return;
-    if (e.target.closest(".eventPopupClose")) return;
-
-    dragState.isDragging = true;
-    popup.classList.add("isDragging");
-
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    const rect = popup.getBoundingClientRect();
-    dragState.offsetX = clientX - rect.left;
-    dragState.offsetY = clientY - rect.top;
-
-    e.preventDefault();
-  }
-
-  function doDrag(e) {
-    if (!dragState.isDragging) return;
-    
-    const popup = $("eventPopup");
-    if (!popup) return;
-
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    let newX = clientX - dragState.offsetX;
-    let newY = clientY - dragState.offsetY;
-
-    // Keep within viewport
-    const maxX = window.innerWidth - popup.offsetWidth;
-    const maxY = window.innerHeight - popup.offsetHeight;
-    newX = Math.max(0, Math.min(newX, maxX));
-    newY = Math.max(0, Math.min(newY, maxY));
-
-    popup.style.left = newX + "px";
-    popup.style.top = newY + "px";
-  }
-
-  function endDrag() {
-    if (!dragState.isDragging) return;
-    
-    const popup = $("eventPopup");
-    if (popup) popup.classList.remove("isDragging");
-    
-    dragState.isDragging = false;
-  }
-
-  // Global drag listeners
-  document.addEventListener("mousemove", doDrag);
-  document.addEventListener("mouseup", endDrag);
-  document.addEventListener("touchmove", doDrag, { passive: false });
-  document.addEventListener("touchend", endDrag);
+  // (Drag logic handled by initDrag in ui_kit.js)
 
   // -----------------------------------------------------------------------------
   // Popup
@@ -411,15 +349,6 @@
     
     popup.classList.remove("hidden");
     state.popupOpen = true;
-    
-    // Add drag handler to header
-    const header = $("popupHeader");
-    if (header) {
-      header.removeEventListener("mousedown", startDrag);
-      header.removeEventListener("touchstart", startDrag);
-      header.addEventListener("mousedown", startDrag);
-      header.addEventListener("touchstart", startDrag, { passive: false });
-    }
   }
 
   function hideEventPopup() {

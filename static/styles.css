@@ -135,19 +135,6 @@ body {
 }
 
 /* Engine 2: static "input-like" value box (for Underlying = SPX) */
-.controlStatic {
-  height: 36px;
-  background: var(--surfaceElev);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 12px;
-  padding: 8px 10px;
-  outline: none;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.80) inset;
-  display: inline-flex;
-  align-items: center;
-  min-width: 120px;
-}
 
 .tickerInputRow .controlStatic {
   flex: 1;
@@ -556,164 +543,25 @@ a.ravenTempDisabled {
 }
 
 /* Engine 1: GO / NO-GO pill + explain panel (uses tooltip mechanics) */
-.goWrap { margin-left: 10px; }
-.goPill {
-  /* Match the modal badge style (top-right) so it's visually consistent. */
-  width: auto;
-  min-width: 72px;
-  height: 30px;
-  padding: 0 14px;
-  border-radius: 999px;
-  font-weight: 850;
-  letter-spacing: 0.10em;
-  font-size: 12px;
-  line-height: 30px;
-  text-transform: uppercase;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--ta-divider);
-  background: rgba(255,255,255,0.70);
-  box-shadow: 0 8px 18px rgba(15, 20, 30, 0.10), 0 1px 0 rgba(255,255,255,0.75) inset;
-}
 .taHeaderTitle .goPill { margin-left: 10px; }
-.goPill.isGo {
-  color: rgba(12, 70, 38, 0.96);
-  border-color: rgba(46, 204, 113, 0.40);
-  background: rgba(46, 204, 113, 0.14);
-  box-shadow: 0 10px 24px rgba(46, 204, 113, 0.10), 0 1px 0 rgba(255,255,255,0.75) inset;
-}
 .goPill.isNo {
   color: rgba(86, 17, 12, 0.96);
   border-color: rgba(231, 76, 60, 0.40);
   background: rgba(231, 76, 60, 0.14);
   box-shadow: 0 10px 24px rgba(231, 76, 60, 0.10), 0 1px 0 rgba(255,255,255,0.75) inset;
 }
-.goPill.isGo:hover { border-color: rgba(46, 204, 113, 0.55); }
 .goPill.isNo:hover { border-color: rgba(231, 76, 60, 0.55); }
 /* GO/NO-GO Modal (centered, 3 columns) */
-.goModalOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 12000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 22px;
-  background: rgba(10, 14, 22, 0.20);
-  backdrop-filter: blur(12px) saturate(140%);
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
-}
 .goModalOverlay.hidden { display: none; }
 
-.goModal {
-  width: min(980px, 94vw);
-  max-height: min(82vh, 860px);
-  overflow: auto;
-  border-radius: 22px;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  background: rgba(255,255,255,0.88);
-  box-shadow: 0 18px 50px rgba(15, 20, 30, 0.18);
-  padding: 16px 16px 14px;
-  position: relative;
-}
-
-.goModalClose {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  background: rgba(255,255,255,0.70);
-  cursor: pointer;
-  font-size: 22px;
-  line-height: 1;
-  color: rgba(11,11,15,0.70);
-}
-.goModalClose:hover { background: rgba(255,255,255,0.82); }
-
-.goModalHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding-right: 44px; /* room for close button */
-}
-.goModalTitle {
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.08px;
-  color: rgba(11,11,15,0.70);
-}
-.goModalVerdict {
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.10em;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--ta-divider);
-}
-.goModalVerdict.isGo {
-  color: rgba(12, 70, 38, 0.96);
-  border-color: rgba(46, 204, 113, 0.40);
-  background: rgba(46, 204, 113, 0.14);
-}
 .goModalVerdict.isNo {
   color: rgba(86, 17, 12, 0.96);
   border-color: rgba(231, 76, 60, 0.40);
   background: rgba(231, 76, 60, 0.14);
 }
-.goModalSub { margin-top: 6px; margin-bottom: 12px; }
 
-.goCols {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
 @media (max-width: 900px) {
-  .goCols { grid-template-columns: 1fr; }
 }
-
-.goCol {
-  border-radius: 18px;
-  border: 1px solid rgba(15, 23, 42, 0.10);
-  background: rgba(255,255,255,0.72);
-  box-shadow: 0 10px 24px rgba(15, 20, 30, 0.08);
-  padding: 12px;
-}
-.goColHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-}
-.goColIcon { font-size: 14px; line-height: 1; }
-.goColTitle { font-size: 12px; font-weight: 700; letter-spacing: 0.08px; color: rgba(11,11,15,0.72); text-transform: uppercase; }
-.goColCount { font-size: 12px; color: rgba(11,11,15,0.55); }
-
-.goColBody { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
-.goRow { padding-bottom: 10px; border-bottom: 1px solid rgba(15, 23, 42, 0.06); }
-.goRow:last-child { padding-bottom: 0; border-bottom: none; }
-.goRowLabel { font-size: 13px; font-weight: 600; color: rgba(11,11,15,0.82); }
-.goRowMeta { margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
-.goRowCode { opacity: 0.88; }
-.goRowMetrics { opacity: 0.70; }
-
-.goCol.isFail { border-color: rgba(231, 76, 60, 0.22); }
-.goCol.isMissing { border-color: rgba(15, 23, 42, 0.12); }
-.goCol.isPass { border-color: rgba(46, 204, 113, 0.22); }
-
-.goModalFoot {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
-}
-.goWarnTitle { font-size: 12px; font-weight: 700; letter-spacing: 0.08px; color: rgba(11,11,15,0.70); text-transform: uppercase; margin-bottom: 6px; }
-.goWarnLine { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .e1Panel #bufferTargetGrid.miniGrid { margin-top: 10px; }
 
@@ -814,14 +662,6 @@ a.ravenTempDisabled {
 
 .metricGrid--regime .metricValue .pill {
   font-weight: 600;
-}
-
-.metricValue--message {
-  font-size: 20px;
-  line-height: 1.18;
-  letter-spacing: 0.10px;
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 /* ============================================================
@@ -1407,81 +1247,11 @@ a.ravenTempDisabled {
 .taStackDot--mixed { fill: rgba(200, 200, 210, 0.75); }
 
 /* Snapshot-specific tightening (Engine 2) */
-#recMain {
-  font-size: 20px;
-  line-height: 1.12;
-  letter-spacing: 0.10px;
-}
-
-.snapshotLines {
-  margin-top: 8px;
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 550;
-  color: rgba(11,11,15,0.74);
-}
-
-.snapLine {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: 10px;
-  align-items: start;
-}
-
-.snapKey {
-  color: rgba(11,11,15,0.48);
-  font-weight: 650;
-  letter-spacing: 0.08px;
-}
-
-.pillRow {
-  display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
 
 .pill.pill--mini {
   padding: 2px 8px;
   font-size: 11px;
   font-weight: 650;
-}
-
-.snapDetails {
-  margin-top: 2px;
-}
-
-.snapDetails summary {
-  list-style: none;
-  cursor: pointer;
-  color: rgba(0, 122, 255, 0.90);
-  font-weight: 650;
-  user-select: none;
-}
-
-.snapDetails summary::-webkit-details-marker { display: none; }
-
-.snapDetails summary:after {
-  content: " ▾";
-  color: rgba(0, 122, 255, 0.70);
-  font-weight: 700;
-}
-
-.snapDetails[open] summary:after { content: " ▴"; }
-
-.snapDetailBody {
-  margin-top: 8px;
-  color: rgba(11,11,15,0.70);
-  font-weight: 550;
-  line-height: 1.35;
-}
-
-.chipRow {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .chip {
@@ -1500,11 +1270,6 @@ a.ravenTempDisabled {
 .chip .k { color: rgba(11,11,15,0.50); font-weight: 700; }
 
 /* Macro week list formatting (Engine 2 Snapshot) */
-.macroEventList {
-  margin-top: 6px;
-  display: grid;
-  gap: 6px;
-}
 
 .macroEventLine {
   white-space: normal;
@@ -1523,13 +1288,6 @@ a.ravenTempDisabled {
 
 .metricGrid--regime #bufferTargetCard .miniGrid {
   margin-top: 10px;
-}
-
-.metricValueSub {
-  margin-top: 4px;
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0.1px;
 }
 
 .segmented {
@@ -1773,21 +1531,6 @@ a.ravenTempDisabled {
   letter-spacing: 0.1px;
 }
 
-.tradeReadStrip {
-  margin-top: 12px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.70);
-  color: rgba(11, 11, 15, 0.78);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.1px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .sectionDivider {
   height: 1px;
   background: var(--line);
@@ -1804,37 +1547,6 @@ a.ravenTempDisabled {
 .rvLine {
   color: var(--muted);
   font-weight: 500;
-}
-
-.execNote {
-  margin-top: 12px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.70);
-}
-
-.execNoteTitle {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1px;
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.execNoteBody {
-  margin-top: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
-.execNoteRule {
-  margin-top: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.9;
 }
 
 .mono, .num, td.num, th.num {
@@ -2115,58 +1827,6 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
 }
 
-/* ===========================
-   Calendar Front Page (v1)
-   =========================== */
-
-.calHero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin: 10px 0 14px;
-}
-
-.calHeroLeft {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-
-.calHeroLogo {
-  width: 62px;
-  height: 62px;
-  object-fit: contain;
-  border-radius: 18px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  box-shadow: 0 12px 28px rgba(15, 20, 30, 0.10);
-}
-
-.calHeroText { min-width: 0; }
-
-.calHeroTitle {
-  font-size: 26px;
-  font-weight: 850;
-  letter-spacing: -0.4px;
-}
-
-.calHeroSubtitle {
-  margin-top: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.calHeroRight {
-  display: inline-flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
 .calTopBar {
   margin-top: 6px;
 }
@@ -2417,9 +2077,6 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 }
 
 /* Hide ticker text - logo only (EarningsHub style) */
-.calTileTicker {
-  display: none;
-}
 
 /* Fallback initial for missing logos */
 .calTileInitial {
@@ -2778,30 +2435,6 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   overflow: auto;
 }
 
-.popGrid { display: grid; gap: 8px; }
-.popRow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.popKey { color: rgba(11,11,15,0.55); font-size: 12px; font-weight: 700; }
-.popVal { font-size: 13px; font-weight: 800; color: rgba(11,11,15,0.86); }
-
-.rankChip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.70);
-  font-weight: 900;
-  letter-spacing: 0.3px;
-}
-.rankChip--A { color: var(--green); border-color: rgba(52, 199, 89, 0.30); }
-.rankChip--B { color: rgba(0, 122, 255, 0.90); border-color: rgba(0, 122, 255, 0.25); }
-.rankChip--C { color: rgba(11,11,15,0.70); border-color: rgba(11,11,15,0.18); }
-.rankChip--D { color: var(--amber); border-color: rgba(255, 159, 10, 0.28); }
-.rankChip--F { color: var(--red); border-color: rgba(255, 59, 48, 0.30); }
-
 .tipBtn:hover {
   background: rgba(255,255,255,0.82);
   border-color: rgba(15, 23, 42, 0.16);
@@ -3100,59 +2733,6 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 }
 
 .tipBody li { margin: 6px 0; }
-
-/* AskRaven chat removed */
-
-/* ===========================
-   Landing Page (root domain)
-   =========================== */
-
-body.landingPage {
-  background:
-    radial-gradient(1000px 700px at 18% -10%, rgba(0, 122, 255, 0.09), transparent 60%),
-    radial-gradient(900px 600px at 88% 10%, rgba(52, 199, 89, 0.06), transparent 62%),
-    var(--bg2);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@media (max-width: 980px) {
-}
-
-@media (max-width: 640px) {
-}
 
 /* ============================================================
    Expected Move Cards (Engine 1)

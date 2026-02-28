@@ -419,30 +419,7 @@
     }
   });
 
-  /* Draggable popup */
-  (function () {
-    var isDragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
-    if (!popupHeader) return;
-    popupHeader.addEventListener("mousedown", function (e) {
-      if (e.target.closest(".pairsInsightClose")) return;
-      isDragging = true;
-      startX = e.clientX; startY = e.clientY;
-      origX = popup.offsetLeft; origY = popup.offsetTop;
-      popup.classList.add("isDragging");
-      e.preventDefault();
-    });
-    document.addEventListener("mousemove", function (e) {
-      if (!isDragging) return;
-      popup.style.left = (origX + e.clientX - startX) + "px";
-      popup.style.top = (origY + e.clientY - startY) + "px";
-    });
-    document.addEventListener("mouseup", function () {
-      if (isDragging) {
-        isDragging = false;
-        popup.classList.remove("isDragging");
-      }
-    });
-  })();
+  initDrag(popup, popupHeader, { closeSelector: ".pairsInsightClose" });
 
   /* ── LLM Review Status (loads on page open) ────────────────────────── */
   (function loadLlmStatus() {

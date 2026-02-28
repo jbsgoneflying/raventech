@@ -21,34 +21,10 @@
   function scoreClass(s) { return s >= 60 ? "high" : s >= 30 ? "med" : "low"; }
   function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
-  /* ════════════════════════════════════════════════════════════════════
-     Draggable Popup System (dark glass panels, matches E8)
-     ════════════════════════════════════════════════════════════════════ */
-  function initDrag(popupId, headerId, closeId) {
-    const popup = $(popupId);
-    const header = $(headerId);
-    let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
-
-    header.addEventListener("mousedown", function (e) {
-      if (e.target.closest(".e9PopupClose")) return;
-      dragging = true;
-      popup.classList.add("isDragging");
-      const rect = popup.getBoundingClientRect();
-      startX = e.clientX; startY = e.clientY;
-      origX = rect.left; origY = rect.top;
-      e.preventDefault();
-    });
-    document.addEventListener("mousemove", function (e) {
-      if (!dragging) return;
-      popup.style.left = (origX + e.clientX - startX) + "px";
-      popup.style.top = (origY + e.clientY - startY) + "px";
-      popup.style.right = "auto";
-    });
-    document.addEventListener("mouseup", function () {
-      if (dragging) { dragging = false; popup.classList.remove("isDragging"); }
-    });
+  function initE9Drag(popupId, headerId, closeId) {
+    initDrag($(popupId), $(headerId), { closeSelector: ".e9PopupClose" });
     $(closeId).addEventListener("click", function () {
-      popup.classList.remove("visible");
+      $(popupId).classList.remove("visible");
     });
   }
 
@@ -532,9 +508,9 @@
     $("e9DeskNotesBtn").addEventListener("click", openDeskNotes);
     $("e9ThesisScanBtn").addEventListener("click", openThesisScan);
 
-    initDrag("e9DeskPopup", "e9DeskPopupHeader", "e9DeskPopupClose");
-    initDrag("e9ThesisPopup", "e9ThesisPopupHeader", "e9ThesisPopupClose");
-    initDrag("e9InsightPopup", "e9InsightPopupHeader", "e9InsightPopupClose");
+    initE9Drag("e9DeskPopup", "e9DeskPopupHeader", "e9DeskPopupClose");
+    initE9Drag("e9ThesisPopup", "e9ThesisPopupHeader", "e9ThesisPopupClose");
+    initE9Drag("e9InsightPopup", "e9InsightPopupHeader", "e9InsightPopupClose");
 
     /* ── Section-level insight buttons ── */
 

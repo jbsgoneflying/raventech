@@ -1930,78 +1930,33 @@ main();
 (function () {
   "use strict";
 
-  var _e2InsightCache = {};
+  var e2Popup = $("e2InsightPopup");
+  if (!e2Popup) return;
 
-  var e2Popup       = $("e2InsightPopup");
-  var e2PopupHeader = $("e2InsightHeader");
-  var e2PopupTitle  = $("e2InsightTitle");
-  var e2PopupClose  = $("e2InsightClose");
-  var e2PopupBody   = $("e2InsightBody");
+  initDrag(e2Popup, $("e2InsightHeader"), { closeSelector: "#e2InsightClose" });
+  $("e2InsightClose").addEventListener("click", function () { e2Popup.style.display = "none"; });
 
-  if (!e2Popup) return;  // popup element missing, skip
-
-  // ── Drag logic ──
-  (function () {
-    var ox = 0, oy = 0, sx = 0, sy = 0, dragging = false;
-    function onDown(ev) {
-      if (ev.target === e2PopupClose) return;
-      dragging = true; ox = ev.clientX; oy = ev.clientY;
-      var r = e2Popup.getBoundingClientRect(); sx = r.left; sy = r.top;
-      e2Popup.classList.add("isDragging");
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    }
-    function onMove(ev) { if (!dragging) return; e2Popup.style.left = (sx + ev.clientX - ox) + "px"; e2Popup.style.top  = (sy + ev.clientY - oy) + "px"; }
-    function onUp() { dragging = false; e2Popup.classList.remove("isDragging"); document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); }
-    e2PopupHeader.addEventListener("mousedown", onDown);
-  })();
-
-  e2PopupClose.addEventListener("click", function () { e2Popup.style.display = "none"; });
-
-  function openPopup(title, x, y) {
-    e2PopupTitle.textContent = title;
-    e2PopupBody.innerHTML = "<div class='e2InsightLoading'><span class='e2InsightDot'></span><span class='e2InsightDot'></span><span class='e2InsightDot'></span><br>Generating desk insight\u2026</div>";
-    e2Popup.style.left = Math.min(x, window.innerWidth - 460) + "px";
-    e2Popup.style.top  = Math.min(y, window.innerHeight - 300) + "px";
-    e2Popup.style.display = "block";
-  }
-
-  var _labels = {
-    regime_read:"Regime Read",component_breakdown:"Component Breakdown",bucket_implications:"Bucket Implications",what_would_change:"What Would Change",
-    macro_risk_level:"Macro Risk Level",key_events:"Key Events",multiplier_effect:"Multiplier Effect",
-    probability_read:"Probability Read",width_selection:"Width Selection",conditioning_quality:"Conditioning Quality",directional_skew:"Directional Skew",
-    dealer_regime:"Dealer Regime",key_levels:"Key Levels",gamma_peaks:"Gamma Peaks",condor_positioning:"Condor Positioning",
-    stability_read:"Stability Read",flip_distances:"Flip Distances",risk_asymmetry:"Risk Asymmetry",condor_implications:"Condor Implications",
-    hedging_flow_read:"Hedging Flow Read",elasticity_analysis:"Elasticity Analysis",scenario_walkthrough:"Scenario Walkthrough",
-    tail_risk_map:"Tail Risk Map",air_pockets:"Air Pockets",wall_distances:"Wall Distances",
-    vol_state:"Vol State",z_score_breakdown:"Z-Score Breakdown",iv_vs_rv:"IV vs RV",term_structure:"Term Structure",
-    expected_move_read:"Expected Move Read",strike_targets:"Strike Targets",vwap_context:"VWAP Context",em_trend:"EM Trend",
-    directional_read:"Directional Read",momentum_analysis:"Momentum Analysis",volatility_context:"Volatility Context",condor_relevance:"Condor Relevance",
-    desk_takeaway:"Desk Takeaway",
-  };
-
-  function renderInsight(data) {
-    if (!data) { e2PopupBody.innerHTML = "<div class='e2InsightLoading'>No insight data.</div>"; return; }
-    var html = "";
-    if (data._fallback_reason) {
-      html += "<div style='background:rgba(255,107,107,.15);border:1px solid rgba(255,107,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ff6b6b;'>" + escapeHtml(data._fallback_reason) + "</div>";
-    }
-    var skip = new Set(["_source","_meta","_card_type","_fallback_reason"]);
-    for (var key in data) {
-      if (skip.has(key)) continue;
-      var label = _labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-      var isDesk = key === "desk_takeaway";
-      html += "<div class='e2InsightSection'><div class='e2InsightSectionTitle'>" + escapeHtml(label) + "</div><div class='e2InsightText'" + (isDesk ? " style='color:#34c759;font-weight:600;'" : "") + ">" + escapeHtml(String(data[key])) + "</div></div>";
-    }
-    if (data._source) html += "<div class='e2InsightSource'>Source: " + escapeHtml(data._source) + "</div>";
-    e2PopupBody.innerHTML = html;
-  }
+  var e2Insight = new InsightPopup({
+    popupEl: e2Popup,
+    titleEl: $("e2InsightTitle"),
+    bodyEl:  $("e2InsightBody"),
+    prefix:  "e2Insight",
+    labels: {
+      regime_read:"Regime Read",component_breakdown:"Component Breakdown",bucket_implications:"Bucket Implications",what_would_change:"What Would Change",
+      macro_risk_level:"Macro Risk Level",key_events:"Key Events",multiplier_effect:"Multiplier Effect",
+      probability_read:"Probability Read",width_selection:"Width Selection",conditioning_quality:"Conditioning Quality",directional_skew:"Directional Skew",
+      dealer_regime:"Dealer Regime",key_levels:"Key Levels",gamma_peaks:"Gamma Peaks",condor_positioning:"Condor Positioning",
+      stability_read:"Stability Read",flip_distances:"Flip Distances",risk_asymmetry:"Risk Asymmetry",condor_implications:"Condor Implications",
+      hedging_flow_read:"Hedging Flow Read",elasticity_analysis:"Elasticity Analysis",scenario_walkthrough:"Scenario Walkthrough",
+      tail_risk_map:"Tail Risk Map",air_pockets:"Air Pockets",wall_distances:"Wall Distances",
+      vol_state:"Vol State",z_score_breakdown:"Z-Score Breakdown",iv_vs_rv:"IV vs RV",term_structure:"Term Structure",
+      expected_move_read:"Expected Move Read",strike_targets:"Strike Targets",vwap_context:"VWAP Context",em_trend:"EM Trend",
+      directional_read:"Directional Read",momentum_analysis:"Momentum Analysis",volatility_context:"Volatility Context",condor_relevance:"Condor Relevance",
+      desk_takeaway:"Desk Takeaway",
+    },
+  });
 
   function fetchInsight(cardType, cardData, title, x, y) {
-    var cacheKey = cardType + ":" + JSON.stringify(cardData).substring(0, 100);
-    if (_e2InsightCache[cacheKey]) { openPopup(title, x, y); renderInsight(_e2InsightCache[cacheKey]); return; }
-    openPopup(title, x, y);
-
     var ctx = {};
     if (lastPayload) {
       ctx.underlying = lastPayload.underlying || {};
@@ -2009,27 +1964,12 @@ main();
       ctx.macro = lastPayload.current?.macro || {};
       ctx.expectedMove = lastPayload.expectedMove || {};
     }
-
-    fetch("/api/front-layer/card-insight", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ card_type: cardType, card_data: cardData, dms_summary: ctx }),
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (resp) {
-      if (resp.error || resp.detail) { e2PopupBody.innerHTML = "<div class='e2InsightLoading' style='color:#ff6b6b;'>Error: " + escapeHtml(resp.error || resp.detail || "Unknown") + "</div>"; return; }
-      _e2InsightCache[cacheKey] = resp;
-      renderInsight(resp);
-    })
-    .catch(function () { e2PopupBody.innerHTML = "<div class='e2InsightLoading' style='color:#ff6b6b;'>Failed to load insight.</div>"; });
+    e2Insight.fetch(cardType, cardData, title, x, y, ctx);
   }
 
-  // Clear cache on new run
-  var _origRender = window.render;
-  // We'll listen for new lastPayload via mutation on the results section
   var resultsObs = $("results");
   if (resultsObs) {
-    var mo = new MutationObserver(function () { _e2InsightCache = {}; });
+    var mo = new MutationObserver(function () { e2Insight.clearCache(); });
     mo.observe(resultsObs, { childList: true, subtree: false });
   }
 

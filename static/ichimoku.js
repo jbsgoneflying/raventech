@@ -495,66 +495,31 @@ if (document.readyState === "loading") {
 (function () {
   "use strict";
 
-  var _ikCache = {};
-  var popup     = $("ikInsightPopup");
-  var popHeader = $("ikInsightHeader");
-  var popTitle  = $("ikInsightTitle");
-  var popClose  = $("ikInsightClose");
-  var popBody   = $("ikInsightBody");
+  var popup = $("ikInsightPopup");
   if (!popup) return;
 
-  // ── Drag ──
-  (function () {
-    var ox=0,oy=0,sx=0,sy=0,dragging=false;
-    function onDown(ev){if(ev.target===popClose)return;dragging=true;ox=ev.clientX;oy=ev.clientY;var r=popup.getBoundingClientRect();sx=r.left;sy=r.top;popup.classList.add("isDragging");document.addEventListener("mousemove",onMove);document.addEventListener("mouseup",onUp);}
-    function onMove(ev){if(!dragging)return;popup.style.left=(sx+ev.clientX-ox)+"px";popup.style.top=(sy+ev.clientY-oy)+"px";}
-    function onUp(){dragging=false;popup.classList.remove("isDragging");document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",onUp);}
-    popHeader.addEventListener("mousedown",onDown);
-  })();
-  popClose.addEventListener("click",function(){popup.style.display="none";});
+  initDrag(popup, $("ikInsightHeader"), { closeSelector: "#ikInsightClose" });
+  $("ikInsightClose").addEventListener("click", function () { popup.style.display = "none"; });
 
-  function openPopup(title,x,y){
-    popTitle.textContent=title;
-    popBody.innerHTML="<div class='ikInsightLoading'><span class='ikInsightDot'></span><span class='ikInsightDot'></span><span class='ikInsightDot'></span><br>Generating desk insight\u2026</div>";
-    popup.style.left=Math.min(x,window.innerWidth-460)+"px";
-    popup.style.top=Math.min(y,window.innerHeight-300)+"px";
-    popup.style.display="block";
-  }
+  var ikInsight = new InsightPopup({
+    popupEl: popup,
+    titleEl: $("ikInsightTitle"),
+    bodyEl:  $("ikInsightBody"),
+    prefix:  "ikInsight",
+    labels: {
+      ichimoku_structure:"Ichimoku Structure",entry_quality:"Entry Quality",freshness_read:"Freshness Read",
+      risk_framework:"Risk Framework",component_analysis:"Component Analysis",
+      dual_index_read:"Dual Index Read",continuation_impact:"Continuation Impact",index_membership:"Index Membership",
+      opportunity_read:"Opportunity Read",actionable_vs_structure:"Actionable vs Structure",rejection_rate:"Rejection Rate",
+      gate_status:"Gate Status",regime_for_continuation:"Regime for Continuation",vol_direction_impact:"Vol Direction Impact",
+      desk_takeaway:"Desk Takeaway",
+    },
+  });
 
-  var _lbl={
-    ichimoku_structure:"Ichimoku Structure",entry_quality:"Entry Quality",freshness_read:"Freshness Read",
-    risk_framework:"Risk Framework",component_analysis:"Component Analysis",
-    dual_index_read:"Dual Index Read",continuation_impact:"Continuation Impact",index_membership:"Index Membership",
-    opportunity_read:"Opportunity Read",actionable_vs_structure:"Actionable vs Structure",rejection_rate:"Rejection Rate",
-    gate_status:"Gate Status",regime_for_continuation:"Regime for Continuation",vol_direction_impact:"Vol Direction Impact",
-    desk_takeaway:"Desk Takeaway",
-  };
-
-  function renderInsight(data){
-    if(!data){popBody.innerHTML="<div class='ikInsightLoading'>No insight data.</div>";return;}
-    var html="";
-    if(data._fallback_reason) html+="<div style='background:rgba(255,107,107,.15);border:1px solid rgba(255,107,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ff6b6b;'>"+escapeHtml(data._fallback_reason)+"</div>";
-    var skip=new Set(["_source","_meta","_card_type","_fallback_reason"]);
-    for(var key in data){
-      if(skip.has(key))continue;
-      var label=_lbl[key]||key.replace(/_/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();});
-      var isDesk=key==="desk_takeaway";
-      html+="<div class='ikInsightSection'><div class='ikInsightSectionTitle'>"+escapeHtml(label)+"</div><div class='ikInsightText'"+(isDesk?" style='color:#34c759;font-weight:600;'":"")+">"+escapeHtml(String(data[key]))+"</div></div>";
-    }
-    if(data._source) html+="<div class='ikInsightSource'>Source: "+escapeHtml(data._source)+"</div>";
-    popBody.innerHTML=html;
-  }
-
-  function fetchInsight(cardType,cardData,title,x,y){
-    var cacheKey=cardType+":"+JSON.stringify(cardData).substring(0,100);
-    if(_ikCache[cacheKey]){openPopup(title,x,y);renderInsight(_ikCache[cacheKey]);return;}
-    openPopup(title,x,y);
-    var ctx={};
-    if(lastPayload){ctx.marketGamma=lastPayload.marketGamma||{};ctx.asOfDate=lastPayload.asOfDate;}
-    fetch("/api/front-layer/card-insight",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({card_type:cardType,card_data:cardData,dms_summary:ctx})})
-    .then(function(r){return r.json();})
-    .then(function(resp){if(resp.error||resp.detail){popBody.innerHTML="<div class='ikInsightLoading' style='color:#ff6b6b;'>Error: "+escapeHtml(resp.error||resp.detail||"Unknown")+"</div>";return;}_ikCache[cacheKey]=resp;renderInsight(resp);})
-    .catch(function(){popBody.innerHTML="<div class='ikInsightLoading' style='color:#ff6b6b;'>Failed to load insight.</div>";});
+  function fetchInsight(cardType, cardData, title, x, y) {
+    var ctx = {};
+    if (lastPayload) { ctx.marketGamma = lastPayload.marketGamma || {}; ctx.asOfDate = lastPayload.asOfDate; }
+    ikInsight.fetch(cardType, cardData, title, x, y, ctx);
   }
 
   // ── Signal cards (Actionable and Structure) ──
