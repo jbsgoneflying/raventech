@@ -20,8 +20,6 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from cachetools import TTLCache
 from pydantic import BaseModel, Field
-import uuid
-import pathlib
 
 from backend.earnings_logic import BreachInputError, compute_breach_stats, compute_current_snapshot
 from backend.go_no_go import compute_go_no_go
@@ -303,10 +301,6 @@ _condor_rank_cache_lock = threading.Lock()
 
 _macro_stats_cache = TTLCache(maxsize=256, ttl=6 * 60 * 60)  # 6h (on-demand)
 _macro_stats_cache_lock = threading.Lock()
-
-def _truncate(s: str, n: int) -> str:
-    t = str(s or "").replace("\n", " ").strip()
-    return (t[:n] + "…") if len(t) > n else t
 
 
 def _get_client() -> OratsClient:
@@ -2539,13 +2533,9 @@ def engine7_pairs_detail(
 
 
 
-
-
-
-# ============================================================================
+# ---------------------------------------------------------------------------
 # Front Layer – Market Intelligence
-# ============================================================================
-
+# ---------------------------------------------------------------------------
 
 _dms_cache: TTLCache = TTLCache(maxsize=4, ttl=300)  # 5-min in-memory cache
 _morning_brief_cache: TTLCache = TTLCache(maxsize=2, ttl=3600)
@@ -3395,9 +3385,7 @@ async def engine8_history(
     try:
         from backend.engine8_pipeline import _build_all_event_rows
         from backend.config import FeatureFlags
-        from dataclasses import replace as dc_replace
-
-        effective_flags = dc_replace(flags, ENGINE8_LOOKBACK_EVENTS=n)
+        effective_flags = replace(flags, ENGINE8_LOOKBACK_EVENTS=n)
 
         loop = asyncio.get_event_loop()
         today = dt.date.today()

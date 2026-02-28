@@ -1,33 +1,5 @@
 /* global window, document */
 
-function $(id) { return document.getElementById(id); }
-
-function escapeHtml(s) {
-  const t = String(s ?? "");
-  return t
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function fmtPct(x, d = 2) {
-  const n = Number(x);
-  if (!Number.isFinite(n)) return "—";
-  return `${n.toFixed(d)}%`;
-}
-
-function fmt0(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n.toFixed(0) : "—";
-}
-
-function fmt2(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n.toFixed(2) : "—";
-}
-
 function fmtMoneyShort(x) {
   const n = Number(x);
   if (!Number.isFinite(n)) return "—";
@@ -1777,7 +1749,6 @@ function render(payload) {
   try { renderEngine2DecisionPanel(payload); } catch { /* ignore */ }
 
   const like = payload?.oddsLikeNow || {};
-  // Snapshot section removed: regime/macro/odds/VWAP/live context are rendered in the decision header + details drawer.
   try {
     if (typeof window.renderTechnicalsDailyPanel === "function") {
       // Engine 2 uses payload.underlying.symbol as the displayed symbol.
@@ -1941,7 +1912,6 @@ async function main() {
   try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }
   initGammaMapUI();
   initGexHeatmapUI();
-  // AskRaven removed
 
   // Do NOT auto-run: user must review selections and click Run.
   const results = $("results");

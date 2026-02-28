@@ -1,12 +1,3 @@
-function $(id) {
-  return document.getElementById(id);
-}
-
-function fmtPct(v) {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  return `${Number(v).toFixed(2)}%`;
-}
-
 function fmtX(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   return `${Number(v).toFixed(2)}×`;
@@ -56,11 +47,6 @@ function fmtSignedPct(v) {
   if (!Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(2)}%`;
-}
-
-function fmt0(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n.toFixed(0) : "—";
 }
 
 function downloadBlob(filename, blob) {
@@ -942,15 +928,6 @@ function _fmtClusterLine(c) {
   return `${fmt0(peak)} (${fmt0(c?.totalOI)}) · range=${fmt0(c?.minStrike)}–${fmt0(c?.maxStrike)} · n=${fmt0(c?.nStrikes)}`;
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function initTooltips() {
   const wraps = Array.from(document.querySelectorAll(".tipWrap"));
   const closeAll = () => {
@@ -1676,34 +1653,6 @@ async function fetchJson(url) {
   // Cache successful responses
   _setCache(url, body);
   return body;
-}
-
-/**
- * Fetch with cache-first strategy for instant perceived performance.
- * Returns { data, fromCache, isRefreshing } 
- * If cached data exists, returns it immediately and optionally refreshes in background.
- */
-async function fetchJsonCached(url, { forceRefresh = false, onRefresh = null } = {}) {
-  const cached = _getCached(url);
-  
-  // If we have fresh cached data and not forcing refresh, return it
-  if (cached?.isFresh && !forceRefresh) {
-    return { data: cached.data, fromCache: true, isRefreshing: false };
-  }
-  
-  // If we have stale cached data, return it immediately but refresh in background
-  if (cached?.isStale && !forceRefresh) {
-    // Background refresh
-    fetchJson(url).then((freshData) => {
-      if (onRefresh) onRefresh(freshData);
-    }).catch(() => {});
-    
-    return { data: cached.data, fromCache: true, isRefreshing: true };
-  }
-  
-  // No cache or force refresh: fetch fresh data
-  const data = await fetchJson(url);
-  return { data, fromCache: false, isRefreshing: false };
 }
 
 function recBadge(rec) {
@@ -3166,7 +3115,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // AskRaven removed
   initTooltips();
   try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }
   initEngine1GammaVizUI();

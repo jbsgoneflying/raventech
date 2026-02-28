@@ -5,34 +5,6 @@
  * Client-side JavaScript for the Ichimoku Continuation UI
  */
 
-function $(id) { return document.getElementById(id); }
-
-function escapeHtml(s) {
-  const t = String(s ?? "");
-  return t
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function fmtPct(x, d = 1) {
-  const n = Number(x);
-  if (!Number.isFinite(n)) return "—";
-  return `${n.toFixed(d)}%`;
-}
-
-function fmt0(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n.toFixed(0) : "—";
-}
-
-function fmt2(x) {
-  const n = Number(x);
-  return Number.isFinite(n) ? n.toFixed(2) : "—";
-}
-
 function fmtMoney(x) {
   const n = Number(x);
   if (!Number.isFinite(n)) return "—";
@@ -132,17 +104,6 @@ async function fetchScan(direction) {
 // -----------------------------------------------------------------------------
 // Render Functions
 // -----------------------------------------------------------------------------
-
-// Safe text setter - prevents "Cannot set properties of null" errors
-function setText(id, text) {
-  const el = $(id);
-  if (el) el.textContent = text;
-}
-
-function setHtml(id, html) {
-  const el = $(id);
-  if (el) el.innerHTML = html;
-}
 
 function renderStats(payload) {
   const scanned = payload.scannedCount ?? 0;

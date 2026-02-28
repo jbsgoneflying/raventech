@@ -184,28 +184,9 @@ function _taCopy(text) {
   if (window.RavenUI && typeof window.RavenUI.copyToClipboard === "function") {
     try {
       return Promise.resolve(window.RavenUI.copyToClipboard(t));
-    } catch {
-      // fall through
-    }
+    } catch { /* fall through */ }
   }
-  if (navigator?.clipboard?.writeText) return navigator.clipboard.writeText(t).then(() => true).catch(() => false);
-  // Fallback
-  return new Promise((resolve) => {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = t;
-      ta.setAttribute("readonly", "true");
-      ta.style.position = "fixed";
-      ta.style.left = "-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      resolve(!!ok);
-    } catch {
-      resolve(false);
-    }
-  });
+  return navigator.clipboard.writeText(t).then(() => true).catch(() => false);
 }
 
 function buildTechnicalsDailyViewModel(payload, { symbolOverride = null } = {}) {

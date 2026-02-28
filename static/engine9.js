@@ -2,38 +2,38 @@
 (function () {
   "use strict";
 
-  var _scanData = null;
-  var _spreadChart = null;
-  var _spreadData = null;
-  var _refreshTimer = null;
-  var _abortCtrl = null;
+  let _scanData = null;
+  let _spreadChart = null;
+  let _spreadData = null;
+  let _refreshTimer = null;
+  let _abortCtrl = null;
 
   function $(id) { return document.getElementById(id); }
   function fmt(v, d) { return v != null ? Number(v).toFixed(d == null ? 1 : d) : "—"; }
   function fmtDollar(v) {
     if (v == null) return "—";
-    var abs = Math.abs(v);
+    const abs = Math.abs(v);
     if (abs >= 1e9) return "$" + (v / 1e9).toFixed(1) + "B";
     if (abs >= 1e6) return "$" + (v / 1e6).toFixed(1) + "M";
     if (abs >= 1e3) return "$" + (v / 1e3).toFixed(0) + "K";
     return "$" + v.toFixed(0);
   }
   function scoreClass(s) { return s >= 60 ? "high" : s >= 30 ? "med" : "low"; }
-  function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+  function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
   /* ════════════════════════════════════════════════════════════════════
      Draggable Popup System (dark glass panels, matches E8)
      ════════════════════════════════════════════════════════════════════ */
   function initDrag(popupId, headerId, closeId) {
-    var popup = $(popupId);
-    var header = $(headerId);
-    var dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+    const popup = $(popupId);
+    const header = $(headerId);
+    let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
 
     header.addEventListener("mousedown", function (e) {
       if (e.target.closest(".e9PopupClose")) return;
       dragging = true;
       popup.classList.add("isDragging");
-      var rect = popup.getBoundingClientRect();
+      const rect = popup.getBoundingClientRect();
       startX = e.clientX; startY = e.clientY;
       origX = rect.left; origY = rect.top;
       e.preventDefault();
@@ -55,13 +55,13 @@
   /* ════════════════════════════════════════════════════════════════════
      Contextual LLM Insight System
      ════════════════════════════════════════════════════════════════════ */
-  var _insightCache = {};
-  var _insightRegistry = [];
+  let _insightCache = {};
+  let _insightRegistry = [];
 
   function requestInsight(type, key, data, title) {
-    var cacheKey = type + ":" + key;
-    var popup = $("e9InsightPopup");
-    var content = $("e9InsightContent");
+    const cacheKey = type + ":" + key;
+    const popup = $("e9InsightPopup");
+    const content = $("e9InsightContent");
     $("e9InsightTitle").textContent = title || "Desk Insight";
     popup.classList.add("visible");
 
@@ -72,7 +72,7 @@
 
     content.innerHTML = '<div class="e9PopupLoading"><div class="e9PopupSpinner"></div><div>Analyzing ' + esc(key) + '...</div></div>';
 
-    var summary = {};
+    let summary = {};
     if (_scanData) {
       summary = {
         phase: (_scanData.composite || {}).phase,
@@ -97,20 +97,20 @@
   }
 
   function renderInsight(data) {
-    var content = $("e9InsightContent");
-    var html = "";
+    const content = $("e9InsightContent");
+    let html = "";
 
     if (data.headline) {
       html += '<div style="font-size:14px;font-weight:800;margin-bottom:12px;color:#fff;">' + esc(data.headline) + '</div>';
     }
 
     if (data.breaking_event_proximity) {
-      var prox = data.breaking_event_proximity.toLowerCase();
-      var proxCls = prox.indexOf("far") >= 0 ? "far" : prox.indexOf("approach") >= 0 ? "approaching" : prox.indexOf("imminent") >= 0 ? "imminent" : "active";
+      const prox = data.breaking_event_proximity.toLowerCase();
+      const proxCls = prox.indexOf("far") >= 0 ? "far" : prox.indexOf("approach") >= 0 ? "approaching" : prox.indexOf("imminent") >= 0 ? "imminent" : "active";
       html += '<div style="margin-bottom:12px;">Event Proximity: <span class="e9ProxBadge ' + proxCls + '">' + esc(data.breaking_event_proximity) + '</span></div>';
     }
 
-    var fields = [
+    const fields = [
       ["what_it_is", "What This Measures"],
       ["current_read", "Current Read"],
       ["what_to_watch", "What to Watch"],
@@ -120,7 +120,7 @@
     ];
 
     fields.forEach(function (f) {
-      var val = data[f[0]];
+      const val = data[f[0]];
       if (!val) return;
       html += '<div class="e9InsightField"><div class="e9ILabel">' + f[1] + '</div><div class="e9IValue">' + esc(val) + '</div></div>';
     });
@@ -133,17 +133,17 @@
   }
 
   function insightBtn(type, key, data, title) {
-    var idx = _insightRegistry.length;
+    const idx = _insightRegistry.length;
     _insightRegistry.push({ type: type, key: key, data: data, title: title });
     return '<button class="e9InsightBtn" data-insight-idx="' + idx + '"><span class="ico">&#9432;</span> Explain</button>';
   }
 
   document.addEventListener("click", function (e) {
-    var btn = e.target.closest(".e9InsightBtn");
+    const btn = e.target.closest(".e9InsightBtn");
     if (!btn) return;
-    var idx = parseInt(btn.getAttribute("data-insight-idx"), 10);
+    const idx = parseInt(btn.getAttribute("data-insight-idx"), 10);
     if (isNaN(idx) || !_insightRegistry[idx]) return;
-    var entry = _insightRegistry[idx];
+    const entry = _insightRegistry[idx];
     requestInsight(entry.type, entry.key, entry.data, entry.title);
   });
 
@@ -151,7 +151,7 @@
      Scan
      ════════════════════════════════════════════════════════════════════ */
   function runScan() {
-    var btn = $("e9ScanBtn");
+    const btn = $("e9ScanBtn");
     btn.disabled = true; btn.textContent = "Scanning...";
     $("e9Loading").style.display = "block";
     _insightCache = {};
@@ -189,34 +189,34 @@
   }
 
   function showSectionInsightButtons() {
-    var ids = ["e9PhaseInsight", "e9TriggersInsight", "e9ThesisHealthInsight",
+    const ids = ["e9PhaseInsight", "e9TriggersInsight", "e9ThesisHealthInsight",
                "e9SignalGridInsight", "e9NewsInsight", "e9ForcedInsight", "e9WatchInsight"];
     ids.forEach(function (id) {
-      var btn = $(id);
+      const btn = $(id);
       if (btn) btn.style.display = "";
     });
   }
 
   /* ── Phase + Triggers + Thesis Health ── */
   function renderPhase(data) {
-    var comp = data.composite || {};
-    var phase = comp.phase || 1;
+    const comp = data.composite || {};
+    const phase = comp.phase || 1;
     $("e9PhaseBadge").setAttribute("data-phase", phase);
     $("e9PhaseNum").textContent = phase;
     $("e9PhaseLabel").textContent = comp.phase_label || "";
     $("e9Composite").textContent = "Composite: " + fmt(comp.composite, 1);
 
-    var action = $("e9ActionBanner");
+    const action = $("e9ActionBanner");
     if (comp.phase_action) {
       action.textContent = "Phase " + phase + " Action: " + comp.phase_action;
       action.style.display = "";
     }
 
-    var triggers = data.triggers || [];
-    var tList = $("e9TriggersList");
+    const triggers = data.triggers || [];
+    const tList = $("e9TriggersList");
     tList.innerHTML = "";
     triggers.forEach(function (t) {
-      var row = document.createElement("div");
+      const row = document.createElement("div");
       row.className = "e9TriggerRow";
       row.innerHTML =
         '<div class="e9TriggerBadge' + (t.active ? " active" : "") + '" data-level="' + t.level + '">' + t.level + '</div>' +
@@ -227,11 +227,11 @@
       tList.appendChild(row);
     });
 
-    var thesis = data.thesis_health || [];
-    var tHealth = $("e9ThesisHealth");
+    const thesis = data.thesis_health || [];
+    const tHealth = $("e9ThesisHealth");
     tHealth.innerHTML = "";
     thesis.forEach(function (ind) {
-      var item = document.createElement("div");
+      const item = document.createElement("div");
       item.className = "e9ThesisItem";
       item.innerHTML =
         '<div class="e9ThesisDot ' + (ind.healthy ? "healthy" : "warning") + '"></div>' +
@@ -239,23 +239,23 @@
       tHealth.appendChild(item);
     });
 
-    var tc = (data.signals || []).find(function (s) { return s.key === "time_compression"; });
-    var banner = $("e9CompressionBanner");
+    const tc = (data.signals || []).find(function (s) { return s.key === "time_compression"; });
+    const banner = $("e9CompressionBanner");
     if (tc && tc.triggered) banner.classList.add("visible"); else banner.classList.remove("visible");
   }
 
   /* ── Signal Grid (with per-card Explain buttons) ── */
   function renderSignals(signals) {
-    var grid = $("e9SignalGrid");
+    const grid = $("e9SignalGrid");
     grid.innerHTML = "";
     signals.forEach(function (sig) {
-      var sc = scoreClass(sig.score);
-      var wt = sig.weight > 0 ? (sig.weight * 100).toFixed(0) + "%" : (sig.key === "time_compression" ? "META" : "OVERLAY");
-      var card = document.createElement("div");
+      const sc = scoreClass(sig.score);
+      const wt = sig.weight > 0 ? (sig.weight * 100).toFixed(0) + "%" : (sig.key === "time_compression" ? "META" : "OVERLAY");
+      const card = document.createElement("div");
       card.className = "e9SigCard" + (sig.triggered ? " triggered" : "");
 
-      var detailHtml = '<div class="e9SigDetail">' + esc(sig.detail || "") + '</div>';
-      var d = sig.data || {};
+      let detailHtml = '<div class="e9SigDetail">' + esc(sig.detail || "") + '</div>';
+      const d = sig.data || {};
       if (sig.key === "nlp_language" && d.method === "llm" && d.per_ticker) {
         detailHtml += '<div style="margin-top:6px;font-size:10px;color:var(--muted)">';
         Object.keys(d.per_ticker).forEach(function (tk) { detailHtml += '<span style="font-weight:700">' + tk + '</span>:' + fmt(d.per_ticker[tk].score, 0) + ' '; });
@@ -269,7 +269,7 @@
       if (sig.key === "insider_selling" && d.per_ticker) {
         detailHtml += '<div style="margin-top:6px;font-size:10px;color:var(--muted)">';
         d.per_ticker.forEach(function (t) {
-          var a = t.anomaly_ratio > 2 ? ' style="color:var(--red);font-weight:700"' : '';
+          const a = t.anomaly_ratio > 2 ? ' style="color:var(--red);font-weight:700"' : '';
           detailHtml += '<span' + a + '>' + t.ticker + ':' + fmt(t.anomaly_ratio, 1) + 'x</span> ';
         });
         detailHtml += '</div>';
@@ -287,19 +287,19 @@
 
   /* ── News Cycle ── */
   function renderNews(news) {
-    var wrap = $("e9NewsWrap");
+    const wrap = $("e9NewsWrap");
     if (!wrap) return;
-    var articles = news.articles || [];
+    const articles = news.articles || [];
     if (!articles.length) {
       wrap.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px;">No credit-stress news detected in past 7 days.</div>';
       return;
     }
-    var html = "";
+    let html = "";
     if (news.summary) html += '<div class="e9NewsSummary">' + esc(news.summary) + '</div>';
     html += '<div class="e9NewsGrid">';
     articles.slice(0, 12).forEach(function (a) {
-      var rel = a.llm_relevance;
-      var relClass = rel >= 7 ? "high" : rel >= 4 ? "med" : "low";
+      const rel = a.llm_relevance;
+      const relClass = rel >= 7 ? "high" : rel >= 4 ? "med" : "low";
       html += '<div class="e9NewsCard"><div class="e9NewsTitle">';
       html += a.link ? '<a href="' + esc(a.link) + '" target="_blank" rel="noopener">' + esc(a.title) + '</a>' : esc(a.title);
       html += '</div><div class="e9NewsMeta">';
@@ -317,15 +317,15 @@
 
   /* ── Forced Seller Map (with per-ticker Explain) ── */
   function renderForcedSellerMap(entries) {
-    var wrap = $("e9ForcedWrap");
+    const wrap = $("e9ForcedWrap");
     if (!entries.length) {
       wrap.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:13px;">No forced seller data.</div>';
       return;
     }
-    var html = '<table class="e9Table"><thead><tr><th>Ticker</th><th>Fragility</th><th>Leverage</th><th>Liq. Mismatch</th><th>Retail Exp.</th><th>Put Skew</th><th>Price 20d %</th><th>Insider 30d</th><th></th></tr></thead><tbody>';
+    let html = '<table class="e9Table"><thead><tr><th>Ticker</th><th>Fragility</th><th>Leverage</th><th>Liq. Mismatch</th><th>Retail Exp.</th><th>Put Skew</th><th>Price 20d %</th><th>Insider 30d</th><th></th></tr></thead><tbody>';
     entries.forEach(function (e) {
-      var fc = e.fragility_score >= 60 ? "e9FragHigh" : e.fragility_score >= 30 ? "e9FragMed" : "e9FragLow";
-      var pc = (e.price_20d_pct != null && e.price_20d_pct < 0) ? "e9Negative" : "";
+      const fc = e.fragility_score >= 60 ? "e9FragHigh" : e.fragility_score >= 30 ? "e9FragMed" : "e9FragLow";
+      const pc = (e.price_20d_pct != null && e.price_20d_pct < 0) ? "e9Negative" : "";
       html += '<tr><td class="e9Ticker">' + e.ticker + '</td><td class="' + fc + '">' + fmt(e.fragility_score, 0) + '</td>' +
         '<td>' + fmt(e.leverage, 2) + 'x</td>' +
         '<td>' + (e.liquidity_mismatch != null ? (e.liquidity_mismatch * 100).toFixed(0) + '%' : '—') + '</td>' +
@@ -340,16 +340,16 @@
 
   /* ── Tiered Watchlist (with per-ticker Explain) ── */
   function renderWatchlist(watchlist) {
-    var wrap = $("e9WatchWrap");
+    const wrap = $("e9WatchWrap");
     wrap.innerHTML = "";
-    var tierOrder = ["tier1", "tier2", "tier3", "tier4"];
-    var tierLabels = { tier1: "Tier 1: BDCs (Direct Stress)", tier2: "Tier 2: Alt Managers (Sentiment + AUM)", tier3: "Tier 3: Credit ETFs (Confirmation)", tier4: "Tier 4: Vol / Tail Hedges" };
+    const tierOrder = ["tier1", "tier2", "tier3", "tier4"];
+    const tierLabels = { tier1: "Tier 1: BDCs (Direct Stress)", tier2: "Tier 2: Alt Managers (Sentiment + AUM)", tier3: "Tier 3: Credit ETFs (Confirmation)", tier4: "Tier 4: Vol / Tail Hedges" };
 
     tierOrder.forEach(function (tierKey) {
-      var tickers = watchlist[tierKey] || [];
+      const tickers = watchlist[tierKey] || [];
       if (!tickers.length) return;
-      var tierLabel = tierLabels[tierKey] || tierKey;
-      var tierData = {
+      const tierLabel = tierLabels[tierKey] || tierKey;
+      const tierData = {
         tier: tierKey, label: tierLabel, count: tickers.length,
         tickers: tickers.map(function (t) {
           return { ticker: t.ticker, price: t.price, change_5d_pct: t.change_5d_pct, change_20d_pct: t.change_20d_pct, signal_score: t.signal_score, conviction: t.conviction };
@@ -357,15 +357,15 @@
         phase: ((_scanData || {}).composite || {}).phase
       };
 
-      var group = document.createElement("div"); group.className = "e9TierGroup";
-      var header = document.createElement("div"); header.className = "e9TierHeader";
+      const group = document.createElement("div"); group.className = "e9TierGroup";
+      const header = document.createElement("div"); header.className = "e9TierHeader";
       header.innerHTML = '<span class="e9TierChevron">&#9654;</span><span class="e9TierBadge ' + tierKey + '">' + tierKey.toUpperCase().replace("TIER", "T") + '</span><span>' + tierLabel + ' (' + tickers.length + ')</span>' +
         '<span style="margin-left:auto;">' + insightBtn("tier", tierKey, tierData, tierLabel) + '</span>';
-      var body = document.createElement("div"); body.className = "e9TierBody";
-      var table = '<table class="e9Table"><thead><tr><th>Ticker</th><th>Price</th><th>5d %</th><th>20d %</th><th>Score</th><th>Conviction</th><th></th></tr></thead><tbody>';
+      const body = document.createElement("div"); body.className = "e9TierBody";
+      let table = '<table class="e9Table"><thead><tr><th>Ticker</th><th>Price</th><th>5d %</th><th>20d %</th><th>Score</th><th>Conviction</th><th></th></tr></thead><tbody>';
       tickers.forEach(function (t) {
-        var c5 = (t.change_5d_pct != null && t.change_5d_pct < 0) ? "e9Negative" : (t.change_5d_pct > 0 ? "e9Positive" : "");
-        var c20 = (t.change_20d_pct != null && t.change_20d_pct < 0) ? "e9Negative" : (t.change_20d_pct > 0 ? "e9Positive" : "");
+        const c5 = (t.change_5d_pct != null && t.change_5d_pct < 0) ? "e9Negative" : (t.change_5d_pct > 0 ? "e9Positive" : "");
+        const c20 = (t.change_20d_pct != null && t.change_20d_pct < 0) ? "e9Negative" : (t.change_20d_pct > 0 ? "e9Positive" : "");
         table += '<tr><td class="e9Ticker">' + t.ticker + '</td><td>' + fmt(t.price, 2) + '</td>' +
           '<td class="' + c5 + '">' + fmt(t.change_5d_pct, 2) + '%</td><td class="' + c20 + '">' + fmt(t.change_20d_pct, 2) + '%</td>' +
           '<td>' + fmt(t.signal_score, 0) + '</td><td><span class="e9ConvBadge ' + (t.conviction || "neutral") + '">' + (t.conviction || "—") + '</span></td>' +
@@ -379,7 +379,7 @@
       });
       group.appendChild(header); group.appendChild(body); wrap.appendChild(group);
     });
-    var first = wrap.querySelector(".e9TierHeader");
+    const first = wrap.querySelector(".e9TierHeader");
     if (first) { first.classList.add("open"); first.nextElementSibling.classList.add("open"); }
   }
 
@@ -393,12 +393,12 @@
 
   function renderSpreadChart(data) {
     _spreadData = data;
-    var chartBtn = $("e9ChartInsightBtn");
+    const chartBtn = $("e9ChartInsightBtn");
     if (chartBtn) chartBtn.style.display = "";
-    var hy = data.hy_oas || {}, ig = data.ig_oas || {}, curve = data.curve_2s10s || {};
-    var dates = hy.dates || ig.dates || [];
+    const hy = data.hy_oas || {}, ig = data.ig_oas || {}, curve = data.curve_2s10s || {};
+    const dates = hy.dates || ig.dates || [];
     if (_spreadChart) _spreadChart.destroy();
-    var ds = [];
+    const ds = [];
     if ((hy.values || []).length) ds.push({ label: "HY OAS (bps)", data: hy.values, borderColor: "rgba(255,59,48,0.9)", backgroundColor: "rgba(255,59,48,0.08)", fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2, yAxisID: "y" });
     if ((ig.values || []).length) ds.push({ label: "IG OAS (bps)", data: ig.values, borderColor: "rgba(255,159,10,0.7)", backgroundColor: "transparent", fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.5, yAxisID: "y" });
     if ((curve.values || []).length) ds.push({ label: "2s10s Curve (%)", data: curve.values, borderColor: "rgba(52,199,89,0.7)", backgroundColor: "transparent", fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.5, yAxisID: "y2", borderDash: [6, 3] });
@@ -421,8 +421,8 @@
      Desk Notes
      ════════════════════════════════════════════════════════════════════ */
   function openDeskNotes() {
-    var popup = $("e9DeskPopup");
-    var content = $("e9DeskContent");
+    const popup = $("e9DeskPopup");
+    const content = $("e9DeskContent");
     popup.classList.add("visible");
     content.innerHTML = '<div class="e9PopupLoading"><div class="e9PopupSpinner"></div><div>Generating desk brief...</div></div>';
     fetch("/api/engine9/desk-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scan_data: _scanData }) })
@@ -432,7 +432,8 @@
   }
 
   function renderDeskNotes(data) {
-    var c = $("e9DeskContent"), html = "";
+    const c = $("e9DeskContent");
+    let html = "";
     if (data.phase_assessment) html += "<h3>Phase Assessment</h3><p>" + esc(data.phase_assessment) + "</p>";
     if (data.active_triggers_commentary) html += "<h3>Active Triggers</h3><p>" + esc(data.active_triggers_commentary) + "</p>";
     if (data.top_trades && data.top_trades.length) {
@@ -456,8 +457,8 @@
      Thesis Discovery
      ════════════════════════════════════════════════════════════════════ */
   function openThesisScan() {
-    var popup = $("e9ThesisPopup");
-    var content = $("e9ThesisContent");
+    const popup = $("e9ThesisPopup");
+    const content = $("e9ThesisContent");
     popup.classList.add("visible");
     content.innerHTML = '<div class="e9PopupLoading"><div class="e9PopupSpinner"></div><div>Running thesis analysis — may take 30-60s...</div></div>';
     fetch("/api/engine9/thesis-scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scan_data: _scanData, news_data: (_scanData || {}).news || {}, force: false }) })
@@ -467,14 +468,15 @@
   }
 
   function renderThesis(data) {
-    var c = $("e9ThesisContent"), html = "";
+    const c = $("e9ThesisContent");
+    let html = "";
     if (data.one_liner) html += '<div class="e9OneLiner">' + esc(data.one_liner) + '</div>';
     if (data.conviction_level) html += '<div style="font-size:11px;margin-bottom:12px;">Conviction: <strong style="color:#fff;">' + esc(data.conviction_level).toUpperCase() + '</strong></div>';
     if (data.scenario_projection_30d) {
       html += '<div class="e9ThesisSection"><h4>30-Day Scenarios</h4><div class="e9ScenarioGrid">';
       ["base_case", "bull_case", "bear_case"].forEach(function (key) {
-        var s = (data.scenario_projection_30d || {})[key] || {};
-        var label = key.replace("_", " ").replace(/\b\w/g, function (ch) { return ch.toUpperCase(); });
+        const s = (data.scenario_projection_30d || {})[key] || {};
+        const label = key.replace("_", " ").replace(/\b\w/g, function (ch) { return ch.toUpperCase(); });
         html += '<div class="e9ScenarioCard"><div class="label">' + label + '</div><div class="prob">' + esc(s.probability || "—") + '</div>';
         html += '<div style="font-size:10px;margin-top:4px;">' + esc(s.description || "") + '</div>';
         if (s.positioning) html += '<div style="font-size:10px;color:rgba(255,255,255,.5);margin-top:4px;">' + esc(s.positioning) + '</div>';
@@ -519,7 +521,7 @@
   function startAutoRefresh() {
     if (_refreshTimer) clearInterval(_refreshTimer);
     _refreshTimer = setInterval(function () {
-      var h = new Date().getUTCHours();
+      const h = new Date().getUTCHours();
       if (h >= 13 && h < 21) runScan();
     }, 5 * 60 * 1000);
   }
@@ -537,15 +539,15 @@
     /* ── Section-level insight buttons ── */
 
     function bindSectionInsight(btnId, type, key, title, dataFn) {
-      var btn = $(btnId);
+      const btn = $(btnId);
       if (btn) btn.addEventListener("click", function () {
         requestInsight(type, key, dataFn(), title);
       });
     }
 
     bindSectionInsight("e9PhaseInsight", "section", "phase_composite", "Phase & Composite Score", function () {
-      var comp = (_scanData || {}).composite || {};
-      var triggers = (_scanData || {}).triggers || [];
+      const comp = (_scanData || {}).composite || {};
+      const triggers = (_scanData || {}).triggers || [];
       return {
         phase: comp.phase, phase_label: comp.phase_label, composite: comp.composite,
         phase_action: comp.phase_action,
@@ -555,7 +557,7 @@
     });
 
     bindSectionInsight("e9TriggersInsight", "section", "execution_triggers", "Execution Triggers", function () {
-      var triggers = (_scanData || {}).triggers || [];
+      const triggers = (_scanData || {}).triggers || [];
       return {
         triggers: triggers.map(function (t) { return { name: t.name, level: t.level, active: t.active, condition: t.condition }; }),
         phase: ((_scanData || {}).composite || {}).phase,
@@ -564,7 +566,7 @@
     });
 
     bindSectionInsight("e9ThesisHealthInsight", "section", "thesis_health", "Thesis Health Indicators", function () {
-      var th = (_scanData || {}).thesis_health || [];
+      const th = (_scanData || {}).thesis_health || [];
       return {
         indicators: th.map(function (i) { return { name: i.name, healthy: i.healthy, detail: i.detail }; }),
         phase: ((_scanData || {}).composite || {}).phase
@@ -572,7 +574,7 @@
     });
 
     bindSectionInsight("e9SignalGridInsight", "section", "signal_grid_overview", "Signal Grid Overview", function () {
-      var sigs = (_scanData || {}).signals || [];
+      const sigs = (_scanData || {}).signals || [];
       return {
         signal_count: sigs.length,
         signals_summary: sigs.map(function (s) { return { label: s.label, key: s.key, score: s.score, weight: s.weight, triggered: s.triggered }; }),
@@ -582,8 +584,8 @@
     });
 
     bindSectionInsight("e9NewsInsight", "section", "news_cycle", "News Cycle — Credit Stress", function () {
-      var news = (_scanData || {}).news || {};
-      var articles = (news.articles || []).slice(0, 8);
+      const news = (_scanData || {}).news || {};
+      const articles = (news.articles || []).slice(0, 8);
       return {
         article_count: (news.articles || []).length,
         top_articles: articles.map(function (a) { return { title: a.title, date: (a.date || "").substring(0, 10), source: a.source, relevance: a.llm_relevance, keywords: a.matched_keywords }; }),
@@ -592,7 +594,7 @@
     });
 
     bindSectionInsight("e9ForcedInsight", "section", "forced_seller_map", "Forced Seller Map", function () {
-      var fsm = (_scanData || {}).forced_seller_map || [];
+      const fsm = (_scanData || {}).forced_seller_map || [];
       return {
         tickers: fsm.map(function (f) { return { ticker: f.ticker, fragility: f.fragility, price_20d_pct: f.price_20d_pct, put_skew: f.put_skew, insider_30d: f.insider_30d }; }),
         most_fragile: fsm.length ? fsm[0].ticker : null,
@@ -601,8 +603,8 @@
     });
 
     bindSectionInsight("e9WatchInsight", "section", "tiered_watchlist", "Tiered Watchlist Overview", function () {
-      var wl = (_scanData || {}).watchlist || {};
-      var summary = {};
+      const wl = (_scanData || {}).watchlist || {};
+      const summary = {};
       Object.keys(wl).forEach(function (tier) {
         summary[tier] = { count: (wl[tier] || []).length, tickers: (wl[tier] || []).map(function (t) { return t.ticker; }) };
       });
@@ -610,14 +612,14 @@
     });
 
     bindSectionInsight("e9ChartInsightBtn", "chart", "credit_spread_history", "Credit Spread History", function () {
-      var chartContext = {};
+      let chartContext = {};
       if (_spreadData) {
-        var hy = _spreadData.hy_oas || {};
-        var ig = _spreadData.ig_oas || {};
-        var curve = _spreadData.curve_2s10s || {};
-        var hyVals = hy.values || [];
-        var igVals = ig.values || [];
-        var curveVals = curve.values || [];
+        const hy = _spreadData.hy_oas || {};
+        const ig = _spreadData.ig_oas || {};
+        const curve = _spreadData.curve_2s10s || {};
+        const hyVals = hy.values || [];
+        const igVals = ig.values || [];
+        const curveVals = curve.values || [];
         chartContext = {
           hy_oas_latest: hyVals.length ? hyVals[hyVals.length - 1] : null,
           hy_oas_30d_ago: hyVals.length > 22 ? hyVals[hyVals.length - 23] : null,

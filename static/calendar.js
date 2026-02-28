@@ -1,17 +1,5 @@
 /* global window, document */
 
-function $(id) { return document.getElementById(id); }
-
-function escapeHtml(s) {
-  const t = String(s ?? "");
-  return t
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 function logoUrlForTicker(ticker) {
   const t = String(ticker || "").trim().toUpperCase();
   if (!t) return null;

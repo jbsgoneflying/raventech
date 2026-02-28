@@ -17,6 +17,32 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+function fmtPct(v, d = 2) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(d)}%`;
+}
+
+function fmt0(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(0) : "—";
+}
+
+function fmt2(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
+
+function setText(id, text) {
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function setHtml(id, html) {
+  const el = $(id);
+  if (el) el.innerHTML = html;
+}
+
 function clamp(x, lo, hi) {
   const n = Number(x);
   if (!Number.isFinite(n)) return lo;
@@ -39,26 +65,9 @@ async function fetchJson(url, { timeoutMs = 30000 } = {}) {
 async function copyToClipboard(text) {
   const t = String(text ?? "");
   if (!t) return false;
-  if (navigator?.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(t);
-      return true;
-    } catch {
-      // fall through
-    }
-  }
-  // Fallback
   try {
-    const ta = document.createElement("textarea");
-    ta.value = t;
-    ta.setAttribute("readonly", "true");
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return !!ok;
+    await navigator.clipboard.writeText(t);
+    return true;
   } catch {
     return false;
   }
@@ -223,6 +232,11 @@ function initInfoTips() {
 window.RavenUI = {
   $,
   escapeHtml,
+  fmtPct,
+  fmt0,
+  fmt2,
+  setText,
+  setHtml,
   clamp,
   fetchJson,
   copyToClipboard,

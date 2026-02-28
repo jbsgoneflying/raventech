@@ -7,8 +7,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-# OratsClient import kept for call-sites that still pass it (backward compat).
-from backend.orats_client import OratsClient  # noqa: F401
+from backend.orats_client import OratsClient
 
 _LOG = logging.getLogger(__name__)
 

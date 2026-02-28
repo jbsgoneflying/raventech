@@ -5,39 +5,39 @@
 (function () {
   "use strict";
 
-  var form       = document.getElementById("e8Form");
-  var runBtn     = document.getElementById("runBtn");
-  var statusEl   = document.getElementById("status");
-  var resultsEl  = document.getElementById("results");
-  var phaseAEl   = document.getElementById("phaseAResults");
+  const form       = document.getElementById("e8Form");
+  const runBtn     = document.getElementById("runBtn");
+  const statusEl   = document.getElementById("status");
+  const resultsEl  = document.getElementById("results");
+  const phaseAEl   = document.getElementById("phaseAResults");
 
-  var _dummyEl = document.createElement("span");
+  const _dummyEl = document.createElement("span");
   function qs(id) { return document.getElementById(id) || _dummyEl; }
 
   function setE8TickerLogo(ticker) {
-    var img = document.getElementById("e8TickerLogo");
+    const img = document.getElementById("e8TickerLogo");
     if (!img) return;
-    var t = String(ticker || "").trim().toUpperCase();
+    const t = String(ticker || "").trim().toUpperCase();
     if (!t) { img.classList.add("hidden"); img.removeAttribute("src"); return; }
-    var src = "https://financialmodelingprep.com/image-stock/" + encodeURIComponent(t) + ".png";
+    const src = "https://financialmodelingprep.com/image-stock/" + encodeURIComponent(t) + ".png";
     img.src = src;
     img.alt = t + " logo";
     img.classList.remove("hidden");
     img.onerror = function () { img.classList.add("hidden"); };
   }
 
-  var tickerInput = document.getElementById("ticker");
+  const tickerInput = document.getElementById("ticker");
   if (tickerInput) {
     setE8TickerLogo(tickerInput.value);
     tickerInput.addEventListener("input", function () { setE8TickerLogo(tickerInput.value); });
   }
 
-  var _lastPhaseAData = null;
-  var _deskNotesCache = {};
-  var _rowPlaybookCache = {};
-  var _rowPlaybookAbort = null;
-  var _activationAbort = null;
-  var _activationCache = null;
+  let _lastPhaseAData = null;
+  const _deskNotesCache = {};
+  let _rowPlaybookCache = {};
+  let _rowPlaybookAbort = null;
+  let _activationAbort = null;
+  let _activationCache = null;
   function fmt(v, d) { return v == null ? "—" : Number(v).toFixed(d == null ? 2 : d); }
   function pct(v) { return v == null ? "—" : (Number(v) * 100).toFixed(1) + "%"; }
 
@@ -46,26 +46,26 @@
     phaseAEl.classList.remove("hidden");
     resultsEl.classList.add("hidden");
 
-    var timing = data.timing || "UNK";
-    var timingLabel = timing === "AMC" ? "After Market Close" : timing === "BMO" ? "Before Market Open" : "Timing TBD";
+    const timing = data.timing || "UNK";
+    const timingLabel = timing === "AMC" ? "After Market Close" : timing === "BMO" ? "Before Market Open" : "Timing TBD";
     qs("phaseATiming").textContent = data.earnings_date + " · " + timingLabel;
     qs("phaseACountdown").textContent = data.countdown_days != null ? data.countdown_days + " day" + (data.countdown_days !== 1 ? "s" : "") + " away" : "";
 
-    var e1 = data.engine1 || {};
-    var sum = e1.summary || {};
-    var cur = e1.current || {};
-    var em = e1.expectedMove || {};
-    var st = e1.strikeTargets || {};
-    var bl = e1.baseline || {};
+    const e1 = data.engine1 || {};
+    const sum = e1.summary || {};
+    const cur = e1.current || {};
+    const em = e1.expectedMove || {};
+    const st = e1.strikeTargets || {};
+    const bl = e1.baseline || {};
 
     /* Core metrics row */
-    var regime = e1.regime || {};
+    const regime = e1.regime || {};
     qs("paRegimeLabel").textContent = regime.label || "—";
 
     /* ORATS EM (EOD + delayed) */
-    var eodEmPct = cur.impliedMovePct;
-    var delayedEmPct = cur.delayedImpliedMovePct;
-    var avgImpliedPct = sum.avg_implied_all_pct;
+    const eodEmPct = cur.impliedMovePct;
+    const delayedEmPct = cur.delayedImpliedMovePct;
+    const avgImpliedPct = sum.avg_implied_all_pct;
     if (eodEmPct != null) {
       qs("paOratsEm").textContent = fmt(eodEmPct) + "%";
       qs("paOratsEmCaption").textContent = cur.asOfDate ? "As of: " + cur.asOfDate + " · EOD (used for breach history)" : "EOD (used for breach history)";
@@ -77,16 +77,16 @@
       qs("paOratsEmCaption").textContent = "EOD (used for breach history)";
     }
     qs("paDelayedEm").textContent = delayedEmPct != null ? fmt(delayedEmPct) + "%" : "—";
-    var delayedNote = cur.delayedUpdatedAt ? "Updated: " + cur.delayedUpdatedAt : cur.delayedTradeDate ? "As of: " + cur.delayedTradeDate : "";
+    const delayedNote = cur.delayedUpdatedAt ? "Updated: " + cur.delayedUpdatedAt : cur.delayedTradeDate ? "As of: " + cur.delayedTradeDate : "";
     qs("paDelayedEmCaption").textContent = (delayedNote ? delayedNote + " · " : "") + "15-min delayed" + (delayedEmPct != null ? " · Used for strike targets" : "");
 
     /* Straddle EM */
-    var stEmPct = em.expectedMovePct;
-    var stEmDollars = em.expectedMoveDollars;
-    var stEmExpiry = em.expiry ? String(em.expiry).slice(0, 10) : "";
-    var stEmSource = em.source || "";
+    const stEmPct = em.expectedMovePct;
+    const stEmDollars = em.expectedMoveDollars;
+    const stEmExpiry = em.expiry ? String(em.expiry).slice(0, 10) : "";
+    const stEmSource = em.source || "";
     qs("paStraddleEm").textContent = stEmPct != null ? fmt(stEmPct) + "%" : "—";
-    var stCaption = [];
+    const stCaption = [];
     if (stEmDollars != null) stCaption.push("$" + fmt(stEmDollars) + " pts");
     if (stEmExpiry) stCaption.push("Exp: " + stEmExpiry);
     if (stEmSource) stCaption.push(stEmSource === "live" ? "Live" : stEmSource === "eod" ? "EOD" : stEmSource);
@@ -96,12 +96,12 @@
     qs("paStWhite").textContent = st && st.whitePct != null ? fmt(st.whitePct) + "%" : "—";
     qs("paStBlue").textContent = st && st.bluePct != null ? fmt(st.bluePct) + "%" : "—";
     qs("paStRed").textContent = st && st.redPct != null ? fmt(st.redPct) + "%" : "—";
-    var stSource = st && st.emSource === "delayed" ? "15-min delayed EM" : "ORATS EOD EM";
+    const stSource = st && st.emSource === "delayed" ? "15-min delayed EM" : "ORATS EOD EM";
     qs("paStrikeCaption").textContent = "Wing distance as % of spot (" + stSource + ").";
 
     /* Breach detail */
     qs("paBreach1x").textContent = sum.breach_rate_pct != null ? fmt(sum.breach_rate_pct) + "%" : "—";
-    var hr = e1.holdRisk || {};
+    const hr = e1.holdRisk || {};
     qs("paBreach15x").textContent = hr.breach_1_5x != null ? fmt(hr.breach_1_5x * 100) + "%" : "—";
     qs("paBreach2x").textContent = hr.breach_2_0x != null ? fmt(hr.breach_2_0x * 100) + "%" : "—";
     qs("paStockPrice").textContent = data.stock_price != null ? "$" + fmt(data.stock_price) : "—";
@@ -113,22 +113,22 @@
 
     /* Breach detail row 3 */
     qs("paAvgRealizedImplied").textContent = bl.avg_ratio_realized_to_implied != null ? fmt(bl.avg_ratio_realized_to_implied) + "×" : "—";
-    var evUsed = sum.events_used;
-    var evFound = sum.events_found;
+    const evUsed = sum.events_used;
+    const evFound = sum.events_found;
     qs("paEventsUsed").textContent = evUsed != null ? evUsed + (evFound != null ? " / " + evFound : "") : "—";
-    var goNoGo = e1.goNoGo || {};
-    var gateVal = (goNoGo.guidance || {}).tradeGate || goNoGo.tradeGate || "";
-    var gateTxt = gateVal === "NO_TRADE" ? "No Trade" : gateVal === "CAUTION" ? "Caution" : gateVal === "OK" ? "OK" : "—";
+    const goNoGo = e1.goNoGo || {};
+    const gateVal = (goNoGo.guidance || {}).tradeGate || goNoGo.tradeGate || "";
+    const gateTxt = gateVal === "NO_TRADE" ? "No Trade" : gateVal === "CAUTION" ? "Caution" : gateVal === "OK" ? "OK" : "—";
     qs("paTradeGate").textContent = gateTxt;
 
     /* IC structure */
-    var tb = e1.tradeBuilder;
-    var icSection = qs("phaseAIcSection");
-    var icGrid = qs("phaseAIcGrid");
+    const tb = e1.tradeBuilder;
+    const icSection = qs("phaseAIcSection");
+    const icGrid = qs("phaseAIcGrid");
     if (tb && tb.totalCredit != null) {
       icSection.style.display = "";
-      var putLeg = tb.put || {};
-      var callLeg = tb.call || {};
+      const putLeg = tb.put || {};
+      const callLeg = tb.call || {};
       icGrid.innerHTML =
         '<div class="evalCard"><div class="evalCardLabel">Short Put</div><div class="evalCardValue">' + fmt(putLeg.shortStrike) + '</div><div class="evalCardCaption">strike</div></div>' +
         '<div class="evalCard"><div class="evalCardLabel">Short Call</div><div class="evalCardValue">' + fmt(callLeg.shortStrike) + '</div><div class="evalCardCaption">strike</div></div>' +
@@ -149,7 +149,7 @@
     renderPlaybook(data.playbook);
 
     /* Show Activation Scanner button if playbook has scenarios */
-    var actWrap = qs("activationScanWrap");
+    const actWrap = qs("activationScanWrap");
     if (data.playbook && data.playbook.scenarios && data.playbook.scenarios.length > 0) {
       actWrap.style.display = "";
       qs("activationScanBtn").disabled = false;
@@ -161,11 +161,11 @@
 
   /* ── Playbook Renderer ────────────────────────────────────────────── */
   function renderPlaybook(pb) {
-    var section = qs("playbookSection");
-    var deskWrap = qs("pbDeskNotesWrap");
-    var deskPanel = qs("pbDeskNotesPanel");
-    var deskBtn = qs("pbDeskNotesBtn");
-    var deskBtnText = qs("pbDeskNotesBtnText");
+    const section = qs("playbookSection");
+    const deskWrap = qs("pbDeskNotesWrap");
+    const deskPanel = qs("pbDeskNotesPanel");
+    const deskBtn = qs("pbDeskNotesBtn");
+    const deskBtnText = qs("pbDeskNotesBtnText");
     deskPanel.style.display = "none";
     deskPanel.innerHTML = "";
     deskBtn.disabled = false;
@@ -187,7 +187,7 @@
       qs("pbQuickRefList").innerHTML = '<div style="color:var(--muted); font-style:italic;">Not enough historical data to build scenarios. Default: PASS on all outcomes.</div>';
       qs("pbThresholds").style.display = "none";
       qs("pbScenarioBody").innerHTML = "";
-      var meta = pb.meta || {};
+      const meta = pb.meta || {};
       qs("pbMeta").textContent = (meta.total_historical_events || 0) + " historical events analyzed — insufficient per-scenario data.";
       deskWrap.style.display = "none";
       return;
@@ -195,24 +195,24 @@
     deskWrap.style.display = "";
 
     /* Quick reference */
-    var qrList = qs("pbQuickRefList");
-    var refs = pb.quick_reference || [];
+    const qrList = qs("pbQuickRefList");
+    const refs = pb.quick_reference || [];
     qrList.innerHTML = refs.map(function (line) {
       return '<div style="padding:2px 0;">' + escHtml(line) + '</div>';
     }).join("");
 
     /* Threshold prices */
-    var thrEl = qs("pbThresholds");
-    var thrGrid = qs("pbThresholdGrid");
+    const thrEl = qs("pbThresholds");
+    const thrGrid = qs("pbThresholdGrid");
     if (pb.thresholds && pb.thresholds.levels) {
       thrEl.style.display = "";
-      var lvls = pb.thresholds.levels;
-      var thrHtml = "";
-      var multLabels = {"1.0x": "1.0× EM", "1.5x": "1.5× EM", "2.0x": "2.0× EM"};
-      var multKeys = ["1.0x", "1.5x", "2.0x"];
-      for (var mi = 0; mi < multKeys.length; mi++) {
-        var mk = multKeys[mi];
-        var lv = lvls[mk];
+      const lvls = pb.thresholds.levels;
+      let thrHtml = "";
+      const multLabels = {"1.0x": "1.0× EM", "1.5x": "1.5× EM", "2.0x": "2.0× EM"};
+      const multKeys = ["1.0x", "1.5x", "2.0x"];
+      for (let mi = 0; mi < multKeys.length; mi++) {
+        const mk = multKeys[mi];
+        const lv = lvls[mk];
         if (!lv) continue;
         thrHtml +=
           '<div class="evalCard pbThresholdCard">' +
@@ -229,33 +229,33 @@
     }
 
     /* Scenario table */
-    var tbody = qs("pbScenarioBody");
-    var rows = "";
-    var magLabels = {"contained": "< 1× EM", "extended": "1–1.5× EM", "extreme": "> 1.5× EM", "all": "Any size"};
-    for (var si = 0; si < pb.scenarios.length; si++) {
-      var s = pb.scenarios[si];
-      var magClass = s.magnitude === "contained" ? "contained" : s.magnitude === "extended" ? "extended" : s.magnitude === "extreme" ? "extreme" : "all";
-      var actClass = (s.action || "pass").toLowerCase();
-      var confClass = (s.confidence || "low").toLowerCase();
-      var cont1d = s.continuation_rate_1d != null ? Math.round(s.continuation_rate_1d * 100) + "%" : "—";
-      var cont3d = s.continuation_rate_3d != null ? Math.round(s.continuation_rate_3d * 100) + "%" : "—";
-      var cont5d = s.continuation_rate_5d != null ? Math.round(s.continuation_rate_5d * 100) + "%" : "—";
-      var driftVal = s.avg_continuation_5d;
-      var avgDrift = driftVal != null ? (driftVal > 0 ? "+" : "") + fmt(driftVal) + "%" : "—";
-      var dirArrow = s.direction === "UP" ? "&#9650;" : "&#9660;";
-      var dirColor = s.direction === "UP" ? "color:rgba(52,199,89,0.9)" : "color:rgba(255,59,48,0.85)";
+    const tbody = qs("pbScenarioBody");
+    let rows = "";
+    const magLabels = {"contained": "< 1× EM", "extended": "1–1.5× EM", "extreme": "> 1.5× EM", "all": "Any size"};
+    for (let si = 0; si < pb.scenarios.length; si++) {
+      const s = pb.scenarios[si];
+      const magClass = s.magnitude === "contained" ? "contained" : s.magnitude === "extended" ? "extended" : s.magnitude === "extreme" ? "extreme" : "all";
+      const actClass = (s.action || "pass").toLowerCase();
+      const confClass = (s.confidence || "low").toLowerCase();
+      const cont1d = s.continuation_rate_1d != null ? Math.round(s.continuation_rate_1d * 100) + "%" : "—";
+      const cont3d = s.continuation_rate_3d != null ? Math.round(s.continuation_rate_3d * 100) + "%" : "—";
+      const cont5d = s.continuation_rate_5d != null ? Math.round(s.continuation_rate_5d * 100) + "%" : "—";
+      const driftVal = s.avg_continuation_5d;
+      const avgDrift = driftVal != null ? (driftVal > 0 ? "+" : "") + fmt(driftVal) + "%" : "—";
+      const dirArrow = s.direction === "UP" ? "&#9650;" : "&#9660;";
+      const dirColor = s.direction === "UP" ? "color:rgba(52,199,89,0.9)" : "color:rgba(255,59,48,0.85)";
 
       /* Volume confirmation badge */
-      var volHtml = "—";
+      let volHtml = "—";
       if (s.high_vol_pct != null) {
-        var vp = Math.round(s.high_vol_pct * 100);
-        var volColor = vp >= 60 ? "color:rgba(52,199,89,0.9)" : vp >= 40 ? "color:rgba(255,149,0,0.9)" : "color:rgba(11,11,15,0.4)";
+        const vp = Math.round(s.high_vol_pct * 100);
+        const volColor = vp >= 60 ? "color:rgba(52,199,89,0.9)" : vp >= 40 ? "color:rgba(255,149,0,0.9)" : "color:rgba(11,11,15,0.4)";
         volHtml = '<span style="' + volColor + '; font-weight:700;">' + vp + '%</span>';
         if (s.avg_rel_volume != null) volHtml += '<br><span style="font-size:10px; color:var(--muted);">' + fmt(s.avg_rel_volume) + '×</span>';
       }
 
       /* Optimal hold period */
-      var holdHtml = s.optimal_hold_days != null ? s.optimal_hold_days + "d" : "—";
+      const holdHtml = s.optimal_hold_days != null ? s.optimal_hold_days + "d" : "—";
 
       rows +=
         '<tr class="pbScenarioRow" data-scenario-idx="' + si + '" style="cursor:pointer;">' +
@@ -276,7 +276,7 @@
     tbody.innerHTML = rows;
 
     /* Meta */
-    var meta = pb.meta || {};
+    const meta = pb.meta || {};
     qs("pbMeta").textContent =
       meta.total_historical_events + " historical events analyzed · " +
       meta.scenarios_computed + " scenarios computed · " +
@@ -287,11 +287,11 @@
   /* ── Row Playbook (per-scenario GPT-5.2 trade ticket) ────────────── */
 
   function buildRowPlaybookPayload(scenario) {
-    var e1 = (_lastPhaseAData || {}).engine1 || {};
-    var sum = e1.summary || {};
-    var cur = e1.current || {};
-    var bl = e1.baseline || {};
-    var pb = (_lastPhaseAData || {}).playbook || {};
+    const e1 = (_lastPhaseAData || {}).engine1 || {};
+    const sum = e1.summary || {};
+    const cur = e1.current || {};
+    const bl = e1.baseline || {};
+    const pb = (_lastPhaseAData || {}).playbook || {};
     return {
       scenario: scenario,
       context: {
@@ -311,7 +311,7 @@
   }
 
   function renderRowPlaybook(data, detailTd) {
-    var sections = [
+    const sections = [
       { key: "one_liner", title: null, cls: "rpOneLiner" },
       { key: "entry_plan", title: "Entry Plan", cls: "rpEntry", nested: true },
       { key: "exit_plan", title: "Exit Plan", cls: "rpExit", nested: true },
@@ -322,30 +322,30 @@
       { key: "desk_voice", title: "Desk Voice", cls: "rpDeskVoice" },
     ];
 
-    var verdict = (data.verdict || "PASS").toUpperCase();
-    var conviction = (data.conviction || "LOW").toUpperCase();
-    var verdictClass = verdict === "CONTINUE" ? "continue" : verdict === "FADE" ? "fade" : "pass";
-    var convClass = conviction === "HIGH" ? "high" : conviction === "MEDIUM" ? "medium" : "low";
+    const verdict = (data.verdict || "PASS").toUpperCase();
+    const conviction = (data.conviction || "LOW").toUpperCase();
+    const verdictClass = verdict === "CONTINUE" ? "continue" : verdict === "FADE" ? "fade" : "pass";
+    const convClass = conviction === "HIGH" ? "high" : conviction === "MEDIUM" ? "medium" : "low";
 
-    var html = '<div class="rpCard">';
+    let html = '<div class="rpCard">';
     html += '<div class="rpHeader">';
     html += '<span class="pbActionBadge ' + verdictClass + '" style="font-size:13px; padding:5px 14px;">' + escHtml(verdict) + '</span>';
     html += '<span class="pbConfBadge ' + convClass + '" style="font-size:12px; margin-left:8px;">' + escHtml(conviction) + '</span>';
     if (data._source) html += '<span class="rpSource">GPT-5.2 Trade Ticket</span>';
     html += '</div>';
 
-    for (var i = 0; i < sections.length; i++) {
-      var sec = sections[i];
-      var val = data[sec.key];
+    for (let i = 0; i < sections.length; i++) {
+      const sec = sections[i];
+      const val = data[sec.key];
       if (!val) continue;
 
       if (sec.nested && typeof val === "object") {
         html += '<div class="rpSection">';
         if (sec.title) html += '<div class="rpSectionTitle">' + escHtml(sec.title) + '</div>';
         html += '<div class="rpNestedGrid">';
-        var nestedKeys = Object.keys(val);
-        for (var nk = 0; nk < nestedKeys.length; nk++) {
-          var nLabel = nestedKeys[nk].replace(/_/g, " ");
+        const nestedKeys = Object.keys(val);
+        for (let nk = 0; nk < nestedKeys.length; nk++) {
+          let nLabel = nestedKeys[nk].replace(/_/g, " ");
           nLabel = nLabel.charAt(0).toUpperCase() + nLabel.slice(1);
           html += '<div class="rpNestedItem">';
           html += '<div class="rpNestedLabel">' + escHtml(nLabel) + '</div>';
@@ -366,13 +366,13 @@
   }
 
   function onScenarioRowClick(e) {
-    var row = e.target.closest(".pbScenarioRow");
+    const row = e.target.closest(".pbScenarioRow");
     if (!row) return;
-    var idx = parseInt(row.getAttribute("data-scenario-idx"), 10);
-    var pb = ((_lastPhaseAData || {}).playbook || {}).scenarios;
+    const idx = parseInt(row.getAttribute("data-scenario-idx"), 10);
+    const pb = ((_lastPhaseAData || {}).playbook || {}).scenarios;
     if (!pb || !pb[idx]) return;
 
-    var existing = row.nextElementSibling;
+    const existing = row.nextElementSibling;
     if (existing && existing.classList.contains("pbRowDetail")) {
       existing.remove();
       row.classList.remove("pbRowActive");
@@ -382,12 +382,12 @@
     document.querySelectorAll(".pbRowDetail").forEach(function (r) { r.remove(); });
     document.querySelectorAll(".pbRowActive").forEach(function (r) { r.classList.remove("pbRowActive"); });
 
-    var scenario = pb[idx];
-    var cacheKey = scenario.key || (scenario.magnitude + "_" + scenario.direction + "_" + scenario.structure);
+    const scenario = pb[idx];
+    const cacheKey = scenario.key || (scenario.magnitude + "_" + scenario.direction + "_" + scenario.structure);
 
-    var detailRow = document.createElement("tr");
+    const detailRow = document.createElement("tr");
     detailRow.className = "pbRowDetail";
-    var detailTd = document.createElement("td");
+    const detailTd = document.createElement("td");
     detailTd.colSpan = 12;
     detailTd.className = "rpDetailCell";
     detailRow.appendChild(detailTd);
@@ -405,7 +405,7 @@
     if (_rowPlaybookAbort) _rowPlaybookAbort.abort();
     _rowPlaybookAbort = new AbortController();
 
-    var payload = buildRowPlaybookPayload(scenario);
+    const payload = buildRowPlaybookPayload(scenario);
 
     fetch("/api/engine8/row-playbook", {
       method: "POST",
@@ -430,7 +430,7 @@
   qs("pbScenarioBody").addEventListener("click", onScenarioRowClick);
 
   function escHtml(s) {
-    var d = document.createElement("div");
+    const d = document.createElement("div");
     d.textContent = s;
     return d.innerHTML;
   }
@@ -441,16 +441,16 @@
     resultsEl.classList.remove("hidden");
 
     /* Engine 1 outcome card */
-    var e1s = data.engine1_summary || {};
-    var outcomeSection = qs("e1OutcomeSection");
-    var outcomeContent = qs("e1OutcomeContent");
+    const e1s = data.engine1_summary || {};
+    const outcomeSection = qs("e1OutcomeSection");
+    const outcomeContent = qs("e1OutcomeContent");
     if (e1s.had_phase_a) {
       outcomeSection.style.display = "";
-      var outcomeLabel = (e1s.trade_outcome || "unknown").replace(/_/g, " ");
-      var outcomeColor = e1s.trade_outcome === "profitable" ? "rgba(52,199,89,0.9)" :
+      const outcomeLabel = (e1s.trade_outcome || "unknown").replace(/_/g, " ");
+      const outcomeColor = e1s.trade_outcome === "profitable" ? "rgba(52,199,89,0.9)" :
                          e1s.trade_outcome === "controlled_loss" ? "rgba(255,149,0,0.9)" :
                          e1s.trade_outcome === "breakdown" ? "rgba(255,59,48,0.9)" : "var(--muted)";
-      var html = '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">';
+      let html = '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">';
       html += '<span class="decisionBadge" style="background:' + outcomeColor.replace("0.9", "0.12") + '; border:1px solid ' + outcomeColor.replace("0.9", "0.30") + '; color:' + outcomeColor + ';">' + outcomeLabel.toUpperCase() + '</span>';
       if (e1s.expected_move_pct != null) html += '<span style="font-size:12px; color:var(--muted);">Expected move: ' + fmt(e1s.expected_move_pct) + '%</span>';
       if (e1s.breach_rate_pct != null) html += '<span style="font-size:12px; color:var(--muted);">Breach rate: ' + fmt(e1s.breach_rate_pct) + '%</span>';
@@ -462,20 +462,20 @@
     }
 
     /* Decision */
-    var dec = data.decision || {};
-    var decisionStr = (typeof dec === "string" ? dec : dec.decision || "PASS").toUpperCase();
-    var badge = qs("decisionBadge");
+    const dec = data.decision || {};
+    const decisionStr = (typeof dec === "string" ? dec : dec.decision || "PASS").toUpperCase();
+    const badge = qs("decisionBadge");
     badge.textContent = decisionStr;
     badge.className = "decisionBadge " + decisionStr.toLowerCase();
 
-    var dir = dec.direction || data.direction;
+    const dir = dec.direction || data.direction;
     qs("decisionDirection").textContent = dir ? (dir.toLowerCase() === "long" ? "Long" : "Short") : "—";
-    var conf = dec.confidence_score != null ? dec.confidence_score : data.confidence;
+    const conf = dec.confidence_score != null ? dec.confidence_score : data.confidence;
     qs("decisionConfidence").textContent = conf != null ? "Confidence: " + Math.round(conf) + " / 100" : "";
 
-    var rationale = "";
+    let rationale = "";
     if (dec.pass_reason) {
-      var reasonMap = {
+      const reasonMap = {
         "activation_failed": "Activation failed — earnings date or post-event data unavailable.",
         "insufficient_historical_sample": "Insufficient historical data for this ticker under similar conditions.",
         "regime_blocked": "Regime overlay blocked — volatility regime is too stressed for new directional trades.",
@@ -487,7 +487,7 @@
     qs("decisionRationale").textContent = rationale;
 
     /* Snapshot */
-    var snap = data.snapshot || {};
+    const snap = data.snapshot || {};
     qs("snapActualMove").textContent = snap.actual_move_pct != null ? fmt(snap.actual_move_pct) + "%" : "—";
     qs("snapEmMultiple").textContent = fmt(snap.move_vs_em) + "x";
     qs("snapAtrMultiple").textContent = fmt(snap.atr_multiple) + "x";
@@ -496,15 +496,15 @@
     qs("snapSentiment").textContent = snap.sentiment || "—";
 
     /* Displacement */
-    var prof = data.profile || {};
+    const prof = data.profile || {};
     qs("displaceMagnitude").textContent = prof.magnitude_em_label || "—";
     qs("displaceStructure").textContent = prof.structure_label || "—";
     qs("displaceContext").textContent = prof.context_label || "—";
 
     /* Historical */
-    var hist = data.historical || {};
-    var contProb = hist.continuation_prob_5d != null ? hist.continuation_prob_5d : hist.continuation_prob_3d;
-    var revProb  = hist.reversion_prob_5d != null ? hist.reversion_prob_5d : hist.reversion_prob_3d;
+    const hist = data.historical || {};
+    const contProb = hist.continuation_prob_5d != null ? hist.continuation_prob_5d : hist.continuation_prob_3d;
+    const revProb  = hist.reversion_prob_5d != null ? hist.reversion_prob_5d : hist.reversion_prob_3d;
     qs("histContinuation").textContent = contProb != null ? pct(contProb) : "—";
     qs("histReversion").textContent = revProb != null ? pct(revProb) : "—";
     qs("histMagnitude").textContent = hist.avg_continuation_magnitude != null ? fmt(hist.avg_continuation_magnitude) + "%" : "—";
@@ -525,17 +525,17 @@
   /* ── Submit handler ────────────────────────────────────────────────── */
   form.addEventListener("submit", function (e) {
     e.preventDefault();
-    var ticker = qs("ticker").value.trim().toUpperCase();
+    const ticker = qs("ticker").value.trim().toUpperCase();
     if (!ticker) { statusEl.textContent = "Please enter a ticker."; return; }
 
-    var earningsDate = qs("earningsDate").value;
+    const earningsDate = qs("earningsDate").value;
     if (!earningsDate) { statusEl.textContent = "Earnings date is required."; return; }
 
-    var timingRadio = document.querySelector('input[name="timing"]:checked');
+    const timingRadio = document.querySelector('input[name="timing"]:checked');
     if (!timingRadio) { statusEl.textContent = "Please select BMO or AMC."; return; }
-    var timing = timingRadio.value;
+    const timing = timingRadio.value;
 
-    var params = new URLSearchParams();
+    const params = new URLSearchParams();
     params.set("ticker", ticker);
     params.set("earnings_date", earningsDate);
     params.set("timing", timing);
@@ -573,7 +573,7 @@
   });
 
   /* ── Desk Notes (GPT-5.2 LLM) ─────────────────────────────────────── */
-  var _deskNotesSections = [
+  const _deskNotesSections = [
     { key: "overall_thesis",   title: "Overall Thesis",      icon: "&#128202;" },
     { key: "iron_condor_view", title: "Iron Condor View",    icon: "&#9878;" },
     { key: "scenario_playbook",title: "Scenario Playbook",   icon: "&#128214;" },
@@ -583,14 +583,14 @@
     { key: "desk_takeaway",    title: "Desk Takeaway",       icon: "&#128161;" },
   ];
 
-  var _deskNotesAbort = null;
+  let _deskNotesAbort = null;
 
   function buildDeskNotesPayload(data) {
-    var e1 = data.engine1 || {};
-    var sum = e1.summary || {};
-    var cur = e1.current || {};
-    var bl = e1.baseline || {};
-    var pb = data.playbook || {};
+    const e1 = data.engine1 || {};
+    const sum = e1.summary || {};
+    const cur = e1.current || {};
+    const bl = e1.baseline || {};
+    const pb = data.playbook || {};
     return {
       ticker: data.ticker || "",
       earnings_date: data.earnings_date || "",
@@ -619,10 +619,10 @@
   }
 
   function renderDeskNotes(data) {
-    var panel = qs("pbDeskNotesPanel");
-    var html = "";
+    const panel = qs("pbDeskNotesPanel");
+    let html = "";
     _deskNotesSections.forEach(function (sec) {
-      var val = data[sec.key];
+      const val = data[sec.key];
       if (!val) return;
       html += '<div class="pbDeskNoteSection">';
       html += '<div class="pbDeskNoteTitle">' + sec.icon + " " + sec.title + '</div>';
@@ -639,21 +639,21 @@
   qs("pbDeskNotesBtn").addEventListener("click", function () {
     if (!_lastPhaseAData) return;
 
-    var ticker = (_lastPhaseAData.ticker || "").toUpperCase();
-    var cacheKey = ticker + "_" + (_lastPhaseAData.earnings_date || "");
+    const ticker = (_lastPhaseAData.ticker || "").toUpperCase();
+    const cacheKey = ticker + "_" + (_lastPhaseAData.earnings_date || "");
 
     if (_deskNotesCache[cacheKey]) {
       renderDeskNotes(_deskNotesCache[cacheKey]);
       return;
     }
 
-    var btn = qs("pbDeskNotesBtn");
-    var btnText = qs("pbDeskNotesBtnText");
+    const btn = qs("pbDeskNotesBtn");
+    const btnText = qs("pbDeskNotesBtnText");
     btn.disabled = true;
     btnText.textContent = "Generating full playbook brief\u2026";
 
-    var dotCount = 0;
-    var dotInterval = setInterval(function () {
+    let dotCount = 0;
+    const dotInterval = setInterval(function () {
       dotCount = (dotCount + 1) % 4;
       btnText.textContent = "Generating full playbook brief" + ".".repeat(dotCount);
     }, 400);
@@ -661,7 +661,7 @@
     if (_deskNotesAbort) _deskNotesAbort.abort();
     _deskNotesAbort = new AbortController();
 
-    var payload = buildDeskNotesPayload(_lastPhaseAData);
+    const payload = buildDeskNotesPayload(_lastPhaseAData);
 
     fetch("/api/engine8/desk-notes", {
       method: "POST",
@@ -694,19 +694,19 @@
   /* ── Activation Scanner (Engine 8.5) ──────────────────────────────── */
 
   function renderActivationPopup(data) {
-    var popup = qs("e8InsightPopup");
-    var body = qs("e8InsightBody");
+    const popup = qs("e8InsightPopup");
+    const body = qs("e8InsightBody");
 
-    var activation = (data.activation || "NO-GO").toUpperCase();
-    var action = (data.action || "PASS").toUpperCase();
-    var conviction = (data.conviction || "LOW").toUpperCase();
-    var m = data._metrics || {};
+    const activation = (data.activation || "NO-GO").toUpperCase();
+    const action = (data.action || "PASS").toUpperCase();
+    const conviction = (data.conviction || "LOW").toUpperCase();
+    const m = data._metrics || {};
 
-    var actClass = activation === "GO" ? "go" : activation === "WAIT" ? "wait" : "no-go";
-    var actionClass = action === "BUY" ? "buy" : action === "SHORT" ? "short" : "pass";
-    var convClass = conviction === "HIGH" ? "high" : conviction === "MEDIUM" ? "medium" : "low";
+    const actClass = activation === "GO" ? "go" : activation === "WAIT" ? "wait" : "no-go";
+    const actionClass = action === "BUY" ? "buy" : action === "SHORT" ? "short" : "pass";
+    const convClass = conviction === "HIGH" ? "high" : conviction === "MEDIUM" ? "medium" : "low";
 
-    var html = '';
+    let html = '';
 
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">';
     html += '<span class="actBadge ' + actClass + '">' + escHtml(activation) + '</span>';
@@ -721,15 +721,15 @@
     html += '<div class="actMetricItem"><div class="actMetricLabel">Price</div><div class="actMetricVal">$' + fmt(m.last_price) + '</div><div class="actMetricSub">open $' + fmt(m.session_open) + '</div></div>';
     html += '</div>';
 
-    var lr = data.live_read || {};
-    var lrKeys = ["gap", "structure", "volume", "iv_crush", "gamma"];
-    var lrHas = false;
-    for (var k = 0; k < lrKeys.length; k++) { if (lr[lrKeys[k]]) { lrHas = true; break; } }
+    const lr = data.live_read || {};
+    const lrKeys = ["gap", "structure", "volume", "iv_crush", "gamma"];
+    let lrHas = false;
+    for (let k = 0; k < lrKeys.length; k++) { if (lr[lrKeys[k]]) { lrHas = true; break; } }
     if (lrHas) {
       html += '<div class="e8InsightSection">';
       html += '<div class="e8InsightSectionTitle">Live Read</div>';
-      for (var k = 0; k < lrKeys.length; k++) {
-        var lbl = lrKeys[k].replace(/_/g, " ");
+      for (let k = 0; k < lrKeys.length; k++) {
+        let lbl = lrKeys[k].replace(/_/g, " ");
         lbl = lbl.charAt(0).toUpperCase() + lbl.slice(1);
         if (lr[lrKeys[k]]) {
           html += '<div style="margin-bottom:6px;"><span style="font-size:10px;font-weight:700;color:rgba(255,255,255,.45);text-transform:uppercase;">' + escHtml(lbl) + '</span><div class="e8InsightText">' + escHtml(lr[lrKeys[k]]) + '</div></div>';
@@ -738,14 +738,14 @@
       html += '</div>';
     }
 
-    var tt = data.trade_ticket || {};
-    var ttKeys = Object.keys(tt);
+    const tt = data.trade_ticket || {};
+    const ttKeys = Object.keys(tt);
     if (ttKeys.length > 0) {
       html += '<div class="e8InsightSection">';
       html += '<div class="e8InsightSectionTitle">Trade Ticket</div>';
       html += '<div class="actTicketGrid">';
-      for (var t = 0; t < ttKeys.length; t++) {
-        var ttLabel = ttKeys[t].replace(/_/g, " ");
+      for (let t = 0; t < ttKeys.length; t++) {
+        let ttLabel = ttKeys[t].replace(/_/g, " ");
         ttLabel = ttLabel.charAt(0).toUpperCase() + ttLabel.slice(1);
         html += '<div class="actTicketItem"><div class="actTicketLabel">' + escHtml(ttLabel) + '</div><div class="actTicketVal">' + escHtml(tt[ttKeys[t]]) + '</div></div>';
       }
@@ -773,22 +773,22 @@
   }
 
   function initPopupDrag() {
-    var popup = qs("e8InsightPopup");
-    var header = qs("e8InsightHeader");
-    var dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+    const popup = qs("e8InsightPopup");
+    const header = qs("e8InsightHeader");
+    let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
 
     header.addEventListener("mousedown", function (e) {
       if (e.target.closest(".e8InsightClose")) return;
       dragging = true;
       popup.classList.add("isDragging");
-      var rect = popup.getBoundingClientRect();
+      const rect = popup.getBoundingClientRect();
       startX = e.clientX; startY = e.clientY;
       origX = rect.left; origY = rect.top;
       e.preventDefault();
     });
     document.addEventListener("mousemove", function (e) {
       if (!dragging) return;
-      var dx = e.clientX - startX, dy = e.clientY - startY;
+      const dx = e.clientX - startX, dy = e.clientY - startY;
       popup.style.left = (origX + dx) + "px";
       popup.style.top = (origY + dy) + "px";
       popup.style.right = "auto";
@@ -806,18 +806,18 @@
   qs("activationScanBtn").addEventListener("click", function () {
     if (!_lastPhaseAData) return;
 
-    var ticker = (_lastPhaseAData.ticker || "").toUpperCase();
+    const ticker = (_lastPhaseAData.ticker || "").toUpperCase();
     if (!ticker) return;
 
     _activationCache = null;
 
-    var btn = qs("activationScanBtn");
-    var btnText = qs("activationScanBtnText");
+    const btn = qs("activationScanBtn");
+    const btnText = qs("activationScanBtnText");
     btn.disabled = true;
     btnText.textContent = "Scanning live market data\u2026";
 
-    var dotCount = 0;
-    var dotInterval = setInterval(function () {
+    let dotCount = 0;
+    const dotInterval = setInterval(function () {
       dotCount = (dotCount + 1) % 4;
       btnText.textContent = "Scanning live market data" + ".".repeat(dotCount);
     }, 400);
@@ -825,7 +825,7 @@
     if (_activationAbort) _activationAbort.abort();
     _activationAbort = new AbortController();
 
-    var payload = {
+    const payload = {
       ticker: ticker,
       earnings_date: _lastPhaseAData.earnings_date || "",
       timing: _lastPhaseAData.timing || "",
@@ -850,7 +850,7 @@
       })
       .catch(function (err) {
         if (err.name === "AbortError") return;
-        var popup = qs("e8InsightPopup");
+        const popup = qs("e8InsightPopup");
         qs("e8InsightTitle").textContent = "Activation Scanner — Error";
         qs("e8InsightBody").innerHTML = '<div style="color:rgba(255,59,48,0.8);font-size:13px;padding:16px;">Error: ' + escHtml(err.message) + '</div>';
         popup.style.display = "block";
@@ -867,11 +867,11 @@
 
   /* ── Tooltip behaviour ─────────────────────────────────────────────── */
   document.addEventListener("click", function (e) {
-    var btn = e.target.closest(".tipBtn");
+    const btn = e.target.closest(".tipBtn");
     if (btn) {
       e.stopPropagation();
-      var panel = btn.nextElementSibling;
-      var open = panel.classList.contains("open");
+      const panel = btn.nextElementSibling;
+      const open = panel.classList.contains("open");
       document.querySelectorAll(".tipPanel.open").forEach(function (p) { p.classList.remove("open"); });
       if (!open) panel.classList.add("open");
       return;
