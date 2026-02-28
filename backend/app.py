@@ -455,7 +455,7 @@ def calendar_page():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "v": "2026-02-27-cleanup"}
 
 
 @app.get("/api/flags")
