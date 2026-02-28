@@ -170,10 +170,10 @@ class FeatureFlags:
     GO_BETA20_HIGH: float = 1.20
 
     GO_AVG_DOLLAR_VOL20D_MIN: float = 200_000_000.0
-    # Delta band for liquidity check - matches Iron Condor wing deltas
-    # 0.05 to 0.08 covers the actual strikes where IC wings are sold
-    GO_OPT_DELTA_BAND_LO: float = 0.05
-    GO_OPT_DELTA_BAND_HI: float = 0.08
+    # Delta band for liquidity check — covers the IC short-strike zone
+    # 0.10 to 0.25 spans aggressive (10d) to standard (25d) wing placement
+    GO_OPT_DELTA_BAND_LO: float = 0.10
+    GO_OPT_DELTA_BAND_HI: float = 0.25
     GO_OPT_SPREAD_MAX: float = 0.15
     GO_OPT_SPREAD_MAX_P90: float = 0.25
     GO_OPT_MIN_MID: float = 0.20
@@ -397,8 +397,8 @@ class FeatureFlags:
             GO_BETA20_HIGH=_get_float("GO_BETA20_HIGH", 1.20),
 
             GO_AVG_DOLLAR_VOL20D_MIN=_get_float("GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0),
-            GO_OPT_DELTA_BAND_LO=_get_float("GO_OPT_DELTA_BAND_LO", 0.05),
-            GO_OPT_DELTA_BAND_HI=_get_float("GO_OPT_DELTA_BAND_HI", 0.08),
+            GO_OPT_DELTA_BAND_LO=_get_float("GO_OPT_DELTA_BAND_LO", 0.10),
+            GO_OPT_DELTA_BAND_HI=_get_float("GO_OPT_DELTA_BAND_HI", 0.25),
             GO_OPT_SPREAD_MAX=_get_float("GO_OPT_SPREAD_MAX", 0.15),
             GO_OPT_SPREAD_MAX_P90=_get_float("GO_OPT_SPREAD_MAX_P90", 0.25),
             GO_OPT_MIN_MID=_get_float("GO_OPT_MIN_MID", 0.20),

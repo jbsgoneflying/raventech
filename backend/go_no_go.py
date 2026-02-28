@@ -649,8 +649,8 @@ def compute_go_no_go(
     BETA20_HIGH = float(getattr(f, "GO_BETA20_HIGH", 1.20))
 
     AVG_DVOL_MIN = float(getattr(f, "GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0))
-    DELTA_LO = float(getattr(f, "GO_OPT_DELTA_BAND_LO", 0.15))
-    DELTA_HI = float(getattr(f, "GO_OPT_DELTA_BAND_HI", 0.20))
+    DELTA_LO = float(getattr(f, "GO_OPT_DELTA_BAND_LO", 0.10))
+    DELTA_HI = float(getattr(f, "GO_OPT_DELTA_BAND_HI", 0.25))
     SPREAD_MAX = float(getattr(f, "GO_OPT_SPREAD_MAX", 0.15))
     SPREAD_MAX_P90 = float(getattr(f, "GO_OPT_SPREAD_MAX_P90", 0.25))
     MIN_MID = float(getattr(f, "GO_OPT_MIN_MID", 0.20))
