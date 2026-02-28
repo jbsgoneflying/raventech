@@ -1,0 +1,18 @@
+# Raven-Tech scheduled jobs (all times UTC)
+# Logs go to /var/log/cron.log inside the container
+
+# Engine 5: refresh global lead-lag snapshot (feeds regime + sequencer)
+0 9 * * 1-5  cd /app && python3 scripts/refresh_engine5_snapshot.py >> /var/log/cron.log 2>&1
+
+# Calendar: refresh earnings calendar snapshot
+10 9 * * 1-5 cd /app && python3 scripts/refresh_calendar_snapshot.py >> /var/log/cron.log 2>&1
+
+# DMS: rebuild daily market state + morning brief
+30 9 * * 1-5 cd /app && python3 scripts/refresh_daily_market_state.py >> /var/log/cron.log 2>&1
+
+# Engine 6 (pairs): nightly LLM theme review
+45 9 * * 1-5 curl -sf -X POST http://localhost:8000/api/engine7-pairs/nightly-review >> /var/log/cron.log 2>&1
+
+# Weekly roadmap: Sunday evening (generates planning brief)
+0 22 * * 0   cd /app && python3 scripts/refresh_daily_market_state.py --weekly >> /var/log/cron.log 2>&1
+

@@ -5,10 +5,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps for requests/ssl + build wheels
+# System deps: curl for health checks, cron for scheduled jobs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    cron \
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
@@ -18,10 +19,10 @@ COPY backend /app/backend
 COPY static /app/static
 COPY scripts /app/scripts
 COPY data /app/data
+COPY deploy /app/deploy
+
+RUN chmod +x /app/deploy/entrypoint.sh
 
 EXPOSE 8000
 
-# Production runner
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "2", "-b", "0.0.0.0:8000", "--timeout", "120", "backend.app:app"]
-
-
+ENTRYPOINT ["/app/deploy/entrypoint.sh"]

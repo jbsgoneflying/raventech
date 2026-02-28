@@ -101,10 +101,11 @@ def main() -> int:
     # Sequencer
     seq_summary = {}
     try:
-        from backend.sequencer import current_week_id, build_weekly_sequence
+        from backend.sequencer import current_week_id, build_weekly_sequence, SequencerEvent
         wk = current_week_id()
         events_raw = store.get_json(f"sequencer:week:{wk}") or []
-        seq = build_weekly_sequence(events_raw, week_id=wk)
+        events = [SequencerEvent.from_dict(e) for e in events_raw] if events_raw else []
+        seq = build_weekly_sequence(week_id=wk, events=events)
         seq_summary = seq.to_dict()
         LOG.info("Sequencer: %d events, pattern=%s", len(events_raw), seq.pattern_match or "none")
     except Exception as e:
