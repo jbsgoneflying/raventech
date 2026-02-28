@@ -18,7 +18,6 @@ COPY backend /app/backend
 COPY static /app/static
 COPY scripts /app/scripts
 COPY data /app/data
-COPY README.md /app/README.md
 
 EXPOSE 8000
 
