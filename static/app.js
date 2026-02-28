@@ -720,11 +720,6 @@ function renderEngine1DecisionPanel(payload) {
           <div class="taCardInterp">Market + single-name stress overlay.</div>
         </div>
         <div class="taCard">
-          <div class="taCardTop"><div class="taCardTitle">Trade gate</div></div>
-          <div class="taCardState">${escapeHtml(gateTxt)}</div>
-          <div class="taCardInterp">OK / Caution / No trade (risk-first).</div>
-        </div>
-        <div class="taCard">
           <div class="taCardTop">
             <div class="taCardTitle">ORATS EM</div>
             <span class="info" title="ORATS implied earnings move (impErnMv). EOD = last close from hist/cores. Delayed = 15-min delayed from /cores snapshot (freshest available). Strike targets are built off the delayed value when available.">ⓘ</span>
