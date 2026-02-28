@@ -539,7 +539,7 @@
 
   function renderAll(data) {
     _lastE5Data = data;     // cache for desk insights
-    _e5InsightCache = {};   // clear insight cache on new data
+    e5Insight.clearCache();
 
     // Render snapshot metadata strip if present
     if (data.meta) {

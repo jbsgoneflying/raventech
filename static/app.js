@@ -3340,7 +3340,7 @@ document.addEventListener("DOMContentLoaded", () => {
   var origRender = window._e1OrigRender;
   if (!origRender) {
     // Monkey-patch to clear insight cache when new data arrives
-    window._e1InsightCacheClear = function () { _e1InsightCache = {}; };
+    window._e1InsightCacheClear = function () { e1Insight.clearCache(); };
   }
 
   // Optional auto-run for calendar deep-links: /breach?ticker=...&mc=1&autorun=1
