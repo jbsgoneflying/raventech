@@ -1,0 +1,294 @@
+"""Engine 12 — Four-Edge Decomposition for VIX Spike Fade.
+
+Edge 1: Spot / term-structure dislocation
+Edge 2: Implied vol vs expected realized vol
+Edge 3: Term structure shape (contango/backwardation)
+Edge 4: Persistence mispricing (implied half-life vs modeled half-life)
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from backend.engine12_ou_model import (
+    OUParams,
+    implied_half_life_from_term_structure,
+    modeled_half_life_days,
+    persistence_mispricing,
+)
+
+LOG = logging.getLogger(__name__)
+
+
+@dataclass
+class EdgeResult:
+    edge_id: str = ""
+    label: str = ""
+    score: float = 0.0          # 0-100 (higher = more edge for short vol)
+    raw_value: float = 0.0
+    interpretation: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "edgeId": self.edge_id,
+            "label": self.label,
+            "score": round(self.score, 1),
+            "rawValue": round(self.raw_value, 4),
+            "interpretation": self.interpretation,
+        }
+
+
+@dataclass
+class EdgeComposite:
+    score: float = 0.0
+    label: str = ""
+    edges: List[EdgeResult] = None
+
+    def __post_init__(self):
+        if self.edges is None:
+            self.edges = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "score": round(self.score, 1),
+            "label": self.label,
+            "edges": [e.to_dict() for e in self.edges],
+        }
+
+
+def _clamp(lo: float, hi: float, x: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def compute_edge1_spot_term_dislocation(
+    vix_spot: float,
+    iv_30d: Optional[float],
+) -> EdgeResult:
+    """Edge 1: Spot VIX vs 30d implied forward dislocation.
+
+    High divergence (spot >> forward) historically predicts mean reversion.
+    """
+    if iv_30d is None or iv_30d <= 0 or vix_spot <= 0:
+        return EdgeResult(
+            edge_id="spot_term_dislocation",
+            label="Spot/Term Dislocation",
+            interpretation="Insufficient term structure data.",
+        )
+
+    dislocation = (vix_spot - iv_30d) / iv_30d
+    # Map dislocation to 0-100: 0% dislocation -> 50, 20%+ -> ~90
+    score = _clamp(0, 100, 50.0 + dislocation * 200.0)
+
+    if dislocation > 0.15:
+        interp = "Strong dislocation: spot significantly above forward — high mean-reversion edge"
+    elif dislocation > 0.05:
+        interp = "Moderate dislocation: spot above forward — some mean-reversion edge"
+    elif dislocation > -0.05:
+        interp = "Minimal dislocation: spot near forward — limited edge"
+    else:
+        interp = "Negative dislocation: spot below forward — inverted, no short vol edge"
+
+    return EdgeResult(
+        edge_id="spot_term_dislocation",
+        label="Spot/Term Dislocation",
+        score=score,
+        raw_value=dislocation,
+        interpretation=interp,
+    )
+
+
+def compute_edge2_iv_vs_rv(
+    vix_spot: float,
+    historical_rv_post_events: List[float],
+) -> EdgeResult:
+    """Edge 2: Current implied vol vs expected realized vol.
+
+    Implied 10d vol = VIX / sqrt(252/10)
+    Expected realized = historical event-conditioned sample mean.
+    """
+    if vix_spot <= 0:
+        return EdgeResult(
+            edge_id="iv_vs_rv",
+            label="IV vs Expected RV",
+            interpretation="No VIX data available.",
+        )
+
+    implied_10d = vix_spot / math.sqrt(252.0 / 10.0)
+
+    if historical_rv_post_events and len(historical_rv_post_events) >= 3:
+        expected_rv = sum(historical_rv_post_events) / len(historical_rv_post_events)
+    else:
+        # Conservative fallback: assume realized = 70% of implied
+        expected_rv = implied_10d * 0.70
+
+    spread = implied_10d - expected_rv
+    # Normalize: 0 spread -> 50, +5 vol points -> ~80
+    score = _clamp(0, 100, 50.0 + spread * 6.0)
+
+    if spread > 5:
+        interp = f"IV significantly overpriced vs historical RV ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — strong short vol edge"
+    elif spread > 2:
+        interp = f"IV moderately overpriced ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — moderate edge"
+    elif spread > 0:
+        interp = f"IV slightly above expected RV ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — marginal edge"
+    else:
+        interp = f"IV below expected RV ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — no short vol edge"
+
+    return EdgeResult(
+        edge_id="iv_vs_rv",
+        label="IV vs Expected RV",
+        score=score,
+        raw_value=spread,
+        interpretation=interp,
+    )
+
+
+def compute_edge3_term_structure_shape(
+    iv_30d: Optional[float],
+    iv_60d: Optional[float],
+    iv_90d: Optional[float],
+) -> EdgeResult:
+    """Edge 3: Term structure shape classification.
+
+    Extreme backwardation = near peak stress, decay imminent.
+    """
+    vals = [(d, v) for d, v in [(30, iv_30d), (60, iv_60d), (90, iv_90d)] if v is not None and v > 0]
+    if len(vals) < 2:
+        return EdgeResult(
+            edge_id="term_structure_shape",
+            label="Term Structure Shape",
+            interpretation="Insufficient DTE data for term structure.",
+        )
+
+    vals.sort(key=lambda x: x[0])
+    front = vals[0][1]
+    back = vals[-1][1]
+    slope = (back - front) / front if front > 0 else 0
+
+    if slope < -0.10:
+        shape = "extreme_backwardation"
+        score = 85.0
+        interp = "Extreme backwardation — peak stress, decay historically imminent"
+    elif slope < -0.03:
+        shape = "backwardation"
+        score = 70.0
+        interp = "Backwardation — stress elevated, vol compression likely"
+    elif slope < 0.03:
+        shape = "flat"
+        score = 50.0
+        interp = "Flat term structure — no directional edge from shape"
+    else:
+        shape = "contango"
+        score = 30.0
+        interp = "Contango — market already pricing vol decline, limited edge"
+
+    return EdgeResult(
+        edge_id="term_structure_shape",
+        label="Term Structure Shape",
+        score=score,
+        raw_value=slope,
+        interpretation=interp,
+    )
+
+
+def compute_edge4_persistence_mispricing(
+    ou_params: Optional[OUParams],
+    iv_30d: Optional[float],
+    iv_60d: Optional[float],
+) -> EdgeResult:
+    """Edge 4: Persistence mispricing — implied half-life vs modeled half-life.
+
+    If market implies longer persistence than the OU model, that is
+    direct, quantifiable short vol edge.
+    """
+    if ou_params is None:
+        return EdgeResult(
+            edge_id="persistence_mispricing",
+            label="Persistence Mispricing",
+            interpretation="OU model not calibrated.",
+        )
+
+    m_hl = modeled_half_life_days(ou_params.kappa)
+    i_hl = implied_half_life_from_term_structure(
+        iv_30d if iv_30d else 0, iv_60d if iv_60d else 0,
+    )
+    mispricing = persistence_mispricing(i_hl, m_hl)
+
+    if mispricing is None:
+        return EdgeResult(
+            edge_id="persistence_mispricing",
+            label="Persistence Mispricing",
+            score=50.0,
+            raw_value=0.0,
+            interpretation=f"Implied half-life unavailable. Modeled half-life: {m_hl:.0f}d.",
+        )
+
+    # Normalize: 0 mispricing -> 50, +20 days mispricing -> ~80
+    score = _clamp(0, 100, 50.0 + mispricing * 1.5)
+
+    if mispricing > 15:
+        interp = (
+            f"Strong mispricing: market implies {i_hl:.0f}d persistence vs model {m_hl:.0f}d "
+            f"(+{mispricing:.0f}d overpriced) — significant short vol edge"
+        )
+    elif mispricing > 5:
+        interp = (
+            f"Moderate mispricing: implied {i_hl:.0f}d vs model {m_hl:.0f}d "
+            f"(+{mispricing:.0f}d) — some edge"
+        )
+    elif mispricing > -5:
+        interp = (
+            f"Minimal mispricing: implied {i_hl:.0f}d vs model {m_hl:.0f}d — "
+            f"fairly priced, limited persistence edge"
+        )
+    else:
+        interp = (
+            f"Negative mispricing: market prices faster decay than model "
+            f"(implied {i_hl:.0f}d vs model {m_hl:.0f}d) — caution"
+        )
+
+    return EdgeResult(
+        edge_id="persistence_mispricing",
+        label="Persistence Mispricing",
+        score=score,
+        raw_value=mispricing,
+        interpretation=interp,
+    )
+
+
+def compute_edge_composite(
+    vix_spot: float,
+    iv_30d: Optional[float],
+    iv_60d: Optional[float],
+    iv_90d: Optional[float],
+    ou_params: Optional[OUParams],
+    historical_rv_post_events: List[float],
+) -> EdgeComposite:
+    """Compute all four edges and produce weighted composite."""
+
+    e1 = compute_edge1_spot_term_dislocation(vix_spot, iv_30d)
+    e2 = compute_edge2_iv_vs_rv(vix_spot, historical_rv_post_events)
+    e3 = compute_edge3_term_structure_shape(iv_30d, iv_60d, iv_90d)
+    e4 = compute_edge4_persistence_mispricing(ou_params, iv_30d, iv_60d)
+
+    # Weights: Edge1 25%, Edge2 30%, Edge3 15%, Edge4 30%
+    composite = (
+        e1.score * 0.25
+        + e2.score * 0.30
+        + e3.score * 0.15
+        + e4.score * 0.30
+    )
+
+    if composite >= 70:
+        label = "Strong Short-Vol Edge"
+    elif composite >= 55:
+        label = "Moderate Edge"
+    elif composite >= 45:
+        label = "Marginal"
+    else:
+        label = "No Edge / Caution"
+
+    return EdgeComposite(score=composite, label=label, edges=[e1, e2, e3, e4])

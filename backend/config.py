@@ -274,6 +274,25 @@ class FeatureFlags:
     ENGINE8_LOOKBACK_EVENTS: int = 40                  # Historical events to consider
     ENGINE8_MAX_CONTROLLED_LOSS_PCT: float = 50.0      # Max % of entry credit loss for "controlled_loss"
 
+    # --- Engine 12: VIX Spike Fade / Vol Dislocation Engine ---
+    ENABLE_ENGINE12_VIX_FADE: bool = True
+    ENGINE12_CACHE_TTL_SCAN: int = 15 * 60              # 15 min in-memory scan cache
+    ENGINE12_MC_N_SIMS: int = 10000                     # Monte Carlo simulations
+    ENGINE12_MC_SEED: int = 42                          # Deterministic seed
+    ENGINE12_OU_CALIBRATION_LOOKBACK_DAYS: int = 1260   # 5 years of VIX history
+    ENGINE12_MAX_WORKERS: int = 4                       # Parallel data fetch workers
+    ENGINE12_SECONDARY_SPIKE_THRESHOLD: float = 0.25    # 25% prob -> structure gating
+    ENGINE12_CONTAINED_THRESHOLD: float = 0.60          # 60% prob -> aggressive short vol
+    ENGINE12_DEALER_GAMMA_ENABLED: bool = True          # Toggle dealer gamma integration
+    ENGINE12_STRESS_WEIGHT_OIL: float = 0.30
+    ENGINE12_STRESS_WEIGHT_GOLD: float = 0.20
+    ENGINE12_STRESS_WEIGHT_HYG: float = 0.20
+    ENGINE12_STRESS_WEIGHT_DXY: float = 0.15
+    ENGINE12_STRESS_WEIGHT_TLT_VOL: float = 0.15
+    ENGINE12_GAMMA_AMP_LOW: float = 0.10                # Dealer gamma amplification factors
+    ENGINE12_GAMMA_AMP_MED: float = 0.20
+    ENGINE12_GAMMA_AMP_HIGH: float = 0.30
+
     # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
     GATE_RD_REGIME_ALLOW: str = "Transitional,Stressed"
@@ -464,6 +483,25 @@ class FeatureFlags:
             ENGINE7_OVERLAP_CORR_WINDOW=_get_int("ENGINE7_OVERLAP_CORR_WINDOW", 20),
             GATE_PAIRS_REGIME_ALLOW=os.getenv("GATE_PAIRS_REGIME_ALLOW", ""),
             GATE_PAIRS_VOL_STATE_ALLOW=os.getenv("GATE_PAIRS_VOL_STATE_ALLOW", ""),
+
+            # --- Engine 12 ---
+            ENABLE_ENGINE12_VIX_FADE=_get_bool("ENABLE_ENGINE12_VIX_FADE", True),
+            ENGINE12_CACHE_TTL_SCAN=_get_int("ENGINE12_CACHE_TTL_SCAN", 15 * 60),
+            ENGINE12_MC_N_SIMS=_get_int("ENGINE12_MC_N_SIMS", 10000),
+            ENGINE12_MC_SEED=_get_int("ENGINE12_MC_SEED", 42),
+            ENGINE12_OU_CALIBRATION_LOOKBACK_DAYS=_get_int("ENGINE12_OU_CALIBRATION_LOOKBACK_DAYS", 1260),
+            ENGINE12_MAX_WORKERS=_get_int("ENGINE12_MAX_WORKERS", 4),
+            ENGINE12_SECONDARY_SPIKE_THRESHOLD=_get_float("ENGINE12_SECONDARY_SPIKE_THRESHOLD", 0.25),
+            ENGINE12_CONTAINED_THRESHOLD=_get_float("ENGINE12_CONTAINED_THRESHOLD", 0.60),
+            ENGINE12_DEALER_GAMMA_ENABLED=_get_bool("ENGINE12_DEALER_GAMMA_ENABLED", True),
+            ENGINE12_STRESS_WEIGHT_OIL=_get_float("ENGINE12_STRESS_WEIGHT_OIL", 0.30),
+            ENGINE12_STRESS_WEIGHT_GOLD=_get_float("ENGINE12_STRESS_WEIGHT_GOLD", 0.20),
+            ENGINE12_STRESS_WEIGHT_HYG=_get_float("ENGINE12_STRESS_WEIGHT_HYG", 0.20),
+            ENGINE12_STRESS_WEIGHT_DXY=_get_float("ENGINE12_STRESS_WEIGHT_DXY", 0.15),
+            ENGINE12_STRESS_WEIGHT_TLT_VOL=_get_float("ENGINE12_STRESS_WEIGHT_TLT_VOL", 0.15),
+            ENGINE12_GAMMA_AMP_LOW=_get_float("ENGINE12_GAMMA_AMP_LOW", 0.10),
+            ENGINE12_GAMMA_AMP_MED=_get_float("ENGINE12_GAMMA_AMP_MED", 0.20),
+            ENGINE12_GAMMA_AMP_HIGH=_get_float("ENGINE12_GAMMA_AMP_HIGH", 0.30),
 
             # --- Engine 8 ---
             ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),
@@ -730,6 +768,26 @@ class FeatureFlags:
             ("ENGINE8_LLM_MODEL_VERSION", str(self.ENGINE8_LLM_MODEL_VERSION)),
             ("ENGINE8_LOOKBACK_EVENTS", int(self.ENGINE8_LOOKBACK_EVENTS)),
             ("ENGINE8_MAX_CONTROLLED_LOSS_PCT", float(self.ENGINE8_MAX_CONTROLLED_LOSS_PCT)),
+        )
+
+    def cache_key_engine12(self) -> tuple:
+        """Engine 12 cache fingerprint (VIX Spike Fade / Vol Dislocation)."""
+        return (
+            ("ENABLE_ENGINE12_VIX_FADE", bool(self.ENABLE_ENGINE12_VIX_FADE)),
+            ("ENGINE12_MC_N_SIMS", int(self.ENGINE12_MC_N_SIMS)),
+            ("ENGINE12_MC_SEED", int(self.ENGINE12_MC_SEED)),
+            ("ENGINE12_OU_CALIBRATION_LOOKBACK_DAYS", int(self.ENGINE12_OU_CALIBRATION_LOOKBACK_DAYS)),
+            ("ENGINE12_SECONDARY_SPIKE_THRESHOLD", float(self.ENGINE12_SECONDARY_SPIKE_THRESHOLD)),
+            ("ENGINE12_CONTAINED_THRESHOLD", float(self.ENGINE12_CONTAINED_THRESHOLD)),
+            ("ENGINE12_DEALER_GAMMA_ENABLED", bool(self.ENGINE12_DEALER_GAMMA_ENABLED)),
+            ("ENGINE12_STRESS_WEIGHT_OIL", float(self.ENGINE12_STRESS_WEIGHT_OIL)),
+            ("ENGINE12_STRESS_WEIGHT_GOLD", float(self.ENGINE12_STRESS_WEIGHT_GOLD)),
+            ("ENGINE12_STRESS_WEIGHT_HYG", float(self.ENGINE12_STRESS_WEIGHT_HYG)),
+            ("ENGINE12_STRESS_WEIGHT_DXY", float(self.ENGINE12_STRESS_WEIGHT_DXY)),
+            ("ENGINE12_STRESS_WEIGHT_TLT_VOL", float(self.ENGINE12_STRESS_WEIGHT_TLT_VOL)),
+            ("ENGINE12_GAMMA_AMP_LOW", float(self.ENGINE12_GAMMA_AMP_LOW)),
+            ("ENGINE12_GAMMA_AMP_MED", float(self.ENGINE12_GAMMA_AMP_MED)),
+            ("ENGINE12_GAMMA_AMP_HIGH", float(self.ENGINE12_GAMMA_AMP_HIGH)),
         )
 
 

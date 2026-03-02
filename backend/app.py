@@ -25,6 +25,7 @@ from backend.routers import (
     engine7_pairs,
     engine8_post_event,
     engine9_credit,
+    engine12_vix_fade,
     calendar,
     market_intel,
     front_layer,
@@ -319,6 +320,14 @@ def credit_stress_page():
     return FileResponse(str(STATIC_DIR / "engine9.html"))
 
 
+@app.get("/vix-fade")
+def vix_fade_page():
+    fl = get_flags()
+    if not getattr(fl, "ENABLE_ENGINE12_VIX_FADE", True):
+        raise HTTPException(status_code=404, detail="Engine 12 disabled")
+    return FileResponse(str(STATIC_DIR / "vix-fade.html"))
+
+
 @app.get("/compare")
 def serve_compare():
     return FileResponse(str(STATIC_DIR / "compare.html"))
@@ -339,6 +348,7 @@ app.include_router(engine5_lead_lag.router)
 app.include_router(engine7_pairs.router)
 app.include_router(engine8_post_event.router)
 app.include_router(engine9_credit.router)
+app.include_router(engine12_vix_fade.router)
 app.include_router(calendar.router)
 app.include_router(market_intel.router)
 app.include_router(front_layer.router)

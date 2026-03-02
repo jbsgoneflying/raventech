@@ -17,6 +17,7 @@
     { href: "/calendar",        label: "Engine 9",        desc: "Mega-cap earnings dates and compare workflow" },
     { href: "/compare",         label: "Engine 10",       desc: "Multi-ticker side-by-side" },
     { href: "/news-risk",       label: "Engine 11",       desc: "Macro events and headline risk" },
+    { href: "/vix-fade",        label: "Engine 12",       desc: "VIX spike fade — vol dislocation engine" },
   ];
 
   /* Which nav item matches the current URL? */
