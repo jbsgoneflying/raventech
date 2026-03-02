@@ -553,7 +553,7 @@ def engine12_explain(body: dict):
     try:
         client = openai.OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-5.3",
+            model="gpt-5.2",
             messages=[
                 {"role": "system", "content": _E12_SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
