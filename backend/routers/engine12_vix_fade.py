@@ -50,46 +50,45 @@ def _fetch_eodhd_prices(eodhd, symbol: str, days: int = 120) -> List[float]:
 
 
 def _fetch_orats_vix_term_structure(orats) -> Dict[str, Optional[float]]:
-    """Fetch SPX IV at multiple DTEs via ORATS hist_monies_implied.
+    """Fetch SPX IV at 30d/60d/90d DTE using Engine 2's proven fetch_iv_curve.
 
-    Tries the most recent business days (today, then back up to 5 days)
-    since ORATS hist data may not be available for the current session yet.
+    Walks back up to 5 business days to find the most recent available data.
     """
     out: Dict[str, Optional[float]] = {"iv_30d": None, "iv_60d": None, "iv_90d": None}
     if orats is None:
         return out
 
+    try:
+        from backend.spx_ic.ohlc import fetch_iv_curve
+    except ImportError:
+        LOG.warning("Could not import fetch_iv_curve from spx_ic")
+        return out
+
     for days_back in range(0, 6):
         try:
-            trade_date = (dt.date.today() - dt.timedelta(days=days_back)).isoformat()
-            resp = orats.hist_monies_implied(
+            trade_date = dt.date.today() - dt.timedelta(days=days_back)
+            curve = fetch_iv_curve(
+                orats,
                 ticker="SPX",
                 trade_date=trade_date,
-                fields="tradeDate,dte,vol50",
+                dte_targets=[30, 60, 90],
             )
-            rows = resp.rows or []
-            if not rows:
-                continue
+            iv30 = curve.get(30)
+            iv60 = curve.get(60)
+            iv90 = curve.get(90)
 
-            for row in rows:
-                dte = row.get("dte")
-                vol50 = row.get("vol50")
-                if dte is None or vol50 is None:
-                    continue
-                dte = int(dte)
-                vol = float(vol50) * 100  # ORATS vol50 is decimal (0.22 = 22%)
-                if 20 <= dte <= 40 and out["iv_30d"] is None:
-                    out["iv_30d"] = vol
-                elif 50 <= dte <= 70 and out["iv_60d"] is None:
-                    out["iv_60d"] = vol
-                elif 80 <= dte <= 100 and out["iv_90d"] is None:
-                    out["iv_90d"] = vol
-
-            if out["iv_30d"] is not None:
-                LOG.info("ORATS term structure loaded from %s (%d rows)", trade_date, len(rows))
+            if iv30 is not None:
+                out["iv_30d"] = iv30
+                out["iv_60d"] = iv60
+                out["iv_90d"] = iv90
+                LOG.info("ORATS term structure loaded from %s: 30d=%.1f, 60d=%s, 90d=%s",
+                         trade_date.isoformat(), iv30,
+                         f"{iv60:.1f}" if iv60 else "N/A",
+                         f"{iv90:.1f}" if iv90 else "N/A")
                 break
         except Exception as e:
-            LOG.warning("ORATS term structure fetch for %s failed: %s", trade_date, e)
+            LOG.warning("ORATS term structure fetch for %s failed: %s",
+                        (dt.date.today() - dt.timedelta(days=days_back)).isoformat(), e)
             continue
 
     return out
