@@ -150,6 +150,81 @@ def implied_half_life_from_term_structure(iv_30d: float, iv_60d: float) -> Optio
     return hl
 
 
+def implied_half_life_from_ou_vs_market(
+    ou_params: "OUParams",
+    vix_current: float,
+    iv_30d: float,
+) -> Optional[float]:
+    """Secondary persistence method: compare OU absolute forecast to market IV.
+
+    OU predicts VIX at 30d = theta + (vix_current - theta) * exp(-kappa * 30/252).
+    Market prices the 30d IV at iv_30d.
+
+    If OU expects 20.5 but market prices 15.6, market prices FASTER decay.
+    If OU expects 20.5 but market prices 22.0, market prices SLOWER decay.
+
+    We back-solve for the implied kappa from the market's price, then convert
+    to half-life. Returns implied half-life in trading days, or None.
+    """
+    if vix_current <= 0 or iv_30d <= 0:
+        return None
+    if ou_params is None or ou_params.theta <= 0:
+        return None
+
+    theta = ou_params.theta
+    diff_current = vix_current - theta
+    diff_market = iv_30d - theta
+
+    if abs(diff_current) < 0.5:
+        return None
+
+    ratio = diff_market / diff_current
+    if ratio <= 0 or ratio >= 1.0:
+        return None
+
+    implied_kappa_daily = -math.log(ratio) / 30.0
+    if implied_kappa_daily <= 1e-6:
+        return None
+
+    hl = math.log(2.0) / implied_kappa_daily
+    if hl < 1 or hl > 500:
+        return None
+    return hl
+
+
+def implied_decay_from_vixy(vixy_closes: List[float], window: int = 10) -> Optional[float]:
+    """Secondary persistence method: VIXY recent decay rate as half-life proxy.
+
+    VIXY tracks short-term VIX futures. Its decay rate over the past `window`
+    days implies how fast vol is dissipating in the futures complex.
+
+    Returns estimated half-life in trading days, or None.
+    """
+    if len(vixy_closes) < window + 1:
+        return None
+
+    start = vixy_closes[-(window + 1)]
+    end = vixy_closes[-1]
+    if start <= 0 or end <= 0:
+        return None
+
+    total_return = end / start
+    if total_return <= 0 or total_return >= 1.5:
+        return None
+
+    if abs(total_return - 1.0) < 0.001:
+        return None
+
+    daily_decay = total_return ** (1.0 / window)
+    if daily_decay <= 0 or daily_decay >= 1.0:
+        return None
+
+    hl = math.log(0.5) / math.log(daily_decay)
+    if hl < 1 or hl > 500:
+        return None
+    return abs(hl)
+
+
 def persistence_mispricing(implied_hl: Optional[float], modeled_hl: float) -> Optional[float]:
     """Compute persistence mispricing in trading days.
 

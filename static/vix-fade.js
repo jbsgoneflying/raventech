@@ -207,9 +207,15 @@
     var dg = d.dealerGamma || {};
     var stress = d.crossAssetStress || {};
 
+    var srcBadge = "";
+    var vs = d.vixSource || "eod";
+    if (vs === "live") srcBadge = ' <span class="e12Badge e12Badge--green">LIVE</span>';
+    else if (vs === "override") srcBadge = ' <span class="e12Badge e12Badge--blue">OVERRIDE</span>';
+    else srcBadge = ' <span class="e12Badge e12Badge--muted">EOD</span>';
+
     var h = "";
     h += card("VIX Current",
-      '<span class="e12MonoVal">' + fmt2(sp.vixCurrent) + "</span>",
+      '<span class="e12MonoVal">' + fmt2(sp.vixCurrent) + "</span>" + srcBadge,
       "20d MA: " + fmt2(sp.vix20dMA) + " &nbsp;|&nbsp; \u03C3: " + fmt2(sp.vix20dStd) + " &nbsp;|&nbsp; z: " + fmt2(sp.zScore));
 
     h += card("Spike Detected",
@@ -342,9 +348,29 @@
     var rec = d.recommendation;
     if (!rec) { $("recContent").innerHTML = '<div style="padding:20px;color:var(--muted);font-size:12px;">No recommendation available.</div>'; return; }
 
+    var lc = d.liveChain || {};
+    var pricing = lc.pricing || {};
+    var chainInfo = lc.chain || {};
+
     var h = '<div class="e12Rec">';
-    h += '<div class="e12RecTitle">' + esc(rec.primary) + "</div>";
+    h += '<div class="e12RecTitle">' + esc(rec.primary);
+    if (lc.available) h += ' <span class="e12Badge e12Badge--green">LIVE CHAIN</span>';
+    else h += ' <span class="e12Badge e12Badge--muted">MODEL EST</span>';
+    h += "</div>";
     h += '<div class="e12RecBody">' + esc(rec.primaryRationale) + "</div>";
+
+    // Show live chain pricing if available
+    if (lc.available && pricing) {
+      var cs = pricing.shortCallSpread;
+      var lp = pricing.longPut;
+      var ps = pricing.longPutSpread;
+      h += '<div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--hover);font-size:12px;line-height:1.6;">';
+      h += '<strong style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);">Live Market Pricing (' + esc(chainInfo.expiry || "") + ', ' + (chainInfo.dte || "?") + ' DTE)</strong><br>';
+      if (cs) h += 'Short Call Spread: <strong>' + fmt1(cs.shortStrike) + '/' + fmt1(cs.longStrike) + '</strong> \u2014 $' + fmt2(cs.midCredit) + ' mid credit<br>';
+      if (lp) h += 'Long Put: <strong>' + fmt1(lp.strike) + '</strong> \u2014 $' + fmt2(lp.midCost) + ' mid cost<br>';
+      if (ps) h += 'Long Put Spread: <strong>' + fmt1(ps.longStrike) + '/' + fmt1(ps.shortStrike) + '</strong> \u2014 $' + fmt2(ps.midDebit) + ' mid debit<br>';
+      h += "</div>";
+    }
     h += "</div>";
 
     if (rec.guardrails && rec.guardrails.length) {
@@ -352,6 +378,8 @@
         h += '<div class="e12Guardrail">\u26A0 ' + esc(rec.guardrails[i]) + "</div>";
       }
     }
+
+    h += '<button id="logTradeBtn" class="e12InsightBtn" style="margin-top:10px;padding:6px 14px;font-size:11px;">Log This Trade</button>';
 
     if (rec.positionSize) {
       var ps = rec.positionSize;
@@ -364,6 +392,127 @@
       h += "</div>";
     }
     $("recContent").innerHTML = h;
+  }
+
+  /* ── Log Trade + Active Trades ── */
+  function logTrade() {
+    if (!lastPayload || !lastPayload.recommendation) return;
+    var rec = lastPayload.recommendation;
+    var sp = lastPayload.spike || {};
+    var body = {
+      entryVix: sp.vixCurrent,
+      structure: rec.primary,
+      strikes: rec.ranked && rec.ranked[0] ? rec.ranked[0] : {},
+      entryCredit: null,
+      ouParams: lastPayload.ouModel || {},
+    };
+    fetch("/api/engine12/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status === "ok") {
+          $("status").textContent = "Trade logged: " + (data.tradeId || "");
+          loadActiveTrades();
+        }
+      })
+      .catch(function (err) { $("status").textContent = "Trade log failed: " + err.message; });
+  }
+
+  document.addEventListener("click", function (e) {
+    if (e.target.id === "logTradeBtn" || (e.target.closest && e.target.closest("#logTradeBtn"))) {
+      logTrade();
+    }
+    if (e.target.classList && e.target.classList.contains("e12CloseTradeBtn")) {
+      var tid = e.target.getAttribute("data-trade-id");
+      if (!tid) return;
+      fetch("/api/engine12/trade/" + tid + "/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }).then(function () { loadActiveTrades(); });
+    }
+  });
+
+  function loadActiveTrades() {
+    fetch("/api/engine12/trades")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        var section = $("activeTradesSection");
+        if (!data || !data.trades || !data.trades.length) {
+          section.style.display = "none";
+          return;
+        }
+        section.style.display = "block";
+        var h = "";
+        for (var i = 0; i < data.trades.length; i++) {
+          var t = data.trades[i];
+          var statusColor = t.trackingStatus === "ahead_of_model" ? "var(--green)"
+            : t.trackingStatus === "behind_model" ? "var(--red)" : "var(--amber)";
+          var statusLabel = t.trackingStatus === "ahead_of_model" ? "Ahead of Model"
+            : t.trackingStatus === "behind_model" ? "Behind Model" : "On Track";
+
+          h += '<div class="e12Card" style="margin-bottom:10px;">';
+          h += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+          h += '<div class="e12CardLabel">' + esc(t.structure) + ' \u2014 ' + esc(t.entryDate) + '</div>';
+          h += '<button class="e12CloseTradeBtn e12InsightBtn" data-trade-id="' + esc(t.tradeId) + '">Close Trade</button>';
+          h += '</div>';
+          h += '<div style="display:flex;gap:24px;margin-top:8px;">';
+          h += '<div><span class="e12CardLabel">Entry VIX</span><div class="e12MonoVal">' + fmt2(t.entryVix) + '</div></div>';
+          h += '<div><span class="e12CardLabel">Current VIX</span><div class="e12MonoVal">' + fmt2(t.currentVix) + '</div></div>';
+          h += '<div><span class="e12CardLabel">Expected Now</span><div class="e12MonoVal">' + fmt2(t.expectedVixNow) + '</div></div>';
+          h += '<div><span class="e12CardLabel">Deviation</span><div class="e12MonoVal" style="color:' + statusColor + '">' + (t.deviation != null ? (t.deviation > 0 ? "+" : "") + fmt2(t.deviation) : "\u2014") + '</div></div>';
+          h += '<div><span class="e12CardLabel">Days Held</span><div class="e12MonoVal">' + (t.daysHeld || 0) + '</div></div>';
+          h += '<div><span class="e12CardLabel">Status</span><div style="color:' + statusColor + ';font-weight:700;font-size:12px;">' + statusLabel + '</div></div>';
+          h += '</div>';
+
+          // Mini actual vs expected chart
+          if (t.expectedPath && t.expectedPath.length > 1) {
+            h += renderTradeChart(t);
+          }
+          h += '</div>';
+        }
+        section.innerHTML = h;
+      })
+      .catch(function () {});
+  }
+
+  function renderTradeChart(t) {
+    var expected = t.expectedPath || [];
+    var actual = t.actualPath || [];
+    if (expected.length < 2) return "";
+
+    var W = 400, H = 100, pad = { l: 36, r: 12, t: 8, b: 22 };
+    var xMax = expected[expected.length - 1].horizon_days || 30;
+    var allY = expected.map(function (p) { return p.expected_vix; }).concat(actual);
+    allY.push(t.entryVix);
+    var yMin = Math.floor(Math.min.apply(null, allY) - 1);
+    var yMax = Math.ceil(Math.max.apply(null, allY) + 1);
+
+    function sx(d) { return pad.l + (d / xMax) * (W - pad.l - pad.r); }
+    function sy(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * (H - pad.t - pad.b); }
+
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:100px;margin-top:8px;" xmlns="http://www.w3.org/2000/svg">';
+
+    // Expected path (blue line)
+    var ePts = expected.map(function (p) { return sx(p.horizon_days) + ',' + sy(p.expected_vix); }).join(' ');
+    svg += '<polyline points="' + ePts + '" fill="none" stroke="rgba(0,122,255,0.5)" stroke-width="1.5" stroke-dasharray="4,3" />';
+
+    // Actual path (orange dots)
+    for (var i = 0; i < actual.length; i++) {
+      var day = i + 1;
+      if (day > xMax) break;
+      svg += '<circle cx="' + sx(day) + '" cy="' + sy(actual[i]) + '" r="2.5" fill="rgba(255,159,10,0.9)" />';
+    }
+
+    // Entry level line
+    svg += '<line x1="' + pad.l + '" y1="' + sy(t.entryVix) + '" x2="' + (W - pad.r) + '" y2="' + sy(t.entryVix) + '" stroke="rgba(255,59,48,0.2)" stroke-dasharray="2,2" />';
+    svg += '<text x="' + (W - pad.r) + '" y="' + (sy(t.entryVix) - 3) + '" fill="rgba(255,59,48,0.5)" font-size="8" text-anchor="end">entry</text>';
+
+    svg += '</svg>';
+    return svg;
   }
 
   /* ── MC Table ── */
@@ -427,7 +576,13 @@
     $("runBtn").disabled = true;
     if (typeof RavenLoading !== "undefined") RavenLoading.show();
 
-    fetch("/api/engine12/scan")
+    var scanUrl = "/api/engine12/scan";
+    var vixOv = $("vixOverride") ? $("vixOverride").value : "";
+    if (vixOv && !isNaN(parseFloat(vixOv))) {
+      scanUrl += "?vix_override=" + parseFloat(vixOv);
+    }
+
+    fetch(scanUrl)
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
@@ -446,6 +601,7 @@
         try { renderRecommendation(data); } catch (e) { console.error("[E12] renderRecommendation:", e); }
         try { renderMC(data); } catch (e) { console.error("[E12] renderMC:", e); }
         try { renderHistorical(data); } catch (e) { console.error("[E12] renderHistorical:", e); }
+        try { loadActiveTrades(); } catch (e) { console.error("[E12] loadActiveTrades:", e); }
         $("results").classList.remove("hidden");
         $("status").textContent = "Analysis complete \u2014 " + (data.asOfDate || "");
       })
@@ -460,4 +616,23 @@
   }
 
   $("runBtn").addEventListener("click", runScan);
+
+  /* ── Spike alert poll on page load ── */
+  (function pollAlert() {
+    fetch("/api/engine12/alert")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        var banner = $("e12AlertBanner");
+        if (!banner || !data || !data.detected) {
+          if (banner) banner.style.display = "none";
+          return;
+        }
+        banner.innerHTML = "SPIKE DETECTED \u2014 VIX at " +
+          (data.vixCurrent || "?") + " (+" + (data.spikePctAboveMA || "?") +
+          "% above 20d MA, z=" + (data.zScore || "?") +
+          ") \u2014 Click <strong>Run Analysis</strong> for full assessment";
+        banner.style.display = "block";
+      })
+      .catch(function () {});
+  })();
 })();

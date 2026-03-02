@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from backend.engine12_ou_model import (
     OUParams,
     implied_half_life_from_term_structure,
+    implied_half_life_from_ou_vs_market,
+    implied_decay_from_vixy,
     modeled_half_life_days,
     persistence_mispricing,
 )
@@ -198,11 +200,15 @@ def compute_edge4_persistence_mispricing(
     ou_params: Optional[OUParams],
     iv_30d: Optional[float],
     iv_60d: Optional[float],
+    vix_spot: float = 0.0,
+    vixy_closes: Optional[List[float]] = None,
 ) -> EdgeResult:
     """Edge 4: Persistence mispricing — implied half-life vs modeled half-life.
 
-    If market implies longer persistence than the OU model, that is
-    direct, quantifiable short vol edge.
+    Tries three methods in priority order:
+    A) Direct: implied half-life from IV term structure slope (30d vs 60d)
+    B) OU vs Market: compare OU forward forecast to market IV absolute level
+    C) VIXY decay: recent VIXY price decay rate as futures-implied half-life
     """
     if ou_params is None:
         return EdgeResult(
@@ -212,9 +218,25 @@ def compute_edge4_persistence_mispricing(
         )
 
     m_hl = modeled_half_life_days(ou_params.kappa)
+
+    # Method A: direct term structure slope
     i_hl = implied_half_life_from_term_structure(
         iv_30d if iv_30d else 0, iv_60d if iv_60d else 0,
     )
+    method = "term_structure"
+
+    # Method B: OU absolute level vs market IV
+    if i_hl is None and iv_30d and iv_30d > 0 and vix_spot > 0:
+        i_hl = implied_half_life_from_ou_vs_market(ou_params, vix_spot, iv_30d)
+        if i_hl is not None:
+            method = "ou_vs_market"
+
+    # Method C: VIXY decay rate
+    if i_hl is None and vixy_closes and len(vixy_closes) > 10:
+        i_hl = implied_decay_from_vixy(vixy_closes)
+        if i_hl is not None:
+            method = "vixy_decay"
+
     mispricing = persistence_mispricing(i_hl, m_hl)
 
     if mispricing is None:
@@ -223,30 +245,35 @@ def compute_edge4_persistence_mispricing(
             label="Persistence Mispricing",
             score=50.0,
             raw_value=0.0,
-            interpretation=f"Implied half-life unavailable. Modeled half-life: {m_hl:.0f}d.",
+            interpretation=f"All persistence methods unavailable. Modeled half-life: {m_hl:.0f}d.",
         )
 
-    # Normalize: 0 mispricing -> 50, +20 days mispricing -> ~80
+    method_label = {
+        "term_structure": "IV slope",
+        "ou_vs_market": "OU vs market",
+        "vixy_decay": "VIXY decay",
+    }.get(method, method)
+
     score = _clamp(0, 100, 50.0 + mispricing * 1.5)
 
     if mispricing > 15:
         interp = (
-            f"Strong mispricing: market implies {i_hl:.0f}d persistence vs model {m_hl:.0f}d "
+            f"Strong mispricing ({method_label}): market implies {i_hl:.0f}d persistence vs model {m_hl:.0f}d "
             f"(+{mispricing:.0f}d overpriced) — significant short vol edge"
         )
     elif mispricing > 5:
         interp = (
-            f"Moderate mispricing: implied {i_hl:.0f}d vs model {m_hl:.0f}d "
+            f"Moderate mispricing ({method_label}): implied {i_hl:.0f}d vs model {m_hl:.0f}d "
             f"(+{mispricing:.0f}d) — some edge"
         )
     elif mispricing > -5:
         interp = (
-            f"Minimal mispricing: implied {i_hl:.0f}d vs model {m_hl:.0f}d — "
-            f"fairly priced, limited persistence edge"
+            f"Minimal mispricing ({method_label}): implied {i_hl:.0f}d vs model {m_hl:.0f}d — "
+            f"fairly priced"
         )
     else:
         interp = (
-            f"Negative mispricing: market prices faster decay than model "
+            f"Negative mispricing ({method_label}): market prices faster decay "
             f"(implied {i_hl:.0f}d vs model {m_hl:.0f}d) — caution"
         )
 
@@ -266,13 +293,16 @@ def compute_edge_composite(
     iv_90d: Optional[float],
     ou_params: Optional[OUParams],
     historical_rv_post_events: List[float],
+    vixy_closes: Optional[List[float]] = None,
 ) -> EdgeComposite:
     """Compute all four edges and produce weighted composite."""
 
     e1 = compute_edge1_spot_term_dislocation(vix_spot, iv_30d)
     e2 = compute_edge2_iv_vs_rv(vix_spot, historical_rv_post_events)
     e3 = compute_edge3_term_structure_shape(iv_30d, iv_60d, iv_90d)
-    e4 = compute_edge4_persistence_mispricing(ou_params, iv_30d, iv_60d)
+    e4 = compute_edge4_persistence_mispricing(
+        ou_params, iv_30d, iv_60d, vix_spot=vix_spot, vixy_closes=vixy_closes,
+    )
 
     # Weights: Edge1 25%, Edge2 30%, Edge3 15%, Edge4 30%
     composite = (

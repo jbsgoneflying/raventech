@@ -13,6 +13,9 @@
 # Engine 6 (pairs): nightly LLM theme review
 45 9 * * 1-5 curl -sf -X POST http://localhost:8000/api/engine7-pairs/nightly-review >> /var/log/cron.log 2>&1
 
+# Engine 12: VIX spike monitor (every 15 min during US market hours, 9am-9pm UTC)
+*/15 9-21 * * 1-5 cd /app && python3 scripts/engine12_spike_monitor.py >> /var/log/cron.log 2>&1
+
 # Weekly roadmap: Sunday evening (generates planning brief)
 0 22 * * 0   cd /app && python3 scripts/refresh_daily_market_state.py --weekly >> /var/log/cron.log 2>&1
 

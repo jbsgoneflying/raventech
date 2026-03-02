@@ -49,6 +49,33 @@ def _fetch_eodhd_prices(eodhd, symbol: str, days: int = 120) -> List[float]:
         return []
 
 
+def _fetch_live_vix(eodhd) -> Optional[float]:
+    """Fetch delayed-live VIX quote via EODHD real-time endpoint (~15min delay)."""
+    if eodhd is None:
+        return None
+    try:
+        resp = eodhd.get_live_quote("VIX.INDX")
+        for row in resp.rows or ([resp.raw] if isinstance(resp.raw, dict) else []):
+            for key in ("close", "previousClose", "last", "price"):
+                v = row.get(key)
+                if v is not None:
+                    fv = float(v)
+                    if fv > 5:
+                        return fv
+    except Exception as e:
+        LOG.warning("Live VIX quote failed: %s", e)
+    return None
+
+
+def _is_market_hours() -> bool:
+    """Rough check: weekday between 14:00-21:30 UTC (pre-market through close ET)."""
+    now = dt.datetime.utcnow()
+    if now.weekday() >= 5:
+        return False
+    minutes = now.hour * 60 + now.minute
+    return 840 <= minutes <= 1290  # 14:00 - 21:30 UTC
+
+
 def _fetch_orats_vix_term_structure(orats) -> Dict[str, Optional[float]]:
     """Fetch SPX IV at 30d/60d/90d DTE using Engine 2's proven fetch_iv_curve.
 
@@ -94,6 +121,168 @@ def _fetch_orats_vix_term_structure(orats) -> Dict[str, Optional[float]]:
     return out
 
 
+def _fetch_vix_option_chain(orats, vix_current: float, dte_target: int = 21) -> Optional[Dict[str, Any]]:
+    """Fetch live VIX option chain from ORATS for real bid/ask pricing.
+
+    Tries ticker variants: VIX, $VIX. Returns strike-level data for
+    the nearest expiry matching dte_target, or None on failure.
+    """
+    if orats is None or vix_current <= 0:
+        return None
+
+    fields = (
+        "strike,callMidIv,putMidIv,callBidPrice,callAskPrice,"
+        "putBidPrice,putAskPrice,callMidPrice,putMidPrice,"
+        "dte,expirDate,spotPrice,callOpenInterest,putOpenInterest"
+    )
+
+    for ticker_variant in ("VIX", "$VIX"):
+        try:
+            resp = orats.live_strikes(ticker=ticker_variant, fields=fields)
+            rows = resp.rows or []
+            if not rows:
+                continue
+
+            # Find best expiry near dte_target
+            dte_vals = set()
+            for r in rows:
+                d = r.get("dte")
+                if d is not None:
+                    dte_vals.add(int(d))
+            if not dte_vals:
+                continue
+
+            best_dte = min(dte_vals, key=lambda d: abs(d - dte_target))
+            chain_rows = [r for r in rows if r.get("dte") is not None and int(r["dte"]) == best_dte]
+            if not chain_rows:
+                continue
+
+            expiry = chain_rows[0].get("expirDate", "")
+            spot = None
+            for r in chain_rows:
+                s = r.get("spotPrice")
+                if s and float(s) > 0:
+                    spot = float(s)
+                    break
+
+            strikes = []
+            for r in chain_rows:
+                k = r.get("strike")
+                if k is None:
+                    continue
+                strikes.append({
+                    "strike": float(k),
+                    "callBid": r.get("callBidPrice"),
+                    "callAsk": r.get("callAskPrice"),
+                    "callMid": r.get("callMidPrice"),
+                    "putBid": r.get("putBidPrice"),
+                    "putAsk": r.get("putAskPrice"),
+                    "putMid": r.get("putMidPrice"),
+                    "callOI": r.get("callOpenInterest"),
+                    "putOI": r.get("putOpenInterest"),
+                })
+
+            LOG.info("VIX chain loaded: %s, %d DTE, %d strikes, ticker=%s", expiry, best_dte, len(strikes), ticker_variant)
+            return {
+                "available": True,
+                "ticker": ticker_variant,
+                "expiry": expiry,
+                "dte": best_dte,
+                "spot": spot,
+                "strikes": sorted(strikes, key=lambda s: s["strike"]),
+            }
+        except Exception as e:
+            LOG.debug("VIX chain fetch failed for %s: %s", ticker_variant, e)
+            continue
+
+    return None
+
+
+def _compute_live_structure_pricing(
+    chain: Dict[str, Any],
+    vix_current: float,
+) -> Dict[str, Any]:
+    """Compute real bid/ask pricing for all 4 structures from the live chain."""
+    strikes = chain.get("strikes", [])
+    if not strikes:
+        return {}
+
+    def _find_nearest(target: float) -> Optional[Dict[str, Any]]:
+        best = None
+        best_dist = float("inf")
+        for s in strikes:
+            d = abs(s["strike"] - target)
+            if d < best_dist:
+                best_dist = d
+                best = s
+        return best
+
+    def _safe_float(v) -> Optional[float]:
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    result = {}
+    expiry = chain.get("expiry", "")
+    dte = chain.get("dte", 0)
+
+    # Short Call Spread: sell ATM+2 / buy ATM+7
+    cs_short = _find_nearest(vix_current + 2)
+    cs_long = _find_nearest(vix_current + 7)
+    if cs_short and cs_long:
+        s_mid = _safe_float(cs_short.get("callMid"))
+        l_mid = _safe_float(cs_long.get("callMid"))
+        s_bid = _safe_float(cs_short.get("callBid"))
+        l_ask = _safe_float(cs_long.get("callAsk"))
+        result["shortCallSpread"] = {
+            "shortStrike": cs_short["strike"],
+            "longStrike": cs_long["strike"],
+            "midCredit": round(s_mid - l_mid, 2) if s_mid and l_mid else None,
+            "worstCredit": round(s_bid - l_ask, 2) if s_bid and l_ask else None,
+            "expiry": expiry,
+            "dte": dte,
+        }
+
+    # Long Put: ATM-1
+    put_row = _find_nearest(vix_current - 1)
+    if put_row:
+        result["longPut"] = {
+            "strike": put_row["strike"],
+            "midCost": _safe_float(put_row.get("putMid")),
+            "askCost": _safe_float(put_row.get("putAsk")),
+            "expiry": expiry,
+            "dte": dte,
+        }
+
+    # Long Put Spread: buy ATM-1 / sell ATM-6
+    ps_long = _find_nearest(vix_current - 1)
+    ps_short = _find_nearest(vix_current - 6)
+    if ps_long and ps_short:
+        l_mid = _safe_float(ps_long.get("putMid"))
+        s_mid = _safe_float(ps_short.get("putMid"))
+        result["longPutSpread"] = {
+            "longStrike": ps_long["strike"],
+            "shortStrike": ps_short["strike"],
+            "midDebit": round(l_mid - s_mid, 2) if l_mid and s_mid else None,
+            "expiry": expiry,
+            "dte": dte,
+        }
+
+    # Calendar: ATM+1 (front sell / back buy — we only have one expiry here)
+    cal_row = _find_nearest(vix_current + 1)
+    if cal_row:
+        result["calendarStrike"] = {
+            "strike": cal_row["strike"],
+            "frontCallMid": _safe_float(cal_row.get("callMid")),
+            "expiry": expiry,
+            "dte": dte,
+            "note": "Back-month pricing requires second expiry — estimate only.",
+        }
+
+    return result
+
+
 def _fetch_dealer_gamma(orats) -> Dict[str, Any]:
     """Fetch SPX dealer gamma context via existing infrastructure."""
     if orats is None:
@@ -123,14 +312,14 @@ def _fetch_dealer_gamma(orats) -> Dict[str, Any]:
 @router.get("/api/engine12/scan")
 def engine12_scan(
     request: Request,
-    date: Optional[str] = Query(None, description="Analysis date (YYYY-MM-DD), defaults to today"),
+    vix_override: Optional[float] = Query(None, ge=5, le=100, description="Manual VIX override for what-if scenarios"),
 ):
     """Engine 12: Full VIX spike fade analysis dashboard."""
     flags = get_flags()
     if not flags.ENABLE_ENGINE12_VIX_FADE:
         raise HTTPException(status_code=503, detail="Engine 12 (VIX Fade) is disabled.")
 
-    cache_key = ("engine12_scan", date or dt.date.today().isoformat())
+    cache_key = ("engine12_scan", dt.date.today().isoformat(), vix_override)
     with _engine12_cache_lock:
         cached = _engine12_cache.get(cache_key)
     if cached is not None:
@@ -165,6 +354,7 @@ def engine12_scan(
     hyg_closes: List[float] = []
     dxy_closes: List[float] = []
     tlt_closes: List[float] = []
+    vixy_closes: List[float] = []
 
     if eodhd:
         with ThreadPoolExecutor(max_workers=flags.ENGINE12_MAX_WORKERS) as pool:
@@ -176,6 +366,7 @@ def engine12_scan(
                 pool.submit(_fetch_eodhd_prices, eodhd, "HYG.US", 120): "hyg",
                 pool.submit(_fetch_eodhd_prices, eodhd, "UUP.US", 120): "dxy",
                 pool.submit(_fetch_eodhd_prices, eodhd, "TLT.US", 120): "tlt",
+                pool.submit(_fetch_eodhd_prices, eodhd, "VIXY.US", 30): "vixy",
             }
             for f in as_completed(futures):
                 key = futures[f]
@@ -195,6 +386,8 @@ def engine12_scan(
                         dxy_closes = data
                     elif key == "tlt":
                         tlt_closes = data
+                    elif key == "vixy":
+                        vixy_closes = data
                 except Exception as e:
                     warnings.append(f"Data fetch failed for {key}: {e}")
     else:
@@ -207,6 +400,18 @@ def engine12_scan(
             "message": "Insufficient VIX data for analysis.",
             "warnings": warnings,
         }
+
+    # ── Live VIX / Override ──
+    vix_source = "eod"
+    if vix_override is not None:
+        vix_closes = vix_closes[:-1] + [vix_override]
+        vix_source = "override"
+        warnings.append(f"VIX override active: using {vix_override:.2f} instead of market data.")
+    elif _is_market_hours() and eodhd:
+        live_vix = _fetch_live_vix(eodhd)
+        if live_vix is not None:
+            vix_closes.append(live_vix)
+            vix_source = "live"
 
     # ── Spike detection ──
     spike = detect_vix_spike(vix_closes)
@@ -277,6 +482,7 @@ def engine12_scan(
         iv_90d=term_struct.get("iv_90d"),
         ou_params=ou_params,
         historical_rv_post_events=historical_rvs,
+        vixy_closes=vixy_closes,
     )
 
     # ── Scenario probabilities (uses ALL signals: severity, gamma, stress, edges, history) ──
@@ -327,6 +533,14 @@ def engine12_scan(
             contained_threshold=flags.ENGINE12_CONTAINED_THRESHOLD,
         )
 
+    # ── Live VIX option chain (best-effort) ──
+    live_chain = None
+    live_pricing = {}
+    if orats:
+        live_chain = _fetch_vix_option_chain(orats, spike.vix_current)
+        if live_chain:
+            live_pricing = _compute_live_structure_pricing(live_chain, spike.vix_current)
+
     # ── Historical comparisons (top 5) ──
     similar = find_similar_events(
         vix_spike_pct=spike.spike_pct_above_ma,
@@ -339,7 +553,8 @@ def engine12_scan(
     result = {
         "engine": "engine12",
         "status": "ok",
-        "asOfDate": date or dt.date.today().isoformat(),
+        "asOfDate": dt.date.today().isoformat(),
+        "vixSource": vix_source,
         "spike": spike.to_dict(),
         "severity": severity.to_dict(),
         "scenarios": scenarios.to_dict(),
@@ -352,6 +567,11 @@ def engine12_scan(
         "monteCarlo": mc_result.to_dict() if mc_result else None,
         "jumpDistribution": jump_dist.to_dict(),
         "recommendation": recommendation.to_dict() if recommendation else None,
+        "liveChain": {
+            "available": live_chain is not None,
+            "chain": {k: v for k, v in (live_chain or {}).items() if k != "strikes"} if live_chain else None,
+            "pricing": live_pricing,
+        },
         "historicalComparisons": similar[:5],
         "warnings": warnings,
     }
@@ -359,6 +579,19 @@ def engine12_scan(
     with _engine12_cache_lock:
         _engine12_cache[cache_key] = result
     return result
+
+
+@router.get("/api/engine12/alert")
+def engine12_alert():
+    """Engine 12: Check spike alert state from Redis (lightweight, no auth)."""
+    from backend.redis_store import get_store_optional
+    store = get_store_optional()
+    if not store:
+        return {"detected": False, "note": "Redis unavailable."}
+    alert = store.get_json("e12:alert:latest")
+    if alert is None:
+        return {"detected": False, "note": "No alert data. Monitor may not be running."}
+    return alert
 
 
 @router.get("/api/engine12/historical")
@@ -574,3 +807,176 @@ def engine12_explain(body: dict):
     except Exception as e:
         LOG.exception("Engine 12 explain failed")
         raise HTTPException(status_code=500, detail=f"LLM call failed: {type(e).__name__}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Post-Trade Tracking
+# ---------------------------------------------------------------------------
+
+_TRADE_KEY_PREFIX = "e12:trades:"
+_TRADE_INDEX_KEY = "e12:trades:index"
+_TRADE_TTL_S = 30 * 86400  # 30 days
+
+
+@router.post("/api/engine12/trade")
+def engine12_log_trade(body: dict):
+    """Log a new VIX fade trade for tracking actual vs predicted decay."""
+    from backend.redis_store import get_store_optional
+    from backend.engine12_ou_model import calibrate_ou, implied_forward_curve, OUParams
+
+    store = get_store_optional()
+    if not store:
+        raise HTTPException(status_code=503, detail="Redis unavailable.")
+
+    trade_id = f"{int(dt.datetime.utcnow().timestamp())}"
+    entry_vix = body.get("entryVix")
+    structure = body.get("structure", "")
+    strikes = body.get("strikes", {})
+    entry_credit = body.get("entryCredit")
+
+    if not entry_vix or not structure:
+        raise HTTPException(status_code=400, detail="Missing entryVix or structure.")
+
+    ou_data = body.get("ouParams", {})
+    ou_params = None
+    if ou_data and ou_data.get("kappa"):
+        ou_params = OUParams(
+            kappa=float(ou_data["kappa"]),
+            theta=float(ou_data.get("theta", 17)),
+            sigma=float(ou_data.get("sigma", 5)),
+            n_obs=int(ou_data.get("nObs", 0)),
+            r_squared=float(ou_data.get("rSquared", 0)),
+        )
+
+    expected_path = []
+    if ou_params:
+        expected_path = implied_forward_curve(
+            ou_params, float(entry_vix), [1, 2, 3, 5, 7, 10, 15, 20, 30],
+        )
+
+    trade = {
+        "tradeId": trade_id,
+        "entryDate": dt.date.today().isoformat(),
+        "entryVix": round(float(entry_vix), 2),
+        "structure": structure,
+        "strikes": strikes,
+        "entryCredit": entry_credit,
+        "ouParams": ou_data,
+        "expectedPath": expected_path,
+        "status": "active",
+    }
+
+    store.set_json(f"{_TRADE_KEY_PREFIX}{trade_id}", trade, ttl_s=_TRADE_TTL_S)
+
+    # Update index
+    index = store.get_json(_TRADE_INDEX_KEY) or []
+    index.append(trade_id)
+    index = index[-50:]  # cap at 50 trades
+    store.set_json(_TRADE_INDEX_KEY, index, ttl_s=_TRADE_TTL_S)
+
+    return {"status": "ok", "tradeId": trade_id, "trade": trade}
+
+
+@router.get("/api/engine12/trades")
+def engine12_list_trades():
+    """List active trades with actual VIX path vs OU prediction."""
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    if not store:
+        return {"trades": []}
+
+    index = store.get_json(_TRADE_INDEX_KEY) or []
+    trades = []
+
+    try:
+        from backend.eodhd_client import EodhdClient
+        eodhd = EodhdClient.from_env()
+    except Exception:
+        eodhd = None
+
+    current_vix = None
+    if eodhd:
+        live = _fetch_live_vix(eodhd)
+        if live:
+            current_vix = live
+        else:
+            prices = _fetch_eodhd_prices(eodhd, "VIX.INDX", 5)
+            if prices:
+                current_vix = prices[-1]
+
+    for tid in reversed(index):
+        trade = store.get_json(f"{_TRADE_KEY_PREFIX}{tid}")
+        if not trade or trade.get("status") != "active":
+            continue
+
+        entry_date = trade.get("entryDate", "")
+        entry_vix = trade.get("entryVix", 0)
+        expected_path = trade.get("expectedPath", [])
+
+        # Compute days held
+        days_held = 0
+        try:
+            ed = dt.date.fromisoformat(entry_date)
+            days_held = (dt.date.today() - ed).days
+        except Exception:
+            pass
+
+        # Fetch actual VIX path since entry
+        actual_path: List[float] = []
+        if eodhd and entry_date:
+            try:
+                resp = eodhd.get_eod("VIX.INDX", from_date=entry_date)
+                actual_path = [
+                    float(r.get("adjusted_close") or r.get("close", 0))
+                    for r in (resp.rows or [])
+                    if r.get("adjusted_close") or r.get("close")
+                ]
+            except Exception:
+                pass
+
+        # Expected VIX at current day
+        expected_now = entry_vix
+        for pt in expected_path:
+            if pt.get("horizon_days", 0) <= days_held:
+                expected_now = pt.get("expected_vix", entry_vix)
+
+        deviation = (current_vix - expected_now) if current_vix else None
+        status_label = "on_track"
+        if deviation is not None:
+            if deviation > 2:
+                status_label = "behind_model"
+            elif deviation < -2:
+                status_label = "ahead_of_model"
+
+        trade["daysHeld"] = days_held
+        trade["currentVix"] = round(current_vix, 2) if current_vix else None
+        trade["expectedVixNow"] = round(expected_now, 2)
+        trade["deviation"] = round(deviation, 2) if deviation is not None else None
+        trade["trackingStatus"] = status_label
+        trade["actualPath"] = actual_path
+        trades.append(trade)
+
+    return {"trades": trades}
+
+
+@router.post("/api/engine12/trade/{trade_id}/close")
+def engine12_close_trade(trade_id: str, body: dict = {}):
+    """Close an active trade."""
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    if not store:
+        raise HTTPException(status_code=503, detail="Redis unavailable.")
+
+    trade = store.get_json(f"{_TRADE_KEY_PREFIX}{trade_id}")
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found.")
+
+    trade["status"] = "closed"
+    trade["closeDate"] = dt.date.today().isoformat()
+    trade["exitVix"] = body.get("exitVix")
+    trade["exitCredit"] = body.get("exitCredit")
+    store.set_json(f"{_TRADE_KEY_PREFIX}{trade_id}", trade, ttl_s=_TRADE_TTL_S)
+
+    return {"status": "ok", "trade": trade}
