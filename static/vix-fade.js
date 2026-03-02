@@ -283,45 +283,63 @@
     $("status").textContent = "Re-simulating\u2026";
     if (typeof RavenLoading !== "undefined") RavenLoading.show();
 
-    fetch(url).then(function (r) { return r.json(); }).then(function (data) {
-      if (data.monteCarlo) renderMC({ monteCarlo: data.monteCarlo });
-      if (data.recommendation) renderRecommendation({ recommendation: data.recommendation });
-      $("status").textContent = "Re-simulation complete";
-    }).catch(function (err) {
-      $("status").textContent = "Re-simulation failed: " + err.message;
-    }).finally(function () {
-      if (typeof RavenLoading !== "undefined") RavenLoading.hide();
-    });
+    fetch(url)
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        console.log("[Engine 12] simulate response:", data);
+        if (data.monteCarlo) renderMC({ monteCarlo: data.monteCarlo });
+        if (data.recommendation) renderRecommendation({ recommendation: data.recommendation });
+        $("status").textContent = "Re-simulation complete";
+      })
+      .catch(function (err) {
+        console.error("[Engine 12] simulate failed:", err);
+        $("status").textContent = "Re-simulation failed: " + err.message;
+      })
+      .finally(function () {
+        if (typeof RavenLoading !== "undefined") RavenLoading.hide();
+      });
   });
 
   /* ── Main scan ── */
   function runScan() {
     $("status").textContent = "Running Engine 12 analysis\u2026";
-    $("results").style.display = "none";
+    $("results").classList.add("hidden");
     $("runBtn").disabled = true;
     if (typeof RavenLoading !== "undefined") RavenLoading.show();
 
-    fetch("/api/engine12/scan").then(function (r) { return r.json(); }).then(function (data) {
-      if (data.status === "error") {
-        $("status").textContent = "Error: " + (data.message || "Unknown");
-        return;
-      }
-      lastPayload = data;
-      renderRegime(data);
-      renderEdges(data);
-      renderOU(data);
-      renderScenarios(data);
-      renderRecommendation(data);
-      renderMC(data);
-      renderHistorical(data);
-      $("results").style.display = "block";
-      $("status").textContent = "Analysis complete \u2014 " + (data.asOfDate || "");
-    }).catch(function (err) {
-      $("status").textContent = "Failed: " + err.message;
-    }).finally(function () {
-      $("runBtn").disabled = false;
-      if (typeof RavenLoading !== "undefined") RavenLoading.hide();
-    });
+    fetch("/api/engine12/scan")
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        console.log("[Engine 12] scan response:", data);
+        if (data.status === "error") {
+          $("status").textContent = "Error: " + (data.message || "Unknown");
+          return;
+        }
+        lastPayload = data;
+        try { renderRegime(data); } catch (e) { console.error("[E12] renderRegime:", e); }
+        try { renderEdges(data); } catch (e) { console.error("[E12] renderEdges:", e); }
+        try { renderOU(data); } catch (e) { console.error("[E12] renderOU:", e); }
+        try { renderScenarios(data); } catch (e) { console.error("[E12] renderScenarios:", e); }
+        try { renderRecommendation(data); } catch (e) { console.error("[E12] renderRecommendation:", e); }
+        try { renderMC(data); } catch (e) { console.error("[E12] renderMC:", e); }
+        try { renderHistorical(data); } catch (e) { console.error("[E12] renderHistorical:", e); }
+        $("results").classList.remove("hidden");
+        $("status").textContent = "Analysis complete \u2014 " + (data.asOfDate || "");
+      })
+      .catch(function (err) {
+        console.error("[Engine 12] scan failed:", err);
+        $("status").textContent = "Failed: " + err.message;
+      })
+      .finally(function () {
+        $("runBtn").disabled = false;
+        if (typeof RavenLoading !== "undefined") RavenLoading.hide();
+      });
   }
 
   $("runBtn").addEventListener("click", runScan);
