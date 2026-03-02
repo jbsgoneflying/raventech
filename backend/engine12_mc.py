@@ -229,7 +229,11 @@ def run_vix_fade_mc(
         var = sigma_daily ** 2
     std = math.sqrt(max(0.0, var))
 
-    vix_vol = ou_params.sigma / 100.0  # vol-of-vol for Black-76
+    # Vol-of-vol for Black-76 pricing of VIX options.
+    # VIX option implied vol (VVIX) typically ranges 60-120%. The OU sigma
+    # is calibrated from daily VIX changes and can understate options vol.
+    # Floor at 0.60 (60%) to prevent artificially small entry credits.
+    vix_vol = max(ou_params.sigma / 100.0, 0.60)
 
     # Define 4 structures relative to current VIX
     # 1) Short call spread: sell ATM+2 / buy ATM+7

@@ -531,6 +531,8 @@ def engine12_scan(
             p_escalation=scenarios.p_escalation,
             secondary_spike_threshold=flags.ENGINE12_SECONDARY_SPIKE_THRESHOLD,
             contained_threshold=flags.ENGINE12_CONTAINED_THRESHOLD,
+            dealer_gamma_sign=dealer_gamma.get("netGammaSign", "unknown"),
+            dealer_gamma_bucket=dealer_gamma.get("magnitudeBucket", "low"),
         )
 
     # ── Live VIX option chain (best-effort) ──
@@ -702,6 +704,8 @@ def engine12_simulate(
         p_escalation=p_escalation / total,
         secondary_spike_threshold=flags.ENGINE12_SECONDARY_SPIKE_THRESHOLD,
         contained_threshold=flags.ENGINE12_CONTAINED_THRESHOLD,
+        dealer_gamma_sign=dealer_gamma.get("netGammaSign", "unknown"),
+        dealer_gamma_bucket=dealer_gamma.get("magnitudeBucket", "low"),
     )
 
     return {

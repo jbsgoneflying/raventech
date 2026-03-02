@@ -32,6 +32,9 @@ class StructureRecommendation:
         }
 
 
+_SHORT_PREMIUM_STRUCTURES = {"Short Call Spread", "Calendar Spread"}
+
+
 def recommend_structure(
     *,
     edge_score: float,
@@ -44,8 +47,16 @@ def recommend_structure(
     secondary_spike_threshold: float = 0.25,
     contained_threshold: float = 0.60,
     risk_budget_dollars: float = 5000.0,
+    dealer_gamma_sign: str = "unknown",
+    dealer_gamma_bucket: str = "low",
 ) -> StructureRecommendation:
-    """Select optimal structure and compute position sizing."""
+    """Select optimal structure and compute position sizing.
+
+    Three-layer selection:
+    1. Pre-filter: dealer gamma veto on short premium
+    2. Decision tree: scenario/edge-based structure selection
+    3. MC consistency check: override if decision tree pick has negative EV
+    """
 
     guardrails: List[str] = []
 
@@ -63,7 +74,23 @@ def recommend_structure(
             "maxLoss": round(s.max_loss, 2),
         })
 
-    # Decision tree
+    # ── Layer 1: Dealer gamma veto on short premium ──
+    # When dealers are short gamma, hedging flow amplifies VIX spikes.
+    # Selling VIX calls in this regime is structurally dangerous.
+    short_premium_vetoed = False
+    if dealer_gamma_sign == "negative" and dealer_gamma_bucket in ("medium", "high"):
+        short_premium_vetoed = True
+        guardrails.append(
+            f"Dealer gamma veto: dealers short gamma ({dealer_gamma_bucket} magnitude). "
+            "Short premium structures (call spreads, calendars) blocked — "
+            "hedging flow amplifies upward VIX moves in this regime."
+        )
+    elif dealer_gamma_sign == "negative":
+        guardrails.append(
+            "Dealers short gamma (low magnitude): short premium allowed but size conservatively."
+        )
+
+    # ── Layer 2: Decision tree ──
     secondary_spike_prob = p_disruption * 0.5 + p_escalation * 0.8
     persistence_score = edge_details.get("persistence_mispricing", 50)
     iv_rv_score = edge_details.get("iv_vs_rv", 50)
@@ -86,14 +113,14 @@ def recommend_structure(
         )
         guardrails.append("Escalation risk >30%: size conservatively, wider strikes.")
 
-    elif term_structure_score >= 80 and persistence_score >= 60:
+    elif term_structure_score >= 80 and persistence_score >= 60 and not short_premium_vetoed:
         primary = "Calendar Spread"
         rationale = (
             "Extreme backwardation + persistence mispricing = double edge. "
             "Calendar spread profits from term structure normalization AND mispriced decay speed."
         )
 
-    elif p_contained > contained_threshold and iv_rv_score >= 60:
+    elif p_contained > contained_threshold and iv_rv_score >= 60 and not short_premium_vetoed:
         primary = "Short Call Spread"
         rationale = (
             f"Contained probability ({p_contained:.0%}) exceeds {contained_threshold:.0%} threshold. "
@@ -109,17 +136,52 @@ def recommend_structure(
             "VIX price mean-reversion rather than IV collapse."
         )
 
+    elif short_premium_vetoed:
+        primary = "Long Put Spread"
+        rationale = (
+            "Short premium vetoed by dealer gamma state. "
+            "Long put spread captures VIX mean-reversion with defined risk "
+            "while avoiding short call exposure in a short-gamma regime."
+        )
+
     else:
-        # Default to highest Sharpe from MC
         if ranked:
-            primary = ranked[0].name
+            candidate = ranked[0].name
+            if candidate in _SHORT_PREMIUM_STRUCTURES and short_premium_vetoed:
+                non_short = [s for s in ranked if s.name not in _SHORT_PREMIUM_STRUCTURES]
+                candidate = non_short[0].name if non_short else "Long Put Spread"
+            primary = candidate
             rationale = (
                 f"No dominant structural edge. Defaulting to highest Sharpe structure "
-                f"from MC simulation ({ranked[0].sharpe:.2f})."
+                f"from MC simulation."
             )
         else:
-            primary = "Short Call Spread"
+            primary = "Long Put Spread"
             rationale = "Default recommendation."
+
+    # ── Layer 3: MC consistency check ──
+    # The decision tree must not recommend a structure the MC says loses money.
+    primary_mc = next((s for s in mc_result.structures if s.name == primary), None)
+    if primary_mc and primary_mc.expected_pnl < 0:
+        positive_ev = [s for s in ranked if s.expected_pnl > 0]
+        if short_premium_vetoed:
+            positive_ev = [s for s in positive_ev if s.name not in _SHORT_PREMIUM_STRUCTURES]
+        if positive_ev:
+            old_primary = primary
+            old_pnl = primary_mc.expected_pnl
+            primary = positive_ev[0].name
+            new_mc = positive_ev[0]
+            rationale = (
+                f"MC override: {old_primary} has negative expected P&L "
+                f"(${old_pnl:.0f}/contract). Switched to {primary} "
+                f"(${new_mc.expected_pnl:.0f}/contract, Sharpe {new_mc.sharpe:.2f}). "
+                f"The MC simulation shows this is the best risk-adjusted structure "
+                f"given current scenario probabilities and vol dynamics."
+            )
+            guardrails.append(
+                f"MC consistency override: {old_primary} had negative EV "
+                f"(${old_pnl:.0f}/contract) — replaced with {primary}."
+            )
 
     # Position sizing via CVaR
     primary_struct = next((s for s in mc_result.structures if s.name == primary), None)
