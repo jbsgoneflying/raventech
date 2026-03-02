@@ -50,32 +50,48 @@ def _fetch_eodhd_prices(eodhd, symbol: str, days: int = 120) -> List[float]:
 
 
 def _fetch_orats_vix_term_structure(orats) -> Dict[str, Optional[float]]:
-    """Fetch VIX IV at multiple DTEs via ORATS hist_monies_implied."""
+    """Fetch SPX IV at multiple DTEs via ORATS hist_monies_implied.
+
+    Tries the most recent business days (today, then back up to 5 days)
+    since ORATS hist data may not be available for the current session yet.
+    """
     out: Dict[str, Optional[float]] = {"iv_30d": None, "iv_60d": None, "iv_90d": None}
     if orats is None:
         return out
-    try:
-        today = dt.date.today().isoformat()
-        resp = orats.hist_monies_implied(
-            ticker="SPX",
-            trade_date=today,
-            fields="tradeDate,dte,vol50",
-        )
-        for row in resp.rows or []:
-            dte = row.get("dte")
-            vol50 = row.get("vol50")
-            if dte is None or vol50 is None:
+
+    for days_back in range(0, 6):
+        try:
+            trade_date = (dt.date.today() - dt.timedelta(days=days_back)).isoformat()
+            resp = orats.hist_monies_implied(
+                ticker="SPX",
+                trade_date=trade_date,
+                fields="tradeDate,dte,vol50",
+            )
+            rows = resp.rows or []
+            if not rows:
                 continue
-            dte = int(dte)
-            vol = float(vol50) * 100  # convert to percentage
-            if 20 <= dte <= 40 and out["iv_30d"] is None:
-                out["iv_30d"] = vol
-            elif 50 <= dte <= 70 and out["iv_60d"] is None:
-                out["iv_60d"] = vol
-            elif 80 <= dte <= 100 and out["iv_90d"] is None:
-                out["iv_90d"] = vol
-    except Exception as e:
-        LOG.warning("ORATS VIX term structure fetch failed: %s", e)
+
+            for row in rows:
+                dte = row.get("dte")
+                vol50 = row.get("vol50")
+                if dte is None or vol50 is None:
+                    continue
+                dte = int(dte)
+                vol = float(vol50) * 100  # ORATS vol50 is decimal (0.22 = 22%)
+                if 20 <= dte <= 40 and out["iv_30d"] is None:
+                    out["iv_30d"] = vol
+                elif 50 <= dte <= 70 and out["iv_60d"] is None:
+                    out["iv_60d"] = vol
+                elif 80 <= dte <= 100 and out["iv_90d"] is None:
+                    out["iv_90d"] = vol
+
+            if out["iv_30d"] is not None:
+                LOG.info("ORATS term structure loaded from %s (%d rows)", trade_date, len(rows))
+                break
+        except Exception as e:
+            LOG.warning("ORATS term structure fetch for %s failed: %s", trade_date, e)
+            continue
+
     return out
 
 

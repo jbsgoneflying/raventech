@@ -104,10 +104,11 @@ def compute_edge2_iv_vs_rv(
     vix_spot: float,
     historical_rv_post_events: List[float],
 ) -> EdgeResult:
-    """Edge 2: Current implied vol vs expected realized vol.
+    """Edge 2: Current implied vol vs expected post-event realized vol.
 
-    Implied 10d vol = VIX / sqrt(252/10)
-    Expected realized = historical event-conditioned sample mean.
+    VIX IS annualized implied vol. Historical rv_5d_after values from the
+    shock DB are also annualized. Compare directly — the spread tells us
+    how much the market is overpricing (or underpricing) post-shock realized.
     """
     if vix_spot <= 0:
         return EdgeResult(
@@ -116,26 +117,25 @@ def compute_edge2_iv_vs_rv(
             interpretation="No VIX data available.",
         )
 
-    implied_10d = vix_spot / math.sqrt(252.0 / 10.0)
+    implied_vol = vix_spot  # VIX level = annualized implied vol
 
     if historical_rv_post_events and len(historical_rv_post_events) >= 3:
         expected_rv = sum(historical_rv_post_events) / len(historical_rv_post_events)
     else:
-        # Conservative fallback: assume realized = 70% of implied
-        expected_rv = implied_10d * 0.70
+        expected_rv = implied_vol * 0.70
 
-    spread = implied_10d - expected_rv
+    spread = implied_vol - expected_rv
     # Normalize: 0 spread -> 50, +5 vol points -> ~80
     score = _clamp(0, 100, 50.0 + spread * 6.0)
 
     if spread > 5:
-        interp = f"IV significantly overpriced vs historical RV ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — strong short vol edge"
+        interp = f"IV significantly overpriced vs historical post-event RV (VIX {implied_vol:.1f} vs {expected_rv:.1f} avg RV) — strong short vol edge"
     elif spread > 2:
-        interp = f"IV moderately overpriced ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — moderate edge"
+        interp = f"IV moderately overpriced (VIX {implied_vol:.1f} vs {expected_rv:.1f} avg RV) — moderate edge"
     elif spread > 0:
-        interp = f"IV slightly above expected RV ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — marginal edge"
+        interp = f"IV slightly above expected RV (VIX {implied_vol:.1f} vs {expected_rv:.1f} avg RV) — marginal edge"
     else:
-        interp = f"IV below expected RV ({implied_10d:.1f} impl vs {expected_rv:.1f} exp) — no short vol edge"
+        interp = f"IV below expected post-event RV (VIX {implied_vol:.1f} vs {expected_rv:.1f} avg RV) — no short vol edge"
 
     return EdgeResult(
         edge_id="iv_vs_rv",
