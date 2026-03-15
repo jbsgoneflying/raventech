@@ -779,7 +779,7 @@ InsightPopup.prototype.render = function (data) {
   for (var key in data) {
     if (skip.has(key)) continue;
     var label = this.labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-    var isDesk = key === "desk_takeaway";
+    var isDesk = key === "desk_takeaway" || key === "the_call";
     html += "<div class='" + this.pfx + "Section'><div class='" + this.pfx + "SectionTitle'>" + esc(label) +
       "</div><div class='" + this.pfx + "Text'" + (isDesk ? " style='color:#34c759;font-weight:600;'" : "") +
       ">" + esc(String(data[key])) + "</div></div>";

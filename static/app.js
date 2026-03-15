@@ -3135,6 +3135,7 @@ document.addEventListener("DOMContentLoaded", () => {
     prefix:  "e1Insight",
     labels: {
       decision_summary:"Decision Summary",key_risks:"Key Risks",what_to_watch:"What to Watch",execution_guidance:"Execution Guidance",
+      the_setup:"The Setup",what_can_hurt_you:"What Can Hurt You",catalyst_calendar:"Catalyst Calendar",how_to_structure_it:"How to Structure It",the_call:"The Call",
       hold_risk_assessment:"Hold Risk Assessment",conditional_vs_unconditional:"Conditional vs Unconditional",drift_analysis:"Drift Analysis",structure_implications:"Structure Implications",
       what_simulation_says:"What the Simulation Says",put_vs_call_skew:"Put vs Call Skew",tail_risk:"Tail Risk",wing_optimization:"Wing Optimization",
       regime_read:"Regime Read",gate_implications:"Gate Implications",tail_multiplier_impact:"Tail Multiplier Impact",
@@ -3171,7 +3172,25 @@ document.addEventListener("DOMContentLoaded", () => {
     e1DecisionEl.addEventListener("click", function (ev) {
       if (ev.target.closest("button, a, input, .tipWrap, .info")) return;
       if (!lastPayload) return;
-      var data = { goNoGo: lastPayload.goNoGo || {}, summary: lastPayload.summary || {}, ticker: lastPayload.ticker };
+      var data = {
+        goNoGo: lastPayload.goNoGo || {},
+        summary: lastPayload.summary || {},
+        ticker: lastPayload.ticker,
+        expectedMove: lastPayload.expectedMove || {},
+        current: lastPayload.current || {},
+        strikeTargets: lastPayload.strikeTargets || {},
+        gapVsCtc: lastPayload.gapVsCtc || {},
+        earningsHoldRisk: lastPayload.earningsHoldRisk || {},
+        baseline: lastPayload.baseline || {},
+        regime: lastPayload.regime || {},
+        wingRecommendation: lastPayload.wingRecommendation || {},
+        skewOverlay: lastPayload.skewOverlay || {},
+        eventRisk: lastPayload.eventRisk || {},
+        monteCarlo: lastPayload.monteCarlo || {},
+        earningsGammaContext: lastPayload.earningsGammaContext || {},
+        quarters: lastPayload.quarters || {},
+        technicals: lastPayload.technicals || {},
+      };
       e1FetchInsight("e1_decision", data, "Decision Panel: " + (lastPayload.ticker || ""), ev.clientX, ev.clientY);
     });
   }

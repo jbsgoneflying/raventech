@@ -690,22 +690,55 @@ Return valid JSON:
 
     # ── Engine 1: Breach / Earnings Hold Risk ──────────────────────────
 
-    "e1_decision": """You are a senior earnings-event options strategist at a proprietary desk.
+    "e1_decision": """You are a senior options trader at a prop desk, briefing a portfolio manager on an
+upcoming earnings event. You have the full Engine 1 data package for this ticker: GO/NO-GO checks,
+breach history, expected move (EM), strike targets, gap-vs-session risk, hold risk, realized-vs-implied
+baseline, regime context, wing recommendations, skew overlay, dealer gamma positioning, event risk
+drivers, Monte Carlo simulation outputs, and quarterly seasonality.
 
-Given the Engine 1 GO/NO-GO decision panel for a specific ticker — including the breach rate,
-breach multiple (k), go/no-go status, all individual checks (each with state pass/warn/fail,
-label, and explanation), and warnings — explain to the desk:
+Write a concise earnings playbook in plain trader English. Never cite raw check IDs or variable names —
+translate everything into what it means for the trade. Use specific numbers (percentages, strike
+distances, ratios) inline to back up every claim.
 
-1. DECISION SUMMARY — What is the GO/NO-GO verdict and what are the most critical checks driving it?
-2. KEY RISKS — Which failed or warned checks should the desk pay the most attention to? Why?
-3. WHAT TO WATCH — If this is a GO, what could change the picture? If NO-GO, what would need to improve?
-4. EXECUTION GUIDANCE — How should the desk approach this ticker given the check results?
-5. DESK TAKEAWAY — One sentence: trade it, skip it, or wait — and why?
+Sections:
 
-Rules: Never say "buy" or "sell." Frame as risk management. Cite specific check names and values. Under 300 words.
+1. THE SETUP — What is this trade? State the ticker, expected move (% and $), breach rate at 1× EM,
+   realized-vs-implied ratio, and how many usable earnings events back the stats. Frame the edge:
+   is the market pricing this name rich or cheap relative to what it actually does? Mention the regime
+   and any regime gate status. This should read like "Here's the opportunity and why the numbers say
+   it exists (or doesn't)."
+
+2. WHAT CAN HURT YOU — Translate every failed or warned check into concrete trade risk. Examples:
+   "Dealer gamma is negative and large, so index hedging flows can whipsaw this name intraday" or
+   "IV isn't elevated vs its own 30-day history (38th percentile, z = −0.15), so you're not getting
+   paid enough to be short vol here." Cover macro (gamma, forced flows, RV acceleration, gamma-flip
+   proximity) and single-name (IV elevation, EM richness, tail coverage, liquidity) risks. If
+   everything passes, say so and note what the remaining edge risks are.
+
+3. CATALYST CALENDAR — What macro or micro events overlap the holding window? Cite specific dates
+   from the forced-flow / event-risk data (e.g., FOMC, PPI, jobless claims). Note how close the SPX
+   gamma flip is (in EM terms) and whether dealer positioning could shift mid-hold. If quarterly
+   seasonality data is available, flag any Q-specific pattern.
+
+4. HOW TO STRUCTURE IT — Concrete trade construction guidance. Reference the 1.0×, 1.5×, and 2.0× EM
+   strike distances (cite the actual percentages). Use the gap-vs-session breach spread to recommend
+   whether to close before the open or hold through the session. Incorporate wing recommendations and
+   skew overlay data. If Monte Carlo outputs are present, reference the simulated P&L distribution or
+   tail risk. Address position sizing relative to the liquidity check (dollar volume, bid-ask spreads,
+   OI coverage). This section should give the trader enough to walk to the pad and put a structure on.
+
+5. THE CALL — One punchy sentence: the trade, the structure, and the conviction level. Examples:
+   "Short the straddle at 1.5× EM with 2× wings, close pre-open — edge is there but macro is shaky"
+   or "Pass — IV isn't elevated and dealer gamma is offside; wait for the flip."
+
+Rules:
+- Never use internal check IDs (like SN_IV_ELEVATED or MACRO_GAMMA). Always translate to plain English.
+- Frame as risk management. Never say "buy" or "sell" — say "short premium", "harvest", "collect", etc.
+- Cite specific numbers from the data to support every point.
+- Under 500 words total.
 
 Return valid JSON:
-{ "decision_summary": "...", "key_risks": "...", "what_to_watch": "...", "execution_guidance": "...", "desk_takeaway": "..." }""",
+{ "the_setup": "...", "what_can_hurt_you": "...", "catalyst_calendar": "...", "how_to_structure_it": "...", "the_call": "..." }""",
 
     "e1_hold_risk": """You are a senior earnings-event options strategist at a proprietary desk.
 
@@ -1247,7 +1280,7 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "e5_triggers": {"where_we_are", "what_flips_up", "what_flips_down", "desk_takeaway"},
     "e5_component": {"what_stress_means", "equity_transmission", "relative_context", "desk_takeaway"},
     # Engine 1 card types
-    "e1_decision": {"decision_summary", "key_risks", "what_to_watch", "execution_guidance", "desk_takeaway"},
+    "e1_decision": {"the_setup", "what_can_hurt_you", "catalyst_calendar", "how_to_structure_it", "the_call"},
     "e1_hold_risk": {"hold_risk_assessment", "conditional_vs_unconditional", "drift_analysis", "structure_implications", "desk_takeaway"},
     "e1_monte_carlo": {"what_simulation_says", "put_vs_call_skew", "tail_risk", "wing_optimization", "desk_takeaway"},
     "e1_regime": {"regime_read", "gate_implications", "tail_multiplier_impact", "desk_takeaway"},
@@ -1284,6 +1317,10 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "ik_gamma": {"dual_index_read", "continuation_impact", "index_membership", "desk_takeaway"},
     "ik_scan_summary": {"opportunity_read", "actionable_vs_structure", "rejection_rate", "desk_takeaway"},
     "ik_gate": {"gate_status", "regime_for_continuation", "vol_direction_impact", "desk_takeaway"},
+}
+
+_CARD_TOKEN_LIMITS: Dict[str, int] = {
+    "e1_decision": 1200,
 }
 
 
@@ -1354,7 +1391,7 @@ def generate_card_insight(
                 {"role": "user", "content": payload_str},
             ],
             temperature=0.4,
-            max_completion_tokens=800,
+            max_completion_tokens=_CARD_TOKEN_LIMITS.get(card_type, 800),
             timeout=30,
             response_format={"type": "json_object"},
         )
