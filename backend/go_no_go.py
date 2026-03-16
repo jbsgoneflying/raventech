@@ -1265,7 +1265,15 @@ def compute_go_no_go(
     elif not underlying_ok:
         liq_state, liq_code, liq_explain = "FLAG", "SN_LIQ_UNDERLYING_LOW", f"avgDollarVol20d ${float(avg_dvol)/1e6:.0f}M below preferred ${AVG_DVOL_MIN/1e6:.0f}M — verify execution."
     else:
-        liq_state, liq_code, liq_explain = opt_state, opt_code, (opt_explain or "Underlying and options liquidity checks passed.")
+        # Underlying is liquid. If options check returned BLOCK (e.g., thin wing
+        # OI on a high-priced name), cap at FLAG — a $200M+/day equity doesn't
+        # have "no executable market," just thinner wings to work.
+        if opt_state == "BLOCK":
+            liq_state = "FLAG"
+            liq_code = opt_code
+            liq_explain = (opt_explain or "") + f" (capped to FLAG — underlying ${float(avg_dvol)/1e6:.0f}M/day is liquid)"
+        else:
+            liq_state, liq_code, liq_explain = opt_state, opt_code, (opt_explain or "Underlying and options liquidity checks passed.")
         if liq_state == "PASS":
             liq_code = None
 
