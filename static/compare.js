@@ -180,15 +180,10 @@
 
     const liqWarning = item.liquidityWarning;
     const liqBlock = item.liquidityBlock;
-    const warningCls = liqBlock ? "liquidityWarning" : "liquidityWarning liquidityWarning--flag";
-    const warningIcon = liqBlock ? "🚫" : "⚑";
-    const warningHtml = liqWarning
-      ? `<div class="${warningCls}">${warningIcon} ${escapeHtml(liqWarning)}</div>`
-      : "";
+    const liqCls = liqBlock ? " rankCard--liqBlock" : liqWarning ? " rankCard--liqFlag" : "";
 
     return `
-      <div class="rankCard rankCard--${tier}${liqWarning ? " rankCard--liqWarning" : ""}" data-ticker="${ticker}">
-        ${warningHtml}
+      <div class="rankCard rankCard--${tier}${liqCls}" data-ticker="${ticker}">
         <div class="rankCardHeader">
           <div class="rankBadge">#${rank}</div>
           <div class="rankTickerInfo">
