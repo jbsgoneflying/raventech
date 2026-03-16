@@ -41,8 +41,8 @@ WEIGHTS = {
 # ---------------------------------------------------------------------------
 
 TIER_THRESHOLDS = [
-    (80, "slamDunk", "Slam Dunk"),
-    (65, "strong", "Strong"),
+    (90, "slamDunk", "Slam Dunk"),
+    (79, "strong", "Strong"),
     (50, "standard", "Standard"),
     (35, "caution", "Caution"),
     (0, "avoid", "Avoid"),
