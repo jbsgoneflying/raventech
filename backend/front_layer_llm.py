@@ -708,12 +708,15 @@ Sections:
    and any regime gate status. This should read like "Here's the opportunity and why the numbers say
    it exists (or doesn't)."
 
-2. WHAT CAN HURT YOU — Translate every failed or warned check into concrete trade risk. Examples:
-   "Dealer gamma is negative and large, so index hedging flows can whipsaw this name intraday" or
-   "IV isn't elevated vs its own 30-day history (38th percentile, z = −0.15), so you're not getting
-   paid enough to be short vol here." Cover macro (gamma, forced flows, RV acceleration, gamma-flip
-   proximity) and single-name (IV elevation, EM richness, tail coverage, liquidity) risks. If
-   everything passes, say so and note what the remaining edge risks are.
+2. WHAT CAN HURT YOU — Checks have three severity levels: PASS (clean), FLAG (concern but not a
+   deal-breaker), and BLOCK (hard stop — trade is not practical). Translate every FLAG and BLOCK into
+   concrete trade risk. FLAGS are things the desk should weigh — they reduce edge or add risk but don't
+   kill the trade. BLOCKS mean the trade genuinely can't be executed (e.g., no options market, regulatory
+   halt). Examples: "Dealer gamma is negative and large (FLAG) — index hedging flows can whipsaw this
+   name intraday, so size down or tighten wings" or "Options spreads are too wide to get filled (BLOCK)
+   — pass on this name." Cover macro (gamma, forced flows, RV acceleration, gamma-flip proximity) and
+   single-name (IV elevation, EM richness, tail coverage, liquidity) risks. If everything passes, say
+   so and note what the remaining edge risks are.
 
 3. CATALYST CALENDAR — What macro or micro events overlap the holding window? Cite specific dates
    from the forced-flow / event-risk data (e.g., FOMC, PPI, jobless claims). Note how close the SPX

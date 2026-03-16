@@ -170,18 +170,23 @@ class FeatureFlags:
     GO_BETA20_HIGH: float = 1.20
 
     GO_AVG_DOLLAR_VOL20D_MIN: float = 200_000_000.0
+    GO_AVG_DOLLAR_VOL20D_BLOCK: float = 20_000_000.0
     # Delta band for liquidity check — covers the IC short-strike zone
     # 0.10 to 0.25 spans aggressive (10d) to standard (25d) wing placement
     GO_OPT_DELTA_BAND_LO: float = 0.10
     GO_OPT_DELTA_BAND_HI: float = 0.25
     GO_OPT_SPREAD_MAX: float = 0.15
+    GO_OPT_SPREAD_BLOCK: float = 0.30
     GO_OPT_SPREAD_MAX_P90: float = 0.25
+    GO_OPT_SPREAD_P90_BLOCK: float = 0.50
     GO_OPT_MIN_MID: float = 0.20
     GO_OPT_OI_MIN: float = 500.0
     GO_OPT_VOL_MIN: float = 50.0
     GO_BAND_QUOTE_COVERAGE_MIN: float = 0.70
     GO_BAND_OI_SUM_MIN: float = 2000.0
+    GO_BAND_OI_SUM_BLOCK: float = 200.0
     GO_BAND_VOL_SUM_MIN: float = 200.0
+    GO_BAND_VOL_SUM_BLOCK: float = 20.0
 
     GO_RV5_JUMP_MAX: float = 1.15
     GO_RV20_JUMP_MAX: float = 1.10
@@ -416,16 +421,21 @@ class FeatureFlags:
             GO_BETA20_HIGH=_get_float("GO_BETA20_HIGH", 1.20),
 
             GO_AVG_DOLLAR_VOL20D_MIN=_get_float("GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0),
+            GO_AVG_DOLLAR_VOL20D_BLOCK=_get_float("GO_AVG_DOLLAR_VOL20D_BLOCK", 20_000_000.0),
             GO_OPT_DELTA_BAND_LO=_get_float("GO_OPT_DELTA_BAND_LO", 0.10),
             GO_OPT_DELTA_BAND_HI=_get_float("GO_OPT_DELTA_BAND_HI", 0.25),
             GO_OPT_SPREAD_MAX=_get_float("GO_OPT_SPREAD_MAX", 0.15),
+            GO_OPT_SPREAD_BLOCK=_get_float("GO_OPT_SPREAD_BLOCK", 0.30),
             GO_OPT_SPREAD_MAX_P90=_get_float("GO_OPT_SPREAD_MAX_P90", 0.25),
+            GO_OPT_SPREAD_P90_BLOCK=_get_float("GO_OPT_SPREAD_P90_BLOCK", 0.50),
             GO_OPT_MIN_MID=_get_float("GO_OPT_MIN_MID", 0.20),
             GO_OPT_OI_MIN=_get_float("GO_OPT_OI_MIN", 500.0),
             GO_OPT_VOL_MIN=_get_float("GO_OPT_VOL_MIN", 50.0),
             GO_BAND_QUOTE_COVERAGE_MIN=_get_float("GO_BAND_QUOTE_COVERAGE_MIN", 0.70),
             GO_BAND_OI_SUM_MIN=_get_float("GO_BAND_OI_SUM_MIN", 2000.0),
+            GO_BAND_OI_SUM_BLOCK=_get_float("GO_BAND_OI_SUM_BLOCK", 200.0),
             GO_BAND_VOL_SUM_MIN=_get_float("GO_BAND_VOL_SUM_MIN", 200.0),
+            GO_BAND_VOL_SUM_BLOCK=_get_float("GO_BAND_VOL_SUM_BLOCK", 20.0),
 
             GO_RV5_JUMP_MAX=_get_float("GO_RV5_JUMP_MAX", 1.15),
             GO_RV20_JUMP_MAX=_get_float("GO_RV20_JUMP_MAX", 1.10),
@@ -619,16 +629,21 @@ class FeatureFlags:
             ("GO_CORR20_HIGH", float(self.GO_CORR20_HIGH)),
             ("GO_BETA20_HIGH", float(self.GO_BETA20_HIGH)),
             ("GO_AVG_DOLLAR_VOL20D_MIN", float(self.GO_AVG_DOLLAR_VOL20D_MIN)),
+            ("GO_AVG_DOLLAR_VOL20D_BLOCK", float(self.GO_AVG_DOLLAR_VOL20D_BLOCK)),
             ("GO_OPT_DELTA_BAND_LO", float(self.GO_OPT_DELTA_BAND_LO)),
             ("GO_OPT_DELTA_BAND_HI", float(self.GO_OPT_DELTA_BAND_HI)),
             ("GO_OPT_SPREAD_MAX", float(self.GO_OPT_SPREAD_MAX)),
+            ("GO_OPT_SPREAD_BLOCK", float(self.GO_OPT_SPREAD_BLOCK)),
             ("GO_OPT_SPREAD_MAX_P90", float(self.GO_OPT_SPREAD_MAX_P90)),
+            ("GO_OPT_SPREAD_P90_BLOCK", float(self.GO_OPT_SPREAD_P90_BLOCK)),
             ("GO_OPT_MIN_MID", float(self.GO_OPT_MIN_MID)),
             ("GO_OPT_OI_MIN", float(self.GO_OPT_OI_MIN)),
             ("GO_OPT_VOL_MIN", float(self.GO_OPT_VOL_MIN)),
             ("GO_BAND_QUOTE_COVERAGE_MIN", float(self.GO_BAND_QUOTE_COVERAGE_MIN)),
             ("GO_BAND_OI_SUM_MIN", float(self.GO_BAND_OI_SUM_MIN)),
+            ("GO_BAND_OI_SUM_BLOCK", float(self.GO_BAND_OI_SUM_BLOCK)),
             ("GO_BAND_VOL_SUM_MIN", float(self.GO_BAND_VOL_SUM_MIN)),
+            ("GO_BAND_VOL_SUM_BLOCK", float(self.GO_BAND_VOL_SUM_BLOCK)),
             ("GO_RV5_JUMP_MAX", float(self.GO_RV5_JUMP_MAX)),
             ("GO_RV20_JUMP_MAX", float(self.GO_RV20_JUMP_MAX)),
             ("GO_RV5_ACCEL_TIGHTEN_TRIGGER", float(self.GO_RV5_ACCEL_TIGHTEN_TRIGGER)),

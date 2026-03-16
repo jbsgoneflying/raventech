@@ -769,7 +769,9 @@ function renderPlaybookCards(go) {
   const badge = (state) => {
     const s = String(state || "").toUpperCase();
     if (s === "PASS") return '<span style="color:#34c759;font-weight:600;margin-left:6px;">PASS</span>';
+    if (s === "BLOCK") return '<span style="color:#ff3b30;font-weight:600;margin-left:6px;">BLOCK</span>';
     if (s === "FAIL") return '<span style="color:#ff3b30;font-weight:600;margin-left:6px;">FAIL</span>';
+    if (s === "FLAG") return '<span style="color:#ff9500;font-weight:600;margin-left:6px;">FLAG</span>';
     return '<span style="color:#ff9f0a;font-weight:600;margin-left:6px;">—</span>';
   };
 

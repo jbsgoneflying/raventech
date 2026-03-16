@@ -178,10 +178,12 @@
       </div>
     `;
 
-    // Liquidity warning banner (critical)
     const liqWarning = item.liquidityWarning;
+    const liqBlock = item.liquidityBlock;
+    const warningCls = liqBlock ? "liquidityWarning" : "liquidityWarning liquidityWarning--flag";
+    const warningIcon = liqBlock ? "🚫" : "⚑";
     const warningHtml = liqWarning
-      ? `<div class="liquidityWarning">⚠️ ${escapeHtml(liqWarning)}</div>`
+      ? `<div class="${warningCls}">${warningIcon} ${escapeHtml(liqWarning)}</div>`
       : "";
 
     return `

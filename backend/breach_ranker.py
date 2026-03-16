@@ -185,30 +185,41 @@ def score_em_richness(em_to_median: Optional[float]) -> Dict[str, Any]:
     }
 
 
+def _vol_label(dollar_vol: Optional[float]) -> str:
+    """Format dollar volume as human-readable label."""
+    if dollar_vol is None:
+        return "Vol N/A"
+    vol_m = float(dollar_vol) / 1_000_000
+    if vol_m >= 1000:
+        return f"${vol_m/1000:.1f}B"
+    return f"${vol_m:.0f}M"
+
+
+def _vol_base_score(dollar_vol: Optional[float]) -> Tuple[float, float]:
+    """Return (base_score, vol_millions) from underlying dollar volume."""
+    if dollar_vol is None:
+        return 40.0, 0.0
+    vol_m = float(dollar_vol) / 1_000_000
+    if vol_m >= 500:
+        return 100.0, vol_m
+    if vol_m >= 200:
+        return 80.0, vol_m
+    if vol_m >= 100:
+        return 60.0, vol_m
+    if vol_m >= 50:
+        return 45.0, vol_m
+    return 30.0, vol_m
+
+
 def score_liquidity(liq_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Score tradability based on underlying volume AND option liquidity.
-    
-    THIS IS A CRITICAL GATE - poor liquidity makes the trade impossible regardless
-    of how good the setup looks on paper.
-    
-    Scoring:
-    - FAIL state from goNoGo: Hard cap at 15 (Avoid tier)
-    - MISSING state: Cap at 30 (Caution tier)
-    - PASS state: Score based on dollar volume + option metrics
-    
-    Underlying thresholds:
-    - $500M+: Excellent (100)
-    - $200-500M: Good (80)
-    - $100-200M: OK (60)
-    - $50-100M: Marginal (45)
-    - <$50M: Poor (30)
-    
-    Option adjustments:
-    - Coverage >80%: +0
-    - Coverage 60-80%: -10
-    - Coverage <60%: -25 (significant penalty)
-    - Very low OI (<500 combined): -20
+
+    Three-tier severity from goNoGo:
+    - BLOCK: genuinely illiquid — hard cap at 15 (Avoid tier)
+    - FLAG:  execution concern — penalize but let composite speak (cap 55)
+    - PASS:  clean — score on gradient from dollar vol + option metrics
+    - MISSING: can't verify — cap at 30
     """
     if not isinstance(liq_data, dict):
         return {
@@ -218,29 +229,37 @@ def score_liquidity(liq_data: Dict[str, Any]) -> Dict[str, Any]:
             "status": "poor",
             "warning": "No liquidity data",
         }
-    
+
     state = liq_data.get("state", "MISSING")
     dollar_vol = liq_data.get("avgDollarVol20d")
     spread_cov = liq_data.get("spreadCoverage")
     put_oi = liq_data.get("putOI", 0) or 0
     call_oi = liq_data.get("callOI", 0) or 0
     total_oi = float(put_oi) + float(call_oi)
-    
-    # HARD GATE: If goNoGo says FAIL, this is untradeable
-    if state == "FAIL":
-        label = "FAIL - Untradeable"
-        if dollar_vol:
-            vol_m = float(dollar_vol) / 1_000_000
-            label = f"${vol_m:.0f}M - FAIL"
+
+    # BLOCK: genuinely no executable market
+    if state == "BLOCK":
+        label = _vol_label(dollar_vol) + " - BLOCK"
         return {
-            "score": 15,  # Hard cap - forces Avoid tier
+            "score": 15,
             "value": dollar_vol,
             "label": label,
             "status": "poor",
-            "warning": "Options liquidity insufficient for clean execution",
+            "warning": "No executable options market",
         }
-    
-    # If missing, we can't verify - cap the score
+
+    # FAIL (legacy compat): treat same as BLOCK
+    if state == "FAIL":
+        label = _vol_label(dollar_vol) + " - FAIL"
+        return {
+            "score": 15,
+            "value": dollar_vol,
+            "label": label,
+            "status": "poor",
+            "warning": "No executable options market",
+        }
+
+    # MISSING with no dollar vol: can't verify
     if state == "MISSING" and dollar_vol is None:
         return {
             "score": 30,
@@ -249,64 +268,53 @@ def score_liquidity(liq_data: Dict[str, Any]) -> Dict[str, Any]:
             "status": "poor",
             "warning": "Liquidity data unavailable",
         }
-    
+
     # Calculate base score from underlying volume
-    if dollar_vol is None:
-        base_score = 40  # Unknown but options might be OK
-        vol_millions = 0
-    else:
-        vol = float(dollar_vol)
-        vol_millions = vol / 1_000_000
-        
-        if vol_millions >= 500:
-            base_score = 100
-        elif vol_millions >= 200:
-            base_score = 80
-        elif vol_millions >= 100:
-            base_score = 60
-        elif vol_millions >= 50:
-            base_score = 45
-        else:
-            base_score = 30
-    
+    base_score, vol_millions = _vol_base_score(dollar_vol)
+
     # Apply option spread coverage adjustment
     adjustment = 0
     if spread_cov is not None:
         cov = float(spread_cov)
         if cov < 60:
-            adjustment = -25  # Significant penalty for wide spreads
+            adjustment = -25
         elif cov < 80:
             adjustment = -10
-    
-    # Additional penalty for very low open interest
+
     if total_oi < 500 and total_oi > 0:
         adjustment -= 20
     elif total_oi < 2000 and total_oi > 0:
         adjustment -= 10
-    
+
     score = max(15, base_score + adjustment)
-    
-    # Format label
-    if vol_millions >= 1000:
-        label = f"${vol_millions/1000:.1f}B"
-    elif vol_millions > 0:
-        label = f"${vol_millions:.0f}M"
-    else:
-        label = "Vol N/A"
-    
+
+    # FLAG: penalize but don't kill — cap at 55 so composite still works
+    if state == "FLAG":
+        score = max(30, min(score, 55))
+        label = _vol_label(dollar_vol) + " ⚑"
+        result: Dict[str, Any] = {
+            "score": score,
+            "value": dollar_vol,
+            "label": label,
+            "status": _get_status(score),
+            "warning": "Liquidity flag — verify execution quality",
+        }
+        return result
+
+    label = _vol_label(dollar_vol)
     if state == "PASS":
         label += " ✓"
-    
+
     result = {
         "score": score,
         "value": dollar_vol,
         "label": label,
         "status": _get_status(score),
     }
-    
+
     if score < 40:
         result["warning"] = "Low liquidity - execution risk"
-    
+
     return result
 
 
@@ -376,7 +384,7 @@ def score_market_regime(macro_checks: Optional[Dict[str, Any]]) -> Dict[str, Any
     if gamma_check.get("result") == "PASS":
         score += 40
         labels.append("Gamma+")
-    elif gamma_check.get("result") == "FAIL":
+    elif gamma_check.get("result") in ("FAIL", "FLAG", "BLOCK"):
         labels.append("Gamma-")
     
     # No gamma flip nearby
@@ -423,7 +431,7 @@ def score_event_risk(
     - Major events (benzinga > 0.6 or legal_reg FAIL): 20
     """
     has_legal_event = False
-    if legal_reg_check and legal_reg_check.get("result") == "FAIL":
+    if legal_reg_check and legal_reg_check.get("result") in ("FAIL", "FLAG", "BLOCK"):
         has_legal_event = True
     
     bz = benzinga_score if benzinga_score is not None else 0
@@ -512,7 +520,7 @@ def _extract_liquidity(payload: Dict[str, Any]) -> Dict[str, Any]:
     - spreadCoverage: option spread quality
     - optLiquidityOk: bool from delta band checks
     - underlyingOk: bool from underlying volume check
-    - state: PASS/FAIL/MISSING
+    - state: PASS/FLAG/BLOCK/MISSING
     """
     checks = _extract_go_no_go_checks(payload)
     liq_check = checks.get("SN_LIQUIDITY", {})
@@ -681,15 +689,11 @@ def compute_composite_score(breach_payload: Dict[str, Any]) -> Dict[str, Any]:
     liq_score = factors.get("liquidity", {}).get("score", 50)
     liq_warning = factors.get("liquidity", {}).get("warning")
     
-    # If liquidity score is critically low, cap the tier
+    # Only force Avoid for BLOCK (score <= 15). FLAG and everything else
+    # let the composite score determine tier naturally.
     if liq_score <= 15:
-        # Force to Avoid regardless of other factors
         tier_id, tier_label = "avoid", "Avoid"
-        liq_warning = liq_warning or "Liquidity too low - untradeable"
-    elif liq_score <= 30:
-        # Cap at Caution regardless of other factors
-        tier_id, tier_label = _get_tier(min(composite, 49))  # Force below Standard
-        liq_warning = liq_warning or "Low liquidity - verify execution"
+        liq_warning = liq_warning or "No executable options market"
     else:
         tier_id, tier_label = _get_tier(composite)
     
@@ -702,7 +706,8 @@ def compute_composite_score(breach_payload: Dict[str, Any]) -> Dict[str, Any]:
     
     if liq_warning:
         result["liquidityWarning"] = liq_warning
-    
+        result["liquidityBlock"] = liq_score <= 15
+
     return result
 
 
@@ -729,14 +734,14 @@ def _regime_to_macro_checks(regime_label: str, regime_score: Optional[float]) ->
         # Mixed
         checks["MACRO_GAMMA"] = {"result": "PASS"}
         checks["MACRO_GAMMA_FLIP"] = {"result": "PASS"}
-        checks["MACRO_RV_ACCEL"] = {"result": "FAIL"}  # RV elevated
+        checks["MACRO_RV_ACCEL"] = {"result": "FLAG"}
         checks["MACRO_FORCED_FLOWS"] = {"result": "PASS"}
     else:
         # Stress
-        checks["MACRO_GAMMA"] = {"result": "FAIL"}
-        checks["MACRO_GAMMA_FLIP"] = {"result": "FAIL"}
-        checks["MACRO_RV_ACCEL"] = {"result": "FAIL"}
-        checks["MACRO_FORCED_FLOWS"] = {"result": "FAIL"}
+        checks["MACRO_GAMMA"] = {"result": "FLAG"}
+        checks["MACRO_GAMMA_FLIP"] = {"result": "FLAG"}
+        checks["MACRO_RV_ACCEL"] = {"result": "FLAG"}
+        checks["MACRO_FORCED_FLOWS"] = {"result": "FLAG"}
     
     return checks
 

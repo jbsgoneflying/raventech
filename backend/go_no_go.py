@@ -19,7 +19,7 @@ from backend.spx_ic.live_levels import compute_live_levels
 from backend.spx_ic.ohlc import fetch_dailies_ohlc_range, fetch_hist_cores_range, fetch_trading_bars
 
 
-State = str  # PASS|FAIL|MISSING
+State = str  # PASS|FLAG|BLOCK|MISSING (legacy: FAIL)
 
 
 def _now_et_date() -> dt.date:
@@ -128,7 +128,7 @@ def _mk_check(
     explain: str,
 ) -> Dict[str, Any]:
     st = str(state).upper()
-    if st not in ("PASS", "FAIL", "MISSING"):
+    if st not in ("PASS", "FAIL", "FLAG", "BLOCK", "MISSING"):
         st = "MISSING"
     return {
         "id": str(id),
@@ -290,6 +290,31 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
                 notes.append("Missing /cores avgVolume20/avgVol20 fields.")
             if px is None:
                 notes.append("Missing /cores spot/stock price fields.")
+
+    # Fallback: EODHD delayed quote (averageVolume × lastTradePrice)
+    if avg_dvol is None:
+        try:
+            from backend.eodhd_client import EodhdClient
+            eodhd = EodhdClient.from_env()
+            eodhd_symbol = f"{t}.US"
+            eodhd_resp = eodhd.get_us_quote_delayed(eodhd_symbol)
+            eodhd_rows = eodhd_resp.rows or []
+            if eodhd_rows and isinstance(eodhd_rows[0], dict):
+                eq = eodhd_rows[0]
+                eodhd_avg_vol = _to_float(eq.get("averageVolume"))
+                eodhd_price = _to_float(eq.get("lastTradePrice")) or _to_float(eq.get("close"))
+                if eodhd_avg_vol and eodhd_price and eodhd_avg_vol > 0 and eodhd_price > 0:
+                    avg_dvol = float(eodhd_price) * float(eodhd_avg_vol)
+                    source = "eodhd_delayed_quote"
+                    notes.append(f"avgDollarVol20d from EODHD delayed quote (averageVolume={eodhd_avg_vol:.0f} × price={eodhd_price:.2f}).")
+                    if px is None:
+                        px = eodhd_price
+                else:
+                    notes.append("EODHD delayed quote missing averageVolume or price.")
+            else:
+                notes.append("EODHD delayed quote returned no data.")
+        except Exception as e:
+            notes.append(f"EODHD delayed quote failed: {type(e).__name__}: {e}")
 
     # Fallback: derive avg $ volume from last ~20 trading days of dailies.
     # (This keeps GO/NO-GO resilient when /cores doesn't include volume fields.)
@@ -650,16 +675,21 @@ def compute_go_no_go(
     BETA20_HIGH = float(getattr(f, "GO_BETA20_HIGH", 1.20))
 
     AVG_DVOL_MIN = float(getattr(f, "GO_AVG_DOLLAR_VOL20D_MIN", 200_000_000.0))
+    AVG_DVOL_BLOCK = float(getattr(f, "GO_AVG_DOLLAR_VOL20D_BLOCK", 20_000_000.0))
     DELTA_LO = float(getattr(f, "GO_OPT_DELTA_BAND_LO", 0.10))
     DELTA_HI = float(getattr(f, "GO_OPT_DELTA_BAND_HI", 0.25))
     SPREAD_MAX = float(getattr(f, "GO_OPT_SPREAD_MAX", 0.15))
+    SPREAD_BLOCK = float(getattr(f, "GO_OPT_SPREAD_BLOCK", 0.30))
     SPREAD_MAX_P90 = float(getattr(f, "GO_OPT_SPREAD_MAX_P90", 0.25))
+    SPREAD_P90_BLOCK = float(getattr(f, "GO_OPT_SPREAD_P90_BLOCK", 0.50))
     MIN_MID = float(getattr(f, "GO_OPT_MIN_MID", 0.20))
     OI_MIN = float(getattr(f, "GO_OPT_OI_MIN", 500.0))
     VOL_MIN = float(getattr(f, "GO_OPT_VOL_MIN", 50.0))
     BAND_QUOTE_COVERAGE_MIN = float(getattr(f, "GO_BAND_QUOTE_COVERAGE_MIN", 0.70))
     BAND_OI_SUM_MIN = float(getattr(f, "GO_BAND_OI_SUM_MIN", 2000.0))
+    BAND_OI_SUM_BLOCK = float(getattr(f, "GO_BAND_OI_SUM_BLOCK", 200.0))
     BAND_VOL_SUM_MIN = float(getattr(f, "GO_BAND_VOL_SUM_MIN", 200.0))
+    BAND_VOL_SUM_BLOCK = float(getattr(f, "GO_BAND_VOL_SUM_BLOCK", 20.0))
 
     RV5_JUMP_MAX = float(getattr(f, "GO_RV5_JUMP_MAX", 1.15))
     RV20_JUMP_MAX = float(getattr(f, "GO_RV20_JUMP_MAX", 1.10))
@@ -729,7 +759,7 @@ def compute_go_no_go(
             _mk_check(
                 id="SN_EM_RICHNESS",
                 label="Expected move rich vs realized median",
-                state="PASS" if passed else "FAIL",
+                state="PASS" if passed else "FLAG",
                 code=None if passed else "SN_EM_NOT_RICH_ENOUGH",
                 value={"expectedMovePct": expected_move_pct, "expectedMoveSource": expected_move_src, "realizedMedianPct": realized_median, "nUsed": n_used, "ratio": None if ratio is None else round(float(ratio), 4)},
                 threshold={"minEarningsN": MIN_EARNINGS_N, "emRichnessMult": EM_RICHNESS_MULT, "requiredExpectedMovePct": round(float(need), 4)},
@@ -771,7 +801,7 @@ def compute_go_no_go(
             _mk_check(
                 id="SN_TAIL_P90_RICHNESS",
                 label="Expected move vs P90 realized (tail proxy)",
-                state="PASS" if passed90 else "FAIL",
+                state="PASS" if passed90 else "FLAG",
                 code=None if passed90 else "SN_TAIL_P90_TOO_LARGE",
                 value={
                     "expectedMovePct": expected_move_pct,
@@ -822,7 +852,7 @@ def compute_go_no_go(
             _mk_check(
                 id="SN_IV_ELEVATED",
                 label="IV30 elevated vs own 30d history",
-                state="FAIL",
+                state="FLAG",
                 code="SN_IV_TOO_LOW_ABSOLUTE",
                 value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": None if iv_z is None else round(float(iv_z), 4)},
                 threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
@@ -834,7 +864,7 @@ def compute_go_no_go(
             _mk_check(
                 id="SN_IV_ELEVATED",
                 label="IV30 elevated vs own 30d history",
-                state="FAIL",
+                state="FLAG",
                 code="SN_IVP_TOO_LOW",
                 value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": None if iv_z is None else round(float(iv_z), 4)},
                 threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
@@ -860,7 +890,7 @@ def compute_go_no_go(
                     _mk_check(
                         id="SN_IV_ELEVATED",
                         label="IV30 elevated vs own 30d history",
-                        state="FAIL",
+                        state="FLAG",
                         code="SN_IV_NOT_ELEVATED_Z",
                         value={"fieldUsed": field_used, "currentIv30Pct": current_iv, "sampleN": iv_sample_n, "percentile01": round(float(iv_pctl), 4), "z": round(float(iv_z), 4)},
                         threshold={"ivpMin": IVP_MIN, "sampleMin": IV_SAMPLE_MIN, "ivFloorPct": IV30_FLOOR, "zEnabled": IV_Z_ENABLED, "zMin": IV30_Z_MIN},
@@ -904,7 +934,7 @@ def compute_go_no_go(
             _mk_check(
                 id="SN_LEGAL_REG",
                 label="No known legal / regulatory binary",
-                state="FAIL",
+                state="BLOCK",
                 code="SN_LEGAL_REG_MANUAL_FLAG",
                 value={"ticker": t, "source": "manual_denylist"},
                 threshold={"keywordScanEnabled": benzinga_client is not None},
@@ -986,7 +1016,7 @@ def compute_go_no_go(
                 _mk_check(
                     id="SN_LEGAL_REG",
                     label="No known legal / regulatory binary",
-                    state="FAIL",
+                    state="FLAG",
                     code="SN_LEGAL_REG_HEADLINE_HIT",
                     value={"ticker": t, "hits": hits[:5], "keywords": kw[:12]},
                     threshold={"keywordScanEnabled": True, "windowDays": 7},
@@ -1152,12 +1182,22 @@ def compute_go_no_go(
                     med_sp_c = _to_float((band_call or {}).get("medianSpread"))
                     p90_sp_p = _to_float((band_put or {}).get("p90Spread"))
                     p90_sp_c = _to_float((band_call or {}).get("p90Spread"))
-                    if (med_sp_p is not None and float(med_sp_p) > float(SPREAD_MAX)) or (med_sp_c is not None and float(med_sp_c) > float(SPREAD_MAX)):
-                        opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_SPREAD_TOO_WIDE", f"Median spread ratio above {SPREAD_MAX:.2f} in delta band."
-                    elif float(SPREAD_MAX_P90) > 0 and (
+                    med_wide = (med_sp_p is not None and float(med_sp_p) > float(SPREAD_MAX)) or (med_sp_c is not None and float(med_sp_c) > float(SPREAD_MAX))
+                    med_block = (med_sp_p is not None and float(med_sp_p) > float(SPREAD_BLOCK)) or (med_sp_c is not None and float(med_sp_c) > float(SPREAD_BLOCK))
+                    p90_wide = float(SPREAD_MAX_P90) > 0 and (
                         (p90_sp_p is not None and float(p90_sp_p) > float(SPREAD_MAX_P90)) or (p90_sp_c is not None and float(p90_sp_c) > float(SPREAD_MAX_P90))
-                    ):
-                        opt_state, opt_code, opt_explain = "FAIL", "SN_OPT_SPREAD_TOO_WIDE", f"P90 spread ratio above {SPREAD_MAX_P90:.2f} in delta band."
+                    )
+                    p90_block = float(SPREAD_P90_BLOCK) > 0 and (
+                        (p90_sp_p is not None and float(p90_sp_p) > float(SPREAD_P90_BLOCK)) or (p90_sp_c is not None and float(p90_sp_c) > float(SPREAD_P90_BLOCK))
+                    )
+                    if med_block:
+                        opt_state, opt_code, opt_explain = "BLOCK", "SN_OPT_SPREAD_TOO_WIDE", f"Median spread ratio above {SPREAD_BLOCK:.2f} — no executable market in delta band."
+                    elif p90_block:
+                        opt_state, opt_code, opt_explain = "BLOCK", "SN_OPT_SPREAD_TOO_WIDE", f"P90 spread ratio above {SPREAD_P90_BLOCK:.2f} — extreme tail spreads in delta band."
+                    elif med_wide:
+                        opt_state, opt_code, opt_explain = "FLAG", "SN_OPT_SPREAD_WIDE", f"Median spread ratio above {SPREAD_MAX:.2f} in delta band — verify fill quality."
+                    elif p90_wide:
+                        opt_state, opt_code, opt_explain = "FLAG", "SN_OPT_SPREAD_WIDE", f"P90 spread ratio above {SPREAD_MAX_P90:.2f} in delta band — wider tails on some strikes."
                     else:
                         oi_p = _to_float((band_put or {}).get("sumOI")) or 0.0
                         oi_c = _to_float((band_call or {}).get("sumOI")) or 0.0
@@ -1167,11 +1207,20 @@ def compute_go_no_go(
                         def _side_ok(oi_sum: float, vol_sum: float) -> bool:
                             return (float(oi_sum) >= float(BAND_OI_SUM_MIN)) or (float(vol_sum) >= float(BAND_VOL_SUM_MIN))
 
-                        if not _side_ok(oi_p, vol_p) or not _side_ok(oi_c, vol_c):
+                        def _side_block(oi_sum: float, vol_sum: float) -> bool:
+                            return (float(oi_sum) < float(BAND_OI_SUM_BLOCK)) and (float(vol_sum) < float(BAND_VOL_SUM_BLOCK))
+
+                        if _side_block(oi_p, vol_p) or _side_block(oi_c, vol_c):
                             opt_state, opt_code, opt_explain = (
-                                "FAIL",
+                                "BLOCK",
                                 "SN_OPT_OI_TOO_LOW",
-                                f"Band OI/vol below minimum (need OI_sum>={BAND_OI_SUM_MIN:.0f} or Vol_sum>={BAND_VOL_SUM_MIN:.0f} per side).",
+                                f"Band OI/vol critically low (need OI_sum>={BAND_OI_SUM_BLOCK:.0f} or Vol_sum>={BAND_VOL_SUM_BLOCK:.0f} per side).",
+                            )
+                        elif not _side_ok(oi_p, vol_p) or not _side_ok(oi_c, vol_c):
+                            opt_state, opt_code, opt_explain = (
+                                "FLAG",
+                                "SN_OPT_OI_LOW",
+                                f"Band OI/vol below preferred minimum (OI_sum>={BAND_OI_SUM_MIN:.0f} or Vol_sum>={BAND_VOL_SUM_MIN:.0f} per side) — verify execution.",
                             )
                         else:
                             opt_state, opt_code, opt_explain = "PASS", None, "Options liquidity looks sufficient in delta band."
@@ -1211,8 +1260,10 @@ def compute_go_no_go(
             liq_notes.append(proxy_reason)
         else:
             liq_state, liq_code, liq_explain = "MISSING", "SN_LIQ_UNDERLYING_MISSING", "Underlying liquidity (avg $vol) unavailable."
+    elif float(avg_dvol) < float(AVG_DVOL_BLOCK):
+        liq_state, liq_code, liq_explain = "BLOCK", "SN_LIQ_UNDERLYING_TOO_LOW", f"avgDollarVol20d ${float(avg_dvol)/1e6:.0f}M critically below ${AVG_DVOL_BLOCK/1e6:.0f}M — genuinely illiquid."
     elif not underlying_ok:
-        liq_state, liq_code, liq_explain = "FAIL", "SN_LIQ_UNDERLYING_TOO_LOW", f"avgDollarVol20d {float(avg_dvol):.0f} below {AVG_DVOL_MIN:.0f}."
+        liq_state, liq_code, liq_explain = "FLAG", "SN_LIQ_UNDERLYING_LOW", f"avgDollarVol20d ${float(avg_dvol)/1e6:.0f}M below preferred ${AVG_DVOL_MIN/1e6:.0f}M — verify execution."
     else:
         liq_state, liq_code, liq_explain = opt_state, opt_code, (opt_explain or "Underlying and options liquidity checks passed.")
         if liq_state == "PASS":
@@ -1284,9 +1335,9 @@ def compute_go_no_go(
         sign = str(dg.get("netGammaSign") or "").lower()
         mag_bucket = str(dg.get("magnitudeBucket") or "").lower() or _bucket_from_ratio(_to_float(dg.get("magnitudeRatio")))
         if sign != "positive":
-            state, code, explain = "FAIL", "MACRO_GAMMA_NOT_POSITIVE", f"netGammaSign={sign or 'missing'}."
+            state, code, explain = "FLAG", "MACRO_GAMMA_NOT_POSITIVE", f"netGammaSign={sign or 'missing'}."
         elif mag_bucket not in ("medium", "high"):
-            state, code, explain = "FAIL", "MACRO_GAMMA_TOO_SMALL", f"magnitudeBucket={mag_bucket or 'missing'} (needs >= medium)."
+            state, code, explain = "FLAG", "MACRO_GAMMA_TOO_SMALL", f"magnitudeBucket={mag_bucket or 'missing'} (needs >= medium)."
         else:
             state, code, explain = "PASS", None, "Positive market gamma with non-trivial magnitude."
         checks.append(
@@ -1340,9 +1391,9 @@ def compute_go_no_go(
         )
     else:
         if float(rv5_jump) > float(RV5_JUMP_MAX):
-            state, code, explain = "FAIL", "MACRO_RV5_ACCELERATING", f"RV5 jump {rv5_jump:.2f} > {RV5_JUMP_MAX:.2f}."
+            state, code, explain = "FLAG", "MACRO_RV5_ACCELERATING", f"RV5 jump {rv5_jump:.2f} > {RV5_JUMP_MAX:.2f}."
         elif float(rv20_jump) > float(RV20_JUMP_MAX):
-            state, code, explain = "FAIL", "MACRO_RV20_ACCELERATING", f"RV20 jump {rv20_jump:.2f} > {RV20_JUMP_MAX:.2f}."
+            state, code, explain = "FLAG", "MACRO_RV20_ACCELERATING", f"RV20 jump {rv20_jump:.2f} > {RV20_JUMP_MAX:.2f}."
         else:
             state, code, explain = "PASS", None, "RV5 and RV20 not accelerating."
         checks.append(
@@ -1432,7 +1483,7 @@ def compute_go_no_go(
             _mk_check(
                 id="MACRO_GAMMA_FLIP",
                 label="No SPX gamma flip within cutoff",
-                state="PASS" if passed else "FAIL",
+                state="PASS" if passed else "FLAG",
                 code=None if passed else "MACRO_TOO_CLOSE_TO_GAMMA_FLIP",
                 value={"minFlipEm": round(float(min_flip), 4), "downsideEm": down_em, "upsideEm": up_em, "cutoffEm": flip_cutoff, "symbolUsed": spx_levels.get("symbolUsed") if isinstance(spx_levels, dict) else None},
                 threshold={"flipCutoffEm": flip_cutoff},
@@ -1524,7 +1575,7 @@ def compute_go_no_go(
         if benzinga_client is None:
             state, code, explain = "MISSING", "MACRO_FORCED_FLOWS_DATA_MISSING", "Benzinga macro calendar unavailable."
         elif high:
-            state, code, explain = "FAIL", "MACRO_FORCED_FLOWS_HIGH", f"{len(high)} HIGH-severity forced-flow event(s) in window."
+            state, code, explain = "FLAG", "MACRO_FORCED_FLOWS_HIGH", f"{len(high)} HIGH-severity forced-flow event(s) in window."
         else:
             state, code, explain = "PASS", None, "No HIGH-severity forced flows in window."
 
@@ -1543,7 +1594,16 @@ def compute_go_no_go(
             )
         )
 
-    passed_all = all(str(c.get("state") or "").upper() == "PASS" for c in checks)
-    return {"status": "GO" if passed_all else "NO_GO", "passed": bool(passed_all), "checks": checks, "warnings": warnings, "notes": notes}
+    blocked = any(str(c.get("state") or "").upper() == "BLOCK" for c in checks)
+    flags = [c for c in checks if str(c.get("state") or "").upper() == "FLAG"]
+    return {
+        "status": "NO_GO" if blocked else "GO",
+        "passed": not blocked,
+        "hasFlags": len(flags) > 0,
+        "flagCount": len(flags),
+        "checks": checks,
+        "warnings": warnings,
+        "notes": notes,
+    }
 
 
