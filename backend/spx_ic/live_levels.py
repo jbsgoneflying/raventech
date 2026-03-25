@@ -112,7 +112,23 @@ def _imp_to_pct(v: Any) -> Optional[float]:
     return x * 100.0 if x <= 1.0 else x
 
 
-def _fetch_orats_em_snapshot(client: OratsClient, *, ticker: str, today: dt.date) -> Dict[str, Any]:
+def _iv_to_weekly_em(iv_annual: Optional[float], dte: int) -> Optional[float]:
+    """Convert annualized IV to expected move % for a given DTE."""
+    if iv_annual is None or iv_annual <= 0 or dte <= 0:
+        return None
+    return abs(iv_annual) * math.sqrt(dte / 365.0)
+
+
+def _pick_iv(row: dict) -> Optional[float]:
+    """Pick the best IV value from an ORATS cores row, preferring short-term."""
+    for k in ("iv7", "iv7d", "iv7Day", "iv30", "iv30d", "iv30Day", "iv"):
+        v = _to_float(row.get(k))
+        if v is not None and v > 0:
+            return float(v) if v > 1.0 else float(v) * 100.0
+    return None
+
+
+def _fetch_orats_em_snapshot(client: OratsClient, *, ticker: str, today: dt.date, dte: int = 5) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "eodImpliedMovePct": None,
         "eodAsOfDate": None,
@@ -124,29 +140,47 @@ def _fetch_orats_em_snapshot(client: OratsClient, *, ticker: str, today: dt.date
         "warnings": [],
     }
 
+    # Fields to request: impErnMv for stocks with earnings, IV fields for indices
+    delayed_fields = "ticker,tradeDate,stockPrice,impErnMv,iv7,iv7d,iv7Day,iv30,iv30d,iv30Day,iv,updatedAt"
+    eod_fields = "ticker,tradeDate,stockPrice,impErnMv,iv7,iv7d,iv7Day,iv30,iv30d,iv30Day,iv"
+
+    # --- Delayed snapshot ---
     try:
         fetcher = getattr(client, "cores_delayed", None) or getattr(client, "cores", None)
         if callable(fetcher):
-            snap = fetcher(ticker=ticker, fields="ticker,tradeDate,stockPrice,impErnMv,updatedAt")
+            snap = fetcher(ticker=ticker, fields=delayed_fields)
             snap_row = next((r for r in (snap.rows or []) if isinstance(r, dict)), None)
             if snap_row:
                 delayed_pct = _imp_to_pct(snap_row.get("impErnMv"))
                 if delayed_pct is not None and delayed_pct > 0:
                     out["delayedImpliedMovePct"] = round(float(delayed_pct), 2)
+                else:
+                    iv = _pick_iv(snap_row)
+                    em_from_iv = _iv_to_weekly_em(iv, dte)
+                    if em_from_iv is not None:
+                        out["delayedImpliedMovePct"] = round(em_from_iv, 2)
+                if out["delayedImpliedMovePct"] is not None:
                     out["delayedUpdatedAt"] = str(snap_row.get("updatedAt") or "")
                     out["delayedTradeDate"] = str(snap_row.get("tradeDate") or "")[:10]
     except Exception as e:
         out["warnings"].append(f"Delayed ORATS EM unavailable: {type(e).__name__}")
 
+    # --- EOD history (walk back up to 8 days) ---
     for i in range(0, 8):
         ds = _fmt_date(today - dt.timedelta(days=i))
         try:
-            resp = client.hist_cores(ticker=ticker, trade_date=ds, fields="ticker,tradeDate,stockPrice,impErnMv")
+            resp = client.hist_cores(ticker=ticker, trade_date=ds, fields=eod_fields)
             row = next((r for r in (resp.rows or []) if isinstance(r, dict)), None)
             if row:
                 eod_pct = _imp_to_pct(row.get("impErnMv"))
                 if eod_pct is not None and eod_pct > 0:
                     out["eodImpliedMovePct"] = round(float(eod_pct), 2)
+                    out["eodAsOfDate"] = str(row.get("tradeDate") or ds)[:10]
+                    break
+                iv = _pick_iv(row)
+                em_from_iv = _iv_to_weekly_em(iv, dte)
+                if em_from_iv is not None:
+                    out["eodImpliedMovePct"] = round(em_from_iv, 2)
                     out["eodAsOfDate"] = str(row.get("tradeDate") or ds)[:10]
                     break
         except Exception:
@@ -331,7 +365,7 @@ def compute_expected_move_weekly(
     result["discountFactor"] = em_result.get("discountFactor")
     result["strikesUsedForForward"] = em_result.get("strikesUsedForForward", 0)
     result["symbolUsed"] = used_symbol
-    em_snap = _fetch_orats_em_snapshot(client, ticker=t, today=today)
+    em_snap = _fetch_orats_em_snapshot(client, ticker=t, today=today, dte=max(result.get("dte") or 5, 1))
     result["eodImpliedMovePct"] = em_snap.get("eodImpliedMovePct")
     result["eodAsOfDate"] = em_snap.get("eodAsOfDate")
     result["delayedImpliedMovePct"] = em_snap.get("delayedImpliedMovePct")

@@ -1676,7 +1676,7 @@ function renderEngine2DecisionPanel(payload) {
         <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="ORATS EM" title="Click for desk insight">
           <div class="taCardTop">
             <div class="taCardTitle">ORATS EM</div>
-            <span class="info" title="ORATS implied move from /cores. EOD shown with delayed overlay when available. Strike targets use delayed first, then EOD.">ⓘ</span>
+            <span class="info" title="ORATS expected move from /cores (IV-derived for indices, impErnMv for stocks). EOD shown with delayed overlay when available. Strike targets use delayed first, then EOD.">ⓘ</span>
           </div>
           <div class="taCardState mono">${Number.isFinite(oratsEodEmPct) ? escapeHtml(oratsEodEmPct.toFixed(2)) + "%" : "—"}</div>
           <div class="taCardInterp">${oratsEodAsOf ? `As of: ${escapeHtml(oratsEodAsOf)}` : "—"} · EOD (used for breach history)</div>
