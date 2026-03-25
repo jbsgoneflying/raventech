@@ -2508,22 +2508,22 @@ function _closeTrade(tradeId) {
   overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center";
 
   var box = document.createElement("div");
-  box.style.cssText = "background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:24px;width:380px;max-width:90vw;color:var(--text-primary);font-family:var(--font)";
+  box.style.cssText = "background:#1c1c1e;border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:24px;width:380px;max-width:90vw;color:var(--text-primary);font-family:var(--font);box-shadow:0 8px 32px rgba(0,0,0,0.5)";
 
   box.innerHTML = '<div style="font-size:14px;font-weight:700;margin-bottom:16px">Close Trade</div>' +
     '<div style="display:grid;gap:12px;font-size:12px">' +
-    '<div><label style="color:var(--text-secondary);display:block;margin-bottom:3px">How did it close?</label>' +
-    '<select id="closeType" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);font-size:12px">' +
+    '<div><label style="color:rgba(255,255,255,0.6);display:block;margin-bottom:3px">How did it close?</label>' +
+    '<select id="closeType" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#2c2c2e;color:#f5f5f7;font-size:12px">' +
     '<option value="expired_worthless">Expired Worthless (Full Win)</option>' +
     '<option value="closed_early">Closed Early</option>' +
     '<option value="stopped_out">Stopped Out</option>' +
     '<option value="rolled">Rolled / Adjusted Out</option>' +
     '</select></div>' +
-    '<div id="closeExitRow"><label style="color:var(--text-secondary);display:block;margin-bottom:3px">Exit Debit Paid ($)</label>' +
-    '<input id="closeExitCredit" type="number" step="0.01" value="0" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);font-family:var(--mono);font-size:12px" />' +
-    '<div style="color:var(--text-secondary);font-size:10px;margin-top:2px">Cost to close (0 if expired worthless)</div></div>' +
-    '<div><label style="color:var(--text-secondary);display:block;margin-bottom:3px">Notes (optional)</label>' +
-    '<input id="closeNotes" type="text" placeholder="e.g. Closed for .30 debit with 1 DTE" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);font-size:12px" /></div>' +
+    '<div id="closeExitRow"><label style="color:rgba(255,255,255,0.6);display:block;margin-bottom:3px">Exit Debit Paid ($)</label>' +
+    '<input id="closeExitCredit" type="number" step="0.01" value="0" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#2c2c2e;color:#f5f5f7;font-family:var(--mono);font-size:12px" />' +
+    '<div style="color:rgba(255,255,255,0.4);font-size:10px;margin-top:2px">Cost to close (0 if expired worthless)</div></div>' +
+    '<div><label style="color:rgba(255,255,255,0.6);display:block;margin-bottom:3px">Notes (optional)</label>' +
+    '<input id="closeNotes" type="text" placeholder="e.g. Closed for .30 debit with 1 DTE" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#2c2c2e;color:#f5f5f7;font-size:12px" /></div>' +
     '</div>' +
     '<div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">' +
     '<button id="closeCancelBtn" class="chipToggle" type="button" style="font-size:12px;padding:6px 14px">Cancel</button>' +
