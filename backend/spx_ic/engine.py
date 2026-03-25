@@ -113,7 +113,12 @@ def _compute_em_preference(
 
     Normalises regime, macro, news-gate, and vol-pressure into 0-100 subscores
     (higher = more conservative market), applies a weighted composite with a
-    dealer-gamma modifier, then maps bands to an EM preference.
+    dealer-gamma modifier and a multi-risk stacking amplifier, then maps
+    bands to an EM preference.
+
+    The stacking amplifier addresses the weakness of weighted averages: when
+    multiple independent risk factors fire simultaneously, the combined danger
+    compounds — calm factors should not dilute that signal.
 
     Returns dict with emPreference (1.0 / 1.5 / 2.0), label, compositeScore,
     and per-factor breakdown for transparency.
@@ -138,7 +143,21 @@ def _compute_em_preference(
     elif gs == "positive":
         gamma_adj = -5.0
 
-    score = _clamp(0, 100, raw + gamma_adj)
+    caution_flags = 0
+    if regime_f > 45:
+        caution_flags += 1
+    if macro_f > 70:
+        caution_flags += 1
+    if news_f > 30:
+        caution_flags += 1
+    if vol_f >= 60:
+        caution_flags += 1
+    if gs == "negative":
+        caution_flags += 1
+
+    stacking_bonus = max(0.0, (caution_flags - 2)) * 10.0
+
+    score = _clamp(0, 100, raw + gamma_adj + stacking_bonus)
 
     if score < 35:
         em_pref, label = 1.0, "aggressive"
@@ -157,6 +176,8 @@ def _compute_em_preference(
             "newsGate": round(news_f, 1),
             "volPressure": round(vol_f, 1),
             "gammaAdj": round(gamma_adj, 1),
+            "stackingBonus": round(stacking_bonus, 1),
+            "cautionFlags": caution_flags,
         },
         "weights": {"regime": 0.35, "macro": 0.25, "newsGate": 0.20, "volPressure": 0.20},
     }

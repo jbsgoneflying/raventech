@@ -416,6 +416,69 @@ def test_compute_em_preference_high_risk():
     assert result["compositeScore"] >= 60
 
 
+def test_compute_em_preference_stacking_three_flags():
+    """When regime, macro, and gamma all flag, the stacking bonus should
+    push the score past 60 into defensive territory — matching deskConsensus."""
+    from backend.spx_ic.engine import _compute_em_preference
+    result = _compute_em_preference(
+        regime_score=49.0,
+        macro_multiplier=1.90,
+        news_gate_max_adj=28.0,
+        vol_pressure_state="NEUTRAL",
+        dealer_gamma_sign="negative",
+    )
+    assert result["emPreference"] == 2.0
+    assert result["label"] == "defensive"
+    assert result["compositeScore"] >= 60
+    assert result["components"]["cautionFlags"] == 3
+    assert result["components"]["stackingBonus"] == 10.0
+
+
+def test_compute_em_preference_stacking_two_flags_no_bonus():
+    """With only 2 caution flags, no stacking bonus should be applied."""
+    from backend.spx_ic.engine import _compute_em_preference
+    result = _compute_em_preference(
+        regime_score=49.0,
+        macro_multiplier=1.90,
+        news_gate_max_adj=10.0,
+        vol_pressure_state="NEUTRAL",
+        dealer_gamma_sign="unknown",
+    )
+    assert result["components"]["cautionFlags"] == 2
+    assert result["components"]["stackingBonus"] == 0.0
+
+
+def test_compute_em_preference_stacking_four_flags():
+    """With 4 caution flags, the stacking bonus should be 20."""
+    from backend.spx_ic.engine import _compute_em_preference
+    result = _compute_em_preference(
+        regime_score=55.0,
+        macro_multiplier=1.80,
+        news_gate_max_adj=40.0,
+        vol_pressure_state="BID",
+        dealer_gamma_sign="negative",
+    )
+    assert result["emPreference"] == 2.0
+    assert result["label"] == "defensive"
+    assert result["components"]["cautionFlags"] == 5
+    assert result["components"]["stackingBonus"] == 30.0
+
+
+def test_compute_em_preference_low_risk_no_stacking():
+    """Low risk scenario: no caution flags, no stacking bonus."""
+    from backend.spx_ic.engine import _compute_em_preference
+    result = _compute_em_preference(
+        regime_score=25.0,
+        macro_multiplier=1.0,
+        news_gate_max_adj=5.0,
+        vol_pressure_state="ASK",
+        dealer_gamma_sign="positive",
+    )
+    assert result["emPreference"] == 1.0
+    assert result["components"]["cautionFlags"] == 0
+    assert result["components"]["stackingBonus"] == 0.0
+
+
 def test_em_fallback_order():
     from backend.spx_ic.engine import _em_fallback_order
     assert _em_fallback_order(1.5, [1.0, 1.5, 2.0]) == [1.0, 2.0]

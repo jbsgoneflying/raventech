@@ -2123,7 +2123,15 @@ function renderWidthComparison(widthComparison) {
 
   var emPref = lastPayload?.emPreference || {};
   var emBreachSummary = lastPayload?.emBreachSummary || {};
-  var prefEm = emPref.emPreference || null;
+  var deskCon = lastPayload?.deskConsensus || {};
+  var rawPrefEm = emPref.emPreference || null;
+  var consensusFloor = deskCon.suggestedEmFloor || null;
+  var effectiveEm = rawPrefEm;
+  var floorOverride = false;
+  if (consensusFloor != null && rawPrefEm != null && consensusFloor > rawPrefEm) {
+    effectiveEm = consensusFloor;
+    floorOverride = true;
+  }
 
   var emGroups = {};
   var emOrder = [];
@@ -2136,13 +2144,23 @@ function renderWidthComparison(widthComparison) {
   var _f = function(v, d) { return v !== null && v !== undefined ? Number(v).toFixed(d) + "%" : "—"; };
   var _fv = function(v, d) { return v !== null && v !== undefined ? Number(v).toFixed(d) : "—"; };
   var emLabels = { "1.0": "Aggressive", "1.5": "Standard", "2.0": "Defensive" };
+  var effectiveLabel = effectiveEm === 2.0 ? "defensive" : effectiveEm === 1.0 ? "aggressive" : "standard";
 
   var html = '<div class="taPanel" style="gap:8px;padding:14px">';
   html += '<div class="taHeader" style="padding:12px 14px 10px">';
   html += '<div class="taHeaderRow">';
   html += '<span class="taHeaderTitle">EM × Wing Width Analysis</span>';
   if (emPref.compositeScore != null) {
-    html += '<span class="taHeaderMeta">Preferred: <strong>' + (prefEm || "—") + 'x</strong> ' + escapeHtml(emPref.label || "") + ' · Score ' + Number(emPref.compositeScore).toFixed(0) + '</span>';
+    html += '<span class="taHeaderMeta">';
+    html += 'Preferred: <strong>' + (effectiveEm || "—") + 'x</strong> ' + escapeHtml(effectiveLabel);
+    if (floorOverride) {
+      html += ' <span style="color:var(--text-secondary);font-size:10px">(from ' + rawPrefEm + 'x · consensus: ' + escapeHtml(deskCon.riskLevel || "") + ')</span>';
+    }
+    html += ' · Score ' + Number(emPref.compositeScore).toFixed(0);
+    if (deskCon.riskLevel) {
+      html += ' · Consensus: ' + escapeHtml(deskCon.riskLevel);
+    }
+    html += '</span>';
   }
   html += '</div></div>';
 
@@ -2150,7 +2168,7 @@ function renderWidthComparison(widthComparison) {
     var rows = emGroups[ek];
     var emVal = parseFloat(ek);
     var breachPct = emBreachSummary[ek];
-    var isRec = prefEm != null && Math.abs(emVal - prefEm) < 0.01;
+    var isRec = effectiveEm != null && Math.abs(emVal - effectiveEm) < 0.01;
     var emLabel = emLabels[ek] || "";
 
     var borderColor = isRec ? 'rgba(52,199,89,0.45)' : 'var(--ta-glass-border)';
