@@ -11,6 +11,7 @@ from backend.engine2_advisor import (
     _extract_dms_context,
     _parse_llm_json,
     _sanitize_e2_for_llm,
+    compute_news_gate_score,
     compute_trade_tracking,
     generate_checkin_analysis,
     generate_trade_analysis,
@@ -23,6 +24,10 @@ from backend.engine2_trades import (
     get_trade,
     list_active_trades,
     log_trade,
+)
+from backend.news_theme_intelligence import (
+    compute_market_adjusted_intensity,
+    get_theme_impact_weight,
 )
 
 
@@ -246,14 +251,45 @@ class TestSanitize:
             "vol_state": {"level": 22},
             "cross_asset_stress": {"composite_score": 0.5, "composite_label": "elevated"},
             "news_themes": [
-                {"theme": "Tariffs", "intensity": 40, "acceleration": 5},
-                {"theme": "Minor", "intensity": 5, "acceleration": 0},
+                {"theme": "Tariffs", "key": "geopolitical_escalation", "intensity": 40, "acceleration": 5},
+                {"theme": "Minor", "key": "ai_displacement", "intensity": 5, "acceleration": 0},
             ],
         }
         ctx = _extract_dms_context(dms)
         assert ctx["composite_stress"] == 0.5
         assert len(ctx["active_themes"]) == 1
-        assert ctx["active_themes"][0]["theme"] == "Tariffs"
+        t = ctx["active_themes"][0]
+        assert t["theme"] == "Tariffs"
+        assert t["adjustedIntensity"] == 40.0
+        assert t["spxImpactWeight"] == 1.0
+
+    def test_dms_context_adjusted_intensity_applied(self):
+        dms = {
+            "news_themes": [
+                {"theme": "AI Displacement", "key": "ai_displacement", "intensity": 86.7, "acceleration": "rising"},
+                {"theme": "Geopolitical Escalation", "key": "geopolitical_escalation", "intensity": 50, "acceleration": "stable"},
+            ],
+        }
+        ctx = _extract_dms_context(dms)
+        themes = ctx["active_themes"]
+        assert len(themes) == 2
+        ai = next(t for t in themes if t["key"] == "ai_displacement")
+        geo = next(t for t in themes if t["key"] == "geopolitical_escalation")
+        assert ai["adjustedIntensity"] == pytest.approx(21.7, abs=0.1)
+        assert ai["spxImpactWeight"] == 0.25
+        assert geo["adjustedIntensity"] == pytest.approx(50.0)
+        assert geo["spxImpactWeight"] == 1.0
+
+    def test_dms_context_includes_news_gate(self):
+        dms = {
+            "news_themes": [
+                {"theme": "Geopolitical Escalation", "key": "geopolitical_escalation", "intensity": 70, "acceleration": "rising"},
+            ],
+        }
+        ctx = _extract_dms_context(dms)
+        assert "newsGate" in ctx
+        assert ctx["newsGate"]["gate"] == "elevated"
+        assert ctx["newsGate"]["maxAdjustedIntensity"] == 70.0
 
 
 class TestAdvisorFallback:
@@ -288,3 +324,83 @@ class TestMultiWingConfig:
         f1 = FeatureFlags(ENGINE2_MULTI_WING=True)
         f2 = FeatureFlags(ENGINE2_MULTI_WING=False)
         assert f1.cache_key_engine2() != f2.cache_key_engine2()
+
+
+# ---------------------------------------------------------------------------
+# Theme impact weighting tests
+# ---------------------------------------------------------------------------
+
+class TestThemeImpactWeighting:
+    def test_get_weight_by_key(self):
+        assert get_theme_impact_weight("geopolitical_escalation") == 1.0
+        assert get_theme_impact_weight("ai_displacement") == 0.25
+        assert get_theme_impact_weight("liquidity_shock") == 0.95
+
+    def test_get_weight_by_label(self):
+        assert get_theme_impact_weight("Geopolitical Escalation") == 1.0
+        assert get_theme_impact_weight("AI Displacement") == 0.25
+        assert get_theme_impact_weight("Credit Stress") == 0.80
+
+    def test_get_weight_unknown_returns_default(self):
+        assert get_theme_impact_weight("Unknown Theme") == 0.5
+        assert get_theme_impact_weight("") == 0.5
+
+    def test_adjusted_intensity_ai_discounted(self):
+        adj = compute_market_adjusted_intensity(86.7, "ai_displacement")
+        assert adj == pytest.approx(21.7, abs=0.1)
+
+    def test_adjusted_intensity_geo_full_weight(self):
+        adj = compute_market_adjusted_intensity(50.0, "geopolitical_escalation")
+        assert adj == pytest.approx(50.0)
+
+    def test_adjusted_intensity_by_label(self):
+        adj = compute_market_adjusted_intensity(60.0, "Labor Stress")
+        assert adj == pytest.approx(30.0)
+
+    def test_adjusted_intensity_zero(self):
+        assert compute_market_adjusted_intensity(0.0, "geopolitical_escalation") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# News gate scoring tests
+# ---------------------------------------------------------------------------
+
+class TestNewsGateScore:
+    def test_empty_themes_ok(self):
+        result = compute_news_gate_score([])
+        assert result["gate"] == "ok"
+        assert result["maxAdjustedIntensity"] == 0
+        assert result["dominantTheme"] is None
+
+    def test_low_adjusted_ok(self):
+        themes = [{"theme": "AI Displacement", "adjustedIntensity": 21.7}]
+        result = compute_news_gate_score(themes)
+        assert result["gate"] == "ok"
+
+    def test_caution_threshold(self):
+        themes = [{"theme": "Labor Stress", "adjustedIntensity": 35.0}]
+        result = compute_news_gate_score(themes)
+        assert result["gate"] == "caution"
+        assert result["dominantTheme"] == "Labor Stress"
+
+    def test_elevated_threshold(self):
+        themes = [{"theme": "Credit Stress", "adjustedIntensity": 64.0}]
+        result = compute_news_gate_score(themes)
+        assert result["gate"] == "elevated"
+
+    def test_block_threshold(self):
+        themes = [{"theme": "Geopolitical Escalation", "adjustedIntensity": 85.0}]
+        result = compute_news_gate_score(themes)
+        assert result["gate"] == "block"
+        assert result["dominantTheme"] == "Geopolitical Escalation"
+
+    def test_dominant_is_highest_adjusted(self):
+        themes = [
+            {"theme": "AI Displacement", "adjustedIntensity": 21.7},
+            {"theme": "Geopolitical Escalation", "adjustedIntensity": 50.0},
+        ]
+        result = compute_news_gate_score(themes)
+        assert result["dominantTheme"] == "Geopolitical Escalation"
+        assert result["maxAdjustedIntensity"] == 50.0
+        assert result["gate"] == "caution"
+        assert result["themeCount"] == 2

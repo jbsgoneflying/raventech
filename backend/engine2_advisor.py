@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.config import FeatureFlags, get_flags
 from backend.daily_market_state import DailyMarketState, load_dms
+from backend.news_theme_intelligence import compute_market_adjusted_intensity, get_theme_impact_weight
 from backend.redis_store import get_store_optional
 
 LOG = logging.getLogger(__name__)
@@ -133,19 +134,75 @@ def _load_todays_dms() -> Optional[Dict[str, Any]]:
 def _extract_dms_context(dms_dict: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not dms_dict:
         return {}
+    themes_raw = dms_dict.get("news_themes") or []
+    active_themes = []
+    for t in themes_raw:
+        raw_i = float(t.get("intensity", 0))
+        if raw_i <= 10:
+            continue
+        key = t.get("key", "")
+        label = t.get("theme", "")
+        adj = float(t.get("adjusted_intensity", 0))
+        if adj <= 0:
+            adj = compute_market_adjusted_intensity(raw_i, key or label)
+        weight = float(t.get("spx_impact_weight", 0))
+        if weight <= 0:
+            weight = get_theme_impact_weight(key or label)
+        active_themes.append({
+            "theme": label,
+            "key": key,
+            "intensity": raw_i,
+            "adjustedIntensity": round(adj, 1),
+            "spxImpactWeight": round(weight, 2),
+            "acceleration": t.get("acceleration"),
+        })
+
+    news_gate = compute_news_gate_score(active_themes)
+
     return {
         "regime": dms_dict.get("regime", {}),
         "vol_state": dms_dict.get("vol_state", {}),
         "composite_stress": (dms_dict.get("cross_asset_stress") or {}).get("composite_score"),
         "composite_label": (dms_dict.get("cross_asset_stress") or {}).get("composite_label"),
         "engine_gates": dms_dict.get("engine_gates", {}),
-        "active_themes": [
-            {"theme": t.get("theme"), "intensity": t.get("intensity"), "acceleration": t.get("acceleration")}
-            for t in (dms_dict.get("news_themes") or [])
-            if float(t.get("intensity", 0)) > 10
-        ],
+        "active_themes": active_themes,
+        "newsGate": news_gate,
         "news_risk": dms_dict.get("news_risk", {}),
         "sequencer_summary": dms_dict.get("sequencer_summary"),
+    }
+
+
+def compute_news_gate_score(themes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Deterministic news gate scoring from market-adjusted theme intensities.
+
+    Returns a gate status (ok/caution/elevated/block) and the dominant theme.
+    Mirrors Engine12's classify_event_severity pattern.
+    """
+    if not themes:
+        return {"maxAdjustedIntensity": 0, "gate": "ok", "dominantTheme": None, "themeCount": 0}
+
+    max_adj = 0.0
+    dominant = None
+    for t in themes:
+        adj = float(t.get("adjustedIntensity", 0))
+        if adj > max_adj:
+            max_adj = adj
+            dominant = t.get("theme") or t.get("key")
+
+    if max_adj >= 80:
+        gate = "block"
+    elif max_adj >= 60:
+        gate = "elevated"
+    elif max_adj >= 30:
+        gate = "caution"
+    else:
+        gate = "ok"
+
+    return {
+        "maxAdjustedIntensity": round(max_adj, 1),
+        "gate": gate,
+        "dominantTheme": dominant,
+        "themeCount": len(themes),
     }
 
 

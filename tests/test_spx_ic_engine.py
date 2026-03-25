@@ -290,3 +290,61 @@ def test_engine2_strike_targets_prefer_orats_em(monkeypatch):
     assert st.get("emSource") == "delayed"
 
 
+def test_engine2_width_comparison_uses_grid_cells(monkeypatch):
+    """Width comparison should source breach data from cells_out grid,
+    not from odds_like_now/by_width (EM-multiple keyed)."""
+    c = FakeOratsClient()
+
+    # Build enough data for 4 weeks of Mon->Fri so the grid has cells
+    # across multiple wing widths.
+    base = 100.0
+    weeks = [
+        ("2025-01-06", "2025-01-10", 0.5),
+        ("2025-01-13", "2025-01-17", -1.0),
+        ("2025-01-20", "2025-01-24", 0.3),
+        ("2025-01-27", "2025-01-31", -0.2),
+    ]
+    for mon, fri, ret in weeks:
+        c.add_close("SPY", mon, base)
+        c.add_close("SPY", fri, base * (1 + ret / 100.0))
+        c.set_iv("SPY", mon, dte=4, vol50=20.0)
+
+    c.add_close("SPY", "2024-12-30", 98.0)
+    c.add_close("SPY", "2024-12-31", 99.0)
+    c.add_close("SPY", "2025-01-02", 99.5)
+    c.add_close("SPY", "2025-01-03", 100.0)
+    c.add_close("SPY", "2025-02-03", 500.0)
+
+    flags = FeatureFlags(
+        ENABLE_ENGINE2_SPX_IC=True,
+        ENGINE2_MULTI_WING=True,
+        ENGINE2_WING_WIDTH_PTS="5,10,15",
+    )
+    out = compute_engine2_spx_ic(
+        client=c,
+        benzinga_client=None,
+        flags=flags,
+        entry_day="mon",
+        years=1,
+        widths=[1.0],
+        risk_target_breach_pct=25.0,
+        seasonality_mode="none",
+        today=dt.date(2025, 2, 3),
+    )
+
+    wc = out.get("widthComparison", [])
+    assert len(wc) == 3
+
+    for entry in wc:
+        assert entry["wingWidthPts"] in (5, 10, 15)
+        assert entry["gridCells"] > 0, (
+            f"Width {entry['wingWidthPts']} should have grid cells"
+        )
+        assert entry["breachPct"] is not None, (
+            f"Width {entry['wingWidthPts']} breach should not be None"
+        )
+        assert entry["survivalPct"] is not None
+        assert 0 <= entry["breachPct"] <= 100
+        assert 0 <= entry["survivalPct"] <= 100
+
+

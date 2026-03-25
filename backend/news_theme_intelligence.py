@@ -39,7 +39,10 @@ class ThemeReading:
     """Single theme's daily reading."""
 
     theme: str = ""
+    key: str = ""
     intensity: float = 0.0              # 0-100
+    adjusted_intensity: float = 0.0     # intensity * spx_impact_weight
+    spx_impact_weight: float = 0.5
     persistence_days: int = 0
     acceleration: str = "stable"         # rising | falling | stable
     affected_sectors: List[str] = field(default_factory=list)
@@ -90,6 +93,7 @@ THEME_DEFINITIONS: Dict[str, dict] = {
             "ai regulation", "openai", "anthropic", "ai chip",
         ],
         "sectors": ["Technology", "Industrials", "Financials", "Healthcare"],
+        "spx_impact_weight": 0.25,
     },
     "labor_stress": {
         "label": "Labor Stress",
@@ -101,6 +105,7 @@ THEME_DEFINITIONS: Dict[str, dict] = {
             "nonfarm payroll", "employment report",
         ],
         "sectors": ["Consumer Discretionary", "Industrials", "Technology"],
+        "spx_impact_weight": 0.50,
     },
     "credit_stress": {
         "label": "Credit Stress",
@@ -113,6 +118,7 @@ THEME_DEFINITIONS: Dict[str, dict] = {
             "distressed debt", "credit tighten",
         ],
         "sectors": ["Financials", "Real Estate", "Consumer Discretionary"],
+        "spx_impact_weight": 0.80,
     },
     "geopolitical_escalation": {
         "label": "Geopolitical Escalation",
@@ -124,6 +130,7 @@ THEME_DEFINITIONS: Dict[str, dict] = {
             "territorial", "diplomatic crisis",
         ],
         "sectors": ["Energy", "Industrials", "Defense", "Materials"],
+        "spx_impact_weight": 1.0,
     },
     "regulation_pressure": {
         "label": "Regulation Pressure",
@@ -135,6 +142,7 @@ THEME_DEFINITIONS: Dict[str, dict] = {
             "ban", "restrict", "oversight",
         ],
         "sectors": ["Technology", "Financials", "Healthcare", "Energy"],
+        "spx_impact_weight": 0.35,
     },
     "liquidity_shock": {
         "label": "Liquidity Shock",
@@ -146,8 +154,32 @@ THEME_DEFINITIONS: Dict[str, dict] = {
             "flash crash", "circuit breaker", "halt", "illiquid",
         ],
         "sectors": ["Financials", "REITs", "Utilities"],
+        "spx_impact_weight": 0.95,
     },
 }
+
+# Reverse lookup: label -> key for weight resolution
+_LABEL_TO_KEY: Dict[str, str] = {
+    defn["label"]: key for key, defn in THEME_DEFINITIONS.items()
+}
+
+
+def get_theme_impact_weight(theme_key_or_label: str) -> float:
+    """Return the SPX impact weight (0-1) for a theme by key or label."""
+    key = str(theme_key_or_label).strip()
+    defn = THEME_DEFINITIONS.get(key)
+    if defn:
+        return float(defn.get("spx_impact_weight", 0.5))
+    resolved = _LABEL_TO_KEY.get(key)
+    if resolved:
+        return float(THEME_DEFINITIONS[resolved].get("spx_impact_weight", 0.5))
+    return 0.5
+
+
+def compute_market_adjusted_intensity(raw_intensity: float, theme_key_or_label: str) -> float:
+    """Compute market-adjusted intensity = raw_intensity * spx_impact_weight."""
+    w = get_theme_impact_weight(theme_key_or_label)
+    return round(raw_intensity * w, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +318,13 @@ def score_themes(
         acceleration = _compute_acceleration(intensity, prior)
         persistence = _compute_persistence(intensity, prior)
 
+        weight = float(defn.get("spx_impact_weight", 0.5))
         readings.append(ThemeReading(
             theme=defn["label"],
+            key=theme_key,
             intensity=intensity,
+            adjusted_intensity=round(intensity * weight, 1),
+            spx_impact_weight=weight,
             persistence_days=persistence,
             acceleration=acceleration,
             affected_sectors=defn["sectors"],

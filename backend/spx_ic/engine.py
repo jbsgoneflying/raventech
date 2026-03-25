@@ -1107,24 +1107,58 @@ def compute_engine2_spx_ic(
     rec_simple = recommend_width(by_width=by_width, risk_target_breach_pct=float(risk_target_breach_pct))
 
     # --- Width comparison (multi-wing ROC analysis for advisor) ---
+    # Source breach/survival from cells_out grid (keyed by dollar wingWidthPts),
+    # NOT from odds_like_now/by_width (keyed by EM multiples).
     width_comparison: List[Dict[str, Any]] = []
     if len(wing_pts) > 1:
-        _like_bw = odds_like_now or by_width
         for wp in wing_pts:
-            bw_match = None
-            for bw in _like_bw:
-                if abs(float(bw.get("w", 0)) - float(wp)) < 0.01:
-                    bw_match = bw
-                    break
-            breach_pct = float(bw_match["breachEitherPct"]) if (bw_match and bw_match.get("breachEitherPct") is not None) else None
+            # Filter grid cells for this wing width + current entry day + regime
+            grid_cells = [
+                c for c in cells_out
+                if int(c.get("wingWidthPts", 0)) == int(wp)
+                and c.get("entryDay") == ed
+                and c.get("regimeBucket") == regime_bucket_now
+            ]
+            # Relaxed fallback: drop regime filter if no exact match
+            if not grid_cells:
+                grid_cells = [
+                    c for c in cells_out
+                    if int(c.get("wingWidthPts", 0)) == int(wp)
+                    and c.get("entryDay") == ed
+                ]
+
+            # Weighted-average breach across EM multiples (prefer recommended EM)
+            rec_em = float(pick["emMult"]) if pick else 1.0
+            total_n = 0
+            weighted_breach = 0.0
+            for gc in grid_cells:
+                n_gc = int(gc.get("n", 0))
+                bp = gc.get("pBreachPct")
+                if n_gc <= 0 or bp is None:
+                    continue
+                em_gc = float(gc.get("emMult", 1.0))
+                em_boost = 1.5 if abs(em_gc - rec_em) < 1e-9 else 1.0
+                w_n = n_gc * em_boost
+                total_n += w_n
+                weighted_breach += float(bp) * w_n
+            breach_pct = round(weighted_breach / total_n, 2) if total_n > 0 else None
             survival = round(100.0 - breach_pct, 2) if breach_pct is not None else None
-            max_loss = float(wp) * 100.0
-            credit_proxy = round(max_loss * 0.12 * (1 + float(wp) * 0.008), 2) if wp else 0.0
-            roc = round(credit_proxy / (max_loss - credit_proxy) * 100.0, 2) if (max_loss > credit_proxy > 0) else None
-            risk_adj_roc = round(roc * survival / 100.0, 2) if (roc is not None and survival is not None) else None
-            grid_cells = [c for c in cells_out if int(c.get("wingWidthPts", 0)) == int(wp) and c.get("entryDay") == ed and c.get("regimeBucket") == regime_bucket_now]
+
             mae_vals = [float(c["mae95xWing"]) for c in grid_cells if c.get("mae95xWing") is not None]
             avg_mae95x = round(sum(mae_vals) / len(mae_vals), 3) if mae_vals else None
+            loss_vals = [float(c["loss95Pts"]) for c in grid_cells if c.get("loss95Pts") is not None]
+            avg_loss95 = round(sum(loss_vals) / len(loss_vals), 2) if loss_vals else None
+
+            max_loss = float(wp) * 100.0
+            # Credit proxy: derive from grid loss data when available
+            if avg_loss95 is not None and max_loss > 0:
+                credit_proxy = round(max_loss - avg_loss95 * 100.0, 2)
+                credit_proxy = max(credit_proxy, round(max_loss * 0.05, 2))
+            else:
+                credit_proxy = round(max_loss * 0.12 * (1 + float(wp) * 0.008), 2) if wp else 0.0
+            roc = round(credit_proxy / (max_loss - credit_proxy) * 100.0, 2) if (max_loss > credit_proxy > 0) else None
+            risk_adj_roc = round(roc * survival / 100.0, 2) if (roc is not None and survival is not None) else None
+            total_obs = sum(int(c.get("n", 0)) for c in grid_cells)
             width_comparison.append({
                 "wingWidthPts": int(wp),
                 "breachPct": breach_pct,
@@ -1134,7 +1168,9 @@ def compute_engine2_spx_ic(
                 "rocPct": roc,
                 "riskAdjRocPct": risk_adj_roc,
                 "avgMae95xWing": avg_mae95x,
+                "avgLoss95Pts": avg_loss95,
                 "gridCells": len(grid_cells),
+                "totalObs": total_obs,
             })
         width_comparison.sort(key=lambda x: -(x.get("riskAdjRocPct") or 0))
         for i, wc in enumerate(width_comparison):
