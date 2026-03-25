@@ -81,27 +81,62 @@ def _filter_chain_by_expiry(rows: List[dict], *, expiry: str) -> List[dict]:
     return out
 
 
+def _next_friday(today: dt.date) -> dt.date:
+    """Return the nearest Friday on or after `today`."""
+    days_ahead = (4 - today.weekday()) % 7
+    if days_ahead == 0 and today.weekday() == 4:
+        return today
+    return today + dt.timedelta(days=days_ahead or 7)
+
+
 def _pick_friday_weekly_expiry(exp_dates: List[str], *, today: dt.date) -> Optional[str]:
     """
     Pick the nearest Friday weekly expiry from available expiration dates.
     Excludes dailies (0DTE, Mon-Thu) - only uses Friday expirations.
 
-    Returns the nearest Friday that is >= today.
+    Strategy:
+    1. Compute expected next Friday programmatically (SPX weeklies are every Friday)
+    2. Check if that date exists in the expiry list
+    3. Fall back to scanning the list for any Friday within 10 days
+    4. Last resort: nearest Friday in the list, but cap at 14 DTE
     """
-    fridays: List[str] = []
+    expected_friday = _next_friday(today)
+    expected_str = expected_friday.isoformat()
+
+    parsed_exp = set()
+    for d in exp_dates:
+        parsed_exp.add(str(d)[:10])
+
+    if expected_str in parsed_exp:
+        return expected_str
+
+    fridays: List[Tuple[str, dt.date]] = []
     for d in exp_dates:
         try:
             ed = _parse_date(str(d)[:10])
             if ed.weekday() == 4 and ed >= today:
-                fridays.append(d)
+                fridays.append((str(d)[:10], ed))
         except Exception:
             continue
 
-    if not fridays:
-        return None
+    fridays.sort(key=lambda x: x[1])
 
-    fridays.sort()
-    return fridays[0]
+    for f_str, f_date in fridays:
+        if (f_date - today).days <= 10:
+            return f_str
+
+    if fridays and (fridays[0][1] - today).days <= 14:
+        return fridays[0][0]
+
+    if expected_str not in parsed_exp:
+        LOG.warning(
+            "EM expiry: expected Friday %s not in API list (%d dates). "
+            "Will attempt direct chain fetch.",
+            expected_str, len(exp_dates),
+        )
+        return expected_str
+
+    return None
 
 
 def _imp_to_pct(v: Any) -> Optional[float]:
@@ -334,8 +369,20 @@ def compute_expected_move_weekly(
         result["warnings"] = warnings + ["No valid weekly Friday chain found."]
         return result
 
+    dte_computed = (exp_date - today).days
+    if dte_computed > 14:
+        LOG.error(
+            "EM expiry sanity check FAILED: picked %s with %d DTE (should be <=10 for weekly). "
+            "Falling back to next Friday %s. Symbols tried: %s. Warnings: %s",
+            exp_date.isoformat(), dte_computed, _next_friday(today).isoformat(),
+            symbols, warnings,
+        )
+        exp_date = _next_friday(today)
+        dte_computed = (exp_date - today).days
+        chain_rows = []
+
     result["expiry"] = exp_date.isoformat()
-    result["dte"] = (exp_date - today).days
+    result["dte"] = dte_computed
     result["spotPrice"] = round(spot, 2)
 
     # Smart spot (open: live, closed: close) for EM percentage normalization.

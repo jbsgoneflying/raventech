@@ -423,3 +423,55 @@ def test_em_fallback_order():
     assert _em_fallback_order(2.0, [1.0, 1.5, 2.0]) == [1.5, 1.0]
 
 
+# ---------------------------------------------------------------------------
+# EM expiry selection: _next_friday and _pick_friday_weekly_expiry
+# ---------------------------------------------------------------------------
+
+def test_next_friday_from_wednesday():
+    from backend.spx_ic.live_levels import _next_friday
+    wed = dt.date(2026, 3, 25)
+    assert _next_friday(wed) == dt.date(2026, 3, 27)
+    assert _next_friday(wed).weekday() == 4
+
+
+def test_next_friday_from_friday():
+    from backend.spx_ic.live_levels import _next_friday
+    fri = dt.date(2026, 3, 27)
+    assert _next_friday(fri) == dt.date(2026, 3, 27)
+
+
+def test_next_friday_from_saturday():
+    from backend.spx_ic.live_levels import _next_friday
+    sat = dt.date(2026, 3, 28)
+    assert _next_friday(sat) == dt.date(2026, 4, 3)
+
+
+def test_pick_friday_prefers_computed_next_friday():
+    """If the expected next Friday is in the exp list, pick it even if there are
+    closer non-Friday dates or farther Fridays."""
+    from backend.spx_ic.live_levels import _pick_friday_weekly_expiry
+    today = dt.date(2026, 3, 25)
+    exp_dates = ["2026-03-26", "2026-03-27", "2026-04-17", "2026-12-18"]
+    result = _pick_friday_weekly_expiry(exp_dates, today=today)
+    assert result == "2026-03-27"
+
+
+def test_pick_friday_returns_computed_when_not_in_list():
+    """If the API doesn't list the expected Friday, return it anyway
+    so the caller can attempt a direct chain fetch."""
+    from backend.spx_ic.live_levels import _pick_friday_weekly_expiry
+    today = dt.date(2026, 3, 25)
+    exp_dates = ["2026-04-17", "2026-06-19", "2026-12-18"]
+    result = _pick_friday_weekly_expiry(exp_dates, today=today)
+    assert result == "2026-03-27"
+
+
+def test_pick_friday_rejects_far_dated_fridays():
+    """A Friday 268 days out should NOT be picked when we can compute the right one."""
+    from backend.spx_ic.live_levels import _pick_friday_weekly_expiry
+    today = dt.date(2026, 3, 25)
+    exp_dates = ["2026-12-18"]
+    result = _pick_friday_weekly_expiry(exp_dates, today=today)
+    assert result == "2026-03-27"
+
+
