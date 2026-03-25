@@ -105,12 +105,18 @@
         </form>
         <div id="status" class="status">Select parameters, then click Run.</div>
         <div class="metricCaption muted" style="margin-top:10px; text-align:center;">
-          Locked: lookback <b>2y</b> (~104 weeks) · widths <b>1.0 / 1.5 / 2.0× EM</b> · wings <b>5pt</b>
+          Locked: lookback <b>2y</b> (~104 weeks) · widths <b>1.0 / 1.5 / 2.0× EM</b> · wings <b>$5/$10/$15/$20/$25</b>
         </div>
       </section>
 
       <section class="results hidden" id="results">
         <section class="surface hidden" id="e2DecisionSection" aria-label="Decision header"></section>
+        <section class="surface hidden" id="e2AdvisorSection" aria-label="AI Trade Advisor">
+          <div id="e2AdvisorContent"></div>
+        </section>
+        <section class="surface hidden" id="e2ActiveTrades" aria-label="Active Trades">
+          <div id="e2ActiveTradesContent"></div>
+        </section>
         <section class="surface hidden" id="technicalsSection"></section>
 
         <section class="surface" id="gammaMap">

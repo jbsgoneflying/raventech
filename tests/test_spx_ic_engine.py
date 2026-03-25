@@ -1,4 +1,5 @@
 import datetime as dt
+import threading
 
 import pytest
 
@@ -145,5 +146,147 @@ def test_beta_binomial_mean_and_pctile_helpers():
     assert pctile([1, 2, 3, 4, 5], 0) == 1
     assert pctile([1, 2, 3, 4, 5], 100) == 5
     assert pctile([1, 2, 3, 4, 5], 50) == 3
+
+
+def test_spx_ic_router_bypasses_cache_when_market_open(monkeypatch):
+    from backend.routers import engine2_spx_ic as router
+
+    class _Flags:
+        ENABLE_ENGINE2_SPX_IC = True
+
+        def cache_key_engine2(self):
+            return ("k",)
+
+    calls = {"n": 0}
+
+    def _compute(**kwargs):
+        calls["n"] += 1
+        return {"weeks": {"rows": [], "count": 0}, "riskGrid": {"cells": []}, "underlying": {"symbol": "SPX"}}
+
+    monkeypatch.setattr(router, "get_flags", lambda: _Flags())
+    monkeypatch.setattr(router, "is_us_equity_market_open", lambda: True)
+    monkeypatch.setattr(router, "compute_engine2_spx_ic", _compute)
+    monkeypatch.setattr(router, "get_client", lambda: object())
+    monkeypatch.setattr(router, "get_benzinga_client_optional", lambda: None)
+    monkeypatch.setattr(router, "spx_ic_cache_key", lambda params, fp: ("same",))
+    monkeypatch.setattr(router, "spx_ic_cache", {})
+    monkeypatch.setattr(router, "spx_ic_cache_lock", threading.Lock())
+
+    router.spx_ic(
+        underlying="SPX",
+        entry_day="mon",
+        years=2,
+        widths="1.0",
+        risk_target_breach_pct=25.0,
+        seasonality_mode="none",
+        weeks_offset=0,
+        weeks_limit=120,
+        grid_limit=0,
+    )
+    router.spx_ic(
+        underlying="SPX",
+        entry_day="mon",
+        years=2,
+        widths="1.0",
+        risk_target_breach_pct=25.0,
+        seasonality_mode="none",
+        weeks_offset=0,
+        weeks_limit=120,
+        grid_limit=0,
+    )
+
+    assert calls["n"] == 2
+    assert router.spx_ic_cache == {}
+
+
+def test_spx_ic_router_uses_cache_when_market_closed(monkeypatch):
+    from backend.routers import engine2_spx_ic as router
+
+    class _Flags:
+        ENABLE_ENGINE2_SPX_IC = True
+
+        def cache_key_engine2(self):
+            return ("k",)
+
+    calls = {"n": 0}
+
+    def _compute(**kwargs):
+        calls["n"] += 1
+        return {"weeks": {"rows": [], "count": 0}, "riskGrid": {"cells": []}, "underlying": {"symbol": "SPX"}}
+
+    monkeypatch.setattr(router, "get_flags", lambda: _Flags())
+    monkeypatch.setattr(router, "is_us_equity_market_open", lambda: False)
+    monkeypatch.setattr(router, "compute_engine2_spx_ic", _compute)
+    monkeypatch.setattr(router, "get_client", lambda: object())
+    monkeypatch.setattr(router, "get_benzinga_client_optional", lambda: None)
+    monkeypatch.setattr(router, "spx_ic_cache_key", lambda params, fp: ("same",))
+    monkeypatch.setattr(router, "spx_ic_cache", {})
+    monkeypatch.setattr(router, "spx_ic_cache_lock", threading.Lock())
+
+    router.spx_ic(
+        underlying="SPX",
+        entry_day="mon",
+        years=2,
+        widths="1.0",
+        risk_target_breach_pct=25.0,
+        seasonality_mode="none",
+        weeks_offset=0,
+        weeks_limit=120,
+        grid_limit=0,
+    )
+    router.spx_ic(
+        underlying="SPX",
+        entry_day="mon",
+        years=2,
+        widths="1.0",
+        risk_target_breach_pct=25.0,
+        seasonality_mode="none",
+        weeks_offset=0,
+        weeks_limit=120,
+        grid_limit=0,
+    )
+
+    assert calls["n"] == 1
+    assert ("same",) in router.spx_ic_cache
+
+
+def test_engine2_strike_targets_prefer_orats_em(monkeypatch):
+    c = FakeOratsClient()
+    c.add_close("SPY", "2024-12-30", 98.0)
+    c.add_close("SPY", "2024-12-31", 99.0)
+    c.add_close("SPY", "2025-01-02", 99.5)
+    c.add_close("SPY", "2025-01-03", 100.0)
+    c.add_close("SPY", "2025-02-03", 500.0)
+    c.add_close("SPY", "2025-01-06", 100.0)
+    c.add_close("SPY", "2025-01-10", 101.0)
+
+    monkeypatch.setattr(
+        "backend.spx_ic.engine.compute_expected_move_weekly",
+        lambda *args, **kwargs: {
+            "expectedMovePct": 7.8,
+            "expectedMoveDollars": 7.8,
+            "spotPrice": 100.0,
+            "smartSpotPrice": 100.0,
+            "oratsExpectedMovePct": 4.9,
+            "oratsExpectedMoveSource": "delayed",
+        },
+    )
+
+    flags = FeatureFlags(ENABLE_ENGINE2_SPX_IC=True)
+    out = compute_engine2_spx_ic(
+        client=c,
+        benzinga_client=None,
+        flags=flags,
+        entry_day="mon",
+        years=1,
+        widths=[1.0],
+        risk_target_breach_pct=25.0,
+        seasonality_mode="none",
+        today=dt.date(2025, 2, 3),
+    )
+
+    st = out.get("strikeTargets") or {}
+    assert st.get("basedOnEmPct") == pytest.approx(4.9)
+    assert st.get("emSource") == "delayed"
 
 

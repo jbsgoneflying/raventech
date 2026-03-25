@@ -9,6 +9,7 @@ from backend.dealer_gamma_context import compute_dealer_gamma_context
 from backend.expected_move import compute_expected_move_from_chain
 from backend.oi_clusters import compute_open_interest_clusters
 from backend.orats_client import OratsClient, OratsError
+from backend.technicals import fetch_live_price_context_optional
 
 from backend.spx_ic.utils import (
     _fmt_date,
@@ -103,6 +104,64 @@ def _pick_friday_weekly_expiry(exp_dates: List[str], *, today: dt.date) -> Optio
     return fridays[0]
 
 
+def _imp_to_pct(v: Any) -> Optional[float]:
+    x = _to_float(v)
+    if x is None:
+        return None
+    x = abs(float(x))
+    return x * 100.0 if x <= 1.0 else x
+
+
+def _fetch_orats_em_snapshot(client: OratsClient, *, ticker: str, today: dt.date) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "eodImpliedMovePct": None,
+        "eodAsOfDate": None,
+        "delayedImpliedMovePct": None,
+        "delayedUpdatedAt": None,
+        "delayedTradeDate": None,
+        "oratsExpectedMovePct": None,
+        "oratsExpectedMoveSource": None,
+        "warnings": [],
+    }
+
+    try:
+        fetcher = getattr(client, "cores_delayed", None) or getattr(client, "cores", None)
+        if callable(fetcher):
+            snap = fetcher(ticker=ticker, fields="ticker,tradeDate,stockPrice,impErnMv,updatedAt")
+            snap_row = next((r for r in (snap.rows or []) if isinstance(r, dict)), None)
+            if snap_row:
+                delayed_pct = _imp_to_pct(snap_row.get("impErnMv"))
+                if delayed_pct is not None and delayed_pct > 0:
+                    out["delayedImpliedMovePct"] = round(float(delayed_pct), 2)
+                    out["delayedUpdatedAt"] = str(snap_row.get("updatedAt") or "")
+                    out["delayedTradeDate"] = str(snap_row.get("tradeDate") or "")[:10]
+    except Exception as e:
+        out["warnings"].append(f"Delayed ORATS EM unavailable: {type(e).__name__}")
+
+    for i in range(0, 8):
+        ds = _fmt_date(today - dt.timedelta(days=i))
+        try:
+            resp = client.hist_cores(ticker=ticker, trade_date=ds, fields="ticker,tradeDate,stockPrice,impErnMv")
+            row = next((r for r in (resp.rows or []) if isinstance(r, dict)), None)
+            if row:
+                eod_pct = _imp_to_pct(row.get("impErnMv"))
+                if eod_pct is not None and eod_pct > 0:
+                    out["eodImpliedMovePct"] = round(float(eod_pct), 2)
+                    out["eodAsOfDate"] = str(row.get("tradeDate") or ds)[:10]
+                    break
+        except Exception:
+            continue
+
+    if out["delayedImpliedMovePct"] is not None:
+        out["oratsExpectedMovePct"] = out["delayedImpliedMovePct"]
+        out["oratsExpectedMoveSource"] = "delayed"
+    elif out["eodImpliedMovePct"] is not None:
+        out["oratsExpectedMovePct"] = out["eodImpliedMovePct"]
+        out["oratsExpectedMoveSource"] = "eod"
+
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Expected move (weekly)
 # ---------------------------------------------------------------------------
@@ -145,6 +204,17 @@ def compute_expected_move_weekly(
         "expectedMovePct": None,
         "discountFactor": None,
         "strikesUsedForForward": 0,
+        "smartSpotPrice": None,
+        "smartSpotSource": None,
+        "smartSpotMode": None,
+        "smartSpotMarketOpen": None,
+        "eodImpliedMovePct": None,
+        "eodAsOfDate": None,
+        "delayedImpliedMovePct": None,
+        "delayedUpdatedAt": None,
+        "delayedTradeDate": None,
+        "oratsExpectedMovePct": None,
+        "oratsExpectedMoveSource": None,
         "warnings": [],
         "notes": ["Using weekly (Friday) options only - dailies excluded."],
     }
@@ -234,9 +304,20 @@ def compute_expected_move_weekly(
     result["dte"] = (exp_date - today).days
     result["spotPrice"] = round(spot, 2)
 
+    # Smart spot (open: live, closed: close) for EM percentage normalization.
+    smart_spot_ctx = fetch_live_price_context_optional(client, ticker=t)
+    smart_spot = _to_float(smart_spot_ctx.get("price")) if isinstance(smart_spot_ctx, dict) else None
+    if smart_spot is None or smart_spot <= 0:
+        smart_spot = spot
+    if isinstance(smart_spot_ctx, dict):
+        result["smartSpotPrice"] = round(float(smart_spot), 2) if smart_spot is not None else None
+        result["smartSpotSource"] = smart_spot_ctx.get("source")
+        result["smartSpotMode"] = smart_spot_ctx.get("mode")
+        result["smartSpotMarketOpen"] = smart_spot_ctx.get("marketOpen")
+
     em_result = compute_expected_move_from_chain(
         chain_rows,
-        spot=spot,
+        spot=float(smart_spot) if (smart_spot is not None and smart_spot > 0) else spot,
         expiry=exp_date,
         as_of=today,
         risk_free_rate=0.05,
@@ -250,7 +331,15 @@ def compute_expected_move_weekly(
     result["discountFactor"] = em_result.get("discountFactor")
     result["strikesUsedForForward"] = em_result.get("strikesUsedForForward", 0)
     result["symbolUsed"] = used_symbol
-    result["warnings"] = warnings + (em_result.get("warnings") or [])
+    em_snap = _fetch_orats_em_snapshot(client, ticker=t, today=today)
+    result["eodImpliedMovePct"] = em_snap.get("eodImpliedMovePct")
+    result["eodAsOfDate"] = em_snap.get("eodAsOfDate")
+    result["delayedImpliedMovePct"] = em_snap.get("delayedImpliedMovePct")
+    result["delayedUpdatedAt"] = em_snap.get("delayedUpdatedAt")
+    result["delayedTradeDate"] = em_snap.get("delayedTradeDate")
+    result["oratsExpectedMovePct"] = em_snap.get("oratsExpectedMovePct")
+    result["oratsExpectedMoveSource"] = em_snap.get("oratsExpectedMoveSource")
+    result["warnings"] = warnings + (em_result.get("warnings") or []) + (em_snap.get("warnings") or [])
 
     return result
 

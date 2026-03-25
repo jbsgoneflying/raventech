@@ -1572,19 +1572,26 @@ function renderEngine2DecisionPanel(payload) {
   // --- Expected Move (weekly Friday options only) ---
   const em = payload?.expectedMove || {};
   const emEnabled = !!em?.enabled;
-  const emPct = emEnabled ? Number(em?.expectedMovePct) : null;
+  const emPct = emEnabled ? Number(em?.expectedMovePct) : null; // straddle EM
   const emDollars = emEnabled ? Number(em?.expectedMoveDollars) : null;
   const emExpiry = String(em?.expiry || "").slice(0, 10);
   const emDte = (em?.dte !== null && em?.dte !== undefined) ? Number(em.dte) : null;
   const emSource = String(em?.source || "").toLowerCase();
   const emSourceLabel = emSource === "live" ? "Live" : emSource === "eod" ? "EOD" : emSource ? emSource : "—";
   const emSymbol = String(em?.symbolUsed || "").toUpperCase();
+  const oratsEodEmPct = Number(em?.eodImpliedMovePct);
+  const oratsEodAsOf = String(em?.eodAsOfDate || "").slice(0, 10);
+  const delayedEmPct = Number(em?.delayedImpliedMovePct);
+  const delayedUpdatedAt = String(em?.delayedUpdatedAt || "").trim();
+  const delayedTradeDate = String(em?.delayedTradeDate || "").slice(0, 10);
 
   // --- Strike Targets ---
   const st = payload?.strikeTargets || null;
-  const stWhite = st?.whitePts;
-  const stBlue = st?.bluePts;
-  const stRed = st?.redPts;
+  const stWhite = (st?.whitePct !== null && st?.whitePct !== undefined) ? Number(st?.whitePct) : null;
+  const stBlue = (st?.bluePct !== null && st?.bluePct !== undefined) ? Number(st?.bluePct) : null;
+  const stRed = (st?.redPct !== null && st?.redPct !== undefined) ? Number(st?.redPct) : null;
+  const stEmSource = String(st?.emSource || "");
+  const stSourceLabel = stEmSource === "delayed" ? "15-min delayed EM" : stEmSource === "eod" ? "ORATS EOD EM" : stEmSource === "straddle" ? "straddle EM fallback" : "";
 
   const dots = Array.from({ length: 5 }).map((_, i) => `<span class="taDot ${i < 3 ? "isOn" : ""}"></span>`).join("");
   const chips = [
@@ -1666,10 +1673,22 @@ function renderEngine2DecisionPanel(payload) {
           <div class="taCardState mono">${escapeHtml(vpState)}${Number.isFinite(vpScore) ? ` · z=${escapeHtml(vpScore.toFixed(2))}` : ""}</div>
           <div class="taCardInterp muted">${escapeHtml(vpSub)}</div>
         </div>
-        <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="Expected Move & Strikes" title="Click for desk insight">
+        <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="ORATS EM" title="Click for desk insight">
           <div class="taCardTop">
-            <div class="taCardTitle">Expected Move</div>
-            <span class="info" title="Risk-neutral expected move computed from weekly Friday ATM straddle. Daily options are excluded.">ⓘ</span>
+            <div class="taCardTitle">ORATS EM</div>
+            <span class="info" title="ORATS implied move from /cores. EOD shown with delayed overlay when available. Strike targets use delayed first, then EOD.">ⓘ</span>
+          </div>
+          <div class="taCardState mono">${Number.isFinite(oratsEodEmPct) ? escapeHtml(oratsEodEmPct.toFixed(2)) + "%" : "—"}</div>
+          <div class="taCardInterp">${oratsEodAsOf ? `As of: ${escapeHtml(oratsEodAsOf)}` : "—"} · EOD (used for breach history)</div>
+          <div style="border-top:1px solid rgba(0,0,0,0.06); margin-top:6px; padding-top:6px;">
+            <div class="taCardState mono" style="font-size:0.95em;">${Number.isFinite(delayedEmPct) ? escapeHtml(delayedEmPct.toFixed(2)) + "%" : "—"}</div>
+            <div class="taCardInterp">${delayedUpdatedAt ? `Updated: ${escapeHtml(delayedUpdatedAt)}` : delayedTradeDate ? `As of: ${escapeHtml(delayedTradeDate)}` : "—"} · 15-min delayed${Number.isFinite(delayedEmPct) ? " · <strong>Used for strike targets</strong>" : ""}</div>
+          </div>
+        </div>
+        <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="Straddle EM" title="Click for desk insight">
+          <div class="taCardTop">
+            <div class="taCardTitle">Straddle EM</div>
+            <span class="info" title="Risk-neutral expected move from weekly Friday ATM-forward straddle. Spot normalization uses the smart live/close pricing mode.">ⓘ</span>
           </div>
           <div class="taCardState mono">${Number.isFinite(emPct) ? escapeHtml(emPct.toFixed(2)) + "%" : "—"}</div>
           <div class="taCardInterp">${Number.isFinite(emDollars) ? `$${escapeHtml(emDollars.toFixed(2))} pts` : "—"} · ${emExpiry ? `Exp: ${escapeHtml(emExpiry)}` : "—"}${Number.isFinite(emDte) ? ` (${emDte}d)` : ""}</div>
@@ -1678,14 +1697,14 @@ function renderEngine2DecisionPanel(payload) {
         <div class="taCard e2Click" data-e2-insight="e2_expected_move" data-e2-title="Strike Targets" title="Click for desk insight">
           <div class="taCardTop">
             <div class="taCardTitle">Strike Targets (EM)</div>
-            <span class="info" title="Wing strike distances based on expected move. White = 2× EM pts, Blue = 1.5× White, Red = 2× White. Use for short-strike targeting.">ⓘ</span>
+            <span class="info" title="Wing strike distances based on ORATS EM (delayed preferred). Values are expressed as a percentage of spot.">ⓘ</span>
           </div>
           <div class="emTargetGrid">
-            <div class="emRow emBox--white"><span class="k">1.0× EM</span><span class="v mono">${Number.isFinite(stWhite) ? escapeHtml(stWhite.toFixed(2)) + " pts" : "—"}</span></div>
-            <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span class="v mono">${Number.isFinite(stBlue) ? escapeHtml(stBlue.toFixed(2)) + " pts" : "—"}</span></div>
-            <div class="emRow emBox--red"><span class="k">2.0× EM</span><span class="v mono">${Number.isFinite(stRed) ? escapeHtml(stRed.toFixed(2)) + " pts" : "—"}</span></div>
+            <div class="emRow emBox--white"><span class="k">1.0× EM</span><span class="v mono">${Number.isFinite(stWhite) ? escapeHtml(stWhite.toFixed(2)) + "%" : "—"}</span></div>
+            <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span class="v mono">${Number.isFinite(stBlue) ? escapeHtml(stBlue.toFixed(2)) + "%" : "—"}</span></div>
+            <div class="emRow emBox--red"><span class="k">2.0× EM</span><span class="v mono">${Number.isFinite(stRed) ? escapeHtml(stRed.toFixed(2)) + "%" : "—"}</span></div>
           </div>
-          <div class="taCardInterp">Wing distance from spot.</div>
+          <div class="taCardInterp">Wing distance as % of spot${stSourceLabel ? ` (${escapeHtml(stSourceLabel)})` : ""}.</div>
         </div>
       </div>
 
@@ -1793,8 +1812,26 @@ function render(payload) {
     }).join("");
   }
 
+  // Width comparison from scan payload (if multi-wing enabled)
+  var wc = payload?.widthComparison;
+  if (Array.isArray(wc) && wc.length > 1) {
+    var advisorSec = $("e2AdvisorSection");
+    var advisorEl = $("e2AdvisorContent");
+    if (advisorSec && advisorEl) {
+      advisorSec.classList.remove("hidden");
+      advisorEl.innerHTML = '<div class="taPanel"><div class="taHeader">' +
+        '<span class="taHeaderTitle">AI Trade Advisor</span>' +
+        '<span class="taHeaderMeta"><button id="e2RunAdvisorBtn" class="primaryButton" type="button" style="font-size:11px;padding:6px 16px">Run Advisor</button></span></div></div>';
+      renderWidthComparison(wc);
+      var advBtn = $("e2RunAdvisorBtn");
+      if (advBtn) advBtn.addEventListener("click", function () { _runAdvisor(); });
+    }
+  }
+
+  // Load active trades
+  _loadActiveTrades();
+
   if (status) {
-    // Keep the UI clean: hide status on success; it only matters for running/errors.
     status.textContent = "";
     status.classList.remove("isRunning", "isError");
     status.classList.add("hidden");
@@ -1919,6 +1956,319 @@ async function main() {
   if (status) {
     status.textContent = "Select parameters, then click Run.";
     status.classList.remove("isError", "isRunning", "isOk");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AI Trade Advisor — inline panel
+// ---------------------------------------------------------------------------
+
+var _advisorLoading = false;
+var _lastAdvisorResult = null;
+
+function _verdictColor(v) {
+  if (v === "TRADE") return "#34c759";
+  if (v === "LEAN_PASS") return "#ff9f0a";
+  return "#ff453a";
+}
+
+function _statusBadge(s) {
+  var colors = { on_track: "#34c759", caution: "#ff9f0a", adjust: "#ff453a", exit: "#ff2d55" };
+  var labels = { on_track: "On Track", caution: "Caution", adjust: "Adjust", exit: "Exit" };
+  var c = colors[s] || "#8e8e93";
+  var l = labels[s] || s;
+  return '<span style="display:inline-block;padding:2px 10px;border-radius:6px;font-size:11px;font-weight:700;color:#fff;background:' + c + '">' + escapeHtml(l) + '</span>';
+}
+
+function renderAdvisorPanel(advisorResult) {
+  var el = $("e2AdvisorContent");
+  var sec = $("e2AdvisorSection");
+  if (!el || !sec) return;
+
+  var a = advisorResult?.advisor;
+  if (!a || a._source === "fallback") {
+    var reason = a?._fallback_reason || "Advisor unavailable";
+    el.innerHTML = '<div class="taPanel"><div class="taHeader"><span class="taHeaderTitle">AI Trade Advisor</span></div>' +
+      '<div style="padding:16px;color:var(--text-secondary);font-size:13px;">' + escapeHtml(reason) + '</div></div>';
+    sec.classList.remove("hidden");
+    return;
+  }
+
+  var verdict = a.verdict || "PASS";
+  var conf = Number(a.confidence) || 0;
+  var ticket = a.tradeTicket || {};
+  var vc = _verdictColor(verdict);
+
+  var html = '<div class="taPanel">';
+  html += '<div class="taHeader"><span class="taHeaderTitle">AI Trade Advisor</span><span class="taHeaderMeta">Powered by LLM · ' + escapeHtml(a._model || "") + '</span></div>';
+
+  // Verdict badge
+  html += '<div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border-bottom:1px solid var(--border)">';
+  html += '<div style="display:flex;flex-direction:column;align-items:center;min-width:100px">';
+  html += '<div style="font-size:28px;font-weight:800;color:' + vc + ';letter-spacing:0.5px">' + escapeHtml(verdict.replace("_", " ")) + '</div>';
+  html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Confidence: ' + conf + '%</div></div>';
+  html += '<div style="flex:1;font-size:13px;color:var(--text-primary);line-height:1.5">' + escapeHtml(a.deskNote || "") + '</div>';
+  html += '</div>';
+
+  if (verdict !== "PASS" && ticket.shortPutStrike) {
+    html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
+    html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:8px">Trade Ticket</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;font-size:12px">';
+    html += '<div><span style="color:var(--text-secondary)">Short Put</span><br><span class="mono" style="font-weight:600">' + escapeHtml(String(ticket.shortPutStrike)) + '</span></div>';
+    html += '<div><span style="color:var(--text-secondary)">Long Put</span><br><span class="mono" style="font-weight:600">' + escapeHtml(String(ticket.longPutStrike)) + '</span></div>';
+    html += '<div><span style="color:var(--text-secondary)">Short Call</span><br><span class="mono" style="font-weight:600">' + escapeHtml(String(ticket.shortCallStrike)) + '</span></div>';
+    html += '<div><span style="color:var(--text-secondary)">Long Call</span><br><span class="mono" style="font-weight:600">' + escapeHtml(String(ticket.longCallStrike)) + '</span></div>';
+    html += '<div><span style="color:var(--text-secondary)">Wing</span><br><span class="mono" style="font-weight:600">$' + escapeHtml(String(ticket.wingWidth)) + '</span></div>';
+    html += '<div><span style="color:var(--text-secondary)">EM Mult</span><br><span class="mono" style="font-weight:600">' + escapeHtml(String(ticket.emMultiple)) + '×</span></div>';
+    html += '<div><span style="color:var(--text-secondary)">Est. Credit</span><br><span class="mono" style="font-weight:600">' + escapeHtml(String(ticket.estimatedCredit || "—")) + '</span></div>';
+    html += '<div><span style="color:var(--text-secondary)">Max Loss</span><br><span class="mono" style="font-weight:600">' + escapeHtml(String(ticket.maxLoss || "—")) + '</span></div>';
+    html += '</div></div>';
+  }
+
+  // Sections
+  var sections = [
+    ["Wing Width Rationale", a.wingWidthRationale],
+    ["Risk Context", a.riskContext],
+    ["Entry Plan", a.entryPlan],
+    ["Management Plan", a.managementPlan],
+    ["Exit Rules", a.exitRules],
+  ];
+  if (a.passReason) sections.unshift(["Pass Reason", a.passReason]);
+
+  html += '<div style="padding:12px 20px">';
+  sections.forEach(function (s) {
+    if (!s[1]) return;
+    html += '<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:4px">' + escapeHtml(s[0]) + '</div>';
+    html += '<div style="font-size:12px;line-height:1.5;color:var(--text-primary)">' + escapeHtml(s[1]) + '</div></div>';
+  });
+
+  if (Array.isArray(a.keyRisks) && a.keyRisks.length) {
+    html += '<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:4px">Key Risks</div>';
+    html += '<ul style="margin:0;padding-left:18px;font-size:12px;line-height:1.6;color:var(--text-primary)">';
+    a.keyRisks.forEach(function (r) { html += '<li>' + escapeHtml(r) + '</li>'; });
+    html += '</ul></div>';
+  }
+  html += '</div>';
+
+  // Log trade button
+  if (verdict === "TRADE" || verdict === "LEAN_PASS") {
+    html += '<div style="padding:12px 20px;border-top:1px solid var(--border);text-align:right">';
+    html += '<button id="e2LogTradeBtn" class="primaryButton" type="button" style="font-size:12px;padding:8px 20px">Log This Trade</button>';
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+  sec.classList.remove("hidden");
+
+  var logBtn = $("e2LogTradeBtn");
+  if (logBtn) {
+    logBtn.addEventListener("click", function () {
+      _logAdvisorTrade(advisorResult);
+    });
+  }
+}
+
+function renderWidthComparison(widthComparison) {
+  if (!Array.isArray(widthComparison) || !widthComparison.length) return;
+  var el = $("e2AdvisorContent");
+  if (!el) return;
+
+  var html = '<div style="padding:12px 20px;border-top:1px solid var(--border)">';
+  html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:8px">Wing Width Comparison</div>';
+  html += '<div class="tableWrap"><table class="dataTable"><thead><tr>';
+  html += '<th>Wing</th><th class="num">Breach %</th><th class="num">Survival %</th><th class="num">ROC %</th><th class="num">Risk-Adj ROC</th><th class="num">MAE95×Wing</th><th>Label</th>';
+  html += '</tr></thead><tbody>';
+  widthComparison.forEach(function (w) {
+    var bp = w.breachPct !== null && w.breachPct !== undefined ? Number(w.breachPct).toFixed(1) + "%" : "—";
+    var sp = w.survivalPct !== null && w.survivalPct !== undefined ? Number(w.survivalPct).toFixed(1) + "%" : "—";
+    var roc = w.rocPct !== null && w.rocPct !== undefined ? Number(w.rocPct).toFixed(1) + "%" : "—";
+    var raroc = w.riskAdjRocPct !== null && w.riskAdjRocPct !== undefined ? Number(w.riskAdjRocPct).toFixed(1) + "%" : "—";
+    var mae = w.avgMae95xWing !== null && w.avgMae95xWing !== undefined ? Number(w.avgMae95xWing).toFixed(3) : "—";
+    var isTop = w.rank === 1;
+    var rowStyle = isTop ? ' style="background:rgba(52,199,89,0.08);font-weight:600"' : '';
+    html += '<tr' + rowStyle + '>';
+    html += '<td class="mono">$' + w.wingWidthPts + '</td>';
+    html += '<td class="num mono">' + bp + '</td>';
+    html += '<td class="num mono">' + sp + '</td>';
+    html += '<td class="num mono">' + roc + '</td>';
+    html += '<td class="num mono">' + raroc + '</td>';
+    html += '<td class="num mono">' + mae + '</td>';
+    html += '<td>' + escapeHtml(w.label || "") + (isTop ? " ★" : "") + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+
+  el.insertAdjacentHTML("beforeend", html);
+}
+
+async function _runAdvisor() {
+  if (_advisorLoading) return;
+  _advisorLoading = true;
+  var el = $("e2AdvisorContent");
+  var sec = $("e2AdvisorSection");
+  if (el && sec) {
+    sec.classList.remove("hidden");
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px">' +
+      '<span class="btnSpinner" style="display:inline-block;margin-right:8px"></span>Running AI Trade Advisor...</div>';
+  }
+  try {
+    var entryDay = $("entryDay")?.value || "mon";
+    var seasonalityMode = $("seasonalityMode")?.value || "none";
+    var underlying = String(window.engine2UnderlyingState?.symbol || "SPX");
+    var qs = new URLSearchParams({ underlying: underlying, entry_day: entryDay, seasonality_mode: seasonalityMode });
+    var resp = await fetch("/api/spx-ic/advisor?" + qs.toString(), { method: "POST" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    _lastAdvisorResult = data;
+    renderAdvisorPanel(data);
+    if (data.widthComparison) renderWidthComparison(data.widthComparison);
+  } catch (err) {
+    if (el) el.innerHTML = '<div style="padding:16px;color:#ff453a;font-size:13px">Advisor error: ' + escapeHtml(String(err.message || err)) + '</div>';
+  } finally {
+    _advisorLoading = false;
+  }
+}
+
+async function _logAdvisorTrade(advisorResult) {
+  if (!advisorResult?.advisor?.tradeTicket) return;
+  var btn = $("e2LogTradeBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Logging..."; }
+  try {
+    var ticket = advisorResult.advisor.tradeTicket;
+    var current = advisorResult.current || {};
+    var em = advisorResult.expectedMove || {};
+    var body = {
+      source: "advisor",
+      entry: {
+        underlying: ticket.underlying || "SPX",
+        spotAtEntry: Number(current.regime?.components?.spotPrice) || 0,
+        entryDate: advisorResult.asOfDate || new Date().toISOString().slice(0, 10),
+        expiryDate: ticket.expiry,
+        shortPutStrike: ticket.shortPutStrike,
+        longPutStrike: ticket.longPutStrike,
+        shortCallStrike: ticket.shortCallStrike,
+        longCallStrike: ticket.longCallStrike,
+        wingWidth: ticket.wingWidth,
+        emMultiple: ticket.emMultiple,
+        entryCredit: parseFloat(String(ticket.estimatedCredit || "0").replace(/[^0-9.]/g, "")) || 0,
+      },
+      entryContext: {
+        regimeScore: current.regime?.score,
+        regimeBucket: current.regime?.bucket,
+        macroBucket: current.macro?.bucket,
+        emPct: em.oratsExpectedMovePct || em.expectedMovePct,
+        volPressureState: lastPayload?.liveContext?.volPressure?.state,
+      },
+      advisorVerdict: advisorResult.advisor,
+    };
+    var resp = await fetch("/api/spx-ic/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    if (btn) { btn.textContent = "Logged ✓"; btn.style.background = "#34c759"; }
+    _loadActiveTrades();
+  } catch (err) {
+    if (btn) { btn.textContent = "Error"; btn.style.background = "#ff453a"; }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Active Trades Panel
+// ---------------------------------------------------------------------------
+
+async function _loadActiveTrades() {
+  var el = $("e2ActiveTradesContent");
+  var sec = $("e2ActiveTrades");
+  if (!el || !sec) return;
+
+  try {
+    var resp = await fetch("/api/spx-ic/trades");
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var trades = data.trades || [];
+    if (!trades.length) {
+      sec.classList.add("hidden");
+      return;
+    }
+
+    sec.classList.remove("hidden");
+    var html = '<div class="taPanel">';
+    html += '<div class="taHeader"><span class="taHeaderTitle">Active Trades</span><span class="taHeaderMeta">' + trades.length + ' open</span></div>';
+
+    trades.forEach(function (t) {
+      var entry = t.entry || {};
+      var tracking = t.tracking || {};
+      var status = tracking.deterministicStatus || "on_track";
+      var lastCheckin = (t.checkIns || []).slice(-1)[0];
+
+      html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+      html += '<div style="font-size:13px;font-weight:600">' + escapeHtml(entry.underlying || "SPX") + ' IC · $' + escapeHtml(String(entry.wingWidth || "")) + ' wings</div>';
+      html += '<div style="display:flex;align-items:center;gap:8px">' + _statusBadge(status);
+      html += '<button class="chipToggle" data-checkin-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Check In</button>';
+      html += '<button class="chipToggle" data-close-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Close</button>';
+      html += '</div></div>';
+
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;font-size:11px">';
+      html += '<div><span style="color:var(--text-secondary)">Short Put</span> <span class="mono">' + escapeHtml(String(entry.shortPutStrike || "—")) + '</span></div>';
+      html += '<div><span style="color:var(--text-secondary)">Short Call</span> <span class="mono">' + escapeHtml(String(entry.shortCallStrike || "—")) + '</span></div>';
+      html += '<div><span style="color:var(--text-secondary)">Spot</span> <span class="mono">' + (tracking.currentSpot ? Number(tracking.currentSpot).toFixed(2) : "—") + '</span></div>';
+      html += '<div><span style="color:var(--text-secondary)">DTE</span> <span class="mono">' + (tracking.dte !== null && tracking.dte !== undefined ? tracking.dte : "—") + '</span></div>';
+      html += '<div><span style="color:var(--text-secondary)">Put dist</span> <span class="mono">' + (tracking.distPutPct !== null ? tracking.distPutPct + "%" : "—") + '</span></div>';
+      html += '<div><span style="color:var(--text-secondary)">Call dist</span> <span class="mono">' + (tracking.distCallPct !== null ? tracking.distCallPct + "%" : "—") + '</span></div>';
+      html += '</div>';
+
+      if (lastCheckin) {
+        html += '<div style="margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;font-size:11px">';
+        html += '<div style="font-weight:600;margin-bottom:2px">Latest check-in: ' + _statusBadge(lastCheckin.status || status) + '</div>';
+        if (lastCheckin.headline) html += '<div style="color:var(--text-primary)">' + escapeHtml(lastCheckin.headline) + '</div>';
+        if (lastCheckin.recommendation) html += '<div style="color:var(--text-secondary);margin-top:2px">' + escapeHtml(lastCheckin.recommendation) + '</div>';
+        html += '</div>';
+      }
+
+      html += '</div>';
+    });
+
+    html += '</div>';
+    el.innerHTML = html;
+
+    el.querySelectorAll("[data-checkin-id]").forEach(function (btn) {
+      btn.addEventListener("click", function () { _runCheckin(btn.dataset.checkinId); });
+    });
+    el.querySelectorAll("[data-close-id]").forEach(function (btn) {
+      btn.addEventListener("click", function () { _closeTrade(btn.dataset.closeId); });
+    });
+  } catch {
+    // silently fail
+  }
+}
+
+async function _runCheckin(tradeId) {
+  try {
+    var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/checkin", { method: "POST" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    _loadActiveTrades();
+  } catch (err) {
+    alert("Check-in error: " + err.message);
+  }
+}
+
+async function _closeTrade(tradeId) {
+  if (!confirm("Close this trade?")) return;
+  try {
+    var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "manual" }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    _loadActiveTrades();
+  } catch (err) {
+    alert("Close error: " + err.message);
   }
 }
 

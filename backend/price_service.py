@@ -267,6 +267,22 @@ class PriceService:
             return bars[-1].close
         return None
 
+    def fetch_intraday_price(self, ticker: str) -> Optional[float]:
+        """Return an intraday snapshot price from EODHD live endpoints."""
+        sym = _to_eodhd_symbol(ticker)
+        try:
+            resp = self._eodhd.get_live_quote(sym)
+            rows = resp.rows or []
+            row = rows[0] if rows and isinstance(rows[0], dict) else None
+            if isinstance(row, dict):
+                for key in ("close", "lastTradePrice", "last", "price"):
+                    px = _to_float(row.get(key))
+                    if px is not None and px > 0:
+                        return float(px)
+        except Exception:
+            return None
+        return None
+
     # -----------------------------------------------------------------------
     # fetch_daily_bars_batch  —  efficient multi-ticker fetch
     # -----------------------------------------------------------------------

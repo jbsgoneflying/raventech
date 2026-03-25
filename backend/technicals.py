@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.orats_client import OratsClient
+from backend.market_hours import is_us_equity_market_open
 
 _LOG = logging.getLogger(__name__)
 
@@ -100,18 +101,12 @@ def fetch_daily_bars_range(
 
 
 def fetch_live_price_optional(client: Any = None, *, ticker: str) -> Optional[float]:
-    """Best-effort latest price for *ticker*.
+    ctx = fetch_live_price_context_optional(client, ticker=ticker)
+    px = _to_float(ctx.get("price")) if isinstance(ctx, dict) else None
+    return px if (px is not None and px > 0) else None
 
-    Uses EODHD via ``PriceService`` (latest EOD close).  Falls back to ORATS
-    ``live_summaries`` if EODHD is not configured.
-    """
-    # Primary path: EODHD
-    from backend.price_service import get_price_service
-    ps = get_price_service()
-    if ps is not None:
-        return ps.fetch_live_price(ticker)
 
-    # Fallback: ORATS live_summaries
+def _extract_orats_live_summary_price(client: Any, ticker: str) -> Optional[float]:
     try:
         if client is None or not callable(getattr(client, "live_summaries", None)):
             return None
@@ -125,6 +120,51 @@ def fetch_live_price_optional(client: Any = None, *, ticker: str) -> Optional[fl
         return px if (px is not None and px > 0) else None
     except Exception:
         return None
+
+
+def fetch_live_price_context_optional(client: Any = None, *, ticker: str) -> Dict[str, Any]:
+    """Session-aware spot resolver for Engine2/technicals overlays.
+
+    - Market open: ORATS live_summaries -> EODHD live quote -> latest close.
+    - Market closed: latest close only.
+    """
+    tk = str(ticker or "").strip().upper()
+    market_open = is_us_equity_market_open()
+    from backend.price_service import get_price_service
+
+    ps = get_price_service()
+    if market_open:
+        px_orats = _extract_orats_live_summary_price(client, tk)
+        if px_orats is not None and px_orats > 0:
+            return {"price": float(px_orats), "source": "orats_live_summaries", "mode": "open_live", "marketOpen": True}
+
+        if ps is not None and callable(getattr(ps, "fetch_intraday_price", None)):
+            try:
+                px_intraday = ps.fetch_intraday_price(tk)
+            except Exception:
+                px_intraday = None
+            if px_intraday is not None and float(px_intraday) > 0:
+                return {"price": float(px_intraday), "source": "eodhd_live_quote", "mode": "open_live", "marketOpen": True}
+
+        px_close = None
+        if ps is not None:
+            px_close = ps.fetch_live_price(tk)
+        return {
+            "price": (float(px_close) if (px_close is not None and float(px_close) > 0) else None),
+            "source": "latest_close",
+            "mode": "open_close_fallback",
+            "marketOpen": True,
+        }
+
+    px_close = None
+    if ps is not None:
+        px_close = ps.fetch_live_price(tk)
+    return {
+        "price": (float(px_close) if (px_close is not None and float(px_close) > 0) else None),
+        "source": "latest_close",
+        "mode": "closed_close",
+        "marketOpen": False,
+    }
 
 
 def _ema_series(closes: List[float], span: int) -> List[float]:
@@ -1389,7 +1429,7 @@ def compute_technicals_payload(
     """
     Compute technicals on daily bars + a live overlay.\n
     - Indicators are computed on daily bars up to the last available daily close.\n
-    - Live overlay uses ORATS live_summaries spot/stockPrice when available.\n
+    - Live overlay is session-aware: open=ORATS->EODHD->close, closed=close.\n
     """
     t = str(ticker).strip().upper()
     today = dt.date.today()
@@ -1667,7 +1707,7 @@ def compute_technicals_payload(
         "narrative": narrative,
         "notes": [
             "Indicators are computed on daily bars (EOD).",
-            "Live overlay uses ORATS Live summaries when available (may reflect afterhours/last known).",
+            "Live overlay is session-aware (open: ORATS -> EODHD -> close fallback; closed: latest close).",
         ],
     }
 

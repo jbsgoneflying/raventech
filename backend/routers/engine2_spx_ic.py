@@ -1,12 +1,26 @@
-"""Engine 2 — SPX Iron Condor & Levels routes."""
+"""Engine 2 — SPX Iron Condor & Levels routes + AI Trade Advisor."""
 
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 
 from backend.config import get_flags
+from backend.engine2_advisor import (
+    compute_trade_tracking,
+    generate_checkin_analysis,
+    generate_trade_analysis,
+)
+from backend.engine2_trades import (
+    add_checkin,
+    close_trade,
+    get_trade,
+    list_active_trades,
+    log_trade,
+)
+from backend.market_hours import is_us_equity_market_open
 from backend.deps import (
     LOG,
     get_benzinga_client_optional,
@@ -22,12 +36,14 @@ from backend.deps import (
     spx_levels_cache_lock,
 )
 from backend.orats_client import OratsError
+from backend.redis_store import get_store_optional
 from backend.spx_ic import (
     compute_engine2_spx_ic,
     compute_live_levels,
     compute_spx_live_levels,
     fetch_dailies_ohlc_range,
 )
+from backend.technicals import fetch_live_price_context_optional
 
 router = APIRouter()
 
@@ -64,10 +80,12 @@ def spx_ic(
             "grid_limit": grid_limit,
         }
         key = spx_ic_cache_key(params, f.cache_key_engine2())
-        with spx_ic_cache_lock:
-            cached = spx_ic_cache.get(key)
-        if cached is not None:
-            return cached
+        cache_enabled = not is_us_equity_market_open()
+        if cache_enabled:
+            with spx_ic_cache_lock:
+                cached = spx_ic_cache.get(key)
+            if cached is not None:
+                return cached
 
         ws: list[float] = []
         for part in str(widths).split(","):
@@ -114,8 +132,9 @@ def spx_ic(
             else:
                 grid_obj["page"] = {"limit": 0, "returned": len(cells), "total": len(cells)}
 
-        with spx_ic_cache_lock:
-            spx_ic_cache[key] = payload
+        if cache_enabled:
+            with spx_ic_cache_lock:
+                spx_ic_cache[key] = payload
         return payload
     except HTTPException:
         raise
@@ -320,3 +339,179 @@ def levels(
     except Exception as e:
         LOG.exception("Unhandled failure (levels)")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AI Trade Advisor endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post("/api/spx-ic/advisor")
+def spx_ic_advisor(
+    underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),
+    entry_day: str = Query("mon", description="Entry day: mon|tue|wed"),
+    seasonality_mode: str = Query("none", description="Seasonality conditioning"),
+):
+    """Run Engine 2 scan + LLM trade advisor — produces a TRADE/LEAN_PASS/PASS verdict."""
+    f = get_flags()
+    if not f.ENABLE_ENGINE2_SPX_IC:
+        raise HTTPException(status_code=404, detail="Engine 2 disabled")
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+
+    under = str(underlying or "SPX").strip().upper()
+    if under not in ("SPX", "SPY", "QQQ"):
+        raise HTTPException(status_code=400, detail="underlying must be SPX|SPY|QQQ")
+
+    try:
+        payload = compute_engine2_spx_ic(
+            client=get_client(),
+            benzinga_client=get_benzinga_client_optional(),
+            flags=f,
+            underlying_preference=under,
+            entry_day=entry_day,
+            seasonality_mode=seasonality_mode,
+        )
+
+        analysis = generate_trade_analysis(
+            engine2_payload=payload,
+            width_analysis=payload.get("widthComparison"),
+            flags=f,
+        )
+
+        return {
+            "advisor": analysis,
+            "widthComparison": payload.get("widthComparison", []),
+            "recommendation": payload.get("recommendation"),
+            "recSimple": payload.get("recSimple"),
+            "strikeTargets": payload.get("strikeTargets"),
+            "current": payload.get("current"),
+            "expectedMove": payload.get("expectedMove"),
+            "underlying": payload.get("underlying"),
+            "asOfDate": payload.get("asOfDate"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Engine2 advisor failure")
+        raise HTTPException(status_code=500, detail=f"Advisor error: {type(e).__name__}") from e
+
+
+@router.post("/api/spx-ic/trade")
+def spx_ic_trade_log(body: Dict[str, Any] = Body(...)):
+    """Log a new trade (from advisor recommendation or manual entry)."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    trade_id = log_trade(trade_data=body, store=store, flags=f)
+    if trade_id is None:
+        raise HTTPException(status_code=500, detail="Failed to log trade")
+
+    trade = get_trade(trade_id, store=store)
+    return {"status": "ok", "tradeId": trade_id, "trade": trade}
+
+
+@router.get("/api/spx-ic/trades")
+def spx_ic_trades_list():
+    """List active trades with live tracking metrics."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+
+    store = get_store_optional()
+    trades = list_active_trades(store=store)
+
+    px_ctx = fetch_live_price_context_optional(client=get_client(), ticker="SPX")
+    current_spot = float(px_ctx.get("price", 0)) if px_ctx else 0.0
+
+    enriched = []
+    for t in trades:
+        tracking = None
+        if current_spot > 0:
+            current_regime = None
+            current_vol = None
+            tracking = compute_trade_tracking(
+                trade=t,
+                current_spot=current_spot,
+                current_regime=current_regime,
+                current_vol_pressure=current_vol,
+            )
+        enriched.append({
+            **t,
+            "tracking": tracking,
+            "currentSpot": current_spot,
+        })
+
+    return {"trades": enriched, "count": len(enriched)}
+
+
+@router.post("/api/spx-ic/trade/{trade_id}/checkin")
+def spx_ic_trade_checkin(trade_id: str):
+    """Run a check-in analysis on an open trade."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    trade = get_trade(trade_id, store=store)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    px_ctx = fetch_live_price_context_optional(client=get_client(), ticker="SPX")
+    current_spot = float(px_ctx.get("price", 0)) if px_ctx else 0.0
+    if current_spot <= 0:
+        raise HTTPException(status_code=502, detail="Could not fetch current spot price")
+
+    tracking = compute_trade_tracking(
+        trade=trade,
+        current_spot=current_spot,
+    )
+
+    analysis = generate_checkin_analysis(
+        trade=trade,
+        tracking=tracking,
+        flags=f,
+    )
+
+    checkin_record = {
+        "status": analysis.get("status", tracking.get("deterministicStatus")),
+        "headline": analysis.get("headline"),
+        "recommendation": analysis.get("recommendation"),
+        "adjustment": analysis.get("adjustmentIfNeeded"),
+        "tracking": tracking,
+        "spotAtCheckin": current_spot,
+    }
+    add_checkin(trade_id, checkin_record, store=store, flags=f)
+
+    return {
+        "tradeId": trade_id,
+        "analysis": analysis,
+        "tracking": tracking,
+        "currentSpot": current_spot,
+    }
+
+
+@router.post("/api/spx-ic/trade/{trade_id}/close")
+def spx_ic_trade_close(trade_id: str, body: Dict[str, Any] = Body(default={})):
+    """Close a trade with optional outcome data."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    trade = close_trade(trade_id, close_data=body, store=store, flags=f)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    return {"status": "ok", "trade": trade}

@@ -33,7 +33,7 @@ from backend.technicals import (
     detect_candlestick_patterns,
     detect_elliott_pivot_structure,
     detect_red_dog_reversal,
-    fetch_live_price_optional,
+    fetch_live_price_context_optional,
 )
 
 from backend.spx_ic.utils import (
@@ -122,11 +122,15 @@ def compute_engine2_spx_ic(
     # Desk-locked config (Engine 2): simplify to the weekly IC workflow you trade.
     # - 2y lookback (~104 weekly observations per entry weekday)
     # - widths fixed to 1.0/1.5/2.0 × EM (short distance)
-    # - wings fixed to 5pt (risk-defined)
+    # - wings: $5 only (legacy) or multi-width when ENGINE2_MULTI_WING is enabled
     yrs = 2
     widths_use = [1.0, 1.5, 2.0]
     em_mults = list(widths_use)
-    wing_pts = [5]
+    if flags.ENGINE2_MULTI_WING:
+        _raw_wp = [p.strip() for p in str(flags.ENGINE2_WING_WIDTH_PTS).split(",") if p.strip()]
+        wing_pts = sorted({int(float(p)) for p in _raw_wp if float(p) > 0}) or [5]
+    else:
+        wing_pts = [5]
     ed = str(entry_day or "mon").strip().lower()
     entry_dow = 0 if ed.startswith("mon") else 1 if ed.startswith("tue") else 2 if ed.startswith("wed") else 0
     now = today or dt.date.today()
@@ -1102,6 +1106,48 @@ def compute_engine2_spx_ic(
     bt = {"rowsUsed": int(len(week_rows)), "rows": [], "byWidth": by_width, "byQuarter": by_q, "notes": ["Derived from Engine 2 weekly rows (fast path)."]}
     rec_simple = recommend_width(by_width=by_width, risk_target_breach_pct=float(risk_target_breach_pct))
 
+    # --- Width comparison (multi-wing ROC analysis for advisor) ---
+    width_comparison: List[Dict[str, Any]] = []
+    if len(wing_pts) > 1:
+        _like_bw = odds_like_now or by_width
+        for wp in wing_pts:
+            bw_match = None
+            for bw in _like_bw:
+                if abs(float(bw.get("w", 0)) - float(wp)) < 0.01:
+                    bw_match = bw
+                    break
+            breach_pct = float(bw_match["breachEitherPct"]) if (bw_match and bw_match.get("breachEitherPct") is not None) else None
+            survival = round(100.0 - breach_pct, 2) if breach_pct is not None else None
+            max_loss = float(wp) * 100.0
+            credit_proxy = round(max_loss * 0.12 * (1 + float(wp) * 0.008), 2) if wp else 0.0
+            roc = round(credit_proxy / (max_loss - credit_proxy) * 100.0, 2) if (max_loss > credit_proxy > 0) else None
+            risk_adj_roc = round(roc * survival / 100.0, 2) if (roc is not None and survival is not None) else None
+            grid_cells = [c for c in cells_out if int(c.get("wingWidthPts", 0)) == int(wp) and c.get("entryDay") == ed and c.get("regimeBucket") == regime_bucket_now]
+            mae_vals = [float(c["mae95xWing"]) for c in grid_cells if c.get("mae95xWing") is not None]
+            avg_mae95x = round(sum(mae_vals) / len(mae_vals), 3) if mae_vals else None
+            width_comparison.append({
+                "wingWidthPts": int(wp),
+                "breachPct": breach_pct,
+                "survivalPct": survival,
+                "creditProxy": credit_proxy,
+                "maxLoss": max_loss,
+                "rocPct": roc,
+                "riskAdjRocPct": risk_adj_roc,
+                "avgMae95xWing": avg_mae95x,
+                "gridCells": len(grid_cells),
+            })
+        width_comparison.sort(key=lambda x: -(x.get("riskAdjRocPct") or 0))
+        for i, wc in enumerate(width_comparison):
+            wc["rank"] = i + 1
+            if wc["wingWidthPts"] <= 5:
+                wc["label"] = "Tight / Higher ROC"
+            elif wc["wingWidthPts"] <= 10:
+                wc["label"] = "Standard"
+            elif wc["wingWidthPts"] <= 15:
+                wc["label"] = "Moderate"
+            else:
+                wc["label"] = "Wide / Safer"
+
     # --- Technicals (daily indicators + live overlay; additive, does not affect backtest) ---
     tech_bars: List[TechDailyBar] = []
     for b in bars:
@@ -1279,8 +1325,12 @@ def compute_engine2_spx_ic(
         live_px = _to_float((live_context.get("spot") if isinstance(live_context, dict) else None))
     except Exception:
         live_px = None
+    live_price_ctx: Dict[str, Any] = {"price": None, "source": "none", "mode": "none", "marketOpen": None}
     if live_px is None:
-        live_px = fetch_live_price_optional(client, ticker=str(underlying).upper())
+        live_price_ctx = fetch_live_price_context_optional(client, ticker=str(underlying).upper())
+        live_px = _to_float(live_price_ctx.get("price"))
+    else:
+        live_price_ctx = {"price": float(live_px), "source": "live_context_spot", "mode": "open_live", "marketOpen": True}
     level_map: Dict[str, Optional[float]] = {}
     level_map.update(ema)
     if isinstance(boll, dict) and boll.get("enabled"):
@@ -1385,7 +1435,10 @@ def compute_engine2_spx_ic(
         "narrative": narrative,
         "notes": [
             "Indicators computed on daily bars (EOD).",
-            "Live overlay uses ORATS Live spot/stockPrice when available (may reflect afterhours/last known).",
+            (
+                f"Live overlay mode={live_price_ctx.get('mode')} "
+                f"source={live_price_ctx.get('source')}."
+            ),
         ],
     }
 
@@ -1457,19 +1510,28 @@ def compute_engine2_spx_ic(
             symbols=em_symbols,
         )
         
-        if em_result.get("expectedMovePct") is not None:
+        straddle_em_pct = _to_float(em_result.get("expectedMovePct"))
+        orats_em_pct = _to_float(em_result.get("oratsExpectedMovePct"))
+        has_em = (straddle_em_pct is not None and straddle_em_pct > 0) or (orats_em_pct is not None and orats_em_pct > 0)
+
+        if has_em:
             expected_move = {
                 "enabled": True,
                 **em_result,
             }
-            
-            # Compute strike targets if we have EM and spot
-            em_pct = em_result.get("expectedMovePct")
-            spot_for_targets = em_result.get("spotPrice")
-            if em_pct is not None and spot_for_targets is not None and float(spot_for_targets) > 0:
+
+            # Strike targets follow ORATS EM (delayed -> EOD). Fallback to straddle EM if ORATS EM is unavailable.
+            em_pct_for_targets = orats_em_pct if (orats_em_pct is not None and orats_em_pct > 0) else straddle_em_pct
+            spot_for_targets = _to_float(em_result.get("smartSpotPrice")) or _to_float(em_result.get("spotPrice"))
+            if em_pct_for_targets is not None and spot_for_targets is not None and float(spot_for_targets) > 0:
                 strike_targets = compute_strike_targets(
-                    expected_move_pct=float(em_pct),
+                    expected_move_pct=float(em_pct_for_targets),
                     spot_price=float(spot_for_targets),
+                )
+                strike_targets["emSource"] = str(
+                    em_result.get("oratsExpectedMoveSource")
+                    if (orats_em_pct is not None and orats_em_pct > 0)
+                    else "straddle"
                 )
         else:
             expected_move = {
@@ -1505,6 +1567,7 @@ def compute_engine2_spx_ic(
             "wingWidthPts": [int(x) for x in wing_pts],
             "seasonalityMode": season_mode,
             "deskLocked": True,
+            "multiWing": bool(flags.ENGINE2_MULTI_WING),
         },
         "underlying": {"symbol": underlying, "isProxy": bool(is_proxy), "notes": proxy_notes},
         "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
@@ -1520,6 +1583,11 @@ def compute_engine2_spx_ic(
             "notes": ["Conditioned on current buckets (regime/macro/season). Risk-only: breach is expiry-close outside ±(width×EM)."],
         },
         "backtest": bt,
+        "recommendation": rec,
+        "recSimple": rec_simple,
+        "riskGrid": {"cells": cells_out, "count": len(cells_out)},
+        "macroEffects": macro_effects,
+        "widthComparison": width_comparison,
         "technicals": technicals,
         "telemetry": telemetry,
         "notes": proxy_notes,

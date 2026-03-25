@@ -139,6 +139,14 @@ class FeatureFlags:
     ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT: float = 10.0
     ENGINE2_POLICY_MAX_MAE95_X_WING: float = 1.0
 
+    # Engine 2 AI Trade Advisor
+    ENGINE2_MULTI_WING: bool = True
+    ENGINE2_ADVISOR_ENABLED: bool = True
+    ENGINE2_ADVISOR_MODEL: str = "gpt-5.2"
+    ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
+    ENGINE2_TRADE_TTL_S: int = 60 * 86400   # 60 days
+    ENGINE2_TRADE_MAX_INDEX: int = 100
+
     # Regime thresholds (score is 0..100)
     ENGINE2_REGIME_LOW_MAX: float = 25.0
     ENGINE2_REGIME_MODERATE_MAX: float = 45.0
@@ -394,6 +402,12 @@ class FeatureFlags:
             ENGINE2_POLICY_MAX_BREACH_PCT=_get_float("ENGINE2_POLICY_MAX_BREACH_PCT", 25.0),
             ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT=_get_float("ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT", 10.0),
             ENGINE2_POLICY_MAX_MAE95_X_WING=_get_float("ENGINE2_POLICY_MAX_MAE95_X_WING", 1.0),
+            ENGINE2_MULTI_WING=_get_bool("ENGINE2_MULTI_WING", True),
+            ENGINE2_ADVISOR_ENABLED=_get_bool("ENGINE2_ADVISOR_ENABLED", True),
+            ENGINE2_ADVISOR_MODEL=os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.2"),
+            ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
+            ENGINE2_TRADE_TTL_S=_get_int("ENGINE2_TRADE_TTL_S", 60 * 86400),
+            ENGINE2_TRADE_MAX_INDEX=_get_int("ENGINE2_TRADE_MAX_INDEX", 100),
             ENGINE2_REGIME_LOW_MAX=_get_float("ENGINE2_REGIME_LOW_MAX", 25.0),
             ENGINE2_REGIME_MODERATE_MAX=_get_float("ENGINE2_REGIME_MODERATE_MAX", 45.0),
             ENGINE2_REGIME_ELEVATED_MAX=_get_float("ENGINE2_REGIME_ELEVATED_MAX", 65.0),
@@ -687,6 +701,7 @@ class FeatureFlags:
             ("ENGINE2_MACRO_BASE_NFP", float(self.ENGINE2_MACRO_BASE_NFP)),
             ("ENGINE2_MACRO_BASE_OPEX", float(self.ENGINE2_MACRO_BASE_OPEX)),
             ("ENGINE2_MACRO_BASE_REFUNDING", float(self.ENGINE2_MACRO_BASE_REFUNDING)),
+            ("ENGINE2_MULTI_WING", bool(self.ENGINE2_MULTI_WING)),
         )
 
     def cache_key_engine3(self) -> tuple:
