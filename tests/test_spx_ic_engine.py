@@ -290,13 +290,11 @@ def test_engine2_strike_targets_prefer_orats_em(monkeypatch):
     assert st.get("emSource") == "delayed"
 
 
-def test_engine2_width_comparison_uses_grid_cells(monkeypatch):
-    """Width comparison should source breach data from cells_out grid,
-    not from odds_like_now/by_width (EM-multiple keyed)."""
+def test_engine2_width_comparison_2d_em_x_wing(monkeypatch):
+    """Width comparison should be a 2D EM x Wing matrix with per-EM breach
+    and per-cell outside/ROC metrics."""
     c = FakeOratsClient()
 
-    # Build enough data for 4 weeks of Mon->Fri so the grid has cells
-    # across multiple wing widths.
     base = 100.0
     weeks = [
         ("2025-01-06", "2025-01-10", 0.5),
@@ -333,18 +331,93 @@ def test_engine2_width_comparison_uses_grid_cells(monkeypatch):
     )
 
     wc = out.get("widthComparison", [])
-    assert len(wc) == 3
+    # 3 EM multiples (1.0, 1.5, 2.0) x 3 wings (5, 10, 15) = 9 entries
+    assert len(wc) == 9
 
+    # Every entry must have both emMult and wingWidthPts
     for entry in wc:
+        assert "emMult" in entry, "Missing emMult field"
+        assert entry["emMult"] in (1.0, 1.5, 2.0)
         assert entry["wingWidthPts"] in (5, 10, 15)
-        assert entry["gridCells"] > 0, (
-            f"Width {entry['wingWidthPts']} should have grid cells"
-        )
-        assert entry["breachPct"] is not None, (
-            f"Width {entry['wingWidthPts']} breach should not be None"
-        )
+        assert entry["gridCells"] > 0
+        assert entry["breachPct"] is not None
         assert entry["survivalPct"] is not None
-        assert 0 <= entry["breachPct"] <= 100
-        assert 0 <= entry["survivalPct"] <= 100
+        assert "outsidePct" in entry
+
+    # Breach % must be constant across wing widths for a given EM
+    em_groups = {}
+    for entry in wc:
+        em_groups.setdefault(entry["emMult"], []).append(entry)
+    for em_val, group in em_groups.items():
+        breach_vals = [e["breachPct"] for e in group]
+        assert all(abs(b - breach_vals[0]) < 0.01 for b in breach_vals), (
+            f"Breach % should be constant across wings at EM {em_val}: {breach_vals}"
+        )
+
+    # Breach % should decrease as EM increases (wider short strikes = less breach)
+    em_breaches = {em: group[0]["breachPct"] for em, group in em_groups.items()}
+    if em_breaches.get(1.0) is not None and em_breaches.get(2.0) is not None:
+        assert em_breaches[1.0] >= em_breaches[2.0], (
+            f"EM 1.0 breach ({em_breaches[1.0]}) should be >= EM 2.0 ({em_breaches[2.0]})"
+        )
+
+    # emBreachSummary and emPreference must be in payload
+    assert "emBreachSummary" in out
+    assert "emPreference" in out
+    em_bs = out["emBreachSummary"]
+    assert "1.0" in em_bs or "1" in em_bs
+    emp = out["emPreference"]
+    assert "emPreference" in emp
+    assert emp["emPreference"] in (1.0, 1.5, 2.0)
+    assert "compositeScore" in emp
+    assert "components" in emp
+
+
+def test_compute_em_preference_low_risk():
+    from backend.spx_ic.engine import _compute_em_preference
+    result = _compute_em_preference(
+        regime_score=25.0,
+        macro_multiplier=1.0,
+        news_gate_max_adj=0.0,
+        vol_pressure_state="ASK",
+        dealer_gamma_sign="positive",
+    )
+    assert result["emPreference"] == 1.0
+    assert result["label"] == "aggressive"
+    assert result["compositeScore"] < 35
+
+
+def test_compute_em_preference_moderate_risk():
+    from backend.spx_ic.engine import _compute_em_preference
+    result = _compute_em_preference(
+        regime_score=50.0,
+        macro_multiplier=1.3,
+        news_gate_max_adj=25.0,
+        vol_pressure_state="NEUTRAL",
+        dealer_gamma_sign="unknown",
+    )
+    assert result["emPreference"] == 1.5
+    assert result["label"] == "standard"
+
+
+def test_compute_em_preference_high_risk():
+    from backend.spx_ic.engine import _compute_em_preference
+    result = _compute_em_preference(
+        regime_score=75.0,
+        macro_multiplier=1.8,
+        news_gate_max_adj=60.0,
+        vol_pressure_state="BID",
+        dealer_gamma_sign="negative",
+    )
+    assert result["emPreference"] == 2.0
+    assert result["label"] == "defensive"
+    assert result["compositeScore"] >= 60
+
+
+def test_em_fallback_order():
+    from backend.spx_ic.engine import _em_fallback_order
+    assert _em_fallback_order(1.5, [1.0, 1.5, 2.0]) == [1.0, 2.0]
+    assert _em_fallback_order(1.0, [1.0, 1.5, 2.0]) == [1.5, 2.0]
+    assert _em_fallback_order(2.0, [1.0, 1.5, 2.0]) == [1.5, 1.0]
 
 

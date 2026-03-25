@@ -2074,30 +2074,67 @@ function renderWidthComparison(widthComparison) {
   var el = $("e2AdvisorContent");
   if (!el) return;
 
-  var html = '<div style="padding:12px 20px;border-top:1px solid var(--border)">';
-  html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:8px">Wing Width Comparison</div>';
-  html += '<div class="tableWrap"><table class="dataTable"><thead><tr>';
-  html += '<th>Wing</th><th class="num">Breach %</th><th class="num">Survival %</th><th class="num">ROC %</th><th class="num">Risk-Adj ROC</th><th class="num">MAE95×Wing</th><th>Label</th>';
-  html += '</tr></thead><tbody>';
+  var emPref = lastPayload?.emPreference || {};
+  var emBreachSummary = lastPayload?.emBreachSummary || {};
+  var prefEm = emPref.emPreference || null;
+
+  var emGroups = {};
+  var emOrder = [];
   widthComparison.forEach(function (w) {
-    var bp = w.breachPct !== null && w.breachPct !== undefined ? Number(w.breachPct).toFixed(1) + "%" : "—";
-    var sp = w.survivalPct !== null && w.survivalPct !== undefined ? Number(w.survivalPct).toFixed(1) + "%" : "—";
-    var roc = w.rocPct !== null && w.rocPct !== undefined ? Number(w.rocPct).toFixed(1) + "%" : "—";
-    var raroc = w.riskAdjRocPct !== null && w.riskAdjRocPct !== undefined ? Number(w.riskAdjRocPct).toFixed(1) + "%" : "—";
-    var mae = w.avgMae95xWing !== null && w.avgMae95xWing !== undefined ? Number(w.avgMae95xWing).toFixed(3) : "—";
-    var isTop = w.rank === 1;
-    var rowStyle = isTop ? ' style="background:rgba(52,199,89,0.08);font-weight:600"' : '';
-    html += '<tr' + rowStyle + '>';
-    html += '<td class="mono">$' + w.wingWidthPts + '</td>';
-    html += '<td class="num mono">' + bp + '</td>';
-    html += '<td class="num mono">' + sp + '</td>';
-    html += '<td class="num mono">' + roc + '</td>';
-    html += '<td class="num mono">' + raroc + '</td>';
-    html += '<td class="num mono">' + mae + '</td>';
-    html += '<td>' + escapeHtml(w.label || "") + (isTop ? " ★" : "") + '</td>';
-    html += '</tr>';
+    var ek = String(w.emMult || "unknown");
+    if (!emGroups[ek]) { emGroups[ek] = []; emOrder.push(ek); }
+    emGroups[ek].push(w);
   });
-  html += '</tbody></table></div></div>';
+
+  var _f = function(v, d) { return v !== null && v !== undefined ? Number(v).toFixed(d) + "%" : "—"; };
+  var _fv = function(v, d) { return v !== null && v !== undefined ? Number(v).toFixed(d) : "—"; };
+  var emLabels = { "1": "Aggressive", "1.0": "Aggressive", "1.5": "Standard", "2": "Defensive", "2.0": "Defensive" };
+
+  var html = '<div style="padding:12px 20px;border-top:1px solid var(--border)">';
+  html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:4px">EM × Wing Width Analysis</div>';
+  if (emPref.compositeScore != null) {
+    html += '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">EM Preference: <strong>' + (prefEm || "—") + 'x</strong> (' + escapeHtml(emPref.label || "") + ') &middot; Composite Score: ' + Number(emPref.compositeScore).toFixed(0) + '/100</div>';
+  }
+
+  emOrder.forEach(function (ek) {
+    var rows = emGroups[ek];
+    var emVal = parseFloat(ek);
+    var breachPct = emBreachSummary[ek];
+    var isRec = prefEm != null && Math.abs(emVal - prefEm) < 0.01;
+    var emLabel = emLabels[ek] || "";
+
+    html += '<div style="margin-top:10px;padding:8px 12px;border-radius:6px;border:1px solid ' + (isRec ? 'var(--accent)' : 'var(--border)') + ';background:' + (isRec ? 'rgba(52,199,89,0.04)' : 'transparent') + '">';
+    html += '<div style="font-size:11px;font-weight:700;margin-bottom:6px">';
+    html += 'EM ' + ek + 'x';
+    if (emLabel) html += ' <span style="font-weight:400;color:var(--text-secondary)">[' + emLabel + ']</span>';
+    html += ' &mdash; Short Strike Breach: <strong>' + (breachPct != null ? Number(breachPct).toFixed(1) + '%' : '—') + '</strong>';
+    if (isRec) html += ' <span style="color:var(--accent);font-weight:700;margin-left:6px">← Recommended</span>';
+    html += '</div>';
+
+    html += '<div class="tableWrap"><table class="dataTable"><thead><tr>';
+    html += '<th>Wing</th><th class="num">Outside %</th><th class="num">Max Loss</th><th class="num">Credit</th><th class="num">ROC %</th><th class="num">Risk-Adj ROC</th><th class="num">MAE95×Wing</th><th>Label</th>';
+    html += '</tr></thead><tbody>';
+
+    rows.sort(function(a,b){ return (b.riskAdjRocPct || 0) - (a.riskAdjRocPct || 0); });
+    var topRaroc = rows.length ? rows[0].riskAdjRocPct : null;
+
+    rows.forEach(function (w) {
+      var isTop = isRec && topRaroc != null && w.riskAdjRocPct === topRaroc;
+      var rowStyle = isTop ? ' style="background:rgba(52,199,89,0.08);font-weight:600"' : '';
+      html += '<tr' + rowStyle + '>';
+      html += '<td class="mono">$' + w.wingWidthPts + '</td>';
+      html += '<td class="num mono">' + _f(w.outsidePct, 1) + '</td>';
+      html += '<td class="num mono">$' + Number(w.maxLoss).toLocaleString() + '</td>';
+      html += '<td class="num mono">$' + _fv(w.creditProxy, 0) + '</td>';
+      html += '<td class="num mono">' + _f(w.rocPct, 1) + '</td>';
+      html += '<td class="num mono">' + _f(w.riskAdjRocPct, 1) + '</td>';
+      html += '<td class="num mono">' + _fv(w.avgMae95xWing, 3) + '</td>';
+      html += '<td>' + escapeHtml(w.label || "") + (isTop ? " ★" : "") + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+  });
+  html += '</div>';
 
   el.insertAdjacentHTML("beforeend", html);
 }

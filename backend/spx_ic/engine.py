@@ -93,6 +93,82 @@ from backend.spx_ic.live_levels import (
 LOG = logging.getLogger("spx_ic_engine")
 
 
+# ---------------------------------------------------------------------------
+# EM preference scorer (Engine12-style composite)
+# ---------------------------------------------------------------------------
+
+def _clamp(lo: float, hi: float, v: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _compute_em_preference(
+    *,
+    regime_score: float,
+    macro_multiplier: float,
+    news_gate_max_adj: float = 0.0,
+    vol_pressure_state: str = "NEUTRAL",
+    dealer_gamma_sign: str = "unknown",
+) -> Dict[str, Any]:
+    """Regime-adaptive EM multiplier selection.
+
+    Normalises regime, macro, news-gate, and vol-pressure into 0-100 subscores
+    (higher = more conservative market), applies a weighted composite with a
+    dealer-gamma modifier, then maps bands to an EM preference.
+
+    Returns dict with emPreference (1.0 / 1.5 / 2.0), label, compositeScore,
+    and per-factor breakdown for transparency.
+    """
+    regime_f = _clamp(0, 100, float(regime_score))
+    macro_f = _clamp(0, 100, (float(macro_multiplier) - 1.0) * 100.0)
+    news_f = _clamp(0, 100, float(news_gate_max_adj))
+    vol_map = {"BID": 60.0, "NEUTRAL": 30.0, "ASK": 10.0}
+    vol_f = vol_map.get(str(vol_pressure_state).upper(), 30.0)
+
+    raw = (
+        regime_f * 0.35
+        + macro_f * 0.25
+        + news_f * 0.20
+        + vol_f * 0.20
+    )
+
+    gamma_adj = 0.0
+    gs = str(dealer_gamma_sign).lower()
+    if gs == "negative":
+        gamma_adj = 8.0
+    elif gs == "positive":
+        gamma_adj = -5.0
+
+    score = _clamp(0, 100, raw + gamma_adj)
+
+    if score < 35:
+        em_pref, label = 1.0, "aggressive"
+    elif score < 60:
+        em_pref, label = 1.5, "standard"
+    else:
+        em_pref, label = 2.0, "defensive"
+
+    return {
+        "emPreference": em_pref,
+        "label": label,
+        "compositeScore": round(score, 1),
+        "components": {
+            "regime": round(regime_f, 1),
+            "macro": round(macro_f, 1),
+            "newsGate": round(news_f, 1),
+            "volPressure": round(vol_f, 1),
+            "gammaAdj": round(gamma_adj, 1),
+        },
+        "weights": {"regime": 0.35, "macro": 0.25, "newsGate": 0.20, "volPressure": 0.20},
+    }
+
+
+def _em_fallback_order(preferred: float, available: List[float]) -> List[float]:
+    """Return EM multiples in proximity order from the preferred value."""
+    others = [e for e in sorted(available) if abs(e - preferred) > 1e-9]
+    others.sort(key=lambda e: abs(e - preferred))
+    return others
+
+
 def compute_engine2_spx_ic(
     *,
     client: OratsClient,
@@ -955,7 +1031,30 @@ def compute_engine2_spx_ic(
             if c4:
                 candidates = c4
                 match_used.update({"fallbackUsed": True, "fallbackReason": "macro_and_season_relaxed"})
-    # Prefer EM=1.0 then minimal wing
+    # --- EM preference (regime-adaptive short-strike placement) ---
+    _vp = live_context.get("volPressure") or {}
+    _vp_state = str(_vp.get("state") or "NEUTRAL").upper() if isinstance(_vp, dict) else "NEUTRAL"
+    _dg = live_context.get("dealerGamma") or {}
+    _dg_sign = str(_dg.get("netGammaSign") or "unknown").lower() if isinstance(_dg, dict) else "unknown"
+    _news_max_adj = 0.0
+    try:
+        from backend.engine2_advisor import compute_news_gate_score, _load_todays_dms, _extract_dms_context
+        _dms_raw = _load_todays_dms()
+        if _dms_raw:
+            _dms_ctx = _extract_dms_context(_dms_raw)
+            _news_max_adj = float((_dms_ctx.get("newsGate") or {}).get("maxAdjustedIntensity", 0))
+    except Exception:
+        pass
+
+    em_preference = _compute_em_preference(
+        regime_score=float(regime_now.get("score", 50)),
+        macro_multiplier=float(macro_now.get("multiplier", 1.0)),
+        news_gate_max_adj=_news_max_adj,
+        vol_pressure_state=_vp_state,
+        dealer_gamma_sign=_dg_sign,
+    )
+    em_pref = float(em_preference["emPreference"])
+
     def _meets(c: Dict[str, Any]) -> bool:
         if c.get("pBreachPct") is None or c.get("pOutsideWingsPct") is None or c.get("mae95xWing") is None:
             return False
@@ -966,17 +1065,26 @@ def compute_engine2_spx_ic(
         )
 
     pick = None
-    # pass 1: EM 1.0
-    em_pref = 1.0
+    # Pass 1: preferred EM from composite scorer, smallest qualifying wing
     same_em = [c for c in candidates if abs(float(c["emMult"]) - em_pref) < 1e-9]
     for c in sorted(same_em, key=lambda x: int(x["wingWidthPts"])):
         if _meets(c):
             pick = c
             break
-    # pass 2: any config, choose min wing then min EM
+    # Pass 2: adjacent EM values in proximity order
+    if pick is None:
+        for fallback_em in _em_fallback_order(em_pref, em_mults):
+            fb_cells = [c for c in candidates if abs(float(c["emMult"]) - fallback_em) < 1e-9]
+            for c in sorted(fb_cells, key=lambda x: int(x["wingWidthPts"])):
+                if _meets(c):
+                    pick = c
+                    break
+            if pick:
+                break
+    # Pass 3: any qualifying cell, prefer wider EM (defensive) then smallest wing
     if pick is None:
         ok = [c for c in candidates if _meets(c)]
-        ok.sort(key=lambda x: (int(x["wingWidthPts"]), float(x["emMult"])))
+        ok.sort(key=lambda x: (-float(x["emMult"]), int(x["wingWidthPts"])))
         pick = ok[0] if ok else None
 
     # If still none, provide best-effort (lowest breach/outside/mae) so UI has a suggestion.
@@ -997,6 +1105,7 @@ def compute_engine2_spx_ic(
         "seasonBucket": season_bucket_now,
         "seasonalityMode": season_mode,
         "matchUsed": match_used,
+        "emPreference": em_preference,
         "policy": policy,
         "recommended": None,
         "bestEffort": None,
@@ -1106,73 +1215,92 @@ def compute_engine2_spx_ic(
     bt = {"rowsUsed": int(len(week_rows)), "rows": [], "byWidth": by_width, "byQuarter": by_q, "notes": ["Derived from Engine 2 weekly rows (fast path)."]}
     rec_simple = recommend_width(by_width=by_width, risk_target_breach_pct=float(risk_target_breach_pct))
 
-    # --- Width comparison (multi-wing ROC analysis for advisor) ---
-    # Source breach/survival from cells_out grid (keyed by dollar wingWidthPts),
-    # NOT from odds_like_now/by_width (keyed by EM multiples).
+    # --- Width comparison: 2D EM x Wing matrix ---
+    # EM multiplier = primary decision (sets short strikes, determines breach %).
+    # Wing width = secondary decision (sets capital at risk, ROC, outside-wings %).
+    # Breach is constant across wing widths for a given EM (short strike doesn't move).
     width_comparison: List[Dict[str, Any]] = []
-    if len(wing_pts) > 1:
-        for wp in wing_pts:
-            # Filter grid cells for this wing width + current entry day + regime
-            grid_cells = [
+    em_breach_summary: Dict[str, Any] = {}
+
+    def _find_wc_cells(em_val: float, wp_val: int) -> List[Dict[str, Any]]:
+        """Filter cells_out for (em, wp) with cascading bucket relaxation."""
+        for macro_b, season_b in [
+            (macro_bucket_now, season_bucket_now if season_mode != "none" else None),
+            (macro_bucket_now, None),
+            (None, None),
+        ]:
+            filt = [
                 c for c in cells_out
-                if int(c.get("wingWidthPts", 0)) == int(wp)
+                if abs(float(c.get("emMult", 0)) - em_val) < 1e-9
+                and int(c.get("wingWidthPts", 0)) == wp_val
                 and c.get("entryDay") == ed
                 and c.get("regimeBucket") == regime_bucket_now
+                and (macro_b is None or c.get("macroBucket") == macro_b)
+                and (season_b is None or c.get("seasonBucket") == season_b)
             ]
-            # Relaxed fallback: drop regime filter if no exact match
-            if not grid_cells:
-                grid_cells = [
-                    c for c in cells_out
-                    if int(c.get("wingWidthPts", 0)) == int(wp)
-                    and c.get("entryDay") == ed
-                ]
+            if filt:
+                return filt
+        return [
+            c for c in cells_out
+            if abs(float(c.get("emMult", 0)) - em_val) < 1e-9
+            and int(c.get("wingWidthPts", 0)) == wp_val
+            and c.get("entryDay") == ed
+        ]
 
-            # Weighted-average breach across EM multiples (prefer recommended EM)
-            rec_em = float(pick["emMult"]) if pick else 1.0
-            total_n = 0
-            weighted_breach = 0.0
-            for gc in grid_cells:
-                n_gc = int(gc.get("n", 0))
-                bp = gc.get("pBreachPct")
-                if n_gc <= 0 or bp is None:
-                    continue
-                em_gc = float(gc.get("emMult", 1.0))
-                em_boost = 1.5 if abs(em_gc - rec_em) < 1e-9 else 1.0
-                w_n = n_gc * em_boost
-                total_n += w_n
-                weighted_breach += float(bp) * w_n
-            breach_pct = round(weighted_breach / total_n, 2) if total_n > 0 else None
-            survival = round(100.0 - breach_pct, 2) if breach_pct is not None else None
-
-            mae_vals = [float(c["mae95xWing"]) for c in grid_cells if c.get("mae95xWing") is not None]
-            avg_mae95x = round(sum(mae_vals) / len(mae_vals), 3) if mae_vals else None
-            loss_vals = [float(c["loss95Pts"]) for c in grid_cells if c.get("loss95Pts") is not None]
-            avg_loss95 = round(sum(loss_vals) / len(loss_vals), 2) if loss_vals else None
-
-            max_loss = float(wp) * 100.0
-            # Credit proxy: derive from grid loss data when available
-            if avg_loss95 is not None and max_loss > 0:
-                credit_proxy = round(max_loss - avg_loss95 * 100.0, 2)
-                credit_proxy = max(credit_proxy, round(max_loss * 0.05, 2))
+    if len(wing_pts) > 1:
+        for em in em_mults:
+            # Breach % comes from any wing at this EM (it's identical)
+            any_wp = wing_pts[0]
+            breach_cells = _find_wc_cells(em, int(any_wp))
+            if breach_cells:
+                _b_vals = [float(c["pBreachPct"]) for c in breach_cells if c.get("pBreachPct") is not None]
+                _b_ns = [int(c.get("n", 0)) for c in breach_cells if c.get("pBreachPct") is not None]
+                _b_total = sum(_b_ns)
+                em_breach = round(sum(b * n for b, n in zip(_b_vals, _b_ns)) / _b_total, 2) if _b_total > 0 else None
             else:
-                credit_proxy = round(max_loss * 0.12 * (1 + float(wp) * 0.008), 2) if wp else 0.0
-            roc = round(credit_proxy / (max_loss - credit_proxy) * 100.0, 2) if (max_loss > credit_proxy > 0) else None
-            risk_adj_roc = round(roc * survival / 100.0, 2) if (roc is not None and survival is not None) else None
-            total_obs = sum(int(c.get("n", 0)) for c in grid_cells)
-            width_comparison.append({
-                "wingWidthPts": int(wp),
-                "breachPct": breach_pct,
-                "survivalPct": survival,
-                "creditProxy": credit_proxy,
-                "maxLoss": max_loss,
-                "rocPct": roc,
-                "riskAdjRocPct": risk_adj_roc,
-                "avgMae95xWing": avg_mae95x,
-                "avgLoss95Pts": avg_loss95,
-                "gridCells": len(grid_cells),
-                "totalObs": total_obs,
-            })
-        width_comparison.sort(key=lambda x: -(x.get("riskAdjRocPct") or 0))
+                em_breach = None
+            em_breach_summary[str(em)] = em_breach
+            survival = round(100.0 - em_breach, 2) if em_breach is not None else None
+
+            for wp in wing_pts:
+                wp_cells = _find_wc_cells(em, int(wp))
+
+                # Outside wings % (full loss) -- varies by wing width
+                _o_vals = [float(c["pOutsideWingsPct"]) for c in wp_cells if c.get("pOutsideWingsPct") is not None]
+                _o_ns = [int(c.get("n", 0)) for c in wp_cells if c.get("pOutsideWingsPct") is not None]
+                _o_total = sum(_o_ns)
+                outside_pct = round(sum(o * n for o, n in zip(_o_vals, _o_ns)) / _o_total, 2) if _o_total > 0 else None
+
+                mae_vals = [float(c["mae95xWing"]) for c in wp_cells if c.get("mae95xWing") is not None]
+                avg_mae95x = round(sum(mae_vals) / len(mae_vals), 3) if mae_vals else None
+                loss_vals = [float(c["loss95Pts"]) for c in wp_cells if c.get("loss95Pts") is not None]
+                avg_loss95 = round(sum(loss_vals) / len(loss_vals), 2) if loss_vals else None
+
+                max_loss = float(wp) * 100.0
+                if avg_loss95 is not None and max_loss > 0:
+                    credit_proxy = round(max_loss - avg_loss95 * 100.0, 2)
+                    credit_proxy = max(credit_proxy, round(max_loss * 0.05, 2))
+                else:
+                    credit_proxy = round(max_loss * 0.12 * (1 + float(wp) * 0.008), 2) if wp else 0.0
+                roc = round(credit_proxy / (max_loss - credit_proxy) * 100.0, 2) if (max_loss > credit_proxy > 0) else None
+                risk_adj_roc = round(roc * survival / 100.0, 2) if (roc is not None and survival is not None) else None
+                total_obs = sum(int(c.get("n", 0)) for c in wp_cells)
+                width_comparison.append({
+                    "emMult": float(em),
+                    "wingWidthPts": int(wp),
+                    "breachPct": em_breach,
+                    "outsidePct": outside_pct,
+                    "survivalPct": survival,
+                    "creditProxy": credit_proxy,
+                    "maxLoss": max_loss,
+                    "rocPct": roc,
+                    "riskAdjRocPct": risk_adj_roc,
+                    "avgMae95xWing": avg_mae95x,
+                    "avgLoss95Pts": avg_loss95,
+                    "gridCells": len(wp_cells),
+                    "totalObs": total_obs,
+                })
+        width_comparison.sort(key=lambda x: (float(x.get("emMult", 0)), -(x.get("riskAdjRocPct") or 0)))
         for i, wc in enumerate(width_comparison):
             wc["rank"] = i + 1
             if wc["wingWidthPts"] <= 5:
@@ -1621,6 +1749,8 @@ def compute_engine2_spx_ic(
         "riskGrid": {"cells": cells_out, "count": len(cells_out)},
         "macroEffects": macro_effects,
         "widthComparison": width_comparison,
+        "emPreference": em_preference,
+        "emBreachSummary": em_breach_summary,
         "technicals": technicals,
         "telemetry": telemetry,
         "notes": proxy_notes,
