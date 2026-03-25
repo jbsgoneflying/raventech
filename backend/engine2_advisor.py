@@ -206,12 +206,102 @@ def compute_news_gate_score(themes: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def compute_desk_consensus(
+    *,
+    regime_score: float = 50.0,
+    regime_bucket: str = "MODERATE",
+    macro_multiplier: float = 1.0,
+    news_gate: Optional[Dict[str, Any]] = None,
+    dealer_gamma_sign: str = "unknown",
+    vol_pressure_state: str = "NEUTRAL",
+    em_breach_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Deterministic desk-consensus risk pre-score.
+
+    Synthesises regime, macro, news, gamma, and vol into a single risk
+    assessment that both the EM tooltip and the Trade Advisor receive.
+    This ensures a shared "floor" of risk awareness across independent
+    LLM systems.  Pure logic — no LLM call.
+    """
+    flags: List[str] = []
+    risk_points = 0.0
+
+    # Macro proximity (1.0 = calm, >=2.0 = extreme)
+    macro_flag = macro_multiplier >= 1.5
+    if macro_flag:
+        risk_points += 25 if macro_multiplier >= 2.0 else 15
+        flags.append(f"Macro multiplier {macro_multiplier:.2f} (>= 1.5)")
+
+    # Regime
+    regime_flag = regime_bucket in ("ELEVATED", "NO_TRADE") or regime_score >= 65
+    if regime_flag:
+        risk_points += 20 if regime_bucket == "NO_TRADE" else 10
+        flags.append(f"Regime {regime_bucket} (score {regime_score:.0f})")
+
+    # News gate
+    ng = news_gate or {}
+    ng_gate = str(ng.get("gate", "ok")).lower()
+    news_flag = ng_gate in ("caution", "elevated", "block")
+    if news_flag:
+        pts = {"caution": 10, "elevated": 20, "block": 30}.get(ng_gate, 0)
+        risk_points += pts
+        dom = ng.get("dominantTheme", "unknown")
+        flags.append(f"NewsGate '{ng_gate}' (dominant: {dom})")
+
+    # Dealer gamma
+    gamma_flag = dealer_gamma_sign in ("negative", "short")
+    if gamma_flag:
+        risk_points += 10
+        flags.append("Dealer gamma negative (amplified move risk)")
+
+    # Vol pressure
+    vol_flag = vol_pressure_state.upper() in ("BID", "SPIKING")
+    if vol_flag:
+        risk_points += 5
+        flags.append(f"Vol pressure {vol_pressure_state}")
+
+    # Map composite risk to level and EM floor
+    if risk_points >= 40:
+        risk_level, em_floor, em_label = "high", 2.0, "defensive"
+    elif risk_points >= 25:
+        risk_level, em_floor, em_label = "elevated", 2.0, "defensive"
+    elif risk_points >= 15:
+        risk_level, em_floor, em_label = "moderate", 1.5, "standard"
+    else:
+        risk_level, em_floor, em_label = "low", 1.0, "aggressive"
+
+    # Breach sanity check: if ALL EM levels breach > 35%, force high risk
+    ebs = em_breach_summary or {}
+    all_high_breach = bool(ebs) and all(
+        (v is not None and float(v) > 35) for v in ebs.values()
+    )
+    if all_high_breach:
+        risk_level = "high"
+        em_floor = 2.0
+        em_label = "defensive"
+        flags.append("All EM levels show breach > 35%")
+
+    return {
+        "riskLevel": risk_level,
+        "riskPoints": round(risk_points, 1),
+        "suggestedEmFloor": em_floor,
+        "suggestedEmLabel": em_label,
+        "macroFlag": macro_flag,
+        "regimeFlag": regime_flag,
+        "newsFlag": news_flag,
+        "gammaFlag": gamma_flag,
+        "volFlag": vol_flag,
+        "flags": flags,
+    }
+
+
 def _sanitize_e2_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Extract the LLM-relevant slice from Engine 2 payload, capping size."""
     scan: Dict[str, Any] = {}
     for key in (
         "asOfDate", "params", "underlying", "current", "expectedMove",
         "strikeTargets", "oddsLikeNow", "recommendation", "recSimple",
+        "deskConsensus",
     ):
         if key in payload:
             scan[key] = payload[key]

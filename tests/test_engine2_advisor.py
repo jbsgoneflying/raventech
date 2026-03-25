@@ -11,6 +11,7 @@ from backend.engine2_advisor import (
     _extract_dms_context,
     _parse_llm_json,
     _sanitize_e2_for_llm,
+    compute_desk_consensus,
     compute_news_gate_score,
     compute_trade_tracking,
     generate_checkin_analysis,
@@ -404,3 +405,116 @@ class TestNewsGateScore:
         assert result["maxAdjustedIntensity"] == 50.0
         assert result["gate"] == "caution"
         assert result["themeCount"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Desk consensus pre-score tests
+# ---------------------------------------------------------------------------
+
+class TestDeskConsensus:
+    def test_low_risk_all_clear(self):
+        result = compute_desk_consensus(
+            regime_score=30.0,
+            regime_bucket="LOW",
+            macro_multiplier=1.0,
+            news_gate={"gate": "ok", "maxAdjustedIntensity": 10},
+            dealer_gamma_sign="positive",
+            vol_pressure_state="ASK",
+        )
+        assert result["riskLevel"] == "low"
+        assert result["suggestedEmFloor"] == 1.0
+        assert result["suggestedEmLabel"] == "aggressive"
+        assert result["macroFlag"] is False
+        assert result["gammaFlag"] is False
+        assert result["newsFlag"] is False
+        assert len(result["flags"]) == 0
+
+    def test_moderate_risk_macro_elevated(self):
+        result = compute_desk_consensus(
+            regime_score=50.0,
+            regime_bucket="MODERATE",
+            macro_multiplier=1.6,
+            news_gate={"gate": "ok"},
+            dealer_gamma_sign="positive",
+            vol_pressure_state="NEUTRAL",
+        )
+        assert result["riskLevel"] == "moderate"
+        assert result["suggestedEmFloor"] == 1.5
+        assert result["macroFlag"] is True
+        assert result["gammaFlag"] is False
+        assert any("Macro" in f for f in result["flags"])
+
+    def test_elevated_risk_multiple_flags(self):
+        result = compute_desk_consensus(
+            regime_score=50.0,
+            regime_bucket="MODERATE",
+            macro_multiplier=1.9,
+            news_gate={"gate": "caution", "dominantTheme": "Geopolitical Escalation"},
+            dealer_gamma_sign="negative",
+            vol_pressure_state="NEUTRAL",
+        )
+        assert result["riskLevel"] in ("elevated", "high")
+        assert result["suggestedEmFloor"] == 2.0
+        assert result["macroFlag"] is True
+        assert result["gammaFlag"] is True
+        assert result["newsFlag"] is True
+        assert len(result["flags"]) >= 3
+
+    def test_high_risk_no_trade_regime(self):
+        result = compute_desk_consensus(
+            regime_score=80.0,
+            regime_bucket="NO_TRADE",
+            macro_multiplier=2.5,
+        )
+        assert result["riskLevel"] == "high"
+        assert result["suggestedEmFloor"] == 2.0
+        assert result["regimeFlag"] is True
+        assert result["macroFlag"] is True
+
+    def test_high_risk_news_block(self):
+        result = compute_desk_consensus(
+            regime_score=40.0,
+            regime_bucket="LOW",
+            macro_multiplier=1.0,
+            news_gate={"gate": "block", "dominantTheme": "Geopolitical Escalation", "maxAdjustedIntensity": 85},
+        )
+        assert result["riskLevel"] in ("elevated", "high")
+        assert result["suggestedEmFloor"] == 2.0
+        assert result["newsFlag"] is True
+
+    def test_breach_all_high_forces_high_risk(self):
+        result = compute_desk_consensus(
+            regime_score=30.0,
+            regime_bucket="LOW",
+            macro_multiplier=1.0,
+            em_breach_summary={"1.0": 40.0, "1.5": 38.0, "2.0": 36.0},
+        )
+        assert result["riskLevel"] == "high"
+        assert result["suggestedEmFloor"] == 2.0
+        assert any("breach > 35%" in f for f in result["flags"])
+
+    def test_breach_not_all_high_unaffected(self):
+        result = compute_desk_consensus(
+            regime_score=30.0,
+            regime_bucket="LOW",
+            macro_multiplier=1.0,
+            em_breach_summary={"1.0": 50.0, "1.5": 25.0, "2.0": 10.0},
+        )
+        assert result["riskLevel"] == "low"
+        assert result["suggestedEmFloor"] == 1.0
+
+    def test_defaults_produce_moderate(self):
+        result = compute_desk_consensus()
+        assert result["riskLevel"] == "low"
+        assert result["suggestedEmFloor"] == 1.0
+        assert isinstance(result["flags"], list)
+        assert isinstance(result["riskPoints"], float)
+
+    def test_sanitizer_passes_desk_consensus(self):
+        payload = {
+            "asOfDate": "2026-03-25",
+            "deskConsensus": {"riskLevel": "elevated", "suggestedEmFloor": 2.0, "flags": ["test"]},
+        }
+        sanitized = _sanitize_e2_for_llm(payload)
+        assert "deskConsensus" in sanitized
+        assert sanitized["deskConsensus"]["riskLevel"] == "elevated"

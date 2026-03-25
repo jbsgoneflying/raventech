@@ -746,6 +746,7 @@ function InsightPopup(opts) {
   this.meta    = !!opts.renderMeta;
   this._cache  = {};
   this._esc    = typeof escapeHtml === "function" ? escapeHtml : function (s) { return String(s ?? ""); };
+  this.onResult = opts.onResult || null;
 }
 
 InsightPopup.prototype.open = function (title, x, y) {
@@ -808,6 +809,7 @@ InsightPopup.prototype.fetch = function (cardType, cardData, title, x, y, ctx) {
     }
     self._cache[cacheKey] = resp;
     self.render(resp);
+    if (typeof self.onResult === "function") self.onResult(cardType, resp);
   })
   .catch(function () {
     self.bodyEl.innerHTML = "<div class='" + self.pfx + "Loading' style='color:#ff6b6b;'>Failed to load insight.</div>";

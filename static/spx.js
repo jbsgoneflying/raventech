@@ -1966,6 +1966,7 @@ async function main() {
 
 var _advisorLoading = false;
 var _lastAdvisorResult = null;
+var _lastEmInsight = null;
 
 function _verdictColor(v) {
   if (v === "TRADE") return "#34c759";
@@ -2147,6 +2148,65 @@ function renderWidthComparison(widthComparison) {
   el.insertAdjacentHTML("beforeend", html);
 }
 
+function renderConvergence() {
+  var existing = $("e2ConvergenceBar");
+  if (existing) existing.remove();
+
+  if (!_lastAdvisorResult || !_lastEmInsight) return;
+
+  var advisor = _lastAdvisorResult.advisor || {};
+  var tooltip = _lastEmInsight;
+
+  var advisorEm = advisor.tradeTicket?.emMultiple || null;
+  var advisorVerdict = advisor.verdict || "";
+  var tooltipEm = tooltip.recommended_em != null ? Number(tooltip.recommended_em) : null;
+  var tooltipStance = tooltip.risk_stance || "";
+  var tooltipConf = tooltip.confidence != null ? Number(tooltip.confidence) : null;
+  var advisorConf = advisor.confidence != null ? Number(advisor.confidence) : null;
+
+  if (advisorEm == null && tooltipEm == null) return;
+
+  var emMatch = advisorEm != null && tooltipEm != null && Math.abs(advisorEm - tooltipEm) < 0.01;
+  var stanceMap = { "TRADE": "aggressive", "LEAN_PASS": "standard", "PASS": "defensive" };
+  var advisorStance = stanceMap[advisorVerdict] || "standard";
+  var stanceMatch = tooltipStance === advisorStance;
+
+  var level, color, bgColor, label, detail;
+  if (emMatch && stanceMatch) {
+    level = "agree";
+    color = "rgba(52,199,89,1)";
+    bgColor = "rgba(52,199,89,0.06)";
+    label = "Systems Agree";
+    detail = "Both recommend " + (tooltipEm || "—") + "x EM (" + (tooltipStance || "—") + ")";
+  } else if (emMatch) {
+    level = "partial";
+    color = "rgba(255,159,10,1)";
+    bgColor = "rgba(255,159,10,0.06)";
+    label = "Partial Agreement";
+    detail = "Both pick " + (tooltipEm || "—") + "x EM but differ on stance: Tooltip '" + tooltipStance + "' vs Advisor '" + advisorVerdict + "'";
+  } else {
+    level = "diverge";
+    color = "rgba(255,69,58,1)";
+    bgColor = "rgba(255,69,58,0.06)";
+    label = "Systems Diverge";
+    detail = "Tooltip recommends " + (tooltipEm || "—") + "x (" + (tooltipStance || "—") + "); Advisor chose " + (advisorEm || "—") + "x (" + advisorVerdict + ")";
+  }
+
+  var confHtml = "";
+  if (tooltipConf != null && advisorConf != null) {
+    confHtml = ' <span class="mono" style="font-size:10px;opacity:0.7">Confidence: EM Insight ' + tooltipConf + '% · Advisor ' + advisorConf + '%</span>';
+  }
+
+  var html = '<div id="e2ConvergenceBar" style="border:1px solid ' + color + ';border-radius:var(--ta-radius-lg);background:' + bgColor +
+    ';padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+    '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:' + color + '">' + escapeHtml(label) + '</span>' +
+    '<span style="font-size:12px;color:var(--ta-muted)">' + escapeHtml(detail) + '</span>' +
+    confHtml + '</div>';
+
+  var el = $("e2AdvisorContent");
+  if (el) el.insertAdjacentHTML("afterbegin", html);
+}
+
 async function _runAdvisor() {
   if (_advisorLoading) return;
   _advisorLoading = true;
@@ -2176,6 +2236,7 @@ async function _runAdvisor() {
     _lastAdvisorResult = data;
     renderAdvisorPanel(data);
     if (data.widthComparison) renderWidthComparison(data.widthComparison);
+    renderConvergence();
   } catch (err) {
     if (el) el.innerHTML = '<div style="padding:16px;color:#ff453a;font-size:13px">Advisor error: ' + escapeHtml(String(err.message || err)) + '</div>';
   } finally {
@@ -2353,9 +2414,15 @@ main();
       hedging_flow_read:"Hedging Flow Read",elasticity_analysis:"Elasticity Analysis",scenario_walkthrough:"Scenario Walkthrough",
       tail_risk_map:"Tail Risk Map",air_pockets:"Air Pockets",wall_distances:"Wall Distances",
       vol_state:"Vol State",z_score_breakdown:"Z-Score Breakdown",iv_vs_rv:"IV vs RV",term_structure:"Term Structure",
-      expected_move_read:"Expected Move Read",strike_targets:"Strike Targets",vwap_context:"VWAP Context",em_trend:"EM Trend",
+      expected_move_read:"Expected Move Read",strike_targets:"Strike Targets",vwap_context:"VWAP Context",em_trend:"EM Trend",risk_overlay:"Risk Overlay",
       directional_read:"Directional Read",momentum_analysis:"Momentum Analysis",volatility_context:"Volatility Context",condor_relevance:"Condor Relevance",
       desk_takeaway:"Desk Takeaway",
+    },
+    onResult: function (cardType, resp) {
+      if (cardType === "e2_expected_move" && resp && resp._source !== "fallback") {
+        _lastEmInsight = resp;
+        renderConvergence();
+      }
     },
   });
 
@@ -2471,7 +2538,22 @@ main();
           d = lastPayload?.liveContext?.volPressure || null;
           break;
         case "e2_expected_move":
-          d = { expectedMove: lastPayload?.expectedMove || {}, vwap: lastPayload?.current?.vwap || {}, strikeTargets: lastPayload?.strikeTargets || {} };
+          d = {
+            expectedMove: lastPayload?.expectedMove || {},
+            vwap: lastPayload?.current?.vwap || {},
+            strikeTargets: lastPayload?.strikeTargets || {},
+            riskContext: {
+              macroMultiplier: lastPayload?.current?.macro?.multiplier,
+              regimeScore: lastPayload?.current?.regime?.score,
+              regimeBucket: lastPayload?.current?.regime?.bucket,
+              dealerGamma: lastPayload?.liveContext?.weeklyFriday?.dealerGamma,
+              gammaFlipStrike: lastPayload?.liveContext?.weeklyFriday?.gammaFlipStrike,
+              volPressure: lastPayload?.liveContext?.volPressure,
+              emPreference: lastPayload?.emPreference,
+              emBreachSummary: lastPayload?.emBreachSummary,
+            },
+            deskConsensus: lastPayload?.deskConsensus || null,
+          };
           break;
         default:
           return;

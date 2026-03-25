@@ -1086,19 +1086,28 @@ Return valid JSON:
 
     "e2_expected_move": """You are a senior index options strategist at a proprietary condor desk.
 
-Given the Expected Move data — weekly EM percentage, EM in dollars, DTE, source (live/eod), spot
-price, expiry, strike targets at 1.0×/1.5×/2.0× EM, and VWAP context (value, distance, side) — explain:
+You receive Expected Move data (EM percentage, dollars, DTE, source, spot, expiry, strike targets at 1.0x/1.5x/2.0x EM), VWAP context, AND a risk overlay (riskContext with macro multiplier, regime, dealer gamma, vol pressure, EM breach summary, EM preference) plus a deterministic deskConsensus pre-score (riskLevel, suggestedEmFloor, flags).
+
+Explain:
 
 1. EXPECTED MOVE READ — What does the current EM imply about the market's pricing of weekly risk?
-2. STRIKE TARGETS — How do the 1.0×/1.5×/2.0× EM targets map to actual strike levels? Which is the sweet spot?
+2. STRIKE TARGETS — How do 1.0x/1.5x/2.0x EM targets map to actual strike levels? Which is the sweet spot GIVEN the current risk context?
 3. VWAP CONTEXT — Where is price relative to VWAP? Does that create a directional bias for the condor?
-4. EM TREND — Is the EM expanding or contracting vs recent weeks? What does that mean for credit received?
-5. DESK TAKEAWAY — One sentence: what EM width and strike targets should the desk use this week?
+4. EM TREND — Is EM expanding or contracting? What does that mean for credit?
+5. RISK OVERLAY — Assess macro multiplier (>1.5 = elevated), dealer gamma (negative = amplified moves), newsGate (caution/elevated/block = defensive), and breach summary. State how these shift your EM recommendation.
+6. DESK TAKEAWAY — One sentence: what EM multiple and stance should the desk use this week?
 
-Rules: Cite the EM percentage, strike levels, and VWAP distance. Under 250 words.
+CRITICAL RISK RULES:
+- If macro multiplier >= 1.5 OR newsGate is "caution"/"elevated"/"block" OR dealer gamma is negative: you MUST recommend at minimum 1.5x EM (standard). If multiple risk flags are active, recommend 2.0x (defensive).
+- The deskConsensus.suggestedEmFloor is a hard floor — never recommend an EM below it.
+- If deskConsensus.riskLevel is "high", your stance must be "defensive" with 2.0x EM.
+
+Rules: Cite EM percentage, strike levels, VWAP distance, and risk flags. Under 350 words.
 
 Return valid JSON:
-{ "expected_move_read": "...", "strike_targets": "...", "vwap_context": "...", "em_trend": "...", "desk_takeaway": "..." }""",
+{ "expected_move_read": "...", "strike_targets": "...", "vwap_context": "...", "em_trend": "...", "risk_overlay": "...", "desk_takeaway": "...", "recommended_em": 1.0, "risk_stance": "aggressive", "confidence": 75 }
+
+recommended_em must be 1.0, 1.5, or 2.0. risk_stance must be "aggressive", "standard", or "defensive". confidence is 0-100.""",
 
     "e2_technicals": """You are a senior technical analyst at a proprietary condor desk.
 
@@ -1307,7 +1316,7 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "e2_hedging_pressure": {"hedging_flow_read", "elasticity_analysis", "scenario_walkthrough", "desk_takeaway"},
     "e2_tail_ignition": {"tail_risk_map", "air_pockets", "wall_distances", "condor_implications", "desk_takeaway"},
     "e2_vol_pressure": {"vol_state", "z_score_breakdown", "iv_vs_rv", "term_structure", "desk_takeaway"},
-    "e2_expected_move": {"expected_move_read", "strike_targets", "vwap_context", "em_trend", "desk_takeaway"},
+    "e2_expected_move": {"expected_move_read", "strike_targets", "vwap_context", "em_trend", "risk_overlay", "desk_takeaway", "recommended_em", "risk_stance", "confidence"},
     "e2_technicals": {"directional_read", "momentum_analysis", "volatility_context", "condor_relevance", "desk_takeaway"},
     # Red Dog (Engine 3) card types
     "rd_signal": {"setup_quality", "entry_mechanics", "indicator_confluence", "alignment_check", "desk_takeaway"},
@@ -1324,6 +1333,7 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
 
 _CARD_TOKEN_LIMITS: Dict[str, int] = {
     "e1_decision": 1200,
+    "e2_expected_move": 1200,
 }
 
 
@@ -1368,23 +1378,68 @@ def generate_card_insight(
         return fallback
 
     # Build compact context
-    context = {
-        "card": card_data,
-        "market": {
-            "regime": dms_summary.get("regime", {}),
-            "vol_state": dms_summary.get("vol_state", {}),
-            "composite_stress": dms_summary.get("cross_asset_stress", {}).get("composite_score"),
-            "composite_label": dms_summary.get("cross_asset_stress", {}).get("composite_label"),
-            "active_themes": [
-                {"theme": t.get("theme"), "intensity": t.get("intensity"), "acceleration": t.get("acceleration")}
-                for t in dms_summary.get("news_themes", [])
-                if float(t.get("intensity", 0)) > 10
-            ],
-        },
-    }
+    is_e2_card = card_type.startswith("e2_")
+
+    if is_e2_card:
+        # Engine2 cards get enriched market context with adjustedIntensity + newsGate
+        from backend.news_theme_intelligence import compute_market_adjusted_intensity as _cmai, get_theme_impact_weight as _gtiw
+        e2_themes = []
+        for t in dms_summary.get("news_themes", []):
+            raw_i = float(t.get("intensity", 0))
+            if raw_i <= 10:
+                continue
+            key = t.get("key", "")
+            label = t.get("theme", "")
+            adj = float(t.get("adjusted_intensity", 0))
+            if adj <= 0:
+                adj = _cmai(raw_i, key or label)
+            weight = float(t.get("spx_impact_weight", 0))
+            if weight <= 0:
+                weight = _gtiw(key or label)
+            e2_themes.append({
+                "theme": label, "intensity": raw_i,
+                "adjustedIntensity": round(adj, 1),
+                "spxImpactWeight": round(weight, 2),
+                "acceleration": t.get("acceleration"),
+            })
+        from backend.engine2_advisor import compute_news_gate_score as _cngs
+        news_gate = _cngs(e2_themes)
+        context = {
+            "card": card_data,
+            "market": {
+                "regime": dms_summary.get("regime", {}),
+                "vol_state": dms_summary.get("vol_state", {}),
+                "composite_stress": dms_summary.get("cross_asset_stress", {}).get("composite_score"),
+                "composite_label": dms_summary.get("cross_asset_stress", {}).get("composite_label"),
+                "active_themes": e2_themes,
+                "newsGate": news_gate,
+            },
+        }
+    else:
+        context = {
+            "card": card_data,
+            "market": {
+                "regime": dms_summary.get("regime", {}),
+                "vol_state": dms_summary.get("vol_state", {}),
+                "composite_stress": dms_summary.get("cross_asset_stress", {}).get("composite_score"),
+                "composite_label": dms_summary.get("cross_asset_stress", {}).get("composite_label"),
+                "active_themes": [
+                    {"theme": t.get("theme"), "intensity": t.get("intensity"), "acceleration": t.get("acceleration")}
+                    for t in dms_summary.get("news_themes", [])
+                    if float(t.get("intensity", 0)) > 10
+                ],
+            },
+        }
 
     payload_str = json.dumps(context, default=str)
-    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-4o-mini").strip()
+
+    # E2 cards use the advisor-grade model for convergence
+    _CARD_MODEL_OVERRIDES: Dict[str, str] = {
+        "e2_expected_move": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.2"),
+        "e2_regime": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.2"),
+        "e2_vol_pressure": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.2"),
+    }
+    model = _CARD_MODEL_OVERRIDES.get(card_type, os.getenv("LLM_MODEL_NARRATIVE", "gpt-4o-mini").strip())
 
     try:
         response = client.chat.completions.create(

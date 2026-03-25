@@ -1057,6 +1057,27 @@ def compute_engine2_spx_ic(
     )
     em_pref = float(em_preference["emPreference"])
 
+    # Desk consensus: shared deterministic risk pre-score for LLM convergence
+    _news_gate_for_consensus: Dict[str, Any] = {}
+    try:
+        if _dms_raw:
+            _news_gate_for_consensus = (_dms_ctx or {}).get("newsGate") or {}
+    except Exception:
+        pass
+    try:
+        from backend.engine2_advisor import compute_desk_consensus
+        desk_consensus = compute_desk_consensus(
+            regime_score=float(regime_now.get("score", 50)),
+            regime_bucket=str(regime_now.get("bucket", "MODERATE")),
+            macro_multiplier=float(macro_now.get("multiplier", 1.0)),
+            news_gate=_news_gate_for_consensus,
+            dealer_gamma_sign=_dg_sign,
+            vol_pressure_state=_vp_state,
+            em_breach_summary=None,  # populated after width comparison
+        )
+    except Exception:
+        desk_consensus = {"riskLevel": "moderate", "suggestedEmFloor": 1.5, "flags": []}
+
     def _meets(c: Dict[str, Any]) -> bool:
         if c.get("pBreachPct") is None or c.get("pOutsideWingsPct") is None or c.get("mae95xWing") is None:
             return False
@@ -1323,6 +1344,22 @@ def compute_engine2_spx_ic(
                 wc["label"] = "Moderate"
             else:
                 wc["label"] = "Wide / Safer"
+
+    # Re-run desk consensus with breach data now available
+    if em_breach_summary:
+        try:
+            from backend.engine2_advisor import compute_desk_consensus as _dc
+            desk_consensus = _dc(
+                regime_score=float(regime_now.get("score", 50)),
+                regime_bucket=str(regime_now.get("bucket", "MODERATE")),
+                macro_multiplier=float(macro_now.get("multiplier", 1.0)),
+                news_gate=_news_gate_for_consensus,
+                dealer_gamma_sign=_dg_sign,
+                vol_pressure_state=_vp_state,
+                em_breach_summary=em_breach_summary,
+            )
+        except Exception:
+            pass
 
     # --- Technicals (daily indicators + live overlay; additive, does not affect backtest) ---
     tech_bars: List[TechDailyBar] = []
@@ -1763,6 +1800,7 @@ def compute_engine2_spx_ic(
         "widthComparison": width_comparison,
         "emPreference": em_preference,
         "emBreachSummary": em_breach_summary,
+        "deskConsensus": desk_consensus,
         "technicals": technicals,
         "telemetry": telemetry,
         "notes": proxy_notes,

@@ -9,6 +9,8 @@ Each theme carries an spxImpactWeight (0-1) reflecting its historical SPX-index 
 
 3. "widthAnalysis" — 2D EM x Wing matrix. Each entry has emMult (1.0/1.5/2.0) and wingWidthPts ($5-$25). Fields per entry: breachPct (short strike breach — varies ONLY by EM, constant across wings at same EM), outsidePct / fullLossPct (long strike breach / full-loss probability — varies by both EM and wing), expectedLoss (actuarial expected loss per contract in dollars), creditProxy (VRP-adjusted premium estimate), maxLoss, rocPct, riskAdjRocPct. Also includes emBreachSummary (breach % at each EM) and emPreference (composite-scored preferred EM with label: aggressive/standard/defensive). The creditProxy uses expected loss × VRP factor (1.25-1.45), NOT the old loss95 approach.
 
+The scan also includes "deskConsensus" — a deterministic risk pre-score that synthesizes regime, macro, news, gamma, and vol into a single assessment. Fields: riskLevel (low/moderate/elevated/high), suggestedEmFloor (1.0/1.5/2.0), flags (list of active risk reasons). This is the SAME pre-score that the EM Insight tooltip system receives — treat suggestedEmFloor as a hard floor for your EM selection. If your analysis leads you to a different EM than suggestedEmFloor, you MUST explain why in deskNote.
+
 The two independent decisions for an iron condor are:
 - Decision 1 (PRIMARY): EM multiple — WHERE to place short strikes. This determines breach probability. 1.0x EM ~30-35% breach (aggressive), 1.5x ~12-18% (standard), 2.0x ~4-8% (defensive).
 - Decision 2 (SECONDARY): Wing width — HOW WIDE the spreads. This determines capital at risk, ROC, and outside-wings probability. Breach % does NOT change with wing width.
