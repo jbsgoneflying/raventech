@@ -2422,6 +2422,8 @@ async function _logAdjustedTrade(advisorResult) {
 // Active Trades Panel
 // ---------------------------------------------------------------------------
 
+var _autoCheckinRunning = false;
+
 async function _loadActiveTrades() {
   var el = $("e2ActiveTradesContent");
   var sec = $("e2ActiveTrades");
@@ -2441,11 +2443,31 @@ async function _loadActiveTrades() {
     var html = '<div class="taPanel">';
     html += '<div class="taHeader"><span class="taHeaderTitle">Active Trades</span><span class="taHeaderMeta">' + trades.length + ' open</span></div>';
 
+    var staleCheckinTradeIds = [];
+
     trades.forEach(function (t) {
       var entry = t.entry || {};
       var tracking = t.tracking || {};
       var status = tracking.deterministicStatus || "on_track";
       var lastCheckin = (t.checkIns || []).slice(-1)[0];
+
+      var checkinAge = null;
+      var checkinAgeLabel = "";
+      var isStale = false;
+      if (lastCheckin && lastCheckin.timestamp) {
+        var checkinMs = new Date(lastCheckin.timestamp).getTime();
+        var ageMs = Date.now() - checkinMs;
+        var ageMins = Math.floor(ageMs / 60000);
+        if (ageMins < 60) checkinAgeLabel = ageMins + "m ago";
+        else if (ageMins < 1440) checkinAgeLabel = Math.floor(ageMins / 60) + "h ago";
+        else checkinAgeLabel = Math.floor(ageMins / 1440) + "d ago";
+        isStale = ageMins > 360;
+      }
+
+      var statusDiverged = lastCheckin && lastCheckin.status && lastCheckin.status !== status;
+      if (statusDiverged || (isStale && (status === "exit" || status === "adjust"))) {
+        staleCheckinTradeIds.push(t.tradeId);
+      }
 
       html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
       html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
@@ -2465,8 +2487,22 @@ async function _loadActiveTrades() {
       html += '</div>';
 
       if (lastCheckin) {
-        html += '<div style="margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;font-size:11px">';
-        html += '<div style="font-weight:600;margin-bottom:2px">Latest check-in: ' + _statusBadge(lastCheckin.status || status) + '</div>';
+        var ciBoxBorder = statusDiverged ? "border-left:3px solid #ff9f0a" : "";
+        html += '<div style="margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;font-size:11px;' + ciBoxBorder + '">';
+
+        var ciHeader = 'Latest check-in: ' + _statusBadge(lastCheckin.status || status);
+        if (checkinAgeLabel) {
+          var ageColor = isStale ? "#ff9f0a" : "var(--text-secondary)";
+          ciHeader += ' <span style="color:' + ageColor + ';font-weight:400;font-size:10px;margin-left:4px">' + escapeHtml(checkinAgeLabel) + '</span>';
+        }
+        html += '<div style="font-weight:600;margin-bottom:2px">' + ciHeader + '</div>';
+
+        if (statusDiverged) {
+          html += '<div style="color:#ff9f0a;font-weight:600;margin-bottom:4px;font-size:10px">';
+          html += 'Status changed since last check-in (' + escapeHtml(lastCheckin.status) + ' \u2192 ' + escapeHtml(status) + ') \u2014 refreshing\u2026';
+          html += '</div>';
+        }
+
         if (lastCheckin.headline) html += '<div style="color:var(--text-primary)">' + escapeHtml(lastCheckin.headline) + '</div>';
         if (lastCheckin.recommendation) html += '<div style="color:var(--text-secondary);margin-top:2px">' + escapeHtml(lastCheckin.recommendation) + '</div>';
         html += '</div>';
@@ -2484,6 +2520,20 @@ async function _loadActiveTrades() {
     el.querySelectorAll("[data-close-id]").forEach(function (btn) {
       btn.addEventListener("click", function () { _closeTrade(btn.dataset.closeId); });
     });
+
+    if (staleCheckinTradeIds.length > 0 && !_autoCheckinRunning) {
+      _autoCheckinRunning = true;
+      (async function () {
+        for (var i = 0; i < staleCheckinTradeIds.length; i++) {
+          try {
+            var ciResp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(staleCheckinTradeIds[i]) + "/checkin", { method: "POST" });
+            if (!ciResp.ok) console.warn("Auto check-in failed for", staleCheckinTradeIds[i]);
+          } catch (e) { console.warn("Auto check-in error", e); }
+        }
+        _autoCheckinRunning = false;
+        _loadActiveTrades();
+      })();
+    }
   } catch {
     // silently fail
   }
