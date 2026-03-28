@@ -2562,8 +2562,13 @@ def compute_breach_stats(
             compute_e1_desk_consensus,
             compute_em_preference,
         )
-        _vrp_em_pct = _to_float((out.get("current") or {}).get("impliedMovePct"))
-        _vrp_stock_px = _to_float((out.get("current") or {}).get("stockPrice"))
+        # Prefer 15-min delayed EM (freshest), fallback to EOD, same chain as Strike Targets
+        _cur = out.get("current") or {}
+        _vrp_em_pct = (
+            _to_float(_cur.get("delayedImpliedMovePct"))
+            or _to_float(_cur.get("impliedMovePct"))
+        )
+        _vrp_stock_px = _to_float(_cur.get("stockPrice"))
 
         _vrp_analysis = compute_vrp_score(out_events, current_implied_move_pct=_vrp_em_pct)
         out["vrpAnalysis"] = _vrp_analysis
@@ -2587,6 +2592,7 @@ def compute_breach_stats(
             regime=regime,
             ticker_dealer_gamma=out.get("tickerDealerGamma"),
             current=out.get("current"),
+            go_no_go=out.get("goNoGo"),
         )
         out["e1EntryQuality"] = _eq
 

@@ -2823,6 +2823,17 @@ function _renderE1AdvisorSection(payload) {
     html += '</div>';
   }
 
+  // Direct log buttons (always visible for TRADE / LEAN_PASS — no LLM required)
+  if (dc && (dc.verdict === "TRADE" || dc.verdict === "LEAN_PASS")) {
+    var emp = payload?.e1EmPreference || {};
+    var prefWing = 5;
+    html += '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
+    html += '<button id="e1QuickLogBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;font-weight:600">Log This Trade</button>';
+    html += '<button id="e1AdjustLogBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;background:var(--surface2);color:var(--text);border:1px solid var(--border)">Adjust & Log</button>';
+    html += '<span style="font-size:11px;opacity:.5">Uses desk consensus: ' + (emp.preferredEm || dc.preferredEm || "2.0") + 'x EM · $' + prefWing + ' wings</span>';
+    html += '</div>';
+  }
+
   // Advisor result placeholder
   html += '<div id="e1AdvisorResultArea"></div>';
 
@@ -2830,6 +2841,9 @@ function _renderE1AdvisorSection(payload) {
 
   // Width Comparison Table
   html += _buildE1WidthTable(wc, payload?.e1EmBreachSummary, payload?.e1EmPreference);
+
+  // Active Trades section placeholder
+  html += '<div id="e1ActiveTradesArea"></div>';
 
   el.innerHTML = html;
 
@@ -2839,6 +2853,15 @@ function _renderE1AdvisorSection(payload) {
       _runE1Advisor(payload);
     });
   }
+
+  // Wire up direct log buttons
+  var quickLog = $("e1QuickLogBtn");
+  if (quickLog) quickLog.addEventListener("click", function () { _logE1DirectTrade(payload); });
+  var adjustLog = $("e1AdjustLogBtn");
+  if (adjustLog) adjustLog.addEventListener("click", function () { _showE1AdjustModal(payload); });
+
+  // Load active trades
+  _loadE1ActiveTrades();
 }
 
 function _vrpCard(label, value, sub, color) {
@@ -2855,12 +2878,12 @@ function _buildE1WidthTable(wc, emBreachSummary, emPref) {
   var emGroups = {};
   for (var i = 0; i < wc.length; i++) {
     var row = wc[i];
-    var ek = String(row.emMult);
+    var ek = Number(row.emMult).toFixed(1);
     if (!emGroups[ek]) emGroups[ek] = [];
     emGroups[ek].push(row);
   }
 
-  var prefEm = emPref ? String(emPref.preferredEm) : null;
+  var prefEm = emPref ? Number(emPref.preferredEm).toFixed(1) : null;
   var prefLabel = emPref ? emPref.label : "";
   var html = '<div style="padding:16px">';
   html += '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap">';
@@ -3011,8 +3034,8 @@ function _renderE1AdvisorResult(data) {
   // Log buttons (only for TRADE / LEAN_PASS)
   if (verdict === "TRADE" || verdict === "LEAN_PASS") {
     html += '<div style="padding:12px 16px;display:flex;gap:12px;flex-wrap:wrap">';
-    html += '<button id="e1LogTradeBtn" class="primaryButton" style="padding:6px 16px;font-size:12px">Log This Trade</button>';
-    html += '<button id="e1AdjustLogBtn" class="primaryButton" style="padding:6px 16px;font-size:12px;background:var(--surface2);color:var(--text)">Adjust & Log</button>';
+    html += '<button id="e1LogTradeBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;font-weight:600">Log This Trade</button>';
+    html += '<button id="e1AdjustLogBtn2" class="primaryButton" style="padding:8px 20px;font-size:12px;background:var(--surface2);color:var(--text);border:1px solid var(--border)">Adjust & Log</button>';
     html += '</div>';
   }
 
@@ -3021,8 +3044,58 @@ function _renderE1AdvisorResult(data) {
 
   var logBtn = $("e1LogTradeBtn");
   if (logBtn) logBtn.addEventListener("click", function() { _logE1AdvisorTrade(data); });
+  var adjBtn2 = $("e1AdjustLogBtn2");
+  if (adjBtn2) adjBtn2.addEventListener("click", function() { _showE1AdjustModal(lastPayload, data); });
 }
 
+// --- Direct trade log (from desk consensus, no LLM) ---
+async function _logE1DirectTrade(payload) {
+  var dc = payload?.e1DeskConsensus || {};
+  var emp = payload?.e1EmPreference || {};
+  var vrp = payload?.vrpAnalysis || {};
+  var cur = payload?.current || {};
+  var ticker = payload?.ticker || "";
+  var emMult = emp.preferredEm || dc.preferredEm || 2.0;
+  var wing = 5;
+  var timing = (cur.earningsTiming || "AMC").toUpperCase();
+
+  var body = {
+    source: "desk_consensus",
+    ticker: ticker,
+    entry: {
+      emMultiple: emMult,
+      wingWidth: wing,
+      earningsDate: cur.earningsDate || cur.earnDateNext || null,
+      earningsTiming: timing,
+      entryWindow: timing === "AMC" ? "3:00 PM EST on earnings day" : "3:00 PM EST day before earnings",
+      exitTarget: "Next morning open or mid-day vol bleed",
+    },
+    entryContext: {
+      vrpScore: vrp.vrpScore,
+      breachPct: (payload?.e1EmBreachSummary || {})[String(emMult)] || null,
+      earningsTiming: timing,
+      regimeBucket: (payload?.regime || {}).regimeBucket || (payload?.regime || {}).bucket,
+    },
+    advisorVerdict: { verdict: dc.verdict, confidence: null, source: "desk_consensus" },
+  };
+
+  try {
+    var resp = await fetch("/api/breach/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var result = await resp.json();
+    alert("Trade logged: " + ticker + " · " + emMult + "x EM · $" + wing + " wings\nTrade ID: " + result.tradeId);
+    _loadE1ActiveTrades();
+    _loadE1TradeJournal();
+  } catch (e) {
+    alert("Failed to log trade: " + e.message);
+  }
+}
+
+// --- Advisor-sourced trade log ---
 async function _logE1AdvisorTrade(advisorData) {
   var a = (advisorData.advisor || {});
   var ticket = a.tradeTicket || {};
@@ -3059,11 +3132,273 @@ async function _logE1AdvisorTrade(advisorData) {
     });
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     var result = await resp.json();
-    alert("Trade logged: " + result.tradeId);
+    alert("Trade logged: " + (ticket.ticker || lastPayload?.ticker) + " · " + result.tradeId);
+    _loadE1ActiveTrades();
     _loadE1TradeJournal();
   } catch (e) {
     alert("Failed to log trade: " + e.message);
   }
+}
+
+// --- Adjust & Log modal ---
+function _showE1AdjustModal(payload, advisorData) {
+  var dc = payload?.e1DeskConsensus || {};
+  var emp = payload?.e1EmPreference || {};
+  var cur = payload?.current || {};
+  var ticker = payload?.ticker || "";
+  var defEm = (advisorData?.advisor?.tradeTicket?.emMultiple) || emp.preferredEm || dc.preferredEm || 2.0;
+  var defWing = (advisorData?.advisor?.tradeTicket?.wingWidth) || 5;
+  var defCredit = (advisorData?.advisor?.tradeTicket?.estimatedCredit) || "";
+  var timing = (cur.earningsTiming || "AMC").toUpperCase();
+  var earnDate = cur.earningsDate || cur.earnDateNext || "";
+
+  var overlay = document.createElement("div");
+  overlay.id = "e1AdjustOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center";
+  overlay.innerHTML = '<div style="background:var(--bg,#fff);border-radius:12px;padding:24px;width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    + '<h3 style="margin:0 0 16px">Adjust & Log Trade — ' + ticker + '</h3>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">'
+    + _adjField("EM Multiple", "e1AdjEm", defEm, "number", "0.5", "3.0", "0.5")
+    + _adjField("Wing Width ($)", "e1AdjWing", defWing, "number", "1", "25", "0.5")
+    + _adjField("Entry Credit ($)", "e1AdjCredit", String(defCredit).replace(/[^0-9.]/g, ""), "number", "0", "999", "0.01")
+    + _adjField("Short Put Strike", "e1AdjSP", (advisorData?.advisor?.tradeTicket?.shortPutStrike) || "", "number", "", "", "0.5")
+    + _adjField("Short Call Strike", "e1AdjSC", (advisorData?.advisor?.tradeTicket?.shortCallStrike) || "", "number", "", "", "0.5")
+    + _adjField("Timing", "e1AdjTiming", timing, "select", "", "", "", ["AMC", "BMO"])
+    + _adjField("Earnings Date", "e1AdjDate", earnDate, "date")
+    + '</div>'
+    + '<div style="margin-top:12px"><label style="font-size:12px;opacity:.7">Notes</label><textarea id="e1AdjNotes" rows="2" style="width:100%;font-size:12px;padding:6px;border-radius:6px;border:1px solid var(--border,#ddd);margin-top:4px" placeholder="Optional adjustment notes..."></textarea></div>'
+    + '<div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">'
+    + '<button id="e1AdjCancelBtn" style="padding:8px 20px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer">Cancel</button>'
+    + '<button id="e1AdjSubmitBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;font-weight:600">Log Adjusted Trade</button>'
+    + '</div></div>';
+
+  document.body.appendChild(overlay);
+
+  $("e1AdjCancelBtn").addEventListener("click", function () { overlay.remove(); });
+  overlay.addEventListener("click", function (ev) { if (ev.target === overlay) overlay.remove(); });
+
+  $("e1AdjSubmitBtn").addEventListener("click", async function () {
+    var emVal = parseFloat($("e1AdjEm").value) || defEm;
+    var wingVal = parseFloat($("e1AdjWing").value) || defWing;
+    var creditVal = parseFloat($("e1AdjCredit").value) || 0;
+    var spVal = parseFloat($("e1AdjSP").value) || null;
+    var scVal = parseFloat($("e1AdjSC").value) || null;
+    var timingVal = $("e1AdjTiming").value || timing;
+    var dateVal = $("e1AdjDate").value || earnDate;
+    var notes = ($("e1AdjNotes").value || "").trim();
+
+    var body = {
+      source: "adjusted",
+      ticker: ticker,
+      entry: {
+        emMultiple: emVal,
+        wingWidth: wingVal,
+        entryCredit: creditVal,
+        shortPutStrike: spVal,
+        shortCallStrike: scVal,
+        longPutStrike: spVal ? spVal - wingVal : null,
+        longCallStrike: scVal ? scVal + wingVal : null,
+        earningsDate: dateVal,
+        earningsTiming: timingVal,
+        entryWindow: timingVal === "AMC" ? "3:00 PM EST on earnings day" : "3:00 PM EST day before earnings",
+        exitTarget: "Next morning open or mid-day vol bleed",
+      },
+      entryContext: {
+        vrpScore: (payload?.vrpAnalysis || {}).vrpScore,
+        breachPct: (payload?.e1EmBreachSummary || {})[String(emVal)] || null,
+        earningsTiming: timingVal,
+        regimeBucket: (payload?.regime || {}).regimeBucket || (payload?.regime || {}).bucket,
+      },
+      advisorVerdict: advisorData ? { verdict: (advisorData.advisor || {}).verdict, confidence: (advisorData.advisor || {}).confidence } : { verdict: dc.verdict, source: "desk_consensus" },
+      adjustmentNote: notes || "Manual adjustment from desk consensus",
+      originalTicket: advisorData ? (advisorData.advisor || {}).tradeTicket : null,
+    };
+
+    try {
+      var resp = await fetch("/api/breach/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      var result = await resp.json();
+      overlay.remove();
+      alert("Adjusted trade logged: " + ticker + " · " + emVal + "x EM · $" + wingVal + " wings\nTrade ID: " + result.tradeId);
+      _loadE1ActiveTrades();
+      _loadE1TradeJournal();
+    } catch (e) {
+      alert("Failed to log trade: " + e.message);
+    }
+  });
+}
+
+function _adjField(label, id, defVal, type, min, max, step, options) {
+  var html = '<div><label for="' + id + '" style="font-size:11px;opacity:.7;display:block;margin-bottom:3px">' + label + '</label>';
+  if (type === "select" && options) {
+    html += '<select id="' + id + '" style="width:100%;padding:6px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd)">';
+    for (var oi = 0; oi < options.length; oi++) {
+      var sel = options[oi] === defVal ? " selected" : "";
+      html += '<option value="' + options[oi] + '"' + sel + '>' + options[oi] + '</option>';
+    }
+    html += '</select>';
+  } else {
+    html += '<input id="' + id + '" type="' + (type || "text") + '" value="' + (defVal != null ? defVal : "") + '"'
+      + (min ? ' min="' + min + '"' : '') + (max ? ' max="' + max + '"' : '') + (step ? ' step="' + step + '"' : '')
+      + ' style="width:100%;padding:6px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd)">';
+  }
+  html += '</div>';
+  return html;
+}
+
+// --- Active Trades (monitoring + close) ---
+async function _loadE1ActiveTrades() {
+  var areaInAdvisor = $("e1ActiveTradesArea");
+  var sec = $("e1ActiveTrades");
+  var el = $("e1ActiveTradesContent");
+
+  try {
+    var resp = await fetch("/api/breach/trades");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    var trades = data.trades || [];
+
+    if (!trades.length) {
+      if (sec) sec.classList.add("hidden");
+      if (areaInAdvisor) areaInAdvisor.innerHTML = "";
+      return;
+    }
+
+    var html = '<div style="padding:16px;border-top:2px solid var(--border)">';
+    html += '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">';
+    html += '<h3 style="margin:0;font-size:15px;font-weight:700">Active Trades</h3>';
+    html += '<span style="font-size:12px;opacity:.6">' + trades.length + ' open position' + (trades.length > 1 ? 's' : '') + '</span>';
+    html += '</div>';
+
+    for (var ti = 0; ti < trades.length; ti++) {
+      var t = trades[ti];
+      var entry = t.entry || {};
+      var ctx = t.entryContext || {};
+      html += '<div style="background:var(--surface2,#f8f9fa);border-radius:8px;padding:12px 16px;margin-bottom:12px;border:1px solid var(--border)">';
+
+      // Trade header
+      html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">';
+      html += '<span style="font-weight:700;font-size:14px">' + (t.ticker || "—") + '</span>';
+      html += '<span style="font-size:12px;opacity:.6">' + (entry.emMultiple || "?") + 'x EM · $' + (entry.wingWidth || "?") + ' wings</span>';
+      html += '<span style="font-size:12px;opacity:.6">' + (entry.earningsTiming || "?") + ' · ' + (entry.earningsDate || "?") + '</span>';
+      html += '<span style="font-size:11px;opacity:.4">Logged ' + (t.loggedAt || "").slice(0, 16).replace("T", " ") + '</span>';
+      html += '</div>';
+
+      // Entry details
+      if (entry.shortPutStrike || entry.shortCallStrike) {
+        html += '<div style="font-size:12px;opacity:.7;margin-bottom:8px">';
+        html += 'Strikes: ' + (entry.shortPutStrike || "?") + '/' + (entry.longPutStrike || "?") + ' put · ' + (entry.shortCallStrike || "?") + '/' + (entry.longCallStrike || "?") + ' call';
+        if (entry.entryCredit) html += ' · Credit: $' + entry.entryCredit;
+        html += '</div>';
+      }
+      if (entry.entryWindow) html += '<div style="font-size:11px;opacity:.5;margin-bottom:4px">Entry: ' + entry.entryWindow + '</div>';
+      if (entry.exitTarget) html += '<div style="font-size:11px;opacity:.5;margin-bottom:8px">Exit: ' + entry.exitTarget + '</div>';
+
+      // Action buttons
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+      html += '<button class="e1CloseTradeBtn primaryButton" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;font-weight:600">Close Trade</button>';
+      html += '<button class="e1CloseWinBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #16a34a;background:#16a34a18;color:#16a34a;cursor:pointer;font-weight:600">Close as Win</button>';
+      html += '<button class="e1CloseLossBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #dc2626;background:#dc262618;color:#dc2626;cursor:pointer;font-weight:600">Close as Loss</button>';
+      html += '<button class="e1CloseExpBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer;opacity:.7">Expired Worthless</button>';
+      html += '</div>';
+
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // Render in the inline area (inside advisor section)
+    if (areaInAdvisor) areaInAdvisor.innerHTML = html;
+    // Also update the standalone section
+    if (sec && el) { sec.classList.add("hidden"); }
+
+    // Wire close buttons
+    _wireE1CloseButtons();
+  } catch (e) {
+    if (sec) sec.classList.add("hidden");
+  }
+}
+
+function _wireE1CloseButtons() {
+  document.querySelectorAll(".e1CloseTradeBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () { _showE1CloseModal(btn.dataset.tradeId); });
+  });
+  document.querySelectorAll(".e1CloseWinBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () { _quickCloseE1Trade(btn.dataset.tradeId, "win"); });
+  });
+  document.querySelectorAll(".e1CloseLossBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () { _quickCloseE1Trade(btn.dataset.tradeId, "loss"); });
+  });
+  document.querySelectorAll(".e1CloseExpBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () { _quickCloseE1Trade(btn.dataset.tradeId, "expired"); });
+  });
+}
+
+async function _quickCloseE1Trade(tradeId, outcome) {
+  var labels = { "win": "WIN (full credit kept)", "loss": "LOSS", "expired": "Expired Worthless (WIN)" };
+  if (!confirm("Close trade " + tradeId + " as " + (labels[outcome] || outcome) + "?")) return;
+
+  var body = { closeReason: outcome === "expired" ? "expired_worthless" : "manual" };
+  if (outcome === "win" || outcome === "expired") {
+    body.exitCredit = 0;
+    body.expiredWorthless = outcome === "expired";
+  }
+
+  try {
+    var resp = await fetch("/api/breach/trade/" + tradeId + "/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    _loadE1ActiveTrades();
+    _loadE1TradeJournal();
+  } catch (e) {
+    alert("Close failed: " + e.message);
+  }
+}
+
+function _showE1CloseModal(tradeId) {
+  var overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center";
+  overlay.innerHTML = '<div style="background:var(--bg,#fff);border-radius:12px;padding:24px;width:380px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    + '<h3 style="margin:0 0 16px">Close Trade · ' + tradeId + '</h3>'
+    + '<div style="display:grid;gap:12px;font-size:13px">'
+    + _adjField("Exit Debit ($)", "e1CloseDebit", "0", "number", "0", "9999", "0.01")
+    + _adjField("Close Reason", "e1CloseReason", "manual", "select", "", "", "", ["manual", "stop_loss", "target_hit", "expired_worthless", "vol_bleed_complete"])
+    + '</div>'
+    + '<div style="margin-top:12px"><label style="font-size:12px;opacity:.7">Notes</label><textarea id="e1CloseNotes" rows="2" style="width:100%;font-size:12px;padding:6px;border-radius:6px;border:1px solid var(--border,#ddd);margin-top:4px" placeholder="Exit notes..."></textarea></div>'
+    + '<div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">'
+    + '<button id="e1CloseCancelBtn" style="padding:8px 20px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer">Cancel</button>'
+    + '<button id="e1CloseSubmitBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;font-weight:600">Close Trade</button>'
+    + '</div></div>';
+
+  document.body.appendChild(overlay);
+  document.getElementById("e1CloseCancelBtn").addEventListener("click", function () { overlay.remove(); });
+  overlay.addEventListener("click", function (ev) { if (ev.target === overlay) overlay.remove(); });
+
+  document.getElementById("e1CloseSubmitBtn").addEventListener("click", async function () {
+    var debit = parseFloat(document.getElementById("e1CloseDebit").value) || 0;
+    var reason = document.getElementById("e1CloseReason").value || "manual";
+    var notes = (document.getElementById("e1CloseNotes").value || "").trim();
+
+    try {
+      var resp = await fetch("/api/breach/trade/" + tradeId + "/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exitCredit: debit, closeReason: reason, notes: notes, expiredWorthless: reason === "expired_worthless" }),
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      overlay.remove();
+      _loadE1ActiveTrades();
+      _loadE1TradeJournal();
+    } catch (e) {
+      alert("Close failed: " + e.message);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

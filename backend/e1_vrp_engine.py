@@ -95,7 +95,7 @@ def compute_vrp_score(
 
     # IV elevation: current EM vs trailing 4-quarter average
     iv_elevation: Optional[float] = None
-    if current_implied_move_pct and implied_vals:
+    if current_implied_move_pct is not None and current_implied_move_pct > 0 and implied_vals:
         avg_hist_iv = statistics.mean(implied_vals)
         if avg_hist_iv > 0:
             iv_elevation = current_implied_move_pct / avg_hist_iv
@@ -105,7 +105,9 @@ def compute_vrp_score(
     ratio_score = max(0.0, min(100.0, (1.0 - mean_ratio) * 200.0))
 
     # Consistency component (25%): lower std = higher score
-    consistency_score = max(0.0, min(100.0, (0.5 - std_ratio) * 200.0))
+    # Curve: 0 at σ≥0.8 (truly random), 100 at σ=0.0 (perfectly consistent)
+    # σ=0.3 → 62.5, σ=0.5 → 37.5 — avoids cliff at σ=0.5
+    consistency_score = max(0.0, min(100.0, (0.8 - std_ratio) * 125.0))
 
     # Sample size component (20%): more events = higher confidence
     sample_score = min(100.0, (n / 20.0) * 100.0)
@@ -263,6 +265,80 @@ def compute_earnings_width_comparison(
 # 3. Entry Quality Score
 # ---------------------------------------------------------------------------
 
+def _compute_liquidity_score(
+    *,
+    current: Optional[Dict[str, Any]] = None,
+    go_no_go: Optional[Dict[str, Any]] = None,
+) -> float:
+    """Derive a 0-100 liquidity score from goNoGo spread/OI data when available."""
+    # Try to extract the SN_LIQUIDITY check from goNoGo
+    if go_no_go and isinstance(go_no_go.get("checks"), list):
+        for chk in go_no_go["checks"]:
+            if not isinstance(chk, dict):
+                continue
+            if chk.get("id") != "SN_LIQUIDITY":
+                continue
+
+            state = str(chk.get("state") or "").upper()
+            data = chk.get("data") if isinstance(chk.get("data"), dict) else {}
+            band_agg = data.get("deltaBandAgg") if isinstance(data.get("deltaBandAgg"), dict) else {}
+            band_put = band_agg.get("put") if isinstance(band_agg.get("put"), dict) else {}
+            band_call = band_agg.get("call") if isinstance(band_agg.get("call"), dict) else {}
+
+            if state == "BLOCK":
+                return 10.0
+
+            med_sp_p = _f(band_put.get("medianSpread"))
+            med_sp_c = _f(band_call.get("medianSpread"))
+            oi_p = _f(band_put.get("sumOI")) or 0.0
+            oi_c = _f(band_call.get("sumOI")) or 0.0
+
+            has_spread = med_sp_p is not None or med_sp_c is not None
+            if has_spread:
+                avg_spread = 0.0
+                n = 0
+                for sp in (med_sp_p, med_sp_c):
+                    if sp is not None:
+                        avg_spread += sp
+                        n += 1
+                avg_spread = avg_spread / max(n, 1)
+
+                # Spread component: 0.02 → 100, 0.15 → 40, 0.30+ → 10
+                spread_score = max(10.0, min(100.0, 100.0 - (avg_spread - 0.02) * 400.0))
+
+                # OI component: more OI = better
+                total_oi = oi_p + oi_c
+                if total_oi >= 5000:
+                    oi_score = 90.0
+                elif total_oi >= 2000:
+                    oi_score = 70.0
+                elif total_oi >= 500:
+                    oi_score = 50.0
+                else:
+                    oi_score = 25.0
+
+                return round(spread_score * 0.7 + oi_score * 0.3, 1)
+
+            # Have check state but no spread data
+            if state == "PASS":
+                return 75.0
+            elif state == "FLAG":
+                return 45.0
+            elif state == "MISSING":
+                return 40.0
+
+    # Fallback: price-based heuristic
+    if current and _f(current.get("stockPrice")):
+        px = _f(current.get("stockPrice"))
+        if px is not None and px > 50:
+            return 65.0
+        elif px is not None and px > 20:
+            return 50.0
+        else:
+            return 35.0
+    return 50.0
+
+
 def compute_entry_quality(
     *,
     iv_elevation: Optional[float] = None,
@@ -270,6 +346,7 @@ def compute_entry_quality(
     regime: Optional[Dict[str, Any]] = None,
     ticker_dealer_gamma: Optional[Dict[str, Any]] = None,
     current: Optional[Dict[str, Any]] = None,
+    go_no_go: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Compute entry quality score (0-100) from current market data."""
     scores: Dict[str, Optional[float]] = {}
@@ -301,8 +378,10 @@ def compute_entry_quality(
     regime_score = 50.0
     if regime:
         bucket = str(regime.get("regimeBucket") or regime.get("bucket") or "").upper()
+        _guidance = regime.get("guidance") if isinstance(regime.get("guidance"), dict) else {}
+        _tg = str(_guidance.get("tradeGate") or regime.get("tradeGate") or "").upper()
         r_score_val = _f(regime.get("regimeScore") or regime.get("score"))
-        if bucket == "NO_TRADE":
+        if bucket == "NO_TRADE" or _tg == "NO_TRADE":
             regime_score = 0.0
             flags.append("no_trade_regime")
         elif r_score_val is not None:
@@ -321,16 +400,8 @@ def compute_entry_quality(
             flags.append("negative_ticker_gamma")
     scores["dealerGamma"] = gamma_score
 
-    # Liquidity (15%): placeholder based on whether current snapshot has data
-    liquidity_score = 50.0
-    if current and _f(current.get("stockPrice")):
-        px = _f(current.get("stockPrice"))
-        if px and px > 50:
-            liquidity_score = 70.0
-        elif px and px > 20:
-            liquidity_score = 55.0
-        else:
-            liquidity_score = 35.0
+    # Liquidity (15%): use goNoGo spread/OI data when available
+    liquidity_score = _compute_liquidity_score(current=current, go_no_go=go_no_go)
     scores["liquidity"] = liquidity_score
 
     # Composite
@@ -399,8 +470,12 @@ def compute_e1_desk_consensus(
         ctc_all_high = all(_ctc_bp(k) > 40.0 for k in ["1.0", "1.5", "2.0"])
 
     regime_bucket = ""
+    trade_gate = ""
     if regime:
         regime_bucket = str(regime.get("regimeBucket") or regime.get("bucket") or "").upper()
+        # DMS regime uses guidance.tradeGate; regime overlay uses top-level tradeGate
+        _guidance = regime.get("guidance") if isinstance(regime.get("guidance"), dict) else {}
+        trade_gate = str(_guidance.get("tradeGate") or regime.get("tradeGate") or "").upper()
 
     macro_intensity_high = False
     if event_risk and isinstance(event_risk, dict):
@@ -419,9 +494,9 @@ def compute_e1_desk_consensus(
     if all_breach_high:
         verdict = "PASS"
         reasons.append("Breach rate > 35% at ALL EM levels")
-    if regime_bucket == "NO_TRADE":
+    if regime_bucket == "NO_TRADE" or trade_gate == "NO_TRADE":
         verdict = "PASS"
-        reasons.append("Regime bucket is NO_TRADE")
+        reasons.append("Regime/trade gate is NO_TRADE")
     if ctc_all_high:
         verdict = "PASS"
         reasons.append("CTC breach rate > 40% at all EM levels — dangerous post-open drift")
@@ -444,6 +519,8 @@ def compute_e1_desk_consensus(
             lean_reasons.append("Negative ticker dealer gamma")
         if "inverted_skew" in eq_flags:
             lean_reasons.append("Inverted skew")
+        if trade_gate == "CAUTION":
+            lean_reasons.append("Trade gate is CAUTION — elevated regime risk")
 
         if lean_reasons:
             verdict = "LEAN_PASS"
