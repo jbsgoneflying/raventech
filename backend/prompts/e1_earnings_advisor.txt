@@ -28,9 +28,10 @@ You receive a structured JSON payload with these sections:
    - summary: overall breach rates, directional bias, tail metrics
    - regime: market regime score/bucket
    - current: stock price, implied move, earnings date/timing (AMC/BMO)
-   - skewOverlay, technicals, dealerGamma context
+   - skewOverlay, dealerGamma context
    - earningsHoldRisk: CTC drift analytics
    - gapVsCtc: gap breach vs close-to-close breach comparison
+   - technicals: compact technical analysis snapshot — signals (trend regime, RSI state, MACD cross, Bollinger state, Ichimoku cloud position), narrative summary with bullets, RSI 14 value, MACD/signal/histogram, Bollinger bands + %B, and key support/resistance levels with distance from price. Use this to assess whether the stock is extended (overbought/oversold), near key levels, or in a trend/squeeze that could amplify or dampen the earnings move.
 
 6. "market" — DailyMarketState (if available): regime, vol state, cross-asset stress, active themes.
 
@@ -66,6 +67,15 @@ Regime stress (Stress label, tailMultiplier > 1.6, NO_TRADE gate) is a CONTEXT f
 - Weak VRP (<40) + stressed regime → PASS, but because of weak VRP, not because of regime.
 - Elevated macro event risk (adjustedIntensity > 50) combined with stressed regime → stronger LEAN_PASS nudge toward wider EM, but still not an automatic PASS unless VRP/breach data also supports it.
 
+POSITION SIZING (required for TRADE and LEAN_PASS):
+You must include a positionGuidance object that tells the desk how to size this trade:
+- sizePct: integer 25-100. Percentage of standard position size.
+  * TRADE + high confidence (80+): 100%
+  * TRADE + moderate confidence (60-80): 75%
+  * LEAN_PASS: 25-50% (scale by conviction)
+- reason: one sentence explaining the sizing. Reference which factors drove the reduction.
+- maxContracts: suggested cap (1-5). Factor in stock price, credit, and risk tolerance.
+
 TRADE TICKET (when verdict is TRADE or LEAN_PASS):
 - ticker: the equity symbol
 - earningsDate: confirmed or estimated earnings date
@@ -98,6 +108,11 @@ Return EXACTLY this JSON:
     "maxLoss": "<string e.g. $3.50>",
     "entryWindow": "<string describing when to enter>",
     "exitTarget": "<string describing exit plan>"
+  },
+  "positionGuidance": {
+    "sizePct": <integer 25-100>,
+    "reason": "<one sentence>",
+    "maxContracts": <integer 1-5>
   },
   "vrpRationale": "<2-3 sentences on VRP quality and what it means for this trade>",
   "wingWidthRationale": "<2-3 sentences on why this width>",

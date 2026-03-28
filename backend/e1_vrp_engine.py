@@ -544,6 +544,11 @@ def compute_e1_desk_consensus(
 
         if macro_intensity_high:
             lean_reasons.append(f"Elevated macro/event risk (score {macro_score01:.2f})")
+        # IV Elevation below historical norm — thinner premium to harvest
+        _iv_elev = _f(vrp.get("ivElevation"))
+        if _iv_elev is not None and _iv_elev < 0.90:
+            lean_reasons.append(f"IV Elevation {_iv_elev:.2f}x — below historical avg, reduced premium to harvest")
+
         if "negative_ticker_gamma" in eq_flags:
             lean_reasons.append("Negative ticker dealer gamma")
         if "inverted_skew" in eq_flags:

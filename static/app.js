@@ -2788,6 +2788,97 @@ function render(payload) {
 
 var _e1AdvisorResult = null;
 
+function _buildExecutionQualityCard(payload) {
+  var gng = payload?.goNoGo;
+  if (!gng || !Array.isArray(gng.checks)) return null;
+
+  var liq = null;
+  for (var i = 0; i < gng.checks.length; i++) {
+    if (gng.checks[i] && gng.checks[i].id === "SN_LIQUIDITY") { liq = gng.checks[i]; break; }
+  }
+  if (!liq) return null;
+
+  var data = liq.data || {};
+  var band = data.deltaBandAgg || {};
+  var bp = band.put || {};
+  var bc = band.call || {};
+  var state = (liq.state || "").toUpperCase();
+
+  var stColor = state === "PASS" ? "#16a34a" : state === "FLAG" ? "#ca8a04" : state === "BLOCK" ? "#dc2626" : "#888";
+  var stLabel = state === "PASS" ? "Good" : state === "FLAG" ? "Caution" : state === "BLOCK" ? "Poor" : "Unknown";
+
+  function _fmtSpr(v) { return v != null ? (v * 100).toFixed(1) + "%" : "—"; }
+  function _fmtOI(v) { return v != null ? Math.round(v).toLocaleString() : "—"; }
+  function _fmtVol(v) { return v != null ? Math.round(v).toLocaleString() : "—"; }
+
+  var h = '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-size:12px">';
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">';
+  h += '<span style="font-weight:700;font-size:11px;text-transform:uppercase;opacity:.5">Execution Quality</span>';
+  h += '<span style="font-weight:700;color:' + stColor + ';font-size:12px">' + stLabel + '</span>';
+  if (data.avgDollarVol20d != null) {
+    var dvol = Number(data.avgDollarVol20d);
+    h += '<span style="opacity:.5;font-size:11px">Avg $Vol: $' + (dvol >= 1e9 ? (dvol / 1e9).toFixed(1) + 'B' : (dvol / 1e6).toFixed(0) + 'M') + '/day</span>';
+  }
+  h += '</div>';
+
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  h += '<div style="background:var(--surface2,#f8f9fa);padding:8px;border-radius:6px">';
+  h += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">Put Side</div>';
+  h += '<div>Spread: <b>' + _fmtSpr(bp.medianSpread) + '</b></div>';
+  h += '<div>OI: <b>' + _fmtOI(bp.sumOI) + '</b></div>';
+  h += '<div>Vol: <b>' + _fmtVol(bp.sumVol) + '</b></div>';
+  if (bp.coverage != null) h += '<div>Coverage: <b>' + (bp.coverage * 100).toFixed(0) + '%</b></div>';
+  h += '</div>';
+
+  h += '<div style="background:var(--surface2,#f8f9fa);padding:8px;border-radius:6px">';
+  h += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">Call Side</div>';
+  h += '<div>Spread: <b>' + _fmtSpr(bc.medianSpread) + '</b></div>';
+  h += '<div>OI: <b>' + _fmtOI(bc.sumOI) + '</b></div>';
+  h += '<div>Vol: <b>' + _fmtVol(bc.sumVol) + '</b></div>';
+  if (bc.coverage != null) h += '<div>Coverage: <b>' + (bc.coverage * 100).toFixed(0) + '%</b></div>';
+  h += '</div>';
+  h += '</div>';
+
+  if (liq.explain) h += '<div style="opacity:.5;font-size:11px;margin-top:6px">' + escapeHtml(liq.explain) + '</div>';
+  h += '</div>';
+  return h;
+}
+
+function _buildEarningsIntel(earnDate, timing, dataAsOf) {
+  if (!earnDate) return null;
+  var ed = new Date(earnDate + "T16:00:00-04:00");
+  if (isNaN(ed.getTime())) return null;
+
+  var now = new Date();
+  var diffMs = ed.getTime() - now.getTime();
+  var diffDays = Math.ceil(diffMs / 86400000);
+
+  var dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  var edDay = dayNames[ed.getUTCDay()] || "";
+  var timingLabel = timing === "AMC" ? "After Close" : timing === "BMO" ? "Before Open" : timing || "";
+  var headline = earnDate + " " + timingLabel + " (" + edDay + ")";
+
+  var countdown = null;
+  if (diffDays > 1) countdown = diffDays + " days away";
+  else if (diffDays === 1) countdown = "Tomorrow";
+  else if (diffDays === 0) countdown = "TODAY";
+  else countdown = "Passed";
+
+  var entryWindow = null;
+  if (timing === "AMC") entryWindow = "Entry: ~3:00 PM EST on " + earnDate;
+  else if (timing === "BMO") {
+    var entryDate = new Date(ed.getTime() - 86400000);
+    var ey = entryDate.getUTCFullYear();
+    var em = String(entryDate.getUTCMonth() + 1).padStart(2, "0");
+    var eday = String(entryDate.getUTCDate()).padStart(2, "0");
+    entryWindow = "Entry: ~3:00 PM EST on " + ey + "-" + em + "-" + eday + " (day before)";
+  }
+
+  var freshness = dataAsOf ? "Data as of: " + dataAsOf + " EOD" : null;
+
+  return { headline: headline, countdown: countdown, entryWindow: entryWindow, freshness: freshness };
+}
+
 function _renderE1AdvisorSection(payload) {
   var wc = payload?.e1WidthComparison;
   var vrp = payload?.vrpAnalysis;
@@ -2806,11 +2897,60 @@ function _renderE1AdvisorSection(payload) {
   var vrpLabel = vrp.vrpScore >= 75 ? "Strong" : vrp.vrpScore >= 55 ? "Moderate" : vrp.vrpScore >= 40 ? "Weak" : "Insufficient";
   var vrpColor = vrp.vrpScore >= 75 ? "#16a34a" : vrp.vrpScore >= 55 ? "#ca8a04" : "#dc2626";
 
+  // Earnings intel: date, timing, countdown, entry window, data freshness
+  var _cur = payload?.current || {};
+  var _ne = payload?.nextEvent || {};
+  var _earnDate = _ne.earnDateNext || _cur.earnDate || null;
+  var _timing = String(_ne.timingPlanned || _cur.earningsTiming || "").toUpperCase();
+  var _dataAsOf = _cur.asOfDate || _cur.delayedTradeDate || null;
+  var _earnIntel = _buildEarningsIntel(_earnDate, _timing, _dataAsOf);
+
   var html = '<div class="taPanel">';
   html += '<div class="taHeader"><div class="taHeaderRow">';
   html += '<span class="taHeaderTitle">AI Trade Advisor — Earnings Vol Crush</span>';
   html += '<button id="e1RunAdvisorBtn" class="primaryButton" style="padding:6px 16px;font-size:12px;">Run Advisor</button>';
   html += '</div></div>';
+
+  // Earnings Intel Banner
+  if (_earnIntel) {
+    html += '<div style="padding:12px 16px;background:var(--surface2,#f8f9fa);border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:13px">';
+    html += '<div style="font-weight:700;font-size:14px">' + escapeHtml(_earnIntel.headline) + '</div>';
+    if (_earnIntel.entryWindow) html += '<div style="opacity:.8">' + escapeHtml(_earnIntel.entryWindow) + '</div>';
+    if (_earnIntel.countdown) html += '<div style="font-weight:600;color:#ca8a04">' + escapeHtml(_earnIntel.countdown) + '</div>';
+    if (_earnIntel.freshness) html += '<div style="opacity:.5;font-size:11px;margin-left:auto">' + escapeHtml(_earnIntel.freshness) + '</div>';
+    html += '</div>';
+  }
+
+  // Trade Day Checklist (appears when earnings within 0-2 calendar days)
+  if (_earnIntel && (_earnIntel.countdown === "TODAY" || _earnIntel.countdown === "Tomorrow" || (_earnIntel.countdown && _earnIntel.countdown.match && _earnIntel.countdown.match(/^[12] days? away$/)))) {
+    var _isTD = _earnIntel.countdown === "TODAY";
+    var _tdColor = _isTD ? "#dc2626" : "#ca8a04";
+    html += '<div style="padding:12px 16px;border-bottom:1px solid var(--border);background:' + _tdColor + '08">';
+    html += '<div style="font-weight:700;font-size:12px;color:' + _tdColor + ';margin-bottom:8px">' + (_isTD ? "TRADE DAY CHECKLIST" : "PRE-TRADE CHECKLIST") + '</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;font-size:12px">';
+    var _checks = _isTD ? [
+      "Re-run Calculate for live intraday data",
+      "Verify bid-ask spreads are within tolerance",
+      "Check for breaking news / analyst revisions",
+      "Confirm earnings timing (AMC/BMO) unchanged",
+      "Review regime — any macro shifts since plan?",
+      "Set entry alert for 3:00 PM EST window",
+      "Pre-calculate exact strikes at current price",
+      "Size per position guidance above"
+    ] : [
+      "Re-run Calculate for fresh EOD data",
+      "Compare VRP score to your planning session",
+      "Check if regime bucket has changed",
+      "Verify no new event risk (FOMC, CPI, etc.)",
+      "Review any analyst revisions or pre-announcements",
+      "Confirm earnings date/timing haven't shifted",
+      "Plan exact entry time and size"
+    ];
+    for (var _ci = 0; _ci < _checks.length; _ci++) {
+      html += '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;opacity:.8"><input type="checkbox" style="margin:0"><span>' + escapeHtml(_checks[_ci]) + '</span></label>';
+    }
+    html += '</div></div>';
+  }
 
   // VRP Scorecard
   html += '<div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;border-bottom:1px solid var(--border)">';
@@ -2818,7 +2958,13 @@ function _renderE1AdvisorSection(payload) {
   html += _vrpCard("Mean Ratio", vrp.meanRatio != null ? vrp.meanRatio.toFixed(3) : "—", vrp.meanRatio != null && vrp.meanRatio < 0.75 ? "Below 0.75 = Strong" : "", null);
   html += _vrpCard("Consistency", vrp.stdRatio != null ? "σ " + vrp.stdRatio.toFixed(3) : "—", vrp.stdRatio != null && vrp.stdRatio < 0.30 ? "Low = Reliable" : "", null);
   html += _vrpCard("Trend", vrp.trendDelta != null ? (vrp.trendDelta > 0 ? "+" : "") + vrp.trendDelta.toFixed(3) : "—", vrp.trendDelta != null && vrp.trendDelta < 0 ? "Improving" : vrp.trendDelta != null && vrp.trendDelta > 0 ? "Deteriorating" : "", null);
-  html += _vrpCard("IV Elevation", vrp.ivElevation != null ? vrp.ivElevation.toFixed(2) + "x" : "—", vrp.ivElevation != null && vrp.ivElevation > 1.1 ? "Rich Premium" : "", null);
+  var _ivSub = "", _ivClr = null;
+  if (vrp.ivElevation != null) {
+    if (vrp.ivElevation < 0.90) { _ivSub = "Below avg — thin premium"; _ivClr = "#ca8a04"; }
+    else if (vrp.ivElevation <= 1.10) { _ivSub = "Normal range"; }
+    else { _ivSub = "Rich Premium"; _ivClr = "#16a34a"; }
+  }
+  html += _vrpCard("IV Elevation", vrp.ivElevation != null ? vrp.ivElevation.toFixed(2) + "x" : "—", _ivSub, _ivClr);
   html += _vrpCard("Sample", vrp.sampleSize + " events", vrp.confidence, null);
   html += '</div>';
 
@@ -2833,6 +2979,10 @@ function _renderE1AdvisorSection(payload) {
     }
     html += '</div>';
   }
+
+  // Execution Quality card (from goNoGo SN_LIQUIDITY)
+  var _eqHtml = _buildExecutionQualityCard(payload);
+  if (_eqHtml) html += _eqHtml;
 
   // Direct log buttons (visible for TRADE / LEAN_PASS before LLM is run)
   if (dc && (dc.verdict === "TRADE" || dc.verdict === "LEAN_PASS")) {
@@ -3014,6 +3164,19 @@ function _renderE1AdvisorResult(data) {
     html += '</div>';
     if (t.entryWindow) html += '<div style="margin-top:8px;font-size:12px"><b>Entry:</b> ' + t.entryWindow + '</div>';
     if (t.exitTarget) html += '<div style="font-size:12px"><b>Exit:</b> ' + t.exitTarget + '</div>';
+    html += '</div>';
+  }
+
+  // Position sizing guidance
+  var pg = a.positionGuidance;
+  if (pg && pg.sizePct != null) {
+    var pgColor = pg.sizePct >= 75 ? "#16a34a" : pg.sizePct >= 50 ? "#ca8a04" : "#ef4444";
+    html += '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:13px;background:' + pgColor + '0a">';
+    html += '<div style="font-weight:700;font-size:11px;text-transform:uppercase;opacity:.5">Position Sizing</div>';
+    html += '<div style="font-size:20px;font-weight:800;color:' + pgColor + '">' + pg.sizePct + '%</div>';
+    html += '<div style="opacity:.7">of standard size</div>';
+    if (pg.maxContracts) html += '<div style="opacity:.7">· Max ' + pg.maxContracts + ' contracts</div>';
+    if (pg.reason) html += '<div style="font-size:12px;opacity:.6;flex-basis:100%">' + pg.reason + '</div>';
     html += '</div>';
   }
 

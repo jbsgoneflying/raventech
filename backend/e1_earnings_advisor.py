@@ -173,6 +173,46 @@ def _sanitize_breach_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "flipPoint": dg.get("flipPoint"),
             }
 
+    # Technicals snapshot — compact signals + narrative summary + key levels
+    tech = payload.get("technicals")
+    if isinstance(tech, dict) and tech.get("enabled"):
+        t_snap: Dict[str, Any] = {}
+        sigs = tech.get("signals")
+        if isinstance(sigs, dict) and sigs.get("enabled"):
+            t_snap["signals"] = sigs
+        narr = tech.get("narrative")
+        if isinstance(narr, dict):
+            t_snap["narrativeSummary"] = narr.get("summary")
+            t_snap["narrativeBullets"] = narr.get("bullets")
+        rsi = tech.get("rsi")
+        if isinstance(rsi, dict) and rsi.get("enabled"):
+            t_snap["rsi14"] = rsi.get("value")
+            t_snap["rsiState"] = rsi.get("state")
+        macd = tech.get("macd")
+        if isinstance(macd, dict) and macd.get("enabled"):
+            t_snap["macd"] = macd.get("macd")
+            t_snap["macdSignal"] = macd.get("signalLine")
+            t_snap["macdHist"] = macd.get("hist")
+        boll = tech.get("bollinger")
+        if isinstance(boll, dict) and boll.get("enabled"):
+            t_snap["bollingerMid"] = boll.get("mid")
+            t_snap["bollingerUpper"] = boll.get("upper")
+            t_snap["bollingerLower"] = boll.get("lower")
+            t_snap["bollingerPctB"] = boll.get("percentB")
+        dist = tech.get("distances")
+        if isinstance(dist, dict):
+            lvls = dist.get("levels")
+            if isinstance(lvls, dict):
+                sr: Dict[str, Any] = {}
+                for lk in ("ema50", "ema200", "bbMid", "bbUpper", "bbLower"):
+                    lv = lvls.get(lk)
+                    if isinstance(lv, dict):
+                        sr[lk] = {"price": lv.get("price"), "distPct": lv.get("distancePct")}
+                if sr:
+                    t_snap["supportResistance"] = sr
+        if t_snap:
+            out["technicals"] = t_snap
+
     return out
 
 
