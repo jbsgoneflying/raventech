@@ -161,6 +161,15 @@ class FeatureFlags:
     ENGINE2_MACRO_BASE_OPEX: float = 0.4
     ENGINE2_MACRO_BASE_REFUNDING: float = 0.5
 
+    # --- Engine 1: Earnings IC Advisor (vol crush premium harvesting) ---
+    E1_ADVISOR_ENABLED: bool = True
+    E1_ADVISOR_MODEL: str = "gpt-5.2"
+    E1_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
+    E1_EM_MULTS: str = "1.0,1.5,2.0"
+    E1_WING_WIDTH_PTS: str = "2.5,5,7.5,10"
+    E1_TRADE_TTL_S: int = 60 * 86400   # 60 days
+    E1_TRADE_MAX_INDEX: int = 200
+
     # --- Engine 1: GO / NO-GO decisioning (strict; additive UI) ---
     GO_IVP_MIN: float = 0.80
     GO_IV_SAMPLE_MIN: int = 20
@@ -418,6 +427,14 @@ class FeatureFlags:
             ENGINE2_MACRO_BASE_NFP=_get_float("ENGINE2_MACRO_BASE_NFP", 0.7),
             ENGINE2_MACRO_BASE_OPEX=_get_float("ENGINE2_MACRO_BASE_OPEX", 0.4),
             ENGINE2_MACRO_BASE_REFUNDING=_get_float("ENGINE2_MACRO_BASE_REFUNDING", 0.5),
+
+            E1_ADVISOR_ENABLED=_get_bool("E1_ADVISOR_ENABLED", True),
+            E1_ADVISOR_MODEL=os.getenv("E1_ADVISOR_MODEL", "gpt-5.2"),
+            E1_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E1_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
+            E1_EM_MULTS=os.getenv("E1_EM_MULTS", "1.0,1.5,2.0"),
+            E1_WING_WIDTH_PTS=os.getenv("E1_WING_WIDTH_PTS", "2.5,5,7.5,10"),
+            E1_TRADE_TTL_S=_get_int("E1_TRADE_TTL_S", 60 * 86400),
+            E1_TRADE_MAX_INDEX=_get_int("E1_TRADE_MAX_INDEX", 200),
 
             GO_IVP_MIN=_get_float("GO_IVP_MIN", 0.80),
             GO_IV_SAMPLE_MIN=_get_int("GO_IV_SAMPLE_MIN", 20),

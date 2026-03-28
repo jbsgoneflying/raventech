@@ -2765,6 +2765,392 @@ function render(payload) {
     skipped.length > 0 ? `${skipped.length} skipped (see notes column)` : "";
 
   renderEarningsTable(payload.events || []);
+
+  // ── Earnings IC Advisor (Vol Crush) ──
+  try { _renderE1AdvisorSection(payload); } catch (e) { console.warn("E1 advisor render:", e); }
+  try { _loadE1TradeJournal(); } catch (e) { console.warn("E1 journal load:", e); }
+}
+
+// ---------------------------------------------------------------------------
+// Engine 1 — Earnings IC (Vol Crush) Advisor UI
+// ---------------------------------------------------------------------------
+
+var _e1AdvisorResult = null;
+
+function _renderE1AdvisorSection(payload) {
+  var wc = payload?.e1WidthComparison;
+  var vrp = payload?.vrpAnalysis;
+  var dc = payload?.e1DeskConsensus;
+  var sec = $("e1AdvisorSection");
+  var el = $("e1AdvisorContent");
+  if (!sec || !el) return;
+
+  if (!Array.isArray(wc) || wc.length < 1 || !vrp || vrp.vrpScore === null) {
+    sec.classList.add("hidden");
+    return;
+  }
+
+  sec.classList.remove("hidden");
+
+  var vrpLabel = vrp.vrpScore >= 75 ? "Strong" : vrp.vrpScore >= 55 ? "Moderate" : vrp.vrpScore >= 40 ? "Weak" : "Insufficient";
+  var vrpColor = vrp.vrpScore >= 75 ? "#16a34a" : vrp.vrpScore >= 55 ? "#ca8a04" : "#dc2626";
+
+  var html = '<div class="taPanel">';
+  html += '<div class="taHeader"><div class="taHeaderRow">';
+  html += '<span class="taHeaderTitle">AI Trade Advisor — Earnings Vol Crush</span>';
+  html += '<button id="e1RunAdvisorBtn" class="primaryButton" style="padding:6px 16px;font-size:12px;">Run Advisor</button>';
+  html += '</div></div>';
+
+  // VRP Scorecard
+  html += '<div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;border-bottom:1px solid var(--border)">';
+  html += _vrpCard("VRP Score", vrp.vrpScore != null ? vrp.vrpScore.toFixed(0) + "/100" : "—", vrpLabel, vrpColor);
+  html += _vrpCard("Mean Ratio", vrp.meanRatio != null ? vrp.meanRatio.toFixed(3) : "—", vrp.meanRatio != null && vrp.meanRatio < 0.75 ? "Below 0.75 = Strong" : "", null);
+  html += _vrpCard("Consistency", vrp.stdRatio != null ? "σ " + vrp.stdRatio.toFixed(3) : "—", vrp.stdRatio != null && vrp.stdRatio < 0.30 ? "Low = Reliable" : "", null);
+  html += _vrpCard("Trend", vrp.trendDelta != null ? (vrp.trendDelta > 0 ? "+" : "") + vrp.trendDelta.toFixed(3) : "—", vrp.trendDelta != null && vrp.trendDelta < 0 ? "Improving" : vrp.trendDelta != null && vrp.trendDelta > 0 ? "Deteriorating" : "", null);
+  html += _vrpCard("IV Elevation", vrp.ivElevation != null ? vrp.ivElevation.toFixed(2) + "x" : "—", vrp.ivElevation != null && vrp.ivElevation > 1.1 ? "Rich Premium" : "", null);
+  html += _vrpCard("Sample", vrp.sampleSize + " events", vrp.confidence, null);
+  html += '</div>';
+
+  // Desk Consensus Strip
+  if (dc) {
+    var vColor = dc.verdict === "TRADE" ? "#16a34a" : dc.verdict === "LEAN_PASS" ? "#ca8a04" : "#dc2626";
+    html += '<div style="padding:12px 16px;background:' + vColor + '18;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
+    html += '<span style="font-weight:700;color:' + vColor + '">' + (dc.verdict || "—") + '</span>';
+    html += '<span style="font-size:12px;opacity:.7">Risk: ' + (dc.riskLevel || "—") + ' · EM Floor: ' + (dc.suggestedEmFloor || "—") + 'x · Entry Quality: ' + (dc.entryQuality != null ? dc.entryQuality.toFixed(0) : "—") + '/100</span>';
+    if (dc.reasons && dc.reasons.length) {
+      html += '<span style="font-size:11px;opacity:.6">' + dc.reasons.join(" · ") + '</span>';
+    }
+    html += '</div>';
+  }
+
+  // Advisor result placeholder
+  html += '<div id="e1AdvisorResultArea"></div>';
+
+  html += '</div>';
+
+  // Width Comparison Table
+  html += _buildE1WidthTable(wc, payload?.e1EmBreachSummary, payload?.e1EmPreference);
+
+  el.innerHTML = html;
+
+  var btn = $("e1RunAdvisorBtn");
+  if (btn) {
+    btn.addEventListener("click", function () {
+      _runE1Advisor(payload);
+    });
+  }
+}
+
+function _vrpCard(label, value, sub, color) {
+  var c = color ? ' style="color:' + color + '"' : '';
+  return '<div style="text-align:center"><div style="font-size:10px;text-transform:uppercase;opacity:.5;margin-bottom:4px">' + label + '</div>'
+    + '<div style="font-size:20px;font-weight:700"' + c + '>' + value + '</div>'
+    + (sub ? '<div style="font-size:11px;opacity:.6;margin-top:2px">' + sub + '</div>' : '')
+    + '</div>';
+}
+
+function _buildE1WidthTable(wc, emBreachSummary, emPref) {
+  if (!wc || !wc.length) return '';
+
+  var emGroups = {};
+  for (var i = 0; i < wc.length; i++) {
+    var row = wc[i];
+    var ek = String(row.emMult);
+    if (!emGroups[ek]) emGroups[ek] = [];
+    emGroups[ek].push(row);
+  }
+
+  var prefEm = emPref ? String(emPref.preferredEm) : null;
+  var prefLabel = emPref ? emPref.label : "";
+  var html = '<div style="padding:16px">';
+  html += '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap">';
+  html += '<h3 style="margin:0;font-size:15px;font-weight:700">EM × Wing Width Analysis</h3>';
+  if (prefEm) {
+    html += '<span style="font-size:12px;opacity:.7">Preferred: ' + prefEm + 'x ' + prefLabel + '</span>';
+  }
+  html += '</div>';
+
+  var emKeys = Object.keys(emGroups).sort(function(a,b){return parseFloat(a)-parseFloat(b)});
+  for (var ei = 0; ei < emKeys.length; ei++) {
+    var em = emKeys[ei];
+    var rows = emGroups[em];
+    var breach = emBreachSummary ? emBreachSummary[em] : null;
+    var breachLabel = em === "1.0" ? "Aggressive" : em === "1.5" ? "Standard" : "Defensive";
+    var isPreferred = prefEm && em === prefEm;
+
+    html += '<div style="margin-bottom:20px">';
+    html += '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">';
+    html += '<span style="font-weight:700">EM ' + em + 'x</span>';
+    html += '<span style="font-size:12px;opacity:.6">' + breachLabel + '</span>';
+    if (breach != null) html += '<span style="font-size:12px;opacity:.6">Breach: ' + breach.toFixed(1) + '%</span>';
+    if (isPreferred) html += '<span style="background:#16a34a22;color:#16a34a;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">RECOMMENDED</span>';
+    html += '</div>';
+
+    html += '<div style="overflow-x:auto"><table class="eventsTable" style="width:100%;font-size:12px">';
+    html += '<thead><tr><th>Wing</th><th class="num">Full Loss %</th><th class="num">E[Loss]</th><th class="num">Credit</th><th class="num">Max Loss</th><th class="num">ROC %</th><th class="num">Risk-Adj ROC</th><th class="num">Obs</th><th>Label</th></tr></thead><tbody>';
+
+    for (var ri = 0; ri < rows.length; ri++) {
+      var r = rows[ri];
+      html += '<tr>';
+      html += '<td>$' + r.wingWidthPts + '</td>';
+      html += '<td class="num">' + (r.fullLossPct != null ? r.fullLossPct.toFixed(1) + '%' : '—') + '</td>';
+      html += '<td class="num">' + (r.expectedLoss != null ? '$' + r.expectedLoss.toFixed(2) : '—') + '</td>';
+      html += '<td class="num">' + (r.creditProxy != null ? '$' + r.creditProxy.toFixed(2) : '—') + '</td>';
+      html += '<td class="num">' + (r.maxLoss != null ? '$' + r.maxLoss.toFixed(0) : '—') + '</td>';
+      html += '<td class="num">' + (r.rocPct != null ? r.rocPct.toFixed(1) + '%' : '—') + '</td>';
+      html += '<td class="num">' + (r.riskAdjRocPct != null ? r.riskAdjRocPct.toFixed(1) + '%' : '—') + '</td>';
+      html += '<td class="num">' + (r.totalObs || '—') + '</td>';
+      html += '<td>' + (r.label || '—') + '</td>';
+      html += '</tr>';
+    }
+    html += '</tbody></table></div></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+async function _runE1Advisor(payload) {
+  var btn = $("e1RunAdvisorBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Analyzing…"; }
+  var area = $("e1AdvisorResultArea");
+  if (area) area.innerHTML = '<div style="padding:16px;text-align:center;opacity:.6">Running LLM advisor…</div>';
+
+  try {
+    var ticker = payload?.ticker || "";
+    var resp = await fetch("/api/breach/advisor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: ticker, n: payload?.params?.n || 20, years: payload?.params?.years || 5 }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    _e1AdvisorResult = data;
+    _renderE1AdvisorResult(data);
+  } catch (e) {
+    if (area) area.innerHTML = '<div style="padding:16px;color:#dc2626">Advisor failed: ' + e.message + '</div>';
+  }
+  if (btn) { btn.disabled = false; btn.textContent = "Run Advisor"; }
+}
+
+function _renderE1AdvisorResult(data) {
+  var area = $("e1AdvisorResultArea");
+  if (!area || !data) return;
+  var a = data.advisor || {};
+  var verdict = a.verdict || "PASS";
+  var vColor = verdict === "TRADE" ? "#16a34a" : verdict === "LEAN_PASS" ? "#ca8a04" : "#dc2626";
+
+  var html = '<div style="border-top:1px solid var(--border)">';
+
+  // Verdict banner
+  html += '<div style="padding:16px;background:' + vColor + '18;display:flex;align-items:center;gap:16px;flex-wrap:wrap">';
+  html += '<span style="font-size:22px;font-weight:800;color:' + vColor + '">' + verdict + '</span>';
+  if (a.confidence != null) html += '<span style="opacity:.7;font-size:13px">Confidence: ' + a.confidence + '/100</span>';
+  if (a._source) html += '<span style="opacity:.5;font-size:11px">Powered by LLM · ' + (a._model || "") + '</span>';
+  html += '</div>';
+
+  // Trade ticket
+  var t = a.tradeTicket || {};
+  if (t.shortPutStrike || t.shortCallStrike) {
+    html += '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px">';
+    html += '<div style="font-weight:700;margin-bottom:6px;text-transform:uppercase;font-size:11px;opacity:.5">Trade Ticket</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">';
+    var fields = [
+      ["Ticker", t.ticker],
+      ["Earnings", t.earningsDate],
+      ["Timing", t.earningsTiming],
+      ["Short Put", t.shortPutStrike],
+      ["Long Put", t.longPutStrike],
+      ["Short Call", t.shortCallStrike],
+      ["Long Call", t.longCallStrike],
+      ["Wing", "$" + (t.wingWidth || "")],
+      ["EM", (t.emMultiple || "") + "x"],
+      ["Credit", t.estimatedCredit],
+      ["Max Loss", t.maxLoss],
+    ];
+    for (var fi = 0; fi < fields.length; fi++) {
+      if (fields[fi][1] != null && fields[fi][1] !== "") {
+        html += '<div><span style="opacity:.5;font-size:10px;text-transform:uppercase">' + fields[fi][0] + '</span><br><b>' + fields[fi][1] + '</b></div>';
+      }
+    }
+    html += '</div>';
+    if (t.entryWindow) html += '<div style="margin-top:8px;font-size:12px"><b>Entry:</b> ' + t.entryWindow + '</div>';
+    if (t.exitTarget) html += '<div style="font-size:12px"><b>Exit:</b> ' + t.exitTarget + '</div>';
+    html += '</div>';
+  }
+
+  // Rationale sections
+  var sections = [
+    ["VRP Rationale", a.vrpRationale],
+    ["Wing Width Rationale", a.wingWidthRationale],
+    ["Risk Context", a.riskContext],
+    ["Entry Plan", a.entryPlan],
+    ["Management Plan", a.managementPlan],
+    ["Exit Rules", a.exitRules],
+    ["Pass Reason", a.passReason],
+    ["Desk Note", a.deskNote],
+  ];
+  for (var si = 0; si < sections.length; si++) {
+    if (sections[si][1]) {
+      html += '<div style="padding:8px 16px;border-bottom:1px solid var(--border);font-size:13px">';
+      html += '<div style="font-weight:700;font-size:11px;text-transform:uppercase;opacity:.5;margin-bottom:4px">' + sections[si][0] + '</div>';
+      html += '<div>' + sections[si][1] + '</div></div>';
+    }
+  }
+
+  // Key risks
+  if (Array.isArray(a.keyRisks) && a.keyRisks.length) {
+    html += '<div style="padding:8px 16px;border-bottom:1px solid var(--border);font-size:13px">';
+    html += '<div style="font-weight:700;font-size:11px;text-transform:uppercase;opacity:.5;margin-bottom:4px">Key Risks</div>';
+    html += '<ul style="margin:0;padding-left:16px">';
+    for (var ki = 0; ki < a.keyRisks.length; ki++) {
+      html += '<li>' + a.keyRisks[ki] + '</li>';
+    }
+    html += '</ul></div>';
+  }
+
+  // Log buttons (only for TRADE / LEAN_PASS)
+  if (verdict === "TRADE" || verdict === "LEAN_PASS") {
+    html += '<div style="padding:12px 16px;display:flex;gap:12px;flex-wrap:wrap">';
+    html += '<button id="e1LogTradeBtn" class="primaryButton" style="padding:6px 16px;font-size:12px">Log This Trade</button>';
+    html += '<button id="e1AdjustLogBtn" class="primaryButton" style="padding:6px 16px;font-size:12px;background:var(--surface2);color:var(--text)">Adjust & Log</button>';
+    html += '</div>';
+  }
+
+  html += '</div>';
+  area.innerHTML = html;
+
+  var logBtn = $("e1LogTradeBtn");
+  if (logBtn) logBtn.addEventListener("click", function() { _logE1AdvisorTrade(data); });
+}
+
+async function _logE1AdvisorTrade(advisorData) {
+  var a = (advisorData.advisor || {});
+  var ticket = a.tradeTicket || {};
+  var body = {
+    source: "advisor",
+    ticker: ticket.ticker || lastPayload?.ticker || "",
+    entry: {
+      shortPutStrike: ticket.shortPutStrike,
+      longPutStrike: ticket.longPutStrike,
+      shortCallStrike: ticket.shortCallStrike,
+      longCallStrike: ticket.longCallStrike,
+      wingWidth: ticket.wingWidth,
+      emMultiple: ticket.emMultiple,
+      entryCredit: parseFloat(String(ticket.estimatedCredit || "0").replace(/[^0-9.]/g, "")) || 0,
+      earningsDate: ticket.earningsDate,
+      earningsTiming: ticket.earningsTiming,
+      entryWindow: ticket.entryWindow,
+      exitTarget: ticket.exitTarget,
+    },
+    entryContext: {
+      vrpScore: (advisorData.vrpAnalysis || {}).vrpScore,
+      breachPct: (advisorData.emBreachSummary || {})[String(ticket.emMultiple)] || null,
+      earningsTiming: ticket.earningsTiming,
+      regimeBucket: (lastPayload?.regime || {}).regimeBucket || (lastPayload?.regime || {}).bucket,
+    },
+    advisorVerdict: { verdict: a.verdict, confidence: a.confidence },
+  };
+
+  try {
+    var resp = await fetch("/api/breach/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var result = await resp.json();
+    alert("Trade logged: " + result.tradeId);
+    _loadE1TradeJournal();
+  } catch (e) {
+    alert("Failed to log trade: " + e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Engine 1 — Trade Journal
+// ---------------------------------------------------------------------------
+
+async function _loadE1TradeJournal() {
+  var sec = $("e1TradeJournal");
+  var el = $("e1TradeJournalContent");
+  if (!sec || !el) return;
+
+  try {
+    var histResp = await fetch("/api/breach/trades/history?limit=20");
+    var perfResp = await fetch("/api/breach/trades/performance");
+    if (!histResp.ok || !perfResp.ok) { sec.classList.add("hidden"); return; }
+    var hist = await histResp.json();
+    var perf = await perfResp.json();
+
+    if (!perf.hasData && !(hist.trades && hist.trades.length)) {
+      sec.classList.add("hidden");
+      return;
+    }
+
+    sec.classList.remove("hidden");
+    var html = '<div class="taPanel">';
+    html += '<div class="taHeader"><div class="taHeaderRow"><span class="taHeaderTitle">Trade Journal</span>';
+    html += '<span style="font-size:12px;opacity:.6">Learning System · ' + (perf.totalClosed || 0) + ' closed trades</span>';
+    html += '</div></div>';
+
+    // Performance Stats
+    if (perf.hasData) {
+      html += '<div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:12px;border-bottom:1px solid var(--border)">';
+      html += _vrpCard("Win Rate", perf.winRate != null ? perf.winRate + "%" : "—", "", perf.winRate >= 60 ? "#16a34a" : perf.winRate >= 40 ? "#ca8a04" : "#dc2626");
+      html += _vrpCard("Total P&L", perf.totalPnl != null ? "$" + perf.totalPnl.toFixed(2) : "—", "", null);
+      html += _vrpCard("Avg P&L", perf.avgPnl != null ? "$" + perf.avgPnl.toFixed(2) : "—", "", null);
+      html += _vrpCard("W-L-S", perf.wins + "-" + perf.losses + "-" + perf.scratches, "", null);
+      html += _vrpCard("Tendency", perf.riskTendency || "—", "", null);
+      html += '</div>';
+
+      // Bucketed breakdowns
+      var buckets = [
+        ["By EM", perf.byEm],
+        ["By Wing", perf.byWing],
+        ["By VRP", perf.byVrpBucket],
+        ["By Timing", perf.byTiming],
+        ["By Regime", perf.byRegime],
+      ];
+      html += '<div style="padding:12px 16px;display:flex;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border);font-size:12px">';
+      for (var bi = 0; bi < buckets.length; bi++) {
+        var bData = buckets[bi][1];
+        if (!bData || !Object.keys(bData).length) continue;
+        html += '<div><div style="font-weight:700;font-size:10px;text-transform:uppercase;opacity:.5;margin-bottom:4px">' + buckets[bi][0] + '</div>';
+        var bKeys = Object.keys(bData);
+        for (var bki = 0; bki < bKeys.length; bki++) {
+          var bd = bData[bKeys[bki]];
+          html += '<div>' + bKeys[bki] + ': ' + (bd.winRate != null ? bd.winRate + '%' : '—') + ' (' + bd.n + ')</div>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Recent Closed Trades
+    var trades = hist.trades || [];
+    if (trades.length) {
+      html += '<div style="padding:12px 16px"><div style="font-weight:700;font-size:11px;text-transform:uppercase;opacity:.5;margin-bottom:8px">Recent Closed Trades</div>';
+      for (var ti = 0; ti < Math.min(trades.length, 10); ti++) {
+        var tr = trades[ti];
+        var oc = (tr.outcome || {}).outcomeClass || "?";
+        var pnl = (tr.outcome || {}).realizedPnl;
+        var ocColor = oc === "win" ? "#16a34a" : oc === "loss" ? "#dc2626" : "#888";
+        html += '<div style="display:flex;align-items:center;gap:12px;padding:4px 0;font-size:12px">';
+        html += '<span style="background:' + ocColor + '22;color:' + ocColor + ';padding:2px 8px;border-radius:4px;font-weight:600;text-transform:uppercase;font-size:10px">' + oc + '</span>';
+        html += '<span style="font-weight:600">' + (tr.ticker || "—") + '</span>';
+        html += '<span>' + ((tr.entry || {}).emMultiple || "?") + 'x EM · $' + ((tr.entry || {}).wingWidth || "?") + ' wings</span>';
+        if (pnl != null) html += '<span style="color:' + (pnl >= 0 ? "#16a34a" : "#dc2626") + ';font-weight:600">' + (pnl >= 0 ? "+" : "") + '$' + pnl.toFixed(2) + '</span>';
+        html += '<span style="opacity:.5">' + (tr.closedAt || "").slice(0, 10) + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
+  } catch (e) {
+    sec.classList.add("hidden");
+  }
 }
 
 function setStatus(text, isError = false) {

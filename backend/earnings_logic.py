@@ -2553,6 +2553,64 @@ def compute_breach_stats(
             "notes": [f"GO/NO-GO failed: {type(e).__name__}: {e}"],
         }
 
+    # --- Earnings IC VRP Engine (vol crush premium harvesting; additive) ---
+    try:
+        from backend.e1_vrp_engine import (
+            compute_vrp_score,
+            compute_earnings_width_comparison,
+            compute_entry_quality,
+            compute_e1_desk_consensus,
+            compute_em_preference,
+        )
+        _vrp_em_pct = _to_float((out.get("current") or {}).get("impliedMovePct"))
+        _vrp_stock_px = _to_float((out.get("current") or {}).get("stockPrice"))
+
+        _vrp_analysis = compute_vrp_score(out_events, current_implied_move_pct=_vrp_em_pct)
+        out["vrpAnalysis"] = _vrp_analysis
+
+        _e1_em_mults = [float(x.strip()) for x in str(flags.E1_EM_MULTS).split(",") if x.strip()]
+        _e1_wing_pts = [float(x.strip()) for x in str(flags.E1_WING_WIDTH_PTS).split(",") if x.strip()]
+
+        _wc, _em_breach = compute_earnings_width_comparison(
+            out_events,
+            em_mults=_e1_em_mults,
+            wing_pts=_e1_wing_pts,
+            current_implied_move_pct=_vrp_em_pct,
+            stock_price=_vrp_stock_px,
+        )
+        out["e1WidthComparison"] = _wc
+        out["e1EmBreachSummary"] = _em_breach
+
+        _eq = compute_entry_quality(
+            iv_elevation=_vrp_analysis.get("ivElevation"),
+            skew_overlay=out.get("skewOverlay"),
+            regime=regime,
+            ticker_dealer_gamma=out.get("tickerDealerGamma"),
+            current=out.get("current"),
+        )
+        out["e1EntryQuality"] = _eq
+
+        _dc = compute_e1_desk_consensus(
+            vrp=_vrp_analysis,
+            entry_quality=_eq,
+            em_breach_summary=_em_breach,
+            regime=regime,
+            gap_vs_ctc=out.get("gapVsCtc"),
+            event_risk=event_risk,
+        )
+        out["e1DeskConsensus"] = _dc
+
+        _emp = compute_em_preference(
+            _em_breach,
+            _vrp_analysis.get("vrpScore"),
+            _eq.get("entryQuality"),
+        )
+        out["e1EmPreference"] = _emp
+
+    except Exception as e:
+        LOG.debug("E1 VRP engine failed for %s: %s", t, e)
+        out["vrpAnalysis"] = {"vrpScore": None, "notes": [f"VRP engine unavailable: {type(e).__name__}"]}
+
     return out
 
 

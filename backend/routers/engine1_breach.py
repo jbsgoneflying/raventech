@@ -1,4 +1,4 @@
-"""Engine 1 — Breach & Compare routes."""
+"""Engine 1 — Breach & Compare routes + Earnings IC Advisor / Trade Journal."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from backend.breach_ranker import rank_tickers, summarize_tiers
 from backend.config import get_flags
@@ -252,3 +252,172 @@ def breach_compare(
     except Exception as e:
         LOG.exception("Unhandled failure (breach-compare)")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ---------------------------------------------------------------------------
+# Engine 1 Earnings IC Advisor
+# ---------------------------------------------------------------------------
+
+@router.post("/api/breach/advisor")
+async def e1_advisor(request: Request):
+    """Run the Engine 1 Earnings IC (Vol Crush) LLM Trade Advisor."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    ticker = str(body.get("ticker", "")).strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    try:
+        f = get_flags()
+        client = get_client()
+        benzinga_client = get_benzinga_client_optional()
+
+        payload = compute_breach_stats(
+            client=client,
+            ticker=ticker,
+            n=int(body.get("n", 20)),
+            years=int(body.get("years", 5)),
+            k=1.0,
+            flags_override=f,
+            benzinga_client=benzinga_client,
+        )
+
+        from backend.e1_vrp_engine import (
+            compute_vrp_score,
+            compute_earnings_width_comparison,
+            compute_entry_quality,
+            compute_e1_desk_consensus,
+            compute_em_preference,
+        )
+        from backend.e1_earnings_advisor import generate_e1_trade_analysis
+
+        events = payload.get("events") or []
+        current = payload.get("current") or {}
+        current_em_pct = None
+        try:
+            current_em_pct = float(current.get("impliedMovePct") or 0) or None
+        except Exception:
+            pass
+
+        vrp = compute_vrp_score(events, current_implied_move_pct=current_em_pct)
+
+        em_mults = [float(x.strip()) for x in str(f.E1_EM_MULTS).split(",") if x.strip()]
+        wing_pts = [float(x.strip()) for x in str(f.E1_WING_WIDTH_PTS).split(",") if x.strip()]
+        stock_price = None
+        try:
+            stock_price = float(current.get("stockPrice") or 0) or None
+        except Exception:
+            pass
+
+        wc, em_breach = compute_earnings_width_comparison(
+            events,
+            em_mults=em_mults,
+            wing_pts=wing_pts,
+            current_implied_move_pct=current_em_pct,
+            stock_price=stock_price,
+        )
+
+        eq = compute_entry_quality(
+            iv_elevation=vrp.get("ivElevation"),
+            skew_overlay=payload.get("skewOverlay"),
+            regime=payload.get("regime"),
+            ticker_dealer_gamma=payload.get("tickerDealerGamma"),
+            current=current,
+        )
+
+        dc = compute_e1_desk_consensus(
+            vrp=vrp,
+            entry_quality=eq,
+            em_breach_summary=em_breach,
+            regime=payload.get("regime"),
+            gap_vs_ctc=payload.get("gapVsCtc"),
+            event_risk=payload.get("eventRisk"),
+        )
+
+        emp = compute_em_preference(em_breach, vrp.get("vrpScore"), eq.get("entryQuality"))
+
+        analysis = generate_e1_trade_analysis(
+            breach_payload=payload,
+            vrp_analysis=vrp,
+            width_analysis=wc,
+            entry_quality=eq,
+            desk_consensus=dc,
+            em_preference=emp,
+            flags=f,
+        )
+
+        return {
+            "advisor": analysis,
+            "vrpAnalysis": vrp,
+            "widthComparison": wc,
+            "emBreachSummary": em_breach,
+            "entryQuality": eq,
+            "deskConsensus": dc,
+            "emPreference": emp,
+        }
+
+    except BreachInputError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except OratsError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("E1 advisor failed")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ---------------------------------------------------------------------------
+# Engine 1 Earnings IC Trade CRUD
+# ---------------------------------------------------------------------------
+
+@router.post("/api/breach/trade")
+async def e1_log_trade(request: Request):
+    """Log a new Engine 1 earnings IC trade."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    from backend.e1_earnings_trades import log_trade
+    trade_id = log_trade(body)
+    if trade_id is None:
+        raise HTTPException(status_code=500, detail="Failed to persist trade")
+    return {"tradeId": trade_id, "status": "active"}
+
+
+@router.get("/api/breach/trades")
+def e1_list_trades():
+    """List active Engine 1 earnings IC trades."""
+    from backend.e1_earnings_trades import list_active_trades
+    return {"trades": list_active_trades()}
+
+
+@router.post("/api/breach/trade/{trade_id}/close")
+async def e1_close_trade(trade_id: str, request: Request):
+    """Close an Engine 1 earnings IC trade with outcome data."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    from backend.e1_earnings_trades import close_trade
+    result = close_trade(trade_id, close_data=body)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Trade not found or close failed")
+    return result
+
+
+@router.get("/api/breach/trades/history")
+def e1_trade_history(limit: int = Query(20, ge=1, le=100)):
+    """List closed Engine 1 earnings IC trades."""
+    from backend.e1_earnings_trades import list_closed_trades
+    return {"trades": list_closed_trades(limit=limit)}
+
+
+@router.get("/api/breach/trades/performance")
+def e1_trade_performance():
+    """Aggregated cross-ticker performance digest for the learning system."""
+    from backend.e1_earnings_trades import compute_e1_trade_performance_digest
+    return compute_e1_trade_performance_digest()
