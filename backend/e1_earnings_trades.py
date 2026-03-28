@@ -71,7 +71,7 @@ def log_trade(
 
     ttl = int(f.E1_TRADE_TTL_S)
     try:
-        s.set_json(_trade_key(trade_id), trade, ex=ttl)
+        s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
         _append_index(s, trade_id, max_len=int(f.E1_TRADE_MAX_INDEX), ttl=ttl)
         return trade_id
     except Exception as e:
@@ -121,7 +121,7 @@ def close_trade(
 
     try:
         ttl = int(get_flags().E1_TRADE_TTL_S)
-        s.set_json(_trade_key(trade_id), trade, ex=ttl)
+        s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
         return trade
     except Exception as e:
         LOG.warning("E1 close trade failed: %s", e)
@@ -164,7 +164,7 @@ def add_checkin(
 
     try:
         ttl = int(get_flags().E1_TRADE_TTL_S)
-        s.set_json(_trade_key(trade_id), trade, ex=ttl)
+        s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
         return True
     except Exception:
         return False
@@ -383,4 +383,4 @@ def _append_index(
     idx.append(trade_id)
     if len(idx) > max_len:
         idx = idx[-max_len:]
-    store.set_json(_INDEX_KEY, idx, ex=ttl)
+    store.set_json(_INDEX_KEY, idx, ttl_s=ttl)

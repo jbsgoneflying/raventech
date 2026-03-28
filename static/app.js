@@ -2834,11 +2834,11 @@ function _renderE1AdvisorSection(payload) {
     html += '</div>';
   }
 
-  // Direct log buttons (always visible for TRADE / LEAN_PASS — no LLM required)
+  // Direct log buttons (visible for TRADE / LEAN_PASS before LLM is run)
   if (dc && (dc.verdict === "TRADE" || dc.verdict === "LEAN_PASS")) {
     var emp = payload?.e1EmPreference || {};
     var prefWing = 5;
-    html += '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
+    html += '<div id="e1DirectLogBtns" style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
     html += '<button id="e1QuickLogBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;font-weight:600">Log This Trade</button>';
     html += '<button id="e1AdjustLogBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;background:var(--surface2);color:var(--text);border:1px solid var(--border)">Adjust & Log</button>';
     html += '<span style="font-size:11px;opacity:.5">Uses desk consensus: ' + (emp.preferredEm || dc.preferredEm || "2.0") + 'x EM · $' + prefWing + ' wings</span>';
@@ -2969,6 +2969,11 @@ async function _runE1Advisor(payload) {
 function _renderE1AdvisorResult(data) {
   var area = $("e1AdvisorResultArea");
   if (!area || !data) return;
+
+  // Hide desk consensus buttons — the advisor result has its own
+  var directBtns = $("e1DirectLogBtns");
+  if (directBtns) directBtns.style.display = "none";
+
   var a = data.advisor || {};
   var verdict = a.verdict || "PASS";
   var vColor = verdict === "TRADE" ? "#16a34a" : verdict === "LEAN_PASS" ? "#ca8a04" : "#dc2626";
