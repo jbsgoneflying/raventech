@@ -2821,23 +2821,29 @@ function _buildExecutionQualityCard(payload) {
   }
   h += '</div>';
 
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-  h += '<div style="background:var(--surface2,#f8f9fa);padding:8px;border-radius:6px">';
-  h += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">Put Side</div>';
-  h += '<div>Spread: <b>' + _fmtSpr(bp.medianSpread) + '</b></div>';
-  h += '<div>OI: <b>' + _fmtOI(bp.sumOI) + '</b></div>';
-  h += '<div>Vol: <b>' + _fmtVol(bp.sumVol) + '</b></div>';
-  if (bp.coverage != null) h += '<div>Coverage: <b>' + (bp.coverage * 100).toFixed(0) + '%</b></div>';
-  h += '</div>';
+  var _hasChainData = bp.medianSpread != null || bc.medianSpread != null || (bp.sumOI != null && bp.sumOI > 0) || (bc.sumOI != null && bc.sumOI > 0);
 
-  h += '<div style="background:var(--surface2,#f8f9fa);padding:8px;border-radius:6px">';
-  h += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">Call Side</div>';
-  h += '<div>Spread: <b>' + _fmtSpr(bc.medianSpread) + '</b></div>';
-  h += '<div>OI: <b>' + _fmtOI(bc.sumOI) + '</b></div>';
-  h += '<div>Vol: <b>' + _fmtVol(bc.sumVol) + '</b></div>';
-  if (bc.coverage != null) h += '<div>Coverage: <b>' + (bc.coverage * 100).toFixed(0) + '%</b></div>';
-  h += '</div>';
-  h += '</div>';
+  if (_hasChainData) {
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+    h += '<div style="background:var(--surface2,#f8f9fa);padding:8px;border-radius:6px">';
+    h += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">Put Side</div>';
+    h += '<div>Spread: <b>' + _fmtSpr(bp.medianSpread) + '</b></div>';
+    h += '<div>OI: <b>' + _fmtOI(bp.sumOI) + '</b></div>';
+    h += '<div>Vol: <b>' + _fmtVol(bp.sumVol) + '</b></div>';
+    if (bp.coverage != null) h += '<div>Coverage: <b>' + (bp.coverage * 100).toFixed(0) + '%</b></div>';
+    h += '</div>';
+
+    h += '<div style="background:var(--surface2,#f8f9fa);padding:8px;border-radius:6px">';
+    h += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">Call Side</div>';
+    h += '<div>Spread: <b>' + _fmtSpr(bc.medianSpread) + '</b></div>';
+    h += '<div>OI: <b>' + _fmtOI(bc.sumOI) + '</b></div>';
+    h += '<div>Vol: <b>' + _fmtVol(bc.sumVol) + '</b></div>';
+    if (bc.coverage != null) h += '<div>Coverage: <b>' + (bc.coverage * 100).toFixed(0) + '%</b></div>';
+    h += '</div>';
+    h += '</div>';
+  } else {
+    h += '<div style="opacity:.5;font-size:11px;padding:4px 0">Chain data unavailable — re-run during market hours for live spread/OI</div>';
+  }
 
   if (liq.explain) h += '<div style="opacity:.5;font-size:11px;margin-top:6px">' + escapeHtml(liq.explain) + '</div>';
   h += '</div>';

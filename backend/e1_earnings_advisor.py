@@ -145,7 +145,7 @@ def _sanitize_breach_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for key in (
         "ticker", "summary", "summaryDecision", "baseline",
-        "current", "regime", "gapVsCtc",
+        "current", "regime", "gapVsCtc", "nextEvent",
     ):
         if key in payload:
             out[key] = payload[key]

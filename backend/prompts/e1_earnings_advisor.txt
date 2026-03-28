@@ -27,7 +27,8 @@ You receive a structured JSON payload with these sections:
 5. "scan" — Full Engine 1 breach payload including:
    - summary: overall breach rates, directional bias, tail metrics
    - regime: market regime score/bucket
-   - current: stock price, implied move, earnings date/timing (AMC/BMO)
+   - current: stock price, implied move, as-of date
+   - nextEvent: CRITICAL — contains earnDateNext (YYYY-MM-DD), timingPlanned (AMC/BMO), source, confidence. USE THIS for the trade ticket earningsDate and earningsTiming fields. Do NOT output "UNKNOWN" — the earnings date is always in nextEvent.earnDateNext.
    - skewOverlay, dealerGamma context
    - earningsHoldRisk: CTC drift analytics
    - gapVsCtc: gap breach vs close-to-close breach comparison
