@@ -14,14 +14,14 @@
   var _insightRegistry = [];
 
   /* ════════════════════════════════════════════════════════════════════
-     GPT-5.3 Contextual Desk Insight System
+     GPT-5.4 Contextual Desk Insight System
      ════════════════════════════════════════════════════════════════════ */
 
   function requestInsight(type, key, data, title) {
     var cacheKey = type + ":" + key;
     var popup = $("e12Popup");
     var body = $("e12PopupBody");
-    $("e12PopupTitle").textContent = title || "Desk Insight \u2014 GPT-5.3";
+    $("e12PopupTitle").textContent = title || "Desk Insight \u2014 GPT-5.4";
     popup.classList.add("visible");
 
     if (_insightCache[cacheKey]) {
@@ -107,25 +107,25 @@
       var title = "Desk Insight";
       if (section === "regime") {
         sectionData = { spike: lastPayload.spike, severity: lastPayload.severity, dealerGamma: lastPayload.dealerGamma, crossAssetStress: lastPayload.crossAssetStress };
-        title = "Regime Dashboard \u2014 GPT-5.3";
+        title = "Regime Dashboard \u2014 GPT-5.4";
       } else if (section === "edge") {
         sectionData = lastPayload.edgeComposite;
-        title = "Edge Decomposition \u2014 GPT-5.3";
+        title = "Edge Decomposition \u2014 GPT-5.4";
       } else if (section === "ou_model") {
         sectionData = { ouModel: lastPayload.ouModel, forwardCurve: lastPayload.forwardCurve, termStructure: lastPayload.termStructure };
-        title = "OU Model \u2014 GPT-5.3";
+        title = "OU Model \u2014 GPT-5.4";
       } else if (section === "scenarios") {
         sectionData = { scenarios: lastPayload.scenarios, dealerGamma: lastPayload.dealerGamma, crossAssetStress: lastPayload.crossAssetStress };
-        title = "Scenario Analysis \u2014 GPT-5.3";
+        title = "Scenario Analysis \u2014 GPT-5.4";
       } else if (section === "recommendation") {
         sectionData = { recommendation: lastPayload.recommendation, edgeComposite: lastPayload.edgeComposite, scenarios: lastPayload.scenarios };
-        title = "Structure Recommendation \u2014 GPT-5.3";
+        title = "Structure Recommendation \u2014 GPT-5.4";
       } else if (section === "mc_results") {
         sectionData = lastPayload.monteCarlo;
-        title = "Monte Carlo Results \u2014 GPT-5.3";
+        title = "Monte Carlo Results \u2014 GPT-5.4";
       } else if (section === "historical") {
         sectionData = { historicalComparisons: lastPayload.historicalComparisons, spike: lastPayload.spike };
-        title = "Historical Shocks \u2014 GPT-5.3";
+        title = "Historical Shocks \u2014 GPT-5.4";
       }
       requestInsight(section, section, sectionData, title);
       return;
@@ -245,7 +245,7 @@
     var h = "";
     for (var i = 0; i < edges.length; i++) {
       var e = edges[i];
-      var btn = inlineInsightBtn("edge", e.edgeId || e.label, e, e.label + " \u2014 GPT-5.3");
+      var btn = inlineInsightBtn("edge", e.edgeId || e.label, e, e.label + " \u2014 GPT-5.4");
       h += card(e.label,
         '<span class="e12MonoVal">' + fmt1(e.score) + "</span> <span style='font-size:13px;color:var(--muted);font-weight:600'>/ 100</span>",
         esc(e.interpretation) + "<br>" + btn, e.score);

@@ -319,7 +319,7 @@ def generate_e1_trade_analysis(
     if len(payload_str) > 30000:
         payload_str = payload_str[:30000]
 
-    model = str(f.E1_ADVISOR_MODEL or "gpt-5.2").strip()
+    model = str(f.E1_ADVISOR_MODEL or "gpt-5.4").strip()
 
     try:
         response = client.chat.completions.create(

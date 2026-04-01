@@ -1,6 +1,6 @@
 """Engine 7 – LLM-augmented keyword auto-promotion.
 
-Nightly review pipeline that uses gpt-5.2 to identify emerging macro
+Nightly review pipeline that uses gpt-5.4 to identify emerging macro
 narratives not covered by the static THEME_KEYWORD_MAP, then auto-promotes
 them into the theme classifier via a two-track system:
 
@@ -30,7 +30,7 @@ _LOG = logging.getLogger(__name__)
 _DYNAMIC_THEMES_PATH = Path(__file__).resolve().parent.parent / "data" / "dynamic_themes.json"
 _FILE_LOCK = threading.Lock()
 
-_LLM_MODEL = "gpt-5.2"
+_LLM_MODEL = "gpt-5.4"
 _MAX_ACTIVE_DYNAMIC = 3
 _TRACK1_SATURATION = 0.10
 _TRACK2_CONFIRM_NIGHTS = 2
@@ -351,7 +351,7 @@ def _enforce_max_active(store: Dict[str, Any], date_str: str) -> None:
 
 
 def _call_llm(headlines: List[str]) -> List[dict]:
-    """Call gpt-5.2 to identify emerging narratives. Returns raw proposals."""
+    """Call gpt-5.4 to identify emerging narratives. Returns raw proposals."""
     try:
         from backend.llm_client import _get_openai_client
     except ImportError:

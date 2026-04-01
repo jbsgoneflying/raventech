@@ -142,7 +142,7 @@ class FeatureFlags:
     # Engine 2 AI Trade Advisor
     ENGINE2_MULTI_WING: bool = True
     ENGINE2_ADVISOR_ENABLED: bool = True
-    ENGINE2_ADVISOR_MODEL: str = "gpt-5.2"
+    ENGINE2_ADVISOR_MODEL: str = "gpt-5.4"
     ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
     ENGINE2_TRADE_TTL_S: int = 60 * 86400   # 60 days
     ENGINE2_TRADE_MAX_INDEX: int = 100
@@ -163,7 +163,7 @@ class FeatureFlags:
 
     # --- Engine 1: Earnings IC Advisor (vol crush premium harvesting) ---
     E1_ADVISOR_ENABLED: bool = True
-    E1_ADVISOR_MODEL: str = "gpt-5.2"
+    E1_ADVISOR_MODEL: str = "gpt-5.4"
     E1_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
     E1_EM_MULTS: str = "1.0,1.5,2.0"
     E1_WING_WIDTH_PTS: str = "2.5,5,7.5,10"
@@ -292,7 +292,7 @@ class FeatureFlags:
     ENGINE8_CONTINUATION_PROB_MIN: float = 0.55        # Min probability for CONTINUE
     ENGINE8_REVERSION_PROB_MIN: float = 0.55           # Min probability for FADE
     ENGINE8_ENABLE_LLM_CLASSIFY: bool = True           # Use LLM for event classification
-    ENGINE8_LLM_MODEL_VERSION: str = "gpt-4o-2024-08-06"
+    ENGINE8_LLM_MODEL_VERSION: str = "gpt-5.4"
     ENGINE8_LOOKBACK_EVENTS: int = 40                  # Historical events to consider
     ENGINE8_MAX_CONTROLLED_LOSS_PCT: float = 50.0      # Max % of entry credit loss for "controlled_loss"
 
@@ -413,7 +413,7 @@ class FeatureFlags:
             ENGINE2_POLICY_MAX_MAE95_X_WING=_get_float("ENGINE2_POLICY_MAX_MAE95_X_WING", 1.0),
             ENGINE2_MULTI_WING=_get_bool("ENGINE2_MULTI_WING", True),
             ENGINE2_ADVISOR_ENABLED=_get_bool("ENGINE2_ADVISOR_ENABLED", True),
-            ENGINE2_ADVISOR_MODEL=os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.2"),
+            ENGINE2_ADVISOR_MODEL=os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.4"),
             ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
             ENGINE2_TRADE_TTL_S=_get_int("ENGINE2_TRADE_TTL_S", 60 * 86400),
             ENGINE2_TRADE_MAX_INDEX=_get_int("ENGINE2_TRADE_MAX_INDEX", 100),
@@ -429,7 +429,7 @@ class FeatureFlags:
             ENGINE2_MACRO_BASE_REFUNDING=_get_float("ENGINE2_MACRO_BASE_REFUNDING", 0.5),
 
             E1_ADVISOR_ENABLED=_get_bool("E1_ADVISOR_ENABLED", True),
-            E1_ADVISOR_MODEL=os.getenv("E1_ADVISOR_MODEL", "gpt-5.2"),
+            E1_ADVISOR_MODEL=os.getenv("E1_ADVISOR_MODEL", "gpt-5.4"),
             E1_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E1_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
             E1_EM_MULTS=os.getenv("E1_EM_MULTS", "1.0,1.5,2.0"),
             E1_WING_WIDTH_PTS=os.getenv("E1_WING_WIDTH_PTS", "2.5,5,7.5,10"),
@@ -569,7 +569,7 @@ class FeatureFlags:
             ENGINE8_CONTINUATION_PROB_MIN=_get_float("ENGINE8_CONTINUATION_PROB_MIN", 0.55),
             ENGINE8_REVERSION_PROB_MIN=_get_float("ENGINE8_REVERSION_PROB_MIN", 0.55),
             ENGINE8_ENABLE_LLM_CLASSIFY=_get_bool("ENGINE8_ENABLE_LLM_CLASSIFY", True),
-            ENGINE8_LLM_MODEL_VERSION=os.getenv("ENGINE8_LLM_MODEL_VERSION", "gpt-4o-2024-08-06"),
+            ENGINE8_LLM_MODEL_VERSION=os.getenv("ENGINE8_LLM_MODEL_VERSION", "gpt-5.4"),
             ENGINE8_LOOKBACK_EVENTS=_get_int("ENGINE8_LOOKBACK_EVENTS", 40),
             ENGINE8_MAX_CONTROLLED_LOSS_PCT=_get_float("ENGINE8_MAX_CONTROLLED_LOSS_PCT", 50.0),
 

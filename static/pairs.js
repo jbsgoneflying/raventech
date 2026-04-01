@@ -308,7 +308,7 @@
     });
   }
 
-  /* ── Desk View popup (GPT-5.2 on-click insight) ───────────────────── */
+  /* ── Desk View popup (GPT-5.4 on-click insight) ───────────────────── */
   var popup       = document.getElementById("pairsInsightPopup");
   var popupTitle  = document.getElementById("pairsInsightTitle");
   var popupBody   = document.getElementById("pairsInsightBody");
@@ -342,7 +342,7 @@
     popupBody.innerHTML =
       '<div class="pairsInsightLoading">' +
       '<span class="pairsInsightDot"></span><span class="pairsInsightDot"></span><span class="pairsInsightDot"></span>' +
-      '<br>Generating desk view with GPT-5.2…</div>';
+      '<br>Generating desk view with GPT-5.4…</div>';
 
     /* Abort previous request */
     if (_activeAbort) { try { _activeAbort.abort(); } catch (e) {} }

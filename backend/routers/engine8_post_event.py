@@ -704,7 +704,7 @@ async def engine8_history(
 
 @router.post("/api/engine8/desk-notes")
 def engine8_desk_notes(body: dict):
-    """Engine 8: Generate GPT-5.2 senior quant desk notes for the earnings playbook."""
+    """Engine 8: Generate GPT-5.4 senior quant desk notes for the earnings playbook."""
     payload_data = body.get("payload")
     if not payload_data:
         raise HTTPException(status_code=400, detail="Missing 'payload' in request body")
@@ -722,7 +722,7 @@ def engine8_desk_notes(body: dict):
             payload_str = payload_str[:12000]
 
         resp = client.chat.completions.create(
-            model="gpt-5.2",
+            model="gpt-5.4",
             messages=[
                 {"role": "system", "content": _E8_DESK_NOTES_SYSTEM},
                 {"role": "user", "content": payload_str},
@@ -737,7 +737,7 @@ def engine8_desk_notes(body: dict):
         if parsed is None:
             raise HTTPException(status_code=502, detail="LLM returned unparseable response")
 
-        parsed["_source"] = "gpt-5.2"
+        parsed["_source"] = "gpt-5.4"
         parsed["_ticker"] = payload_data.get("ticker", "")
         return parsed
 
@@ -750,7 +750,7 @@ def engine8_desk_notes(body: dict):
 
 @router.post("/api/engine8/row-playbook")
 def engine8_row_playbook(body: dict):
-    """Engine 8: Generate GPT-5.2 trade ticket for a single scenario row."""
+    """Engine 8: Generate GPT-5.4 trade ticket for a single scenario row."""
     scenario = body.get("scenario")
     context = body.get("context", {})
     if not scenario:
@@ -795,7 +795,7 @@ def engine8_row_playbook(body: dict):
             payload_str = payload_str[:16000]
 
         resp = llm_client.chat.completions.create(
-            model="gpt-5.2",
+            model="gpt-5.4",
             messages=[
                 {"role": "system", "content": _E8_ROW_PLAYBOOK_SYSTEM},
                 {"role": "user", "content": payload_str},
@@ -810,7 +810,7 @@ def engine8_row_playbook(body: dict):
         if parsed is None:
             raise HTTPException(status_code=502, detail="LLM returned unparseable response")
 
-        parsed["_source"] = "gpt-5.2"
+        parsed["_source"] = "gpt-5.4"
         parsed["_scenario_key"] = scenario.get("key", "")
         return parsed
 
@@ -921,9 +921,9 @@ def engine8_activation_scan(body: dict):
         if len(payload_str) > 20000:
             payload_str = payload_str[:20000]
 
-        # 7. Call GPT-5.2
+        # 7. Call GPT-5.4
         resp = llm_client.chat.completions.create(
-            model="gpt-5.2",
+            model="gpt-5.4",
             messages=[
                 {"role": "system", "content": _E8_ACTIVATION_SYSTEM},
                 {"role": "user", "content": payload_str},
@@ -938,7 +938,7 @@ def engine8_activation_scan(body: dict):
         if parsed is None:
             raise HTTPException(status_code=502, detail="LLM returned unparseable response")
 
-        parsed["_source"] = "gpt-5.2"
+        parsed["_source"] = "gpt-5.4"
         parsed["_metrics"] = metrics
         parsed["_matched_scenario_key"] = (matched or {}).get("key", "")
         return parsed

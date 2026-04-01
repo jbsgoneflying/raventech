@@ -8,7 +8,7 @@ Endpoints:
   GET  /api/engine12/scan       — Full analysis dashboard
   GET  /api/engine12/historical — Historical shock comparison table
   GET  /api/engine12/simulate   — Custom Monte Carlo with user scenario weights
-  POST /api/engine12/explain    — GPT-5.3 contextual desk notes for any card/section
+  POST /api/engine12/explain    — GPT-5.4 contextual desk notes for any card/section
 """
 
 from __future__ import annotations
@@ -726,7 +726,7 @@ def engine12_simulate(
 
 
 # ---------------------------------------------------------------------------
-# GPT-5.3 Contextual Desk Notes
+# GPT-5.4 Contextual Desk Notes
 # ---------------------------------------------------------------------------
 
 _E12_SYSTEM_PROMPT = """You are a senior volatility trader and quant strategist running the VIX options desk at a top quantitative family office. You have 20+ years of experience fading geopolitical VIX spikes.
@@ -764,7 +764,7 @@ Rules:
 
 @router.post("/api/engine12/explain")
 def engine12_explain(body: dict):
-    """Engine 12: GPT-5.3 contextual desk notes for any card or section."""
+    """Engine 12: GPT-5.4 contextual desk notes for any card or section."""
     flags = get_flags()
     if not flags.ENABLE_ENGINE12_VIX_FADE:
         raise HTTPException(status_code=503, detail="Engine 12 disabled.")
@@ -790,7 +790,7 @@ def engine12_explain(body: dict):
     try:
         client = openai.OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-5.2",
+            model="gpt-5.4",
             messages=[
                 {"role": "system", "content": _E12_SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
