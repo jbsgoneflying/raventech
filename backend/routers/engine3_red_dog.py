@@ -1,4 +1,8 @@
-"""Engine 3: Red Dog Reversal Scanner routes."""
+"""Engine 3 (backend) / Engine 4 (UI): Red Dog Reversal Scanner routes.
+
+Backend module is named engine3 for historical reasons. Users see this as
+Engine 4 in the navigation. See ENGINE_REGISTRY in config.py.
+"""
 from __future__ import annotations
 
 import logging

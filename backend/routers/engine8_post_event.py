@@ -1,4 +1,8 @@
-"""Engine 8: Post-Event Trade Extension router."""
+"""Engine 8 (backend) / Engine 7 (UI): Post-Event Trade Extension router.
+
+Backend module is named engine8 for historical reasons. Users see this as
+Engine 7 in the navigation. See ENGINE_REGISTRY in config.py.
+"""
 from __future__ import annotations
 
 import datetime as dt

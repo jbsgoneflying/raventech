@@ -1,4 +1,8 @@
-"""Engine 7: Thematic Relative Value (Pairs) router."""
+"""Engine 7 (backend) / Engine 6 (UI): Thematic Relative Value (Pairs) router.
+
+Backend module is named engine7 for historical reasons. Users see this as
+Engine 6 in the navigation. See ENGINE_REGISTRY in config.py.
+"""
 from __future__ import annotations
 
 import datetime as dt
@@ -125,6 +129,7 @@ def engine7_pairs_scan(
             as_of_date=date,
             enable_orats=flags.ENGINE7_ENABLE_ORATS_VOL,
             enable_llm_annotation=flags.ENGINE7_ENABLE_LLM_ANNOTATION,
+            enable_llm_theme_scoring=flags.ENGINE7_ENABLE_LLM_THEME_SCORING,
             theme_required=flags.ENGINE7_THEME_REQUIRED,
             z_score_window=flags.ENGINE7_Z_SCORE_WINDOW,
             z_entry_threshold=flags.ENGINE7_Z_ENTRY_THRESHOLD,
@@ -166,6 +171,7 @@ def engine7_pairs_scan(
             except Exception as gate_err:
                 LOG.warning("Gate injection failed for engine7: %s", gate_err)
 
+        result["updatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
         return result
 
     except Exception as exc:

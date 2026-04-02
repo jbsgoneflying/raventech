@@ -1,4 +1,8 @@
-"""Engine 4: Ichimoku Cloud Continuation Scanner routes."""
+"""Engine 4 (backend) / Engine 5 (UI): Ichimoku Cloud Continuation Scanner routes.
+
+Backend module is named engine4 for historical reasons. Users see this as
+Engine 5 in the navigation. See ENGINE_REGISTRY in config.py.
+"""
 from __future__ import annotations
 
 import logging

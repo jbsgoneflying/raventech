@@ -1,4 +1,8 @@
-"""Engine 9: Credit Stress Drift router."""
+"""Engine 9 (backend) / Engine 8 (UI): Credit Stress Drift Detection router.
+
+Backend module is named engine9 for historical reasons. Users see this as
+Engine 8 in the navigation. See ENGINE_REGISTRY in config.py.
+"""
 from __future__ import annotations
 
 import datetime as dt
@@ -332,15 +336,20 @@ def engine9_scan():
         try:
             all_news_articles: list[dict] = []
             week_ago = (dt.date.today() - dt.timedelta(days=7)).isoformat()
-            for tk in (TIER_1_BDCS[:2] + TIER_2_ALT_MANAGERS[:2]):
+            news_tickers = TIER_1_BDCS + TIER_2_ALT_MANAGERS + TIER_3_CREDIT_ETFS
+            for tk in news_tickers:
                 try:
-                    resp = eodhd.get_news(ticker=f"{tk}.US", from_date=week_ago, limit=15)
+                    resp = eodhd.get_news(ticker=f"{tk}.US", from_date=week_ago, limit=10)
                     all_news_articles.extend(resp.rows or [])
                 except Exception:
                     pass
             relevant = filter_credit_news(all_news_articles)
-            relevant = relevant[:15]
+            relevant = relevant[:20]
             news_data = {"articles": relevant, "llm_scored": False, "avg_relevance": 0}
+
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            if api_key and relevant:
+                news_data = score_news_with_llm(relevant, api_key)
             store_news_scan(today_str_news, news_data)
         except Exception as e:
             LOG.warning("News cycle scan failed: %s", e)
@@ -449,6 +458,15 @@ def engine9_scan():
         "watchlist": watchlist_by_tier,
         "news": news_data,
         "updated_at": dt.datetime.utcnow().isoformat() + "Z",
+        "data_freshness": {
+            "fred_hy_oas_points": len(hy_oas_values),
+            "eodhd_tickers_with_data": sum(1 for v in price_data.values() if len(v) >= 5),
+            "eodhd_tickers_total": len(all_tickers),
+            "eodhd_stale": sum(1 for v in price_data.values() if len(v) < 5),
+            "insider_tickers_queried": len(insider_per_ticker),
+            "news_articles_found": len((news_data or {}).get("articles", [])),
+            "orats_available": orats is not None,
+        },
     }
 
     with engine9_cache_lock:

@@ -4,6 +4,25 @@ import os
 from dataclasses import dataclass
 from typing import List, Tuple
 
+# Canonical mapping: UI engine number -> backend module name and API prefix.
+# UI numbering is the user-facing standard. Backend file/API names are frozen
+# for backwards compatibility. Reference this table, not file names, when
+# discussing engine numbers in logs, comments, or user-facing text.
+ENGINE_REGISTRY = {
+    1:  {"name": "Earnings Hold Risk",               "backend": "engine1_breach",      "api": "/api/breach"},
+    2:  {"name": "SPX Iron Condor Scanner",           "backend": "engine2_spx_ic",      "api": "/api/spx-ic"},
+    3:  {"name": "Global Lead-Lag Regime",            "backend": "engine5_lead_lag",    "api": "/api/engine5"},
+    4:  {"name": "Mean-Reversion Scanner (Red Dog)",  "backend": "engine3_red_dog",     "api": "/api/engine3-red-dog"},
+    5:  {"name": "Trend-Continuation (Ichimoku)",     "backend": "engine4_ichimoku",    "api": "/api/engine4-ichimoku"},
+    6:  {"name": "Thematic Pairs Scanner",            "backend": "engine7_pairs",       "api": "/api/engine7-pairs"},
+    7:  {"name": "Post-Event Extension Evaluator",    "backend": "engine8_post_event",  "api": "/api/engine8"},
+    8:  {"name": "Credit Stress Drift Detection",     "backend": "engine9_credit",      "api": "/api/engine9"},
+    9:  {"name": "Earnings Calendar & Compare",       "backend": "calendar",            "api": "/api/calendar"},
+    10: {"name": "Multi-Ticker Compare",              "backend": "engine1_breach",      "api": "/api/breach-compare"},
+    11: {"name": "Macro Events & Headline Risk",      "backend": "market_intel",        "api": "/api/news-risk"},
+    12: {"name": "VIX Spike Fade",                    "backend": "engine12_vix_fade",   "api": "/api/engine12"},
+}
+
 
 def _get_bool(name: str, default: bool) -> bool:
     v = os.getenv(name)
@@ -258,8 +277,9 @@ class FeatureFlags:
     ENGINE7_Z_MOMENTUM_THRESHOLD: float = 1.0        # Min |z| for momentum mode
     ENGINE7_MAX_CONCURRENT_PAIRS: int = 5            # Max positions
     ENGINE7_THEME_REQUIRED: bool = True              # Enforce theme validation (INV-2)
-    ENGINE7_ENABLE_ORATS_VOL: bool = False           # Optional ORATS IV overlay (INV-5)
+    ENGINE7_ENABLE_ORATS_VOL: bool = True            # ORATS IV overlay for pairs scoring (INV-5)
     ENGINE7_ENABLE_LLM_ANNOTATION: bool = False      # Optional LLM theme annotation (INV-1)
+    ENGINE7_ENABLE_LLM_THEME_SCORING: bool = True   # LLM-enhanced theme scoring (demote false positives, catch missed themes)
     ENGINE7_OVERLAP_CORR_THRESHOLD: float = 0.70     # Ratio-return correlation cap (INV-3)
     ENGINE7_OVERLAP_CORR_WINDOW: int = 20            # Rolling correlation window (trading days)
 
@@ -518,8 +538,9 @@ class FeatureFlags:
             ENGINE7_Z_MOMENTUM_THRESHOLD=_get_float("ENGINE7_Z_MOMENTUM_THRESHOLD", 1.0),
             ENGINE7_MAX_CONCURRENT_PAIRS=_get_int("ENGINE7_MAX_CONCURRENT_PAIRS", 5),
             ENGINE7_THEME_REQUIRED=_get_bool("ENGINE7_THEME_REQUIRED", True),
-            ENGINE7_ENABLE_ORATS_VOL=_get_bool("ENGINE7_ENABLE_ORATS_VOL", False),
+            ENGINE7_ENABLE_ORATS_VOL=_get_bool("ENGINE7_ENABLE_ORATS_VOL", True),
             ENGINE7_ENABLE_LLM_ANNOTATION=_get_bool("ENGINE7_ENABLE_LLM_ANNOTATION", False),
+            ENGINE7_ENABLE_LLM_THEME_SCORING=_get_bool("ENGINE7_ENABLE_LLM_THEME_SCORING", True),
             ENGINE7_OVERLAP_CORR_THRESHOLD=_get_float("ENGINE7_OVERLAP_CORR_THRESHOLD", 0.70),
             ENGINE7_OVERLAP_CORR_WINDOW=_get_int("ENGINE7_OVERLAP_CORR_WINDOW", 20),
             GATE_PAIRS_REGIME_ALLOW=os.getenv("GATE_PAIRS_REGIME_ALLOW", ""),

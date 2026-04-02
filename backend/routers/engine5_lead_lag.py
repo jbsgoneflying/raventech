@@ -1,4 +1,9 @@
-"""Engine 5: Global Lead-Lag Engine routes."""
+"""Engine 5 (backend) / Engine 3 (UI): Global Lead-Lag Regime routes.
+
+Backend module is named engine5 for historical reasons. Users see this as
+Engine 3 in the navigation. See ENGINE_REGISTRY in config.py for the
+canonical mapping.
+"""
 from __future__ import annotations
 
 import asyncio

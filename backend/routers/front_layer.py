@@ -7,7 +7,7 @@ import os
 import threading
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from backend.deps import (
@@ -342,6 +342,145 @@ def api_front_layer_refresh():
         "brief_regenerated": brief_source == "llm",
         "llm": llm_diag,
     }
+
+
+@router.get("/api/front-layer/backtest/summary")
+def api_backtest_summary():
+    """Paper-trade performance summary across all engines."""
+    from backend.backtest_engine import get_backtest_summary
+    store = get_store_optional()
+    return get_backtest_summary(store=store).to_dict()
+
+
+@router.get("/api/front-layer/backtest/trades")
+def api_backtest_trades(
+    engine_id: Optional[int] = Query(None, description="Filter by engine ID"),
+    status: Optional[str] = Query(None, description="Filter by status: open|closed"),
+):
+    """List paper trades with optional filtering."""
+    from backend.backtest_engine import get_paper_trades
+    store = get_store_optional()
+    trades = get_paper_trades(store=store, engine_id=engine_id, status=status)
+    return {"trades": [t.to_dict() for t in trades], "count": len(trades)}
+
+
+@router.post("/api/front-layer/backtest/trade")
+def api_backtest_log_trade(body: dict = Body(...)):
+    """Log a new paper trade from any engine signal."""
+    from backend.backtest_engine import PaperTrade, log_paper_trade
+    store = get_store_optional()
+    trade = PaperTrade(**{k: v for k, v in body.items()
+                          if k in PaperTrade.__dataclass_fields__})
+    trade_id = log_paper_trade(trade, store=store)
+    return {"status": "ok", "tradeId": trade_id}
+
+
+@router.post("/api/front-layer/backtest/trade/{trade_id}/close")
+def api_backtest_close_trade(trade_id: str, body: dict = Body(...)):
+    """Close an open paper trade and compute P&L."""
+    from backend.backtest_engine import close_paper_trade
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    result = close_paper_trade(
+        trade_id,
+        exit_price=float(body.get("exit_price", 0)),
+        exit_reason=str(body.get("exit_reason", "manual")),
+        store=store,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found or already closed")
+    return {"status": "ok", "trade": result.to_dict()}
+
+
+@router.get("/api/front-layer/consensus")
+def api_front_layer_consensus():
+    """Cross-engine consensus dashboard.
+
+    Aggregates signals from regime (Engine 3), IC scanner (Engine 2),
+    VIX fade (Engine 12), and credit stress (Engine 8) into a single
+    agreement/disagreement view with composite conviction scoring.
+    """
+    from backend.consensus_engine import build_consensus_from_apis
+
+    store = get_store_optional()
+    regime_data = None
+    ic_data = None
+    vix_data = None
+    credit_data = None
+
+    # Fetch regime from Engine 5 snapshot
+    if store is not None:
+        try:
+            from backend.engine5_snapshot import select_best_snapshot
+            flags = get_flags()
+            snap = select_best_snapshot(
+                store,
+                max_age_days=flags.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
+                snapshot_ttl=flags.ENGINE5_SNAPSHOT_TTL_S,
+            )
+            if snap:
+                regime_data = snap.get("data", {}).get("regime", {})
+        except Exception:
+            pass
+
+    # Fetch VIX fade from cache
+    if store is not None:
+        try:
+            cached_vix = store.get_json("engine12:cache:scan")
+            if cached_vix:
+                vix_data = cached_vix
+        except Exception:
+            pass
+
+    # Fetch credit stress from cache
+    if store is not None:
+        try:
+            cached_credit = store.get_json("engine9:cache:scan")
+            if cached_credit:
+                credit_data = cached_credit
+        except Exception:
+            pass
+
+    result = build_consensus_from_apis(
+        regime_data=regime_data,
+        ic_data=ic_data,
+        vix_data=vix_data,
+        credit_data=credit_data,
+    )
+    return result.to_dict()
+
+
+@router.get("/api/front-layer/vol-surface")
+def api_front_layer_vol_surface(ticker: str = Query("SPY", description="Underlying: SPY or SPX")):
+    """Intraday vol surface snapshot.
+
+    Monitors option-implied volatility surface for skew, term structure,
+    and anomalies. Useful for Engines 2 (IC width selection) and 12
+    (VIX fade context).
+    """
+    from backend.vol_surface_engine import get_vol_surface
+    orats = get_client_optional()
+    if orats is None:
+        raise HTTPException(status_code=503, detail="ORATS unavailable")
+    store = get_store_optional()
+    surface = get_vol_surface(orats, ticker=ticker.upper(), store=store)
+    return surface.to_dict()
+
+
+@router.get("/api/front-layer/macro-proximity")
+def api_front_layer_macro_proximity():
+    """System-wide macro event proximity signal.
+
+    Returns upcoming high-impact macro events (FOMC, CPI, NFP, etc.)
+    with a composite multiplier and per-engine sizing guidance.
+    Consumed by all engines for position sizing and structure selection.
+    """
+    from backend.macro_calendar_engine import get_macro_proximity
+    bz = get_benzinga_client_optional()
+    store = get_store_optional()
+    result = get_macro_proximity(benzinga_client=bz, store=store)
+    return result.to_dict()
 
 
 @router.get("/api/front-layer/morning-brief")

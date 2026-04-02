@@ -36,6 +36,7 @@ class GlobalRegime:
     allowed_structures: List[str] = field(default_factory=list)
     position_size_modifier: float = 1.0
     suppression_flags: List[str] = field(default_factory=list)
+    small_cap_bias: Optional[Dict[str, float]] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -218,6 +219,41 @@ def _compute_iv_stress(
     return round(_clamp(0, 100, spy_iv_rank * 100), 2)
 
 
+def _compute_small_cap_bias(
+    iwm_rets: List[float],
+    spy_rets: List[float],
+) -> Optional[Dict[str, float]]:
+    """Compute IWM-SPY relative strength as a regime quality signal.
+
+    Small-cap outperformance (IWM > SPY) confirms risk-on breadth.
+    Small-cap underperformance during apparent risk-on is a divergence warning.
+
+    Returns dict with relative_strength_5d, bias label, and divergence flag,
+    or None if data is insufficient.
+    """
+    if len(iwm_rets) < 3 or len(spy_rets) < 3:
+        return None
+
+    n = min(len(iwm_rets), len(spy_rets))
+    iwm_cum = sum(iwm_rets[-n:])
+    spy_cum = sum(spy_rets[-n:])
+    rel_strength = iwm_cum - spy_cum
+
+    if rel_strength > 0.5:
+        bias = "small_cap_leading"
+    elif rel_strength < -0.5:
+        bias = "small_cap_lagging"
+    else:
+        bias = "neutral"
+
+    return {
+        "iwm_5d_return": round(iwm_cum, 4),
+        "spy_5d_return": round(spy_cum, 4),
+        "relative_strength_5d": round(rel_strength, 4),
+        "bias": bias,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Regime classification
 # ---------------------------------------------------------------------------
@@ -231,6 +267,7 @@ def classify_regime(
     commodity_stress: float,
     iv_stress: float,
     yield_snapshot: Optional[dict] = None,
+    small_cap_bias: Optional[Dict[str, float]] = None,
     stressed_threshold: float = 75.0,
     risk_off_threshold: float = 55.0,
     transitional_threshold: float = 30.0,
@@ -243,6 +280,10 @@ def classify_regime(
     Uses composite score plus per-component OR triggers:
     - Stressed: score >= stressed_threshold OR fx >= 80 OR iv >= 70
     - Risk-On:  score <= transitional_threshold AND fx <= 45 AND iv <= 55
+
+    If small_cap_bias is provided, it is stored on the regime and used to
+    generate a divergence warning when risk-on regime coincides with
+    small-cap underperformance.
     """
     score = (
         0.30 * fx_stress
@@ -298,6 +339,12 @@ def classify_regime(
     if commodity_stress >= 85:
         flags.append("commodity_stress_extreme")
 
+    # IWM small-cap divergence: risk-on regime + small-cap lagging = breadth warning
+    if small_cap_bias and small_cap_bias.get("bias") == "small_cap_lagging":
+        if label == "Risk-On":
+            flags.append("small_cap_divergence")
+            size_mod = min(size_mod, 0.85)
+
     return GlobalRegime(
         date=date,
         label=label,
@@ -311,6 +358,7 @@ def classify_regime(
         allowed_structures=allowed,
         position_size_modifier=size_mod,
         suppression_flags=flags,
+        small_cap_bias=small_cap_bias,
     )
 
 
@@ -374,6 +422,11 @@ def compute_regime_from_bars(
     # IV stress
     iv_stress = _compute_iv_stress(spy_iv_rank)
 
+    # IWM small-cap bias (relative to SPY)
+    iwm_rets = _extract_recent_returns(bars_history.get("IWM.US", []), 5)
+    spy_rets = _extract_recent_returns(bars_history.get("SPY.US", []), 5)
+    small_cap_bias = _compute_small_cap_bias(iwm_rets, spy_rets)
+
     return classify_regime(
         date=date,
         fx_stress=fx_stress,
@@ -381,6 +434,7 @@ def compute_regime_from_bars(
         commodity_stress=commodity_stress,
         iv_stress=iv_stress,
         yield_snapshot=latest_yield,
+        small_cap_bias=small_cap_bias,
         stressed_threshold=stressed_threshold,
         risk_off_threshold=risk_off_threshold,
         transitional_threshold=transitional_threshold,

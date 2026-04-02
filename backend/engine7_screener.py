@@ -34,6 +34,7 @@ from backend.engine7_theme import (
     ThemeResult,
     annotate_themes_llm,
     classify_themes_deterministic,
+    enhance_themes_with_llm,
     fetch_headlines,
     score_theme_alignment,
 )
@@ -387,6 +388,7 @@ def compute_engine7_scan(
     *,
     enable_orats: bool = False,
     enable_llm_annotation: bool = False,
+    enable_llm_theme_scoring: bool = True,
     theme_required: bool = True,
     z_score_window: int = 40,
     z_entry_threshold: float = 1.5,
@@ -442,6 +444,13 @@ def compute_engine7_scan(
         headlines = fetch_headlines(date_str, lookback_days=7)
         theme_result = classify_themes_deterministic(headlines)
         theme_result.date = date_str
+
+        # 3b. LLM-enhanced theme scoring (demotes false positives, catches missed themes)
+        if enable_llm_theme_scoring and headlines:
+            theme_result = enhance_themes_with_llm(
+                theme_result, headlines, date_str, store=redis_store,
+            )
+
         with _theme_cache_lock:
             _theme_cache[theme_cache_key] = theme_result
 
@@ -454,9 +463,39 @@ def compute_engine7_scan(
         )
         theme_result.llm_annotation = llm_annotation
 
+    # 4b. Dynamic pair discovery (cointegration screen)
+    discovered_pairs: List[PairDefinition] = []
+    try:
+        from backend.engine7_discovery import discover_pairs, DISCOVERY_POOL
+        disc_tickers = [f"{t}.US" for t in DISCOVERY_POOL if f"{t}.US" not in all_bars]
+        if disc_tickers:
+            disc_bars = fetch_bars_for_tickers(
+                [t.replace(".US", "") for t in disc_tickers],
+                today, lookback_days=max_lookback, max_workers=max_workers,
+            )
+            all_bars.update(disc_bars)
+        found = discover_pairs(all_bars, max_pairs=5)
+        existing_ids = {p.pair_id for p in library}
+        for dp in found:
+            if dp.pair_id not in existing_ids:
+                discovered_pairs.append(PairDefinition(
+                    pair_id=dp.pair_id,
+                    long_ticker=dp.long_ticker,
+                    short_ticker=dp.short_ticker,
+                    tier=3,
+                    label=f"Discovered: {dp.long_ticker}/{dp.short_ticker}",
+                    default_lookback_days=120,
+                ))
+        if discovered_pairs:
+            _LOG.info("Engine7 discovery: adding %d dynamic pairs to scan", len(discovered_pairs))
+    except Exception as disc_err:
+        _LOG.warning("Engine7 dynamic pair discovery failed: %s", disc_err)
+
+    scan_library = list(library) + discovered_pairs
+
     # 5. Analyze all pairs
     signals: List[PairSignal] = []
-    for pair_def in library:
+    for pair_def in scan_library:
         bars_long = all_bars.get(pair_def.long_ticker, [])
         bars_short = all_bars.get(pair_def.short_ticker, [])
 
@@ -571,8 +610,11 @@ def compute_engine7_scan(
             "dynamicThemeCount": len(dynamic_theme_ids),
             "dynamicThemeNames": sorted(dynamic_theme_ids),
             "themeRequired": theme_required,
+            "discoveredPairs": len(discovered_pairs),
+            "discoveredPairIds": [p.pair_id for p in discovered_pairs],
             "oratsEnabled": enable_orats,
             "llmAnnotationEnabled": enable_llm_annotation,
+            "llmThemeScoringEnabled": enable_llm_theme_scoring,
             "zScoreWindow": z_score_window,
             "maxConcurrentPairs": max_concurrent,
             "overlapCorrThreshold": overlap_corr_threshold,

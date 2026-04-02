@@ -72,6 +72,22 @@
       "currency": "USD",
       "us_targets": ["SPY"],
       "theme": "us_reference"
+    },
+    {
+      "symbol": "SPY.US",
+      "name": "SPY (S&P 500 ETF)",
+      "region": "us",
+      "currency": "USD",
+      "us_targets": [],
+      "theme": "regime_bias_reference"
+    },
+    {
+      "symbol": "IWM.US",
+      "name": "IWM (Russell 2000 ETF)",
+      "region": "us",
+      "currency": "USD",
+      "us_targets": [],
+      "theme": "small_cap_bias"
     }
   ],
   "fx": [

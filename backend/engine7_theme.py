@@ -569,6 +569,197 @@ def annotate_themes_llm(
 
 
 # ---------------------------------------------------------------------------
+# Layer 3: LLM-enhanced theme scoring (upgrades keyword classification)
+# ---------------------------------------------------------------------------
+
+_LLM_SCORING_PROMPT = """You are a quantitative macro theme classifier. Given a list of market
+headlines and a set of predefined themes, score how strongly each theme is
+supported by the headlines.
+
+Themes to evaluate:
+{theme_list}
+
+Headlines (most recent first):
+{headlines}
+
+For each theme, return a confidence score from 0.0 to 1.0 indicating how
+strongly the headlines support that theme being active right now. A score of
+0.0 means no evidence; 1.0 means overwhelming evidence.
+
+Also flag up to 2 themes that are ABSENT from the predefined list but clearly
+present in the headlines (novel themes).
+
+Respond with valid JSON only:
+{{
+  "scores": {{
+    "<theme_id>": <0.0-1.0>,
+    ...
+  }},
+  "novel_themes": [
+    {{"theme_id": "<snake_case>", "label": "<short label>", "confidence": <0.0-1.0>, "evidence": "<one sentence>"}}
+  ]
+}}"""
+
+_LLM_SCORING_REDIS_PREFIX = "engine7:theme_llm_scores"
+
+
+def _scoring_cache_key(date_str: str, headlines: List[str], model: str) -> str:
+    sorted_hl = sorted(headlines)
+    payload = json.dumps(sorted_hl, sort_keys=True) + "|scoring|" + model
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return f"{_LLM_SCORING_REDIS_PREFIX}:{date_str}:{digest}"
+
+
+def enhance_themes_with_llm(
+    keyword_result: "ThemeResult",
+    headlines: List[str],
+    date_str: str,
+    *,
+    store: Any = None,
+    model: str = "gpt-5.4",
+    ttl_s: int = 7 * 86400,
+    activation_threshold: float = 0.3,
+) -> "ThemeResult":
+    """Enhance keyword-based ThemeResult with LLM confidence scores.
+
+    INV-1 guarantee maintained: if LLM fails, returns the original
+    keyword_result unchanged. Results are cached in Redis for deterministic
+    replay.
+
+    The LLM scores each theme 0.0-1.0. Themes with LLM confidence >= threshold
+    that were inactive in keyword classification are activated. Themes with
+    LLM confidence < 0.1 that were keyword-activated are demoted (likely
+    false positives from substring matching).
+    """
+    if not headlines:
+        return keyword_result
+
+    cache_key = _scoring_cache_key(date_str, headlines, model)
+
+    # Try Redis replay
+    llm_scores: Optional[dict] = None
+    if store is not None:
+        try:
+            cached = store.get_json(cache_key)
+            if cached is not None:
+                llm_scores = cached
+                _LOG.debug("Engine7 LLM theme scores replayed from Redis: %s", cache_key)
+        except Exception:
+            pass
+
+    if llm_scores is None:
+        try:
+            from backend.llm_client import _get_openai_client, _rate_limiter, _parse_desk_brief_json
+        except ImportError:
+            _LOG.debug("LLM client not available for Engine7 theme scoring")
+            return keyword_result
+
+        if not _rate_limiter.acquire():
+            _LOG.debug("Engine7 LLM theme scoring rate-limited; using keyword-only")
+            return keyword_result
+
+        client = _get_openai_client()
+        if client is None:
+            return keyword_result
+
+        theme_list = "\n".join(
+            f"- {tid}: {tdef.get('label', tid)}"
+            for tid, tdef in THEME_KEYWORD_MAP.items()
+        )
+        sorted_hl = sorted(headlines)
+        prompt = _LLM_SCORING_PROMPT.format(
+            theme_list=theme_list,
+            headlines="\n".join(f"- {h}" for h in sorted_hl[:60]),
+        )
+
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=800,
+                timeout=20,
+            )
+            content = resp.choices[0].message.content or ""
+            llm_scores = _parse_desk_brief_json(content)
+            if llm_scores is None:
+                _LOG.warning("Engine7 LLM theme scoring parse failed")
+                return keyword_result
+        except Exception as exc:
+            _LOG.warning("Engine7 LLM theme scoring failed: %s", exc)
+            return keyword_result
+
+        if store is not None:
+            try:
+                store.set_json(cache_key, llm_scores, ttl_s=ttl_s)
+            except Exception:
+                pass
+
+    scores_map = llm_scores.get("scores", {}) if isinstance(llm_scores, dict) else {}
+    if not scores_map:
+        return keyword_result
+
+    # Merge LLM scores into keyword result
+    enhanced_themes: List[ThemeClassification] = []
+    enhanced_active: List[str] = []
+
+    for tc in keyword_result.themes:
+        llm_conf = scores_map.get(tc.theme)
+        if llm_conf is None:
+            enhanced_themes.append(tc)
+            if tc.active:
+                enhanced_active.append(tc.theme)
+            continue
+
+        llm_conf = float(llm_conf)
+
+        if tc.active and llm_conf < 0.1:
+            _LOG.info(
+                "Engine7 LLM demoting false-positive theme %s (keyword=%d hits, llm=%.2f)",
+                tc.theme, tc.keyword_hits, llm_conf,
+            )
+            enhanced_themes.append(ThemeClassification(
+                theme=tc.theme, label=tc.label, active=False,
+                intensity=round(llm_conf * 100, 1),
+                keyword_hits=tc.keyword_hits,
+                sample_keywords=tc.sample_keywords,
+            ))
+        elif not tc.active and llm_conf >= activation_threshold:
+            _LOG.info(
+                "Engine7 LLM activating missed theme %s (keyword=%d hits, llm=%.2f)",
+                tc.theme, tc.keyword_hits, llm_conf,
+            )
+            new_intensity = round(max(llm_conf * 100, 25.0), 1)
+            enhanced_themes.append(ThemeClassification(
+                theme=tc.theme, label=tc.label, active=True,
+                intensity=new_intensity,
+                keyword_hits=tc.keyword_hits,
+                sample_keywords=tc.sample_keywords,
+            ))
+            enhanced_active.append(tc.theme)
+        else:
+            # Blend: keyword intensity weighted 60%, LLM 40%
+            blended = tc.intensity * 0.6 + (llm_conf * 100) * 0.4
+            enhanced_themes.append(ThemeClassification(
+                theme=tc.theme, label=tc.label,
+                active=tc.active,
+                intensity=round(blended, 1),
+                keyword_hits=tc.keyword_hits,
+                sample_keywords=tc.sample_keywords,
+            ))
+            if tc.active:
+                enhanced_active.append(tc.theme)
+
+    return ThemeResult(
+        date=keyword_result.date,
+        themes=enhanced_themes,
+        active_themes=enhanced_active,
+        headline_count=keyword_result.headline_count,
+        llm_annotation=keyword_result.llm_annotation,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Headline fetching helper
 # ---------------------------------------------------------------------------
 

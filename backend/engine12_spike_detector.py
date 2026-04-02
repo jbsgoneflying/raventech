@@ -94,12 +94,17 @@ def _clamp(lo: float, hi: float, x: float) -> float:
 
 
 def detect_vix_spike(closes: List[float]) -> SpikeSignal:
-    """Detect if current VIX move qualifies as a geopolitical shock.
+    """Detect if current VIX move qualifies as a tradeable spike.
 
-    Criteria:
-    (a) VIX prior 20d mean was in low-vol regime (< 20)
-    (b) Current VIX is > 20% above 20d MA
-    (c) Move is > 2 standard deviations from recent history
+    Detection thresholds (intentionally lower than academic 2-sigma):
+    - spike_pct > 15% above 20d MA
+    - z-score > 1.5 standard deviations
+
+    Rationale: for a fade engine, false negatives (missing a real spike)
+    are more costly than false positives (flagging a modest move). The
+    severity classifier and edge composite downstream filter out noise.
+    Pre-event regime (low_vol/normal/elevated/high_vol) is contextual
+    but does not gate detection.
     """
     if len(closes) < 21:
         return SpikeSignal()

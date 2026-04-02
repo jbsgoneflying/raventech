@@ -603,7 +603,14 @@
         try { renderHistorical(data); } catch (e) { console.error("[E12] renderHistorical:", e); }
         try { loadActiveTrades(); } catch (e) { console.error("[E12] loadActiveTrades:", e); }
         $("results").classList.remove("hidden");
-        $("status").textContent = "Analysis complete \u2014 " + (data.asOfDate || "");
+        var statusText = "Analysis complete \u2014 " + (data.asOfDate || "");
+        if (data.updatedAt) {
+          var updAt = new Date(data.updatedAt);
+          var ageMin = Math.round((Date.now() - updAt.getTime()) / 60000);
+          statusText += " \u2022 Updated " + (ageMin < 1 ? "just now" : ageMin + "m ago");
+          if (ageMin > 30) statusText += " \u26a0\ufe0f stale";
+        }
+        $("status").textContent = statusText;
       })
       .catch(function (err) {
         console.error("[Engine 12] scan failed:", err);

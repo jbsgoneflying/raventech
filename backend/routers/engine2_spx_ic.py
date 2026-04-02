@@ -113,6 +113,7 @@ def spx_ic(
         )
 
         payload["schemaVersion"] = 2
+        payload["updatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
 
         weeks_obj = payload.get("weeks") if isinstance(payload.get("weeks"), dict) else None
         if weeks_obj is not None:

@@ -1,19 +1,19 @@
 # Raven-Tech scheduled jobs (all times UTC)
 # Logs go to /var/log/cron.log inside the container
 
-# Engine 5: refresh global lead-lag snapshot (feeds regime + sequencer)
+# Engine 3 (backend: engine5_lead_lag): refresh global lead-lag snapshot (feeds regime + sequencer)
 0 9 * * 1-5  cd /app && python3 scripts/refresh_engine5_snapshot.py >> /var/log/cron.log 2>&1
 
-# Calendar: refresh earnings calendar snapshot
+# Engine 9 (calendar): refresh earnings calendar snapshot
 10 9 * * 1-5 cd /app && python3 scripts/refresh_calendar_snapshot.py >> /var/log/cron.log 2>&1
 
 # DMS: rebuild daily market state + morning brief
 30 9 * * 1-5 cd /app && python3 scripts/refresh_daily_market_state.py >> /var/log/cron.log 2>&1
 
-# Engine 6 (pairs): nightly LLM theme review
+# Engine 6 (backend: engine7_pairs): nightly LLM theme review
 45 9 * * 1-5 curl -sf -X POST http://localhost:8000/api/engine7-pairs/nightly-review >> /var/log/cron.log 2>&1
 
-# Engine 12: VIX spike monitor (every 15 min during US market hours, 9am-9pm UTC)
+# Engine 12 (backend: engine12_vix_fade): VIX spike monitor (every 15 min during US market hours, 9am-9pm UTC)
 */15 9-21 * * 1-5 cd /app && python3 scripts/engine12_spike_monitor.py >> /var/log/cron.log 2>&1
 
 # Sequencer breadth: earnings dispersion, red dog breadth, ichimoku breadth

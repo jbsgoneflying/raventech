@@ -161,7 +161,29 @@
     renderNews(data.news || {});
     renderForcedSellerMap(data.forced_seller_map || []);
     renderWatchlist(data.watchlist || {});
+    renderFreshness(data);
     showSectionInsightButtons();
+  }
+
+  function renderFreshness(data) {
+    var el = $("e9Freshness");
+    if (!el) return;
+    var parts = [];
+    if (data.updated_at) {
+      var updAt = new Date(data.updated_at);
+      var ageMin = Math.round((Date.now() - updAt.getTime()) / 60000);
+      parts.push("Updated " + (ageMin < 1 ? "just now" : ageMin + "m ago"));
+      if (ageMin > 30) parts.push("\u26a0 stale data");
+    }
+    var df = data.data_freshness || {};
+    if (df.eodhd_stale > 0) {
+      parts.push("\u26a0 " + df.eodhd_stale + "/" + df.eodhd_tickers_total + " tickers missing price data");
+    }
+    if (df.news_articles_found !== undefined) {
+      parts.push(df.news_articles_found + " news articles");
+    }
+    el.textContent = parts.join(" \u2022 ");
+    el.style.color = (ageMin > 30 || df.eodhd_stale > 2) ? "#995c00" : "var(--muted)";
   }
 
   function showSectionInsightButtons() {
