@@ -6,9 +6,10 @@
 - Commodity stress (20%): risk-off commodity pattern = stress
 - IV stress (25%): high IV rank = stress
 
-Classification uses composite score **plus** per-component OR triggers:
-- Risk-On:   score <= 35 AND fx <= 45 AND iv <= 55
-- Stressed:  score >= 70 OR fx >= 80 OR iv >= 70
+Classification uses composite score **plus** per-component OR triggers.
+Default thresholds (aligned with config.py ENGINE5_REGIME_* values):
+- Risk-On:   score <= 30 AND fx <= 45 AND iv <= 55
+- Stressed:  score >= 75 OR fx >= 80 OR iv >= 70
 - Risk-Off:  score >= 55 (when not Stressed)
 - Transitional: otherwise
 """
@@ -230,17 +231,18 @@ def classify_regime(
     commodity_stress: float,
     iv_stress: float,
     yield_snapshot: Optional[dict] = None,
-    stressed_threshold: float = 70.0,
+    stressed_threshold: float = 75.0,
     risk_off_threshold: float = 55.0,
-    transitional_threshold: float = 35.0,
+    transitional_threshold: float = 30.0,
 ) -> GlobalRegime:
     """Classify the global regime from four stress factor scores.
 
     All inputs are 0-100, higher = more stress.
+    Defaults are aligned with config.py ENGINE5_REGIME_* values.
 
     Uses composite score plus per-component OR triggers:
-    - Stressed: score >= 70 OR fx >= 80 OR iv >= 70
-    - Risk-On:  score <= 35 AND fx <= 45 AND iv <= 55
+    - Stressed: score >= stressed_threshold OR fx >= 80 OR iv >= 70
+    - Risk-On:  score <= transitional_threshold AND fx <= 45 AND iv <= 55
     """
     score = (
         0.30 * fx_stress
@@ -411,8 +413,17 @@ _COMPONENT_LABELS = {
 }
 
 
-def compute_regime_triggers(regime: GlobalRegime) -> RegimeTransitionTriggers:
+def compute_regime_triggers(
+    regime: GlobalRegime,
+    *,
+    stressed_threshold: float = 75.0,
+    risk_off_threshold: float = 55.0,
+    transitional_threshold: float = 30.0,
+) -> RegimeTransitionTriggers:
     """Compute what would change the current regime classification.
+
+    Thresholds must match the values used in classify_regime / config.py
+    to produce accurate boundary distances and flip condition text.
 
     Returns human-readable flip conditions, boundary distances, and
     proximity flags for the desk.
@@ -425,6 +436,11 @@ def compute_regime_triggers(regime: GlobalRegime) -> RegimeTransitionTriggers:
     yld = comps.get("yield_stress", 50.0)
     cmdty = comps.get("commodity_stress", 50.0)
 
+    fx_stressed = 80
+    iv_stressed = 70
+    fx_risk_on = 45
+    iv_risk_on = 55
+
     # --- Top 2 drivers (highest stress values) ---
     sorted_comps = sorted(comps.items(), key=lambda kv: kv[1], reverse=True)
     top_drivers = [
@@ -433,14 +449,13 @@ def compute_regime_triggers(regime: GlobalRegime) -> RegimeTransitionTriggers:
     ]
 
     # --- Boundary distances ---
-    # Positive = above boundary; Negative = below boundary
     distances: Dict[str, float] = {
-        "score_to_stressed": round(score - 70, 1),
-        "score_to_risk_on": round(score - 35, 1),
-        "fx_to_stressed": round(fx - 80, 1),
-        "fx_to_risk_on": round(fx - 45, 1),
-        "iv_to_stressed": round(iv - 70, 1),
-        "iv_to_risk_on": round(iv - 55, 1),
+        "score_to_stressed": round(score - stressed_threshold, 1),
+        "score_to_risk_on": round(score - transitional_threshold, 1),
+        "fx_to_stressed": round(fx - fx_stressed, 1),
+        "fx_to_risk_on": round(fx - fx_risk_on, 1),
+        "iv_to_stressed": round(iv - iv_stressed, 1),
+        "iv_to_risk_on": round(iv - iv_risk_on, 1),
     }
 
     # --- Flip conditions ---
@@ -448,30 +463,31 @@ def compute_regime_triggers(regime: GlobalRegime) -> RegimeTransitionTriggers:
     flip_down: List[str] = []
 
     if label == "Transitional":
-        flip_up.append(f"Upgrade to Risk-On if Total Score <= 35 (now {score:.0f}) AND FX Stress <= 45 (now {fx:.0f}) AND IV Stress <= 55 (now {iv:.0f}).")
-        flip_down.append(f"Downgrade to Risk-Off if Total Score >= 55 (now {score:.0f}).")
-        flip_down.append(f"Downgrade to Stressed if FX Stress >= 80 (now {fx:.0f}) OR IV Stress >= 70 (now {iv:.0f}) OR Total Score >= 70.")
+        flip_up.append(f"Upgrade to Risk-On if Total Score <= {transitional_threshold:.0f} (now {score:.0f}) AND FX Stress <= {fx_risk_on} (now {fx:.0f}) AND IV Stress <= {iv_risk_on} (now {iv:.0f}).")
+        flip_down.append(f"Downgrade to Risk-Off if Total Score >= {risk_off_threshold:.0f} (now {score:.0f}).")
+        flip_down.append(f"Downgrade to Stressed if FX Stress >= {fx_stressed} (now {fx:.0f}) OR IV Stress >= {iv_stressed} (now {iv:.0f}) OR Total Score >= {stressed_threshold:.0f}.")
     elif label == "Risk-On":
-        flip_down.append(f"Downgrade to Transitional if Total Score > 35 (now {score:.0f}) OR FX Stress > 45 (now {fx:.0f}) OR IV Stress > 55 (now {iv:.0f}).")
-        flip_down.append(f"Downgrade to Stressed if FX Stress >= 80 OR IV Stress >= 70 OR Total Score >= 70.")
+        flip_down.append(f"Downgrade to Transitional if Total Score > {transitional_threshold:.0f} (now {score:.0f}) OR FX Stress > {fx_risk_on} (now {fx:.0f}) OR IV Stress > {iv_risk_on} (now {iv:.0f}).")
+        flip_down.append(f"Downgrade to Stressed if FX Stress >= {fx_stressed} OR IV Stress >= {iv_stressed} OR Total Score >= {stressed_threshold:.0f}.")
     elif label == "Risk-Off":
-        flip_up.append(f"Improve to Transitional if Total Score < 55 (now {score:.0f}) AND no component OR trigger active.")
-        flip_down.append(f"Downgrade to Stressed if FX Stress >= 80 (now {fx:.0f}) OR IV Stress >= 70 (now {iv:.0f}) OR Total Score >= 70.")
+        flip_up.append(f"Improve to Transitional if Total Score < {risk_off_threshold:.0f} (now {score:.0f}) AND no component OR trigger active.")
+        flip_down.append(f"Downgrade to Stressed if FX Stress >= {fx_stressed} (now {fx:.0f}) OR IV Stress >= {iv_stressed} (now {iv:.0f}) OR Total Score >= {stressed_threshold:.0f}.")
     elif label == "Stressed":
-        flip_up.append(f"Improve to Risk-Off if FX Stress < 75 (now {fx:.0f}) AND IV Stress < 65 (now {iv:.0f}) AND Total Score < 70 (now {score:.0f}).")
-        flip_up.append(f"Improve to Transitional if Total Score < 55 AND all component OR triggers clear.")
+        flip_up.append(f"Improve to Risk-Off if FX Stress < {fx_stressed - 5} (now {fx:.0f}) AND IV Stress < {iv_stressed - 5} (now {iv:.0f}) AND Total Score < {stressed_threshold:.0f} (now {score:.0f}).")
+        flip_up.append(f"Improve to Transitional if Total Score < {risk_off_threshold:.0f} AND all component OR triggers clear.")
 
     # --- Proximity flags ---
     proximity: List[str] = []
+    stressed_proximity = stressed_threshold - 10
     if label == "Transitional":
-        if score <= 40 or fx <= 50:
+        if score <= transitional_threshold + 10 or fx <= fx_risk_on + 5:
             proximity.append("near_risk_on")
-        if score >= 65 or fx >= 75 or iv >= 65:
+        if score >= stressed_proximity or fx >= fx_stressed - 5 or iv >= iv_stressed - 5:
             proximity.append("near_stressed")
     elif label == "Risk-Off":
-        if score >= 65 or fx >= 75 or iv >= 65:
+        if score >= stressed_proximity or fx >= fx_stressed - 5 or iv >= iv_stressed - 5:
             proximity.append("near_stressed")
-        if score <= 58:
+        if score <= risk_off_threshold + 3:
             proximity.append("near_transitional")
 
     return RegimeTransitionTriggers(

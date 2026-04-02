@@ -77,6 +77,7 @@ def _build_live_dms(today_str: str, store) -> dict:
     regime_data = {}
     vol_direction = ""
     iv_stress = 50.0
+    regime_source: Dict[str, Any] = {}
 
     try:
         from backend.engine5_snapshot import select_best_snapshot
@@ -87,6 +88,11 @@ def _build_live_dms(today_str: str, store) -> dict:
             vol_ll = snap_data.get("volLeadLag", {})
             vol_direction = str(vol_ll.get("volLagState") or vol_ll.get("vol_lag_state", ""))
             iv_stress = float(regime_data.get("components", {}).get("iv_stress", 50.0))
+            regime_source = {
+                "snapshot_id": snapshot.get("id", ""),
+                "snapshot_generated_at": snapshot.get("generated_at", ""),
+                "snapshot_grade": snapshot.get("grade", ""),
+            }
     except Exception as e:
         LOG.warning("Front Layer: Engine 5 data unavailable: %s", e)
 
@@ -195,6 +201,7 @@ def _build_live_dms(today_str: str, store) -> dict:
     dms = build_daily_market_state(
         date_str=today_str,
         regime=regime_data,
+        regime_source=regime_source,
         vol_direction=vol_direction,
         iv_stress=iv_stress,
         event_count_5d=event_count,

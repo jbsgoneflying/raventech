@@ -572,7 +572,7 @@
     bindSectionInsight("e9ForcedInsight", "section", "forced_seller_map", "Forced Seller Map", function () {
       const fsm = (_scanData || {}).forced_seller_map || [];
       return {
-        tickers: fsm.map(function (f) { return { ticker: f.ticker, fragility: f.fragility, price_20d_pct: f.price_20d_pct, put_skew: f.put_skew, insider_30d: f.insider_30d }; }),
+        tickers: fsm.map(function (f) { return { ticker: f.ticker, fragility: f.fragility_score, price_20d_pct: f.price_20d_pct, put_skew: f.put_skew_25d, insider_30d: f.insider_net_30d }; }),
         most_fragile: fsm.length ? fsm[0].ticker : null,
         count: fsm.length
       };

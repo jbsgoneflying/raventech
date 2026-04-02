@@ -161,6 +161,22 @@
       '<span class="miHeroChip"><b>Term</b> ' + (vs.term_structure || "--") + '</span>' +
       '<span class="miHeroChip"><b>Skew</b> ' + (vs.skew || "--") + '</span>' +
       '<span class="miHeroChip"><b>Level</b> ' + (vs.level || 0).toFixed(1) + '</span>';
+
+    // Show regime data source and staleness
+    var src = dms.regime_source || {};
+    var srcEl = document.getElementById("miRegimeSource");
+    if (srcEl && src.snapshot_generated_at) {
+      var snapTime = fmt(src.snapshot_generated_at);
+      var grade = src.snapshot_grade ? " · Grade " + src.snapshot_grade : "";
+      srcEl.textContent = "Snapshot: " + snapTime + grade;
+      srcEl.style.display = "block";
+      var snapDate = new Date(src.snapshot_generated_at);
+      var ageMs = Date.now() - snapDate.getTime();
+      if (ageMs > 60 * 60 * 1000) {
+        srcEl.style.color = "#995c00";
+        srcEl.textContent += " (stale — " + Math.round(ageMs / 60000) + "m ago)";
+      }
+    }
   }
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -307,14 +323,14 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════════
-     Render: Cross-Asset Stress
+     Render: Market Stress (cross-asset readings)
      ═══════════════════════════════════════════════════════════════════ */
   function renderStress(dms) {
     var xa = dms.cross_asset_stress || {};
     var readings = xa.readings || [];
 
     if (readings.length === 0) {
-      stressGrid.innerHTML = '<div class="miEmpty">No cross-asset data available.</div>';
+      stressGrid.innerHTML = '<div class="miEmpty">No market stress data available.</div>';
       return;
     }
 
@@ -417,6 +433,22 @@
         renderStress(dms);
         renderAsymmetry(dms);
         bottomGrid.style.display = "grid";
+
+        if (refreshBanner && dms.generated_at) {
+          var regime = dms.regime || {};
+          var src = dms.regime_source || {};
+          var xa = dms.cross_asset_stress || {};
+          var parts = [
+            '<b>Live data refreshed</b> at ' + fmt(dms.generated_at),
+            'Regime: <b>' + (regime.state || '?') + ' (' + (regime.score || 0).toFixed(0) + ')</b>',
+            'Cross-asset: ' + (xa.composite_score ? xa.composite_score.toFixed(0) : '?'),
+            (dms.news_themes || []).length + ' themes',
+            src.snapshot_grade ? 'Brief generated (Grade ' + src.snapshot_grade + ')' : ''
+          ].filter(Boolean);
+          refreshBanner.className = "miRefreshBanner miRefreshBanner--ok";
+          refreshBanner.innerHTML = parts.join(' &middot; ');
+          refreshBanner.style.display = "block";
+        }
 
         setProgress(50, "Generating Morning Brief...");
         return fetchJSON("/api/front-layer/morning-brief").then(function (brief) {

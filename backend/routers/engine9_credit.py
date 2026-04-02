@@ -255,6 +255,7 @@ def engine9_scan():
                     insider_totals["txn_count"] += txn_ct
                     monthly_net = net_90 / 3.0 if net_90 else 0
                     insider_30_data[t] = monthly_net
+                    insider_totals["net_60d"] += net_90 * (2 / 3)
                     store_insider_latest(t, data)
                     baseline = update_insider_baseline(t, monthly_net)
                     baseline_avg = baseline.get("avg", 0)
@@ -310,9 +311,14 @@ def engine9_scan():
     funding_signal = compute_funding_stress(bkln_prices, hyg_prices, dgs2_values, dgs10_values)
     signal_results.append(funding_signal)
 
-    # Signal 8: Time Compression
-    tc_signal = compute_time_compression(signal_results, {})
+    # Signal 8: Time Compression (with actual trigger history from Redis)
+    from backend.engine9_store import load_trigger_dates, append_trigger_dates
+    recent_trigger_dates = load_trigger_dates()
+    tc_signal = compute_time_compression(signal_results, recent_trigger_dates)
     signal_results.append(tc_signal)
+
+    # Persist today's trigger state for future time compression calculations
+    append_trigger_dates(signal_results, today_str)
 
     # ── News Cycle Signal (context overlay, not scored) ──
     from backend.engine9_signals import filter_credit_news, score_news_with_llm
@@ -362,6 +368,22 @@ def engine9_scan():
         except Exception:
             return None
 
+    def _iv_rank_for(ticker: str) -> float | None:
+        if not orats:
+            return None
+        try:
+            resp = orats.hist_cores(ticker, trade_date=today_str, fields="tradeDate,ivRank")
+            rows = resp.rows or []
+            if rows:
+                latest = rows[-1] if isinstance(rows, list) else rows
+                rank_val = latest.get("ivRank")
+                if rank_val is not None:
+                    rank_f = float(rank_val)
+                    return round(rank_f * 100, 1) if rank_f <= 1.0 else round(rank_f, 1)
+        except Exception:
+            pass
+        return None
+
     watchlist_by_tier: dict[str, list] = {}
     for tier_key, tier_info in TIERS.items():
         scores = []
@@ -369,9 +391,10 @@ def engine9_scan():
             p = price_data.get(ticker, [])
             skew = _skew_for(ticker) if tier_key in ("tier1", "tier2") else None
             insider = insider_30_data.get(ticker, 0) if insider_30_data else None
+            iv_rank = _iv_rank_for(ticker) if tier_key in ("tier1", "tier2") else None
             ts = compute_ticker_score(
                 ticker, p,
-                iv_rank=None,
+                iv_rank=iv_rank,
                 put_skew_25d=skew,
                 insider_net_30d=insider,
                 current_phase=composite.get("phase", 1),

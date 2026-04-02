@@ -125,6 +125,7 @@ class DailyMarketState:
     date: str = ""
     generated_at: str = ""
     regime: dict = field(default_factory=dict)
+    regime_source: dict = field(default_factory=dict)
     vol_state: dict = field(default_factory=dict)
     engine_gates: dict = field(default_factory=dict)
     earnings_candidates: List[dict] = field(default_factory=list)
@@ -256,6 +257,7 @@ def build_daily_market_state(
     *,
     date_str: Optional[str] = None,
     regime: Optional[dict] = None,
+    regime_source: Optional[dict] = None,
     vol_direction: str = "",
     iv_stress: float = 50.0,
     vix_level: Optional[float] = None,
@@ -306,6 +308,7 @@ def build_daily_market_state(
         date=date_str,
         generated_at=now.isoformat() + "Z",
         regime=regime_state.to_dict(),
+        regime_source=regime_source or {},
         vol_state=vol_state.to_dict(),
         engine_gates=engine_gates.to_dict(),
         earnings_candidates=earnings_candidates or [],

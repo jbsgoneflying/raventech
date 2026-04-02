@@ -206,12 +206,16 @@ def estimate_scenario_probabilities(
 ) -> ScenarioProbabilities:
     """Estimate P(contained), P(disruption), P(escalation) from all available data.
 
-    Multi-factor model combining:
-    1. Empirical base rates from historical shock DB (conditioned on similar events)
-    2. Current VIX spike magnitude and regime
-    3. Cross-asset stress composite
-    4. Dealer gamma state
-    5. Edge decomposition score
+    9-factor model combining:
+    1. Empirical base rates from historical shock DB
+    2. Similarity-conditioned nearest-neighbor
+    3. Severity score (composite event severity)
+    4. VIX spike magnitude
+    5. Pre-event regime
+    6. Oil gap (energy disruption signal)
+    7. Dealer gamma state
+    8. Cross-asset stress composite
+    9. Edge decomposition score
     """
     adjustments: List[str] = []
 
@@ -280,7 +284,26 @@ def estimate_scenario_probabilities(
 
     p_c, p_d, p_e = base_c, base_d, base_e
 
-    # ── Factor 3: VIX spike magnitude adjustment ──
+    # ── Factor 3: Severity score (composite event severity) ──
+    if severity_score > 70:
+        shift = min(0.10, (severity_score - 70) / 250.0)
+        p_c -= shift
+        p_e += shift * 0.6
+        p_d += shift * 0.4
+        adjustments.append(f"Severity high ({severity_score:.0f}/100): elevated escalation probability")
+    elif severity_score > 55:
+        shift = min(0.05, (severity_score - 55) / 300.0)
+        p_c -= shift * 0.5
+        p_d += shift * 0.5
+        adjustments.append(f"Severity moderate ({severity_score:.0f}/100): modest disruption bias")
+    elif severity_score < 30:
+        shift = min(0.06, (30 - severity_score) / 300.0)
+        p_c += shift
+        p_e -= shift * 0.4
+        p_d -= shift * 0.6
+        adjustments.append(f"Severity low ({severity_score:.0f}/100): contained probability boosted")
+
+    # ── Factor 4: VIX spike magnitude adjustment ──
     if vix_spike_pct > 40:
         shift = min(0.15, (vix_spike_pct - 40) / 200.0)
         p_c -= shift
@@ -293,7 +316,7 @@ def estimate_scenario_probabilities(
         p_d += shift * 0.5
         adjustments.append(f"VIX spike significant (+{vix_spike_pct:.0f}%): disruption probability higher")
 
-    # ── Factor 4: Pre-event regime ──
+    # ── Factor 5: Pre-event regime ──
     if pre_event_regime == "low_vol":
         p_c += 0.04
         p_e -= 0.03
@@ -303,7 +326,7 @@ def estimate_scenario_probabilities(
         p_e += 0.04
         adjustments.append("Pre-event high-vol regime: escalation risk +4% (already stressed, amplification likely)")
 
-    # ── Factor 5: Oil gap (energy disruption signal) ──
+    # ── Factor 6: Oil gap (energy disruption signal) ──
     if abs(oil_gap_pct) > 10:
         shift = min(0.10, abs(oil_gap_pct) / 100.0)
         p_c -= shift
@@ -315,7 +338,7 @@ def estimate_scenario_probabilities(
         p_d += shift
         p_c -= shift * 0.5
 
-    # ── Factor 6: Dealer gamma ──
+    # ── Factor 7: Dealer gamma ──
     if dealer_gamma_sign == "negative":
         shift = {"low": 0.03, "medium": 0.06, "high": 0.10}.get(dealer_gamma_bucket, 0.03)
         p_c -= shift
@@ -335,7 +358,7 @@ def estimate_scenario_probabilities(
             f"contained +{shift:.0%}"
         )
 
-    # ── Factor 7: Cross-asset stress ──
+    # ── Factor 8: Cross-asset stress ──
     if cross_asset_stress > 70:
         shift = min(0.12, (cross_asset_stress - 70) / 200.0)
         p_c -= shift
@@ -354,7 +377,7 @@ def estimate_scenario_probabilities(
         p_d -= shift * 0.4
         adjustments.append(f"Cross-asset stress low ({cross_asset_stress:.0f}/100): other markets not confirming panic")
 
-    # ── Factor 8: Edge score (high edge = market overpricing, favors contained) ──
+    # ── Factor 9: Edge score (high edge = market overpricing, favors contained) ──
     if edge_score > 65:
         shift = min(0.06, (edge_score - 65) / 500.0)
         p_c += shift

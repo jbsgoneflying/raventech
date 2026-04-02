@@ -556,6 +556,7 @@ def engine12_scan(
         "engine": "engine12",
         "status": "ok",
         "asOfDate": dt.date.today().isoformat(),
+        "updatedAt": dt.datetime.utcnow().isoformat() + "Z",
         "vixSource": vix_source,
         "spike": spike.to_dict(),
         "severity": severity.to_dict(),

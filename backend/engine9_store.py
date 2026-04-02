@@ -173,6 +173,43 @@ def load_thesis() -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Trigger History (for time compression meta-signal)
+# ---------------------------------------------------------------------------
+
+TTL_TRIGGER_HISTORY = 30 * 86400  # 30 days
+
+def store_trigger_dates(trigger_dates: dict) -> bool:
+    """Persist {signal_key: [date_str, ...]} so time compression can see clustering."""
+    s = _store()
+    if not s:
+        return False
+    return s.set_json("e9:trigger_history", trigger_dates, ttl_s=TTL_TRIGGER_HISTORY)
+
+
+def load_trigger_dates() -> dict:
+    s = _store()
+    if not s:
+        return {}
+    return s.get_json("e9:trigger_history") or {}
+
+
+def append_trigger_dates(signal_results: list, today_str: str) -> dict:
+    """Merge today's triggered signals into the rolling history and persist."""
+    history = load_trigger_dates()
+    for sig in signal_results:
+        if getattr(sig, "weight", 0) > 0 and getattr(sig, "triggered", False):
+            key = getattr(sig, "key", "")
+            if key:
+                dates = history.get(key, [])
+                if today_str not in dates:
+                    dates.append(today_str)
+                dates = dates[-30:]
+                history[key] = dates
+    store_trigger_dates(history)
+    return history
+
+
+# ---------------------------------------------------------------------------
 # Full Scan Cache
 # ---------------------------------------------------------------------------
 

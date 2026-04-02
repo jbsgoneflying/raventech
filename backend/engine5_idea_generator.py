@@ -365,8 +365,15 @@ def generate_weekly_ideas(
     macro_flags = macro_event_flags or []
     regime_dict = regime.to_dict()
 
-    # Compute regime transition triggers
-    triggers = compute_regime_triggers(regime)
+    # Compute regime transition triggers using config thresholds
+    from backend.config import get_flags as _get_flags
+    _fl = _get_flags()
+    triggers = compute_regime_triggers(
+        regime,
+        stressed_threshold=_fl.ENGINE5_REGIME_STRESSED_THRESHOLD,
+        risk_off_threshold=_fl.ENGINE5_REGIME_RISK_OFF_THRESHOLD,
+        transitional_threshold=_fl.ENGINE5_REGIME_TRANSITIONAL_THRESHOLD,
+    )
     regime_dict["transitionTriggers"] = triggers.to_dict()
 
     # Vol lead-lag data (if available and not suppressed)
