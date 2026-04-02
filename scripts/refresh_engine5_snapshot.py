@@ -65,6 +65,9 @@ def _emit_sequencer_events(store, snapshot_id: str) -> None:
             "regime": regime.get("label") or regime.get("current_label") or "",
             "vol_leadlag": vol.get("vol_lag_state") or vol.get("volLagState") or "",
             "dealer_gamma": dg_sign,
+            "earnings_dispersion": str(store.get_json("sequencer:state:earnings_dispersion") or ""),
+            "red_dog_breadth": str(store.get_json("sequencer:state:red_dog_breadth") or ""),
+            "ichimoku_breadth": str(store.get_json("sequencer:state:ichimoku_breadth") or ""),
         }
 
         # Load prior state from Redis
