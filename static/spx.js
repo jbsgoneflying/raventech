@@ -2012,7 +2012,7 @@ function renderAdvisorPanel(advisorResult) {
   html += '<div style="flex:1;font-size:13px;color:var(--text-primary);line-height:1.5">' + escapeHtml(a.deskNote || "") + '</div>';
   html += '</div>';
 
-  if (verdict !== "PASS" && ticket.shortPutStrike) {
+  if (ticket.shortPutStrike) {
     html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
     html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:8px">Trade Ticket</div>';
     html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;font-size:12px">';
@@ -2052,8 +2052,8 @@ function renderAdvisorPanel(advisorResult) {
   }
   html += '</div>';
 
-  // Log trade buttons
-  if (verdict === "TRADE" || verdict === "LEAN_PASS") {
+  // Log trade buttons (allow logging for any verdict, including PASS)
+  if (verdict === "TRADE" || verdict === "LEAN_PASS" || verdict === "PASS") {
     html += '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:10px">';
     html += '<button id="e2AdjustTradeBtn" class="chipToggle" type="button" style="font-size:12px;padding:8px 16px">Adjust & Log</button>';
     html += '<button id="e2LogTradeBtn" class="primaryButton" type="button" style="font-size:12px;padding:8px 20px">Log This Trade</button>';
@@ -2308,11 +2308,11 @@ async function _runAdvisor() {
 }
 
 async function _logAdvisorTrade(advisorResult) {
-  if (!advisorResult?.advisor?.tradeTicket) return;
+  if (!advisorResult?.advisor) return;
   var btn = $("e2LogTradeBtn");
   if (btn) { btn.disabled = true; btn.textContent = "Logging..."; }
   try {
-    var ticket = advisorResult.advisor.tradeTicket;
+    var ticket = advisorResult.advisor.tradeTicket || {};
     var current = advisorResult.current || {};
     var em = advisorResult.expectedMove || {};
     var body = {
@@ -2321,13 +2321,13 @@ async function _logAdvisorTrade(advisorResult) {
         underlying: ticket.underlying || "SPX",
         spotAtEntry: Number(current.regime?.components?.spotPrice) || 0,
         entryDate: advisorResult.asOfDate || new Date().toISOString().slice(0, 10),
-        expiryDate: ticket.expiry,
-        shortPutStrike: ticket.shortPutStrike,
-        longPutStrike: ticket.longPutStrike,
-        shortCallStrike: ticket.shortCallStrike,
-        longCallStrike: ticket.longCallStrike,
-        wingWidth: ticket.wingWidth,
-        emMultiple: ticket.emMultiple,
+        expiryDate: ticket.expiry || null,
+        shortPutStrike: ticket.shortPutStrike || null,
+        longPutStrike: ticket.longPutStrike || null,
+        shortCallStrike: ticket.shortCallStrike || null,
+        longCallStrike: ticket.longCallStrike || null,
+        wingWidth: ticket.wingWidth || null,
+        emMultiple: ticket.emMultiple || null,
         entryCredit: parseFloat(String(ticket.estimatedCredit || "0").replace(/[^0-9.]/g, "")) || 0,
       },
       entryContext: {
@@ -2354,11 +2354,11 @@ async function _logAdvisorTrade(advisorResult) {
 }
 
 async function _logAdjustedTrade(advisorResult) {
-  if (!advisorResult?.advisor?.tradeTicket) return;
+  if (!advisorResult?.advisor) return;
   var btn = $("e2AdjustSubmitBtn");
   if (btn) { btn.disabled = true; btn.textContent = "Logging..."; }
   try {
-    var ticket = advisorResult.advisor.tradeTicket;
+    var ticket = advisorResult.advisor.tradeTicket || {};
     var current = advisorResult.current || {};
     var em = advisorResult.expectedMove || {};
 
