@@ -47,9 +47,24 @@ def _emit_sequencer_events(store, snapshot_id: str) -> None:
         regime = data.get("regime", {})
         vol = data.get("volLeadLag", {})
 
+        # Dealer gamma from ORATS SPY strikes (if available)
+        dg_sign = ""
+        try:
+            from backend.orats_client import OratsClient
+            from backend.dealer_gamma_context import compute_dealer_gamma_context
+            orats = OratsClient.from_env()
+            spy_strikes = orats.live_strikes(ticker="SPY")
+            if spy_strikes.rows:
+                dg = compute_dealer_gamma_context(spy_strikes.rows)
+                dg_sign = dg.get("netGammaSign", "")
+                LOG.info("Dealer gamma sign: %s", dg_sign or "unavailable")
+        except Exception as e:
+            LOG.debug("Dealer gamma unavailable for sequencer: %s", e)
+
         current_state = {
             "regime": regime.get("label") or regime.get("current_label") or "",
             "vol_leadlag": vol.get("vol_lag_state") or vol.get("volLagState") or "",
+            "dealer_gamma": dg_sign,
         }
 
         # Load prior state from Redis

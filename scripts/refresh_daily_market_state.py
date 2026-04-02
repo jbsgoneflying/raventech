@@ -83,12 +83,13 @@ def main() -> int:
     vol_direction = ""
     iv_stress = 50.0
     try:
-        from backend.engine5_snapshot import load_best_snapshot
-        snapshot = load_best_snapshot(store)
+        from backend.engine5_snapshot import select_best_snapshot
+        snapshot = select_best_snapshot(store)
         if snapshot:
-            regime_data = snapshot.get("regime", {})
-            vol_ll = snapshot.get("vol_lead_lag", {})
-            vol_direction = str(vol_ll.get("vol_lag_state", ""))
+            snap_data = snapshot.get("data", {})
+            regime_data = snap_data.get("regime", {})
+            vol_ll = snap_data.get("volLeadLag", {})
+            vol_direction = str(vol_ll.get("volLagState") or vol_ll.get("vol_lag_state", ""))
             iv_stress = float(regime_data.get("components", {}).get("iv_stress", 50.0))
             LOG.info("Engine 5 regime: %s (score %.1f)", regime_data.get("label", "?"), regime_data.get("score", 0))
         else:

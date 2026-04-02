@@ -198,7 +198,7 @@ PATTERN_TEMPLATES = {
         "label": "Break and Trend",
         "description": "Regime flips to Risk-On or Risk-Off mid-week. Vol expands.",
         "expected_events": ["REGIME_FLIP"],
-        "min_events": 2,
+        "min_events": 1,
         "favored_play_types": ["directional_spread", "calendar", "defined_risk"],
         "primary_risk": "False breakout if regime flip reverses",
     },
@@ -238,25 +238,22 @@ def match_pattern(events: List[SequencerEvent]) -> tuple:
         max_events = tmpl.get("max_events", 999)
 
         if key == "pin_and_grind":
-            # Match when there are few events
             if n_events <= max_events:
-                confidence = 0.85 if n_events == 0 else 0.65
+                confidence = 0.70 if n_events == 0 else 0.45
             else:
-                confidence = max(0.0, 0.3 - (n_events - max_events) * 0.1)
+                confidence = max(0.0, 0.25 - (n_events - max_events) * 0.1)
         else:
             if not expected:
                 continue
-            # Count how many expected events have occurred
             matched = sum(1 for et in expected if et in event_types)
             if matched == 0:
                 continue
             match_ratio = matched / len(expected)
 
-            # Bonus for having enough events
             if n_events >= min_events:
                 event_bonus = 1.0
             else:
-                event_bonus = 0.6
+                event_bonus = 0.75
 
             confidence = match_ratio * event_bonus * 0.85
 

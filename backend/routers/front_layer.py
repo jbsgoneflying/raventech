@@ -79,13 +79,13 @@ def _build_live_dms(today_str: str, store) -> dict:
     iv_stress = 50.0
 
     try:
-        from backend.engine5_pipeline import run_pipeline
-        from backend.engine5_snapshot import load_best_snapshot
-        snapshot = load_best_snapshot(store) if store else None
+        from backend.engine5_snapshot import select_best_snapshot
+        snapshot = select_best_snapshot(store) if store else None
         if snapshot:
-            regime_data = snapshot.get("regime", {})
-            vol_ll = snapshot.get("vol_lead_lag", {})
-            vol_direction = str(vol_ll.get("vol_lag_state", ""))
+            snap_data = snapshot.get("data", {})
+            regime_data = snap_data.get("regime", {})
+            vol_ll = snap_data.get("volLeadLag", {})
+            vol_direction = str(vol_ll.get("volLagState") or vol_ll.get("vol_lag_state", ""))
             iv_stress = float(regime_data.get("components", {}).get("iv_stress", 50.0))
     except Exception as e:
         LOG.warning("Front Layer: Engine 5 data unavailable: %s", e)
