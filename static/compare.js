@@ -394,12 +394,15 @@
   // Game Plan (E10 Portfolio Advisor)
   // -----------------------------------------------------------------
 
-  async function fetchGamePlan(tickers, k) {
+  async function fetchGamePlan(rankings) {
     const res = await fetch("/api/breach-compare/advisor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tickers: tickers, k: Number(k), n: 20, years: 5 }),
+      body: JSON.stringify({ rankings: rankings }),
     });
+    if (res.redirected || res.url.includes("/login")) {
+      throw new Error("Session expired — please refresh the page and log in again.");
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -578,9 +581,7 @@
     }
 
     try {
-      const tickers = $("tickers").value.trim();
-      const k = $("k").value;
-      const data = await fetchGamePlan(tickers, k);
+      const data = await fetchGamePlan(lastPayload.rankings);
 
       if (window.RavenLoading) {
         window.RavenLoading.setProgress(80, "Rendering game plan...");

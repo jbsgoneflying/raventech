@@ -324,22 +324,16 @@ def breach_compare(
 
 @router.post("/api/breach-compare/advisor")
 async def e10_portfolio_advisor(request: Request):
-    """Run the Engine 10 Portfolio Advisor: deterministic allocation + LLM game plan."""
+    """Run the Engine 10 Portfolio Advisor: deterministic allocation + LLM game plan.
+
+    Accepts pre-computed rankings from the client (from the initial /api/breach-compare
+    call) so we skip the expensive re-fetch of ORATS data.  Falls back to a fresh
+    fetch if ``rankings`` is not provided in the body.
+    """
     try:
         body = await request.json()
     except Exception:
         body = {}
-
-    tickers_raw = body.get("tickers", "")
-    if isinstance(tickers_raw, list):
-        tickers_raw = ",".join(tickers_raw)
-    tickers_raw = str(tickers_raw).strip()
-    if not tickers_raw:
-        raise HTTPException(status_code=400, detail="tickers is required")
-
-    k = float(body.get("k", 1.0))
-    n = int(body.get("n", 20))
-    years = int(body.get("years", 5))
 
     try:
         from backend.e10_portfolio_advisor import (
@@ -347,106 +341,111 @@ async def e10_portfolio_advisor(request: Request):
             generate_portfolio_advisor,
         )
 
-        ticker_list = [t.strip().upper() for t in tickers_raw.split(",") if t.strip()]
-        ticker_list = list(dict.fromkeys(ticker_list))
-
-        if not ticker_list:
-            raise HTTPException(status_code=400, detail="No valid tickers provided")
-        if len(ticker_list) > 10:
-            raise HTTPException(status_code=400, detail="Maximum 10 tickers allowed")
-
-        LOG.info(f"E10 Portfolio Advisor: {len(ticker_list)} tickers at k={k}")
-
         f = get_flags()
-        client = get_client()
-        benzinga_client = get_benzinga_client_optional()
+        rankings = body.get("rankings")
 
-        from backend.e1_vrp_engine import (
-            compute_vrp_score,
-            compute_earnings_width_comparison,
-            compute_entry_quality,
-            compute_e1_desk_consensus,
-            compute_em_preference,
-        )
+        # --- Fast path: client sent pre-computed rankings from /api/breach-compare ---
+        if isinstance(rankings, list) and len(rankings) > 0:
+            LOG.info(f"E10 Portfolio Advisor (fast path): {len(rankings)} pre-computed rankings")
+        else:
+            # --- Slow path: fetch from scratch (fallback) ---
+            tickers_raw = body.get("tickers", "")
+            if isinstance(tickers_raw, list):
+                tickers_raw = ",".join(tickers_raw)
+            tickers_raw = str(tickers_raw).strip()
+            if not tickers_raw:
+                raise HTTPException(status_code=400, detail="tickers or rankings is required")
 
-        payloads: list[tuple[str, dict]] = []
-        errors: list[dict] = []
+            k = float(body.get("k", 1.0))
+            n_param = int(body.get("n", 20))
+            years_param = int(body.get("years", 5))
 
-        def _fetch_enriched(ticker: str):
-            payload = compute_breach_stats(
-                client=client, ticker=ticker, n=n, years=years, k=k,
-                trade_builder_inputs=None, flags_override=f, benzinga_client=benzinga_client,
+            ticker_list = [t.strip().upper() for t in tickers_raw.split(",") if t.strip()]
+            ticker_list = list(dict.fromkeys(ticker_list))
+            if not ticker_list:
+                raise HTTPException(status_code=400, detail="No valid tickers provided")
+            if len(ticker_list) > 10:
+                raise HTTPException(status_code=400, detail="Maximum 10 tickers allowed")
+
+            LOG.info(f"E10 Portfolio Advisor (slow path): {len(ticker_list)} tickers at k={k}")
+
+            from backend.e1_vrp_engine import (
+                compute_vrp_score,
+                compute_earnings_width_comparison,
+                compute_entry_quality,
+                compute_e1_desk_consensus,
+                compute_em_preference,
             )
-            try:
-                payload["goNoGo"] = compute_go_no_go(
-                    client, ticker=ticker, payload=payload, benzinga_client=benzinga_client,
-                )
-            except Exception as e:
-                LOG.warning(f"goNoGo failed for {ticker}: {e}")
 
-            try:
-                events = payload.get("events") or []
-                current = payload.get("current") or {}
-                current_em_pct = None
+            client = get_client()
+            benzinga_client = get_benzinga_client_optional()
+            payloads: list[tuple[str, dict]] = []
+            errors: list[dict] = []
+
+            def _fetch_enriched(ticker: str):
+                payload = compute_breach_stats(
+                    client=client, ticker=ticker, n=n_param, years=years_param, k=k,
+                    trade_builder_inputs=None, flags_override=f, benzinga_client=benzinga_client,
+                )
                 try:
-                    current_em_pct = float(current.get("impliedMovePct") or 0) or None
-                except Exception:
-                    pass
-
-                vrp = compute_vrp_score(events, current_implied_move_pct=current_em_pct)
-                payload["vrpAnalysis"] = vrp
-
-                em_mults = [float(x.strip()) for x in str(f.E1_EM_MULTS).split(",") if x.strip()]
-                wing_pts = [float(x.strip()) for x in str(f.E1_WING_WIDTH_PTS).split(",") if x.strip()]
-                stock_price = None
-                try:
-                    stock_price = float(current.get("stockPrice") or 0) or None
-                except Exception:
-                    pass
-
-                wc, em_breach = compute_earnings_width_comparison(
-                    events, em_mults=em_mults, wing_pts=wing_pts,
-                    current_implied_move_pct=current_em_pct, stock_price=stock_price,
-                )
-                payload["widthComparison"] = wc
-                payload["emBreachSummary"] = em_breach
-
-                eq = compute_entry_quality(
-                    iv_elevation=vrp.get("ivElevation"),
-                    skew_overlay=payload.get("skewOverlay"),
-                    regime=payload.get("regime"),
-                    ticker_dealer_gamma=payload.get("tickerDealerGamma"),
-                    current=current,
-                    go_no_go=payload.get("goNoGo"),
-                )
-                payload["entryQuality"] = eq
-
-                dc = compute_e1_desk_consensus(
-                    vrp=vrp, entry_quality=eq, em_breach_summary=em_breach,
-                    regime=payload.get("regime"), gap_vs_ctc=payload.get("gapVsCtc"),
-                    event_risk=payload.get("eventRisk"),
-                )
-                payload["deskConsensus"] = dc
-
-                emp = compute_em_preference(em_breach, vrp.get("vrpScore"), eq.get("entryQuality"))
-                payload["emPreference"] = emp
-            except Exception as e:
-                LOG.warning(f"VRP enrichment failed for {ticker}: {e}")
-
-            return ticker, payload
-
-        with ThreadPoolExecutor(max_workers=min(len(ticker_list), 5)) as executor:
-            futures = {executor.submit(_fetch_enriched, t): t for t in ticker_list}
-            for future in as_completed(futures):
-                ticker = futures[future]
-                try:
-                    _, payload = future.result(timeout=60)
-                    payloads.append((ticker, payload))
+                    payload["goNoGo"] = compute_go_no_go(
+                        client, ticker=ticker, payload=payload, benzinga_client=benzinga_client,
+                    )
                 except Exception as e:
-                    LOG.warning(f"Failed to fetch {ticker}: {e}")
-                    errors.append({"ticker": ticker, "error": str(e)})
+                    LOG.warning(f"goNoGo failed for {ticker}: {e}")
+                try:
+                    events = payload.get("events") or []
+                    current = payload.get("current") or {}
+                    current_em_pct = None
+                    try:
+                        current_em_pct = float(current.get("impliedMovePct") or 0) or None
+                    except Exception:
+                        pass
+                    vrp = compute_vrp_score(events, current_implied_move_pct=current_em_pct)
+                    payload["vrpAnalysis"] = vrp
+                    em_mults = [float(x.strip()) for x in str(f.E1_EM_MULTS).split(",") if x.strip()]
+                    wing_pts = [float(x.strip()) for x in str(f.E1_WING_WIDTH_PTS).split(",") if x.strip()]
+                    stock_price = None
+                    try:
+                        stock_price = float(current.get("stockPrice") or 0) or None
+                    except Exception:
+                        pass
+                    wc, em_breach = compute_earnings_width_comparison(
+                        events, em_mults=em_mults, wing_pts=wing_pts,
+                        current_implied_move_pct=current_em_pct, stock_price=stock_price,
+                    )
+                    payload["widthComparison"] = wc
+                    payload["emBreachSummary"] = em_breach
+                    eq = compute_entry_quality(
+                        iv_elevation=vrp.get("ivElevation"), skew_overlay=payload.get("skewOverlay"),
+                        regime=payload.get("regime"), ticker_dealer_gamma=payload.get("tickerDealerGamma"),
+                        current=current, go_no_go=payload.get("goNoGo"),
+                    )
+                    payload["entryQuality"] = eq
+                    dc = compute_e1_desk_consensus(
+                        vrp=vrp, entry_quality=eq, em_breach_summary=em_breach,
+                        regime=payload.get("regime"), gap_vs_ctc=payload.get("gapVsCtc"),
+                        event_risk=payload.get("eventRisk"),
+                    )
+                    payload["deskConsensus"] = dc
+                    emp = compute_em_preference(em_breach, vrp.get("vrpScore"), eq.get("entryQuality"))
+                    payload["emPreference"] = emp
+                except Exception as e:
+                    LOG.warning(f"VRP enrichment failed for {ticker}: {e}")
+                return ticker, payload
 
-        rankings = rank_tickers(payloads)
+            with ThreadPoolExecutor(max_workers=min(len(ticker_list), 5)) as executor:
+                futures = {executor.submit(_fetch_enriched, t): t for t in ticker_list}
+                for future in as_completed(futures):
+                    ticker = futures[future]
+                    try:
+                        _, payload = future.result(timeout=60)
+                        payloads.append((ticker, payload))
+                    except Exception as e:
+                        LOG.warning(f"Failed to fetch {ticker}: {e}")
+                        errors.append({"ticker": ticker, "error": str(e)})
+
+            rankings = rank_tickers(payloads)
 
         regime_label = "moderate"
         try:
@@ -474,7 +473,7 @@ async def e10_portfolio_advisor(request: Request):
             "tickers": [r.get("ticker") for r in rankings],
             "deterministicAllocation": det_alloc,
             "advisor": advisor,
-            "errors": errors if errors else None,
+            "errors": None,
         }
 
     except HTTPException:
