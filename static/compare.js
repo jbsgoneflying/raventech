@@ -394,11 +394,44 @@
   // Game Plan (E10 Portfolio Advisor)
   // -----------------------------------------------------------------
 
+  function stripRankingsForAdvisor(rankings) {
+    const KEEP_KEYS = [
+      "deskConsensus", "vrpAnalysis", "entryQuality", "emPreference",
+      "widthComparison", "emBreachSummary", "nextEvent",
+    ];
+    return (rankings || []).map((r) => {
+      const fp = r.fullPayload || {};
+      const slim = {};
+      for (const k of KEEP_KEYS) {
+        if (fp[k] !== undefined) slim[k] = fp[k];
+      }
+      if (fp.current) {
+        slim.current = {
+          stockPrice: fp.current.stockPrice,
+          impliedMovePct: fp.current.impliedMovePct,
+        };
+      }
+      if (fp.summary) {
+        slim.summary = { breachRate: fp.summary.breachRate };
+      }
+      return {
+        ticker: r.ticker,
+        compositeScore: r.compositeScore,
+        tier: r.tier,
+        tierLabel: r.tierLabel,
+        rank: r.rank,
+        factors: r.factors,
+        fullPayload: slim,
+      };
+    });
+  }
+
   async function fetchGamePlan(rankings) {
+    const slim = stripRankingsForAdvisor(rankings);
     const res = await fetch("/api/breach-compare/advisor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rankings: rankings }),
+      body: JSON.stringify({ rankings: slim }),
     });
     if (res.redirected || res.url.includes("/login")) {
       throw new Error("Session expired — please refresh the page and log in again.");
