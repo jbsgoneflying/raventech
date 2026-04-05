@@ -609,7 +609,7 @@
     panel.innerHTML = '<div class="loadingState">Running portfolio advisor — analyzing allocations, correlations, and timing...</div>';
 
     if (window.RavenLoading) {
-      window.RavenLoading.show({ status: "Building game plan..." });
+      window.RavenLoading.show({ status: "Building game plan...", clearResults: false });
       window.RavenLoading.setProgress(20, "Running portfolio advisor...");
     }
 
