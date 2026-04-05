@@ -25,6 +25,7 @@
   // State
   let lastPayload = null;
   let isBusy = false;
+  let gamePlanBusy = false;
 
   // Status icons
   const STATUS_ICONS = {
@@ -290,6 +291,16 @@
     renderTierSummary(payload.summary);
     renderRankings(payload.rankings);
     renderErrors(payload.errors);
+
+    // Show game plan button if we have tradeable tickers
+    const gpBtn = $("gamePlanBtn");
+    if (payload.rankings && payload.rankings.length >= 1) {
+      gpBtn.classList.remove("hidden");
+    } else {
+      gpBtn.classList.add("hidden");
+    }
+    $("gamePlanPanel").classList.add("hidden");
+    $("gamePlanPanel").innerHTML = "";
   }
 
   /**
@@ -379,12 +390,225 @@
     }
   }
 
+  // -----------------------------------------------------------------
+  // Game Plan (E10 Portfolio Advisor)
+  // -----------------------------------------------------------------
+
+  async function fetchGamePlan(tickers, k) {
+    const res = await fetch("/api/breach-compare/advisor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tickers: tickers, k: Number(k), n: 20, years: 5 }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  function renderAllocCard(a) {
+    const pct = a.allocationPct != null ? fmt1(a.allocationPct) : "0";
+    const action = a.action || a.verdict || "SKIP";
+    const em = a.emMultiple || a.preferredEm || "—";
+    const wing = a.wingWidth || a.suggestedWing || "—";
+    const entry = escapeHtml(a.entryWindow || "");
+    const exit = escapeHtml(a.exitPlan || "");
+    const rationale = escapeHtml(a.rationale || "");
+    const sector = escapeHtml(a.sector || "");
+
+    return `
+      <div class="gpAllocCard">
+        <div class="gpAllocPct">${pct}%</div>
+        <div class="gpAllocInfo">
+          <div class="gpAllocTicker">${escapeHtml(a.ticker)}</div>
+          <div class="gpAllocMeta">
+            <span>EM: ${em}x</span>
+            <span>Wing: $${wing}</span>
+            ${sector ? `<span>Sector: ${sector}</span>` : ""}
+          </div>
+          ${entry ? `<div class="gpAllocMeta">Entry: ${entry}</div>` : ""}
+          ${exit ? `<div class="gpAllocMeta">Exit: ${exit}</div>` : ""}
+          ${rationale ? `<div class="gpAllocRationale">${rationale}</div>` : ""}
+        </div>
+        <div class="gpAllocAction">
+          <span class="gpActionBadge gpActionBadge--${action}">${action.replace("_", " ")}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderGamePlan(data) {
+    const panel = $("gamePlanPanel");
+    const advisor = data.advisor || {};
+    const det = data.deterministicAllocation || {};
+    const plan = advisor.allocationPlan || det.allocations || [];
+    const source = advisor._source || "fallback";
+    const concentration = advisor.concentrationChoice || "balanced";
+
+    const totalDeployed = advisor.totalDeployedPct ?? det.totalDeployed ?? 0;
+    const cashReserve = advisor.cashReservePct ?? det.cashReserve ?? 0;
+    const regimeLabel = det.regimeLabel || "moderate";
+    const regimeCap = det.regimeCap != null ? `${Math.round(det.regimeCap * 100)}%` : "—";
+
+    const tradeItems = plan.filter((a) => (a.action || a.verdict || "SKIP") !== "SKIP");
+    const skipItems = plan.filter((a) => (a.action || a.verdict || "SKIP") === "SKIP");
+
+    const sectorBuckets = det.sectorBuckets || {};
+    const hasOverlap = Object.values(sectorBuckets).some(
+      (arr) => Array.isArray(arr) && arr.length > 1
+    );
+    const conflicts = det.conflicts || [];
+    const risks = advisor.keyRisks || [];
+
+    let html = `
+      <div class="gpHeader">
+        <div class="gpTitle">Allocation Game Plan</div>
+        <span class="gpBadge">${concentration}</span>
+      </div>
+
+      <div class="gpDeployBar">
+        <div class="gpDeployStat">
+          <div class="gpDeployLabel">Deployed</div>
+          <div class="gpDeployValue">${fmt1(totalDeployed)}%</div>
+        </div>
+        <div class="gpDeployStat">
+          <div class="gpDeployLabel">Cash Reserve</div>
+          <div class="gpDeployValue">${fmt1(cashReserve)}%</div>
+        </div>
+        <div class="gpDeployStat">
+          <div class="gpDeployLabel">Regime</div>
+          <div class="gpDeployValue">${escapeHtml(regimeLabel)}</div>
+        </div>
+        <div class="gpDeployStat">
+          <div class="gpDeployLabel">Regime Cap</div>
+          <div class="gpDeployValue">${regimeCap}</div>
+        </div>
+      </div>
+    `;
+
+    if (tradeItems.length > 0) {
+      html += `<div class="gpSectionTitle">Allocations</div>`;
+      html += `<div class="gpAllocGrid">${tradeItems.map(renderAllocCard).join("")}</div>`;
+    }
+
+    if (skipItems.length > 0) {
+      html += `<div class="gpSectionTitle" style="opacity:0.6;">Skipped</div>`;
+      html += `<div class="gpAllocGrid">${skipItems.map(renderAllocCard).join("")}</div>`;
+    }
+
+    // Sector tags
+    const sectorEntries = Object.entries(sectorBuckets);
+    if (sectorEntries.length > 0) {
+      html += `<div class="gpSectionTitle">Sector Exposure</div><div class="gpSectorTags">`;
+      for (const [sector, tickers] of sectorEntries) {
+        const overlap = Array.isArray(tickers) && tickers.length > 1;
+        const cls = overlap ? "gpSectorTag gpSectorTag--overlap" : "gpSectorTag";
+        const names = Array.isArray(tickers) ? tickers.join(", ") : "";
+        html += `<span class="${cls}">${escapeHtml(sector)}: ${escapeHtml(names)}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    // Correlation note
+    if (advisor.correlationNote) {
+      html += `<div class="gpSectionTitle">Correlation Assessment</div>`;
+      html += `<div class="gpTextBlock">${escapeHtml(advisor.correlationNote)}</div>`;
+    }
+
+    // Conflicts
+    if (conflicts.length > 0) {
+      html += `<div class="gpSectionTitle">Timing Conflicts</div>`;
+      for (const c of conflicts) {
+        html += `<div class="gpConflicts"><b>${escapeHtml(c.session)} ${escapeHtml(c.date)}</b>: ${escapeHtml(c.tickers?.join(", "))} — ${escapeHtml(c.note)}</div>`;
+      }
+      if (advisor.conflictResolution) {
+        html += `<div class="gpTextBlock">${escapeHtml(advisor.conflictResolution)}</div>`;
+      }
+    }
+
+    // Regime adjustment
+    if (advisor.regimeAdjustment) {
+      html += `<div class="gpSectionTitle">Regime Adjustment</div>`;
+      html += `<div class="gpTextBlock">${escapeHtml(advisor.regimeAdjustment)}</div>`;
+    }
+
+    // Portfolio rationale
+    if (advisor.portfolioRationale) {
+      html += `<div class="gpSectionTitle">Portfolio Rationale</div>`;
+      html += `<div class="gpTextBlock">${escapeHtml(advisor.portfolioRationale)}</div>`;
+    }
+
+    // Key risks
+    if (risks.length > 0) {
+      html += `<div class="gpSectionTitle">Key Risks</div><div class="gpRiskList">`;
+      for (const r of risks) {
+        html += `<span class="gpRiskItem">${escapeHtml(r)}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    // Desk note
+    if (advisor.deskNote) {
+      html += `<div class="gpSectionTitle">Desk Note</div>`;
+      html += `<div class="gpDeskNote">${escapeHtml(advisor.deskNote)}</div>`;
+    }
+
+    html += `<div class="gpSourceTag">Source: ${source === "llm" ? "AI Portfolio Advisor" : "Deterministic Model"}${advisor._model ? ` (${advisor._model})` : ""}</div>`;
+
+    panel.innerHTML = html;
+    panel.classList.remove("hidden");
+  }
+
+  async function handleGamePlan() {
+    if (gamePlanBusy || !lastPayload) return;
+    gamePlanBusy = true;
+
+    const btn = $("gamePlanBtn");
+    btn.disabled = true;
+    btn.textContent = "Building Game Plan...";
+
+    const panel = $("gamePlanPanel");
+    panel.classList.remove("hidden");
+    panel.innerHTML = '<div class="loadingState">Running portfolio advisor — analyzing allocations, correlations, and timing...</div>';
+
+    if (window.RavenLoading) {
+      window.RavenLoading.show({ status: "Building game plan..." });
+      window.RavenLoading.setProgress(20, "Running portfolio advisor...");
+    }
+
+    try {
+      const tickers = $("tickers").value.trim();
+      const k = $("k").value;
+      const data = await fetchGamePlan(tickers, k);
+
+      if (window.RavenLoading) {
+        window.RavenLoading.setProgress(80, "Rendering game plan...");
+      }
+
+      renderGamePlan(data);
+    } catch (err) {
+      console.error("Game plan failed:", err);
+      panel.innerHTML = `<div class="loadingState" style="color: #b42823;">Game plan failed: ${escapeHtml(err.message)}</div>`;
+    } finally {
+      gamePlanBusy = false;
+      btn.disabled = false;
+      btn.textContent = "Get Game Plan";
+      if (window.RavenLoading) {
+        window.RavenLoading.hide();
+      }
+    }
+  }
+
   /**
    * Initialize page
    */
   function init() {
     // Form submission
     $("form").addEventListener("submit", handleSubmit);
+
+    // Game Plan button
+    $("gamePlanBtn").addEventListener("click", handleGamePlan);
 
     // Auto-uppercase ticker input
     $("tickers").addEventListener("input", function () {

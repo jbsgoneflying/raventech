@@ -189,6 +189,11 @@ class FeatureFlags:
     E1_TRADE_TTL_S: int = 180 * 86400   # 180 days (survive full earnings cycle)
     E1_TRADE_MAX_INDEX: int = 200
 
+    # --- Engine 10: Multi-Ticker Portfolio Advisor ---
+    E10_ADVISOR_ENABLED: bool = True
+    E10_ADVISOR_MODEL: str = "gpt-5.4"
+    E10_ADVISOR_MAX_CALLS_PER_MINUTE: int = 3
+
     # --- Engine 1: GO / NO-GO decisioning (strict; additive UI) ---
     GO_IVP_MIN: float = 0.80
     GO_IV_SAMPLE_MIN: int = 20
@@ -447,6 +452,10 @@ class FeatureFlags:
             ENGINE2_MACRO_BASE_NFP=_get_float("ENGINE2_MACRO_BASE_NFP", 0.7),
             ENGINE2_MACRO_BASE_OPEX=_get_float("ENGINE2_MACRO_BASE_OPEX", 0.4),
             ENGINE2_MACRO_BASE_REFUNDING=_get_float("ENGINE2_MACRO_BASE_REFUNDING", 0.5),
+
+            E10_ADVISOR_ENABLED=_get_bool("E10_ADVISOR_ENABLED", True),
+            E10_ADVISOR_MODEL=os.getenv("E10_ADVISOR_MODEL", "gpt-5.4"),
+            E10_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E10_ADVISOR_MAX_CALLS_PER_MINUTE", 3),
 
             E1_ADVISOR_ENABLED=_get_bool("E1_ADVISOR_ENABLED", True),
             E1_ADVISOR_MODEL=os.getenv("E1_ADVISOR_MODEL", "gpt-5.4"),

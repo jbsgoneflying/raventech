@@ -271,6 +271,242 @@
         color: rgba(15, 23, 42, 0.7);
         margin: 4px 0;
       }
+
+      /* Game Plan section */
+      .gamePlanBtn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 22px;
+        background: linear-gradient(135deg, #6B1D3A, #8B2252);
+        color: #fff;
+        border: none;
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.2s;
+        margin-top: 16px;
+      }
+      .gamePlanBtn:hover { opacity: 0.9; transform: translateY(-1px); }
+      .gamePlanBtn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+      .gamePlanPanel {
+        margin-top: 20px;
+        padding: 20px;
+        border-radius: 16px;
+        border: 1px solid rgba(107, 29, 58, 0.2);
+        background: rgba(107, 29, 58, 0.03);
+      }
+
+      .gpHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+      }
+
+      .gpTitle {
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: #6B1D3A;
+      }
+
+      .gpBadge {
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        background: rgba(107, 29, 58, 0.12);
+        color: #6B1D3A;
+      }
+
+      .gpDeployBar {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+      }
+
+      .gpDeployStat {
+        flex: 1;
+        min-width: 120px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.8);
+        border-radius: 12px;
+        text-align: center;
+        border: 1px solid rgba(15, 23, 42, 0.06);
+      }
+
+      .gpDeployLabel {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: rgba(15, 23, 42, 0.5);
+        margin-bottom: 4px;
+      }
+
+      .gpDeployValue {
+        font-size: 20px;
+        font-weight: 800;
+        color: rgba(15, 23, 42, 0.85);
+      }
+
+      .gpAllocGrid {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .gpAllocCard {
+        display: grid;
+        grid-template-columns: 60px 1fr 80px;
+        gap: 12px;
+        align-items: center;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.85);
+        border-radius: 12px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+      }
+
+      .gpAllocPct {
+        font-size: 22px;
+        font-weight: 800;
+        color: #6B1D3A;
+        text-align: center;
+      }
+
+      .gpAllocInfo {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .gpAllocTicker {
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: -0.01em;
+      }
+
+      .gpAllocMeta {
+        font-size: 11px;
+        color: rgba(15, 23, 42, 0.6);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .gpAllocAction {
+        text-align: center;
+      }
+
+      .gpActionBadge {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .gpActionBadge--TRADE { background: rgba(52, 199, 89, 0.15); color: #0c4626; }
+      .gpActionBadge--LEAN_TRADE { background: rgba(255, 149, 0, 0.15); color: #804a00; }
+      .gpActionBadge--SKIP { background: rgba(255, 59, 48, 0.1); color: #b42823; }
+
+      .gpAllocRationale {
+        font-size: 11px;
+        color: rgba(15, 23, 42, 0.55);
+        margin-top: 4px;
+        font-style: italic;
+      }
+
+      .gpSectionTitle {
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 8px;
+        color: rgba(15, 23, 42, 0.7);
+      }
+
+      .gpTextBlock {
+        font-size: 12px;
+        line-height: 1.6;
+        color: rgba(15, 23, 42, 0.7);
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 10px;
+        margin-bottom: 12px;
+      }
+
+      .gpSectorTags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      .gpSectorTag {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        background: rgba(0, 122, 255, 0.08);
+        color: #003d80;
+        border: 1px solid rgba(0, 122, 255, 0.15);
+      }
+
+      .gpSectorTag--overlap {
+        background: rgba(255, 149, 0, 0.12);
+        color: #804a00;
+        border-color: rgba(255, 149, 0, 0.25);
+      }
+
+      .gpConflicts {
+        padding: 10px 14px;
+        background: rgba(255, 149, 0, 0.08);
+        border: 1px solid rgba(255, 149, 0, 0.2);
+        border-radius: 10px;
+        font-size: 12px;
+        margin-bottom: 12px;
+      }
+
+      .gpRiskList {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      .gpRiskItem {
+        padding: 4px 10px;
+        border-radius: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        background: rgba(255, 59, 48, 0.08);
+        color: #b42823;
+        border: 1px solid rgba(255, 59, 48, 0.15);
+      }
+
+      .gpDeskNote {
+        padding: 14px;
+        background: rgba(107, 29, 58, 0.06);
+        border-left: 3px solid #6B1D3A;
+        border-radius: 0 10px 10px 0;
+        font-size: 13px;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.8);
+        line-height: 1.5;
+      }
+
+      .gpSourceTag {
+        font-size: 10px;
+        color: rgba(15, 23, 42, 0.4);
+        margin-top: 12px;
+        text-align: right;
+      }
     </style>
   </head>
   <body>
@@ -347,6 +583,12 @@
         <div id="rankingsGrid" class="rankingsGrid"></div>
 
         <div id="errorsList" class="errorsList hidden"></div>
+
+        <button id="gamePlanBtn" class="gamePlanBtn hidden" type="button">
+          Get Game Plan
+        </button>
+
+        <div id="gamePlanPanel" class="gamePlanPanel hidden"></div>
       </section>
 
       <section class="surface" style="margin-top: 24px;">

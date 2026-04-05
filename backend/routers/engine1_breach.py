@@ -199,7 +199,15 @@ def breach_compare(
         errors: list[dict] = []
 
         def fetch_single(ticker: str):
-            """Fetch breach stats + goNoGo (for liquidity) for a single ticker."""
+            """Fetch breach stats + goNoGo + VRP enrichment for a single ticker."""
+            from backend.e1_vrp_engine import (
+                compute_vrp_score,
+                compute_earnings_width_comparison,
+                compute_entry_quality,
+                compute_e1_desk_consensus,
+                compute_em_preference,
+            )
+
             payload = compute_breach_stats(
                 client=client,
                 ticker=ticker,
@@ -219,6 +227,62 @@ def breach_compare(
                 )
             except Exception as e:
                 LOG.warning(f"goNoGo failed for {ticker}: {e}")
+
+            try:
+                events = payload.get("events") or []
+                current = payload.get("current") or {}
+                current_em_pct = None
+                try:
+                    current_em_pct = float(current.get("impliedMovePct") or 0) or None
+                except Exception:
+                    pass
+
+                vrp = compute_vrp_score(events, current_implied_move_pct=current_em_pct)
+                payload["vrpAnalysis"] = vrp
+
+                em_mults = [float(x.strip()) for x in str(base_flags.E1_EM_MULTS).split(",") if x.strip()]
+                wing_pts = [float(x.strip()) for x in str(base_flags.E1_WING_WIDTH_PTS).split(",") if x.strip()]
+                stock_price = None
+                try:
+                    stock_price = float(current.get("stockPrice") or 0) or None
+                except Exception:
+                    pass
+
+                wc, em_breach = compute_earnings_width_comparison(
+                    events,
+                    em_mults=em_mults,
+                    wing_pts=wing_pts,
+                    current_implied_move_pct=current_em_pct,
+                    stock_price=stock_price,
+                )
+                payload["widthComparison"] = wc
+                payload["emBreachSummary"] = em_breach
+
+                eq = compute_entry_quality(
+                    iv_elevation=vrp.get("ivElevation"),
+                    skew_overlay=payload.get("skewOverlay"),
+                    regime=payload.get("regime"),
+                    ticker_dealer_gamma=payload.get("tickerDealerGamma"),
+                    current=current,
+                    go_no_go=payload.get("goNoGo"),
+                )
+                payload["entryQuality"] = eq
+
+                dc = compute_e1_desk_consensus(
+                    vrp=vrp,
+                    entry_quality=eq,
+                    em_breach_summary=em_breach,
+                    regime=payload.get("regime"),
+                    gap_vs_ctc=payload.get("gapVsCtc"),
+                    event_risk=payload.get("eventRisk"),
+                )
+                payload["deskConsensus"] = dc
+
+                emp = compute_em_preference(em_breach, vrp.get("vrpScore"), eq.get("entryQuality"))
+                payload["emPreference"] = emp
+            except Exception as e:
+                LOG.warning(f"VRP enrichment failed for {ticker}: {e}")
+
             return ticker, payload
 
         with ThreadPoolExecutor(max_workers=min(len(ticker_list), 5)) as executor:
@@ -251,6 +315,174 @@ def breach_compare(
         raise
     except Exception as e:
         LOG.exception("Unhandled failure (breach-compare)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ---------------------------------------------------------------------------
+# Engine 10 Portfolio Advisor (multi-ticker allocation game plan)
+# ---------------------------------------------------------------------------
+
+@router.post("/api/breach-compare/advisor")
+async def e10_portfolio_advisor(request: Request):
+    """Run the Engine 10 Portfolio Advisor: deterministic allocation + LLM game plan."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    tickers_raw = body.get("tickers", "")
+    if isinstance(tickers_raw, list):
+        tickers_raw = ",".join(tickers_raw)
+    tickers_raw = str(tickers_raw).strip()
+    if not tickers_raw:
+        raise HTTPException(status_code=400, detail="tickers is required")
+
+    k = float(body.get("k", 1.0))
+    n = int(body.get("n", 20))
+    years = int(body.get("years", 5))
+
+    try:
+        from backend.e10_portfolio_advisor import (
+            compute_portfolio_allocation,
+            generate_portfolio_advisor,
+        )
+
+        ticker_list = [t.strip().upper() for t in tickers_raw.split(",") if t.strip()]
+        ticker_list = list(dict.fromkeys(ticker_list))
+
+        if not ticker_list:
+            raise HTTPException(status_code=400, detail="No valid tickers provided")
+        if len(ticker_list) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 tickers allowed")
+
+        LOG.info(f"E10 Portfolio Advisor: {len(ticker_list)} tickers at k={k}")
+
+        f = get_flags()
+        client = get_client()
+        benzinga_client = get_benzinga_client_optional()
+
+        from backend.e1_vrp_engine import (
+            compute_vrp_score,
+            compute_earnings_width_comparison,
+            compute_entry_quality,
+            compute_e1_desk_consensus,
+            compute_em_preference,
+        )
+
+        payloads: list[tuple[str, dict]] = []
+        errors: list[dict] = []
+
+        def _fetch_enriched(ticker: str):
+            payload = compute_breach_stats(
+                client=client, ticker=ticker, n=n, years=years, k=k,
+                trade_builder_inputs=None, flags_override=f, benzinga_client=benzinga_client,
+            )
+            try:
+                payload["goNoGo"] = compute_go_no_go(
+                    client, ticker=ticker, payload=payload, benzinga_client=benzinga_client,
+                )
+            except Exception as e:
+                LOG.warning(f"goNoGo failed for {ticker}: {e}")
+
+            try:
+                events = payload.get("events") or []
+                current = payload.get("current") or {}
+                current_em_pct = None
+                try:
+                    current_em_pct = float(current.get("impliedMovePct") or 0) or None
+                except Exception:
+                    pass
+
+                vrp = compute_vrp_score(events, current_implied_move_pct=current_em_pct)
+                payload["vrpAnalysis"] = vrp
+
+                em_mults = [float(x.strip()) for x in str(f.E1_EM_MULTS).split(",") if x.strip()]
+                wing_pts = [float(x.strip()) for x in str(f.E1_WING_WIDTH_PTS).split(",") if x.strip()]
+                stock_price = None
+                try:
+                    stock_price = float(current.get("stockPrice") or 0) or None
+                except Exception:
+                    pass
+
+                wc, em_breach = compute_earnings_width_comparison(
+                    events, em_mults=em_mults, wing_pts=wing_pts,
+                    current_implied_move_pct=current_em_pct, stock_price=stock_price,
+                )
+                payload["widthComparison"] = wc
+                payload["emBreachSummary"] = em_breach
+
+                eq = compute_entry_quality(
+                    iv_elevation=vrp.get("ivElevation"),
+                    skew_overlay=payload.get("skewOverlay"),
+                    regime=payload.get("regime"),
+                    ticker_dealer_gamma=payload.get("tickerDealerGamma"),
+                    current=current,
+                    go_no_go=payload.get("goNoGo"),
+                )
+                payload["entryQuality"] = eq
+
+                dc = compute_e1_desk_consensus(
+                    vrp=vrp, entry_quality=eq, em_breach_summary=em_breach,
+                    regime=payload.get("regime"), gap_vs_ctc=payload.get("gapVsCtc"),
+                    event_risk=payload.get("eventRisk"),
+                )
+                payload["deskConsensus"] = dc
+
+                emp = compute_em_preference(em_breach, vrp.get("vrpScore"), eq.get("entryQuality"))
+                payload["emPreference"] = emp
+            except Exception as e:
+                LOG.warning(f"VRP enrichment failed for {ticker}: {e}")
+
+            return ticker, payload
+
+        with ThreadPoolExecutor(max_workers=min(len(ticker_list), 5)) as executor:
+            futures = {executor.submit(_fetch_enriched, t): t for t in ticker_list}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    _, payload = future.result(timeout=60)
+                    payloads.append((ticker, payload))
+                except Exception as e:
+                    LOG.warning(f"Failed to fetch {ticker}: {e}")
+                    errors.append({"ticker": ticker, "error": str(e)})
+
+        rankings = rank_tickers(payloads)
+
+        regime_label = "moderate"
+        try:
+            from backend.daily_market_state import load_dms as _load_dms
+            from backend.redis_store import get_store_optional
+            _store = get_store_optional()
+            if _store:
+                import datetime as _dt
+                _dms = _load_dms(_dt.date.today().strftime("%Y-%m-%d"), _store)
+                if _dms:
+                    _d = _dms.to_dict()
+                    regime_label = (_d.get("regime") or {}).get("label", "moderate")
+        except Exception:
+            pass
+
+        det_alloc = compute_portfolio_allocation(rankings, market_regime_label=regime_label)
+        advisor = generate_portfolio_advisor(
+            rankings=rankings,
+            deterministic_allocation=det_alloc,
+            flags=f,
+        )
+
+        return {
+            "asOfDate": dt.date.today().isoformat(),
+            "tickers": [r.get("ticker") for r in rankings],
+            "deterministicAllocation": det_alloc,
+            "advisor": advisor,
+            "errors": errors if errors else None,
+        }
+
+    except HTTPException:
+        raise
+    except (BreachInputError, OratsError) as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (breach-compare/advisor)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
