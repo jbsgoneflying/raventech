@@ -18,6 +18,7 @@
     { href: "/compare",         label: "Engine 10",       desc: "Multi-ticker side-by-side" },
     { href: "/news-risk",       label: "Engine 11",       desc: "Macro events and headline risk" },
     { href: "/vix-fade",        label: "Engine 12",       desc: "VIX spike fade — vol dislocation engine" },
+    { href: "/gap-regime",      label: "Engine 13",       desc: "Gap regime scanner — post-gap SPX analysis" },
   ];
 
   /* Which nav item matches the current URL? */
