@@ -21,6 +21,7 @@ ENGINE_REGISTRY = {
     10: {"name": "Multi-Ticker Compare",              "backend": "engine1_breach",      "api": "/api/breach-compare"},
     11: {"name": "Macro Events & Headline Risk",      "backend": "market_intel",        "api": "/api/news-risk"},
     12: {"name": "VIX Spike Fade",                    "backend": "engine12_vix_fade",   "api": "/api/engine12"},
+    13: {"name": "Gap Regime Scanner",                "backend": "engine13_gap_regime", "api": "/api/engine13"},
 }
 
 
@@ -349,6 +350,12 @@ class FeatureFlags:
     ENGINE12_GAMMA_AMP_MED: float = 0.20
     ENGINE12_GAMMA_AMP_HIGH: float = 0.30
 
+    # --- Engine 13: Gap Regime Scanner ---
+    ENABLE_ENGINE13_GAP_REGIME: bool = True
+    ENGINE13_CACHE_TTL_SCAN: int = 10 * 60              # 10 min scan cache
+    ENGINE13_ADVISOR_MODEL: str = "gpt-5.4"
+    ENGINE13_GAP_THRESHOLD_PCT: float = 1.5             # Min gap % for analogues
+
     # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
     GATE_RD_REGIME_ALLOW: str = "Transitional,Stressed"
@@ -591,6 +598,12 @@ class FeatureFlags:
             ENGINE12_GAMMA_AMP_LOW=_get_float("ENGINE12_GAMMA_AMP_LOW", 0.10),
             ENGINE12_GAMMA_AMP_MED=_get_float("ENGINE12_GAMMA_AMP_MED", 0.20),
             ENGINE12_GAMMA_AMP_HIGH=_get_float("ENGINE12_GAMMA_AMP_HIGH", 0.30),
+
+            # --- Engine 13 ---
+            ENABLE_ENGINE13_GAP_REGIME=_get_bool("ENABLE_ENGINE13_GAP_REGIME", True),
+            ENGINE13_CACHE_TTL_SCAN=_get_int("ENGINE13_CACHE_TTL_SCAN", 10 * 60),
+            ENGINE13_ADVISOR_MODEL=os.getenv("ENGINE13_ADVISOR_MODEL", "gpt-5.4"),
+            ENGINE13_GAP_THRESHOLD_PCT=_get_float("ENGINE13_GAP_THRESHOLD_PCT", 1.5),
 
             # --- Engine 8 ---
             ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),

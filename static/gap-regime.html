@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Engine 13 — Gap Regime Scanner | Raven-Tech.co</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 13: Post-gap regime analysis for SPX/SPY short premium management." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <style>
+      /* ── Engine 13 — Gap Regime Scanner ──────────────────────────── */
+
+      .e13Grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 18px; }
+
+      .e13Card {
+        padding: 16px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: var(--surfaceSolid);
+      }
+      .e13CardLabel {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px;
+      }
+      .e13CardValue {
+        font-size: 22px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--text); line-height: 1.2;
+      }
+      .e13CardCaption { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 4px; line-height: 1.4; }
+
+      .e13Badge {
+        display: inline-block; padding: 2px 8px; border-radius: 6px;
+        font-size: 11px; font-weight: 700; vertical-align: middle; margin-left: 6px;
+      }
+      .e13Badge--green { background: rgba(52,199,89,0.12); color: var(--green); }
+      .e13Badge--amber { background: rgba(255,159,10,0.12); color: var(--amber); }
+      .e13Badge--red   { background: rgba(255,59,48,0.12); color: var(--red); }
+      .e13Badge--blue  { background: rgba(0,122,255,0.12); color: var(--blue); }
+      .e13Badge--muted { background: var(--hover); color: var(--muted); }
+
+      .e13Divider {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted);
+        margin: 24px 0 12px; padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: space-between;
+      }
+
+      .e13Table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 18px; }
+      .e13Table th {
+        text-align: left; padding: 8px 10px; font-weight: 700; font-size: 10px;
+        text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+        border-bottom: 2px solid var(--border); white-space: nowrap;
+      }
+      .e13Table td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+      .e13Table tr:hover td { background: var(--hover); }
+
+      /* Scenario probability bars */
+      .e13ScenarioPanel {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px;
+      }
+      .e13Scenario {
+        padding: 18px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        text-align: center; position: relative; overflow: hidden;
+      }
+      .e13Scenario.dominant { border-color: var(--blue); border-width: 2px; }
+      .e13ScenarioName {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px;
+      }
+      .e13ScenarioProb {
+        font-size: 28px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        line-height: 1.2;
+      }
+      .e13ScenarioBar {
+        height: 4px; border-radius: 2px; background: var(--line); margin-top: 10px; overflow: hidden;
+      }
+      .e13ScenarioBarFill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+      .e13ScenarioBarFill.cont { background: var(--green); }
+      .e13ScenarioBarFill.cons { background: var(--amber); }
+      .e13ScenarioBarFill.rev  { background: var(--red); }
+
+      .e13ScenarioRange { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+      /* Advisor panel */
+      .e13Advisor {
+        padding: 20px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        border-left: 4px solid var(--blue); margin-bottom: 18px;
+      }
+      .e13AdvisorHeader {
+        display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;
+      }
+      .e13AdvisorTitle { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+      .e13VerdictBadge {
+        display: inline-block; padding: 4px 14px; border-radius: 8px;
+        font-size: 14px; font-weight: 900; letter-spacing: 0.04em;
+      }
+      .e13VerdictBadge.hold { background: rgba(52,199,89,0.15); color: var(--green); }
+      .e13VerdictBadge.roll { background: rgba(255,59,48,0.15); color: var(--red); }
+      .e13VerdictBadge.adjust { background: rgba(255,159,10,0.15); color: var(--amber); }
+
+      .e13AdvisorSection { margin-bottom: 12px; }
+      .e13AdvisorSectionLabel {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px;
+      }
+      .e13AdvisorSectionBody { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.5; }
+
+      /* Modifier tags */
+      .e13ModTag {
+        display: inline-block; padding: 2px 8px; border-radius: 4px;
+        font-size: 10px; font-weight: 700; background: var(--hover);
+        color: var(--muted); margin: 2px 4px 2px 0;
+      }
+
+      /* Run button */
+      .e13RunBtn {
+        padding: 10px 24px; border-radius: 8px; border: none;
+        background: var(--text); color: var(--bg); font-weight: 700;
+        font-size: 13px; cursor: pointer; letter-spacing: 0.02em;
+      }
+      .e13RunBtn:hover { opacity: 0.85; }
+      .e13RunBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      @media (max-width: 700px) {
+        .e13ScenarioPanel { grid-template-columns: 1fr; }
+        .e13Grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="appHeader">
+      <div class="appHeaderInner">
+        <a href="/" class="appLogo">
+          <img src="/static/RavenONLY.png" width="28" height="28" alt="" />
+          <span><strong>Raven-Tech.co</strong></span>
+        </a>
+        <span class="appHeaderSub">Engine 13 — Gap Regime Scanner</span>
+        <button class="menuBtn" onclick="document.querySelector('.navDrawer').classList.toggle('open')">&#9776;</button>
+      </div>
+    </header>
+
+    <main class="appMain">
+      <div class="pageHeader" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <h1 style="font-size:18px;font-weight:800;margin:0">Gap Regime Scanner</h1>
+          <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Post-gap regime analysis — continuation vs consolidation vs reversion</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:11px;font-weight:600;color:var(--muted)">Gap threshold %</label>
+          <input id="gapThreshold" type="number" min="0.5" max="5" step="0.25" value="1.5"
+            style="width:60px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);font-size:12px;font-weight:700;background:var(--surfaceSolid);color:var(--text)" />
+          <button id="runBtn" class="e13RunBtn" onclick="runScan()">Run Scan</button>
+        </div>
+      </div>
+
+      <div id="loading" style="display:none;text-align:center;padding:48px 0">
+        <div style="font-size:14px;font-weight:700;color:var(--muted)">Scanning SPX gap regime...</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Fetching 5 years of SPX data, options chains, VIX, and technicals</div>
+      </div>
+
+      <div id="results" style="display:none">
+        <!-- Gap header cards -->
+        <div id="gapCards" class="e13Grid"></div>
+
+        <!-- Scenario panel -->
+        <div class="e13Divider">Scenario Probabilities</div>
+        <div id="scenarioPanel" class="e13ScenarioPanel"></div>
+        <div id="modifiers" style="margin-bottom:18px"></div>
+
+        <!-- Historical analogues -->
+        <div class="e13Divider">Historical Gap Analogues</div>
+        <div id="histStats" class="e13Grid"></div>
+        <div id="histTable"></div>
+
+        <!-- Options microstructure -->
+        <div class="e13Divider">Options Microstructure</div>
+        <div id="optionsCards" class="e13Grid"></div>
+
+        <!-- Technicals + VIX -->
+        <div class="e13Divider">Technical Context &amp; VIX</div>
+        <div id="techVixCards" class="e13Grid"></div>
+
+        <!-- Advisor -->
+        <div class="e13Divider" style="justify-content:space-between">
+          <span>LLM Desk Note</span>
+          <button id="advisorBtn" class="e13RunBtn" onclick="runAdvisor()" style="padding:6px 16px;font-size:11px">Get Desk Note</button>
+        </div>
+        <div id="advisorPanel"></div>
+      </div>
+
+      <div id="errorPanel" style="display:none;padding:24px;text-align:center;color:var(--red);font-weight:700"></div>
+    </main>
+
+    <script src="/static/ui_kit.js"></script>
+    <script src="/static/gap-regime.js"></script>
+  </body>
+</html>
