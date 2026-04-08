@@ -247,6 +247,32 @@ def compute_historical_gap_analogues(
 # Layer 3 — Options Microstructure
 # ---------------------------------------------------------------------------
 
+_STRIKES_FIELDS = (
+    "ticker,tradeDate,expirDate,expiry,expDate,exp_date,strike,"
+    "spotPrice,stockPrice,gamma,theta,vega,"
+    "callOpenInterest,putOpenInterest,callVolume,putVolume,"
+    "callMidIv,putMidIv,callDelta,putDelta"
+)
+
+
+def _infer_nearest_expiry(rows: List[Dict]) -> Optional[str]:
+    """Pick the nearest expiry with decent OI from a raw strikes payload."""
+    from collections import Counter
+    exp_counter: Counter = Counter()
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        exp = str(r.get("expirDate") or r.get("expiry") or r.get("expDate")
+                  or r.get("exp_date") or "")[:10]
+        if exp:
+            exp_counter[exp] += 1
+    if not exp_counter:
+        return None
+    today_str = dt.date.today().isoformat()
+    future = sorted(e for e in exp_counter if e >= today_str)
+    return future[0] if future else None
+
+
 def compute_options_microstructure(
     orats: Any,
     *,
@@ -264,25 +290,41 @@ def compute_options_microstructure(
     if orats is None:
         return result
 
-    spx_symbols = ("SPXW", "SPX") if ticker in ("SPX", "SPXW") else (ticker,)
+    spx_symbols = ("SPXW", "SPX", "SPY") if ticker in ("SPX", "SPXW") else (ticker,)
 
     # Dealer gamma + OI clusters from live strikes
+    all_strikes: List[Dict] = []
     try:
-        strikes_rows = []
         for sym in spx_symbols:
             try:
-                resp = orats.live_strikes(sym)
-                if resp and resp.rows:
-                    strikes_rows.extend(resp.rows)
+                resp = orats.live_strikes(ticker=sym, fields=_STRIKES_FIELDS)
+                rows = [r for r in (resp.rows if resp else []) if isinstance(r, dict)]
+                if rows:
+                    all_strikes.extend(rows)
+                    break  # use first symbol that returns data
             except Exception:
                 pass
 
-        if strikes_rows:
+        if all_strikes:
+            expiry = _infer_nearest_expiry(all_strikes)
+            chain_rows = all_strikes
+            if expiry:
+                chain_rows = [
+                    r for r in all_strikes
+                    if str(r.get("expirDate") or r.get("expiry") or r.get("expDate")
+                           or r.get("exp_date") or "")[:10] == expiry
+                ] or all_strikes
+
             from backend.dealer_gamma_context import compute_dealer_gamma_context
-            result["dealerGamma"] = compute_dealer_gamma_context(strikes_rows)
+            result["dealerGamma"] = compute_dealer_gamma_context(
+                chain_rows, expiry=expiry, contract_multiplier=100,
+                band_pct=0.05, top_n=5,
+            )
 
             from backend.oi_clusters import compute_open_interest_clusters
-            result["oiClusters"] = compute_open_interest_clusters(strikes_rows)
+            result["oiClusters"] = compute_open_interest_clusters(
+                chain_rows, expiry=expiry, band_pct=0.05, top_n=5,
+            )
     except Exception as exc:
         LOG.debug("Engine13 dealer gamma / OI: %s", exc)
 
@@ -312,7 +354,7 @@ def compute_options_microstructure(
     except Exception as exc:
         LOG.debug("Engine13 vol surface: %s", exc)
 
-    # Unusual option activity from Benzinga
+    # Unusual option activity — prefer Benzinga signals, fall back to ORATS volume proxy
     if benzinga is not None:
         try:
             today = dt.date.today().isoformat()
@@ -343,7 +385,40 @@ def compute_options_microstructure(
                 ],
             }
         except Exception as exc:
-            LOG.debug("Engine13 unusual flow: %s", exc)
+            LOG.debug("Engine13 unusual flow (Benzinga): %s", exc)
+
+    # ORATS volume proxy when Benzinga is unavailable or returned nothing
+    if result["unusualFlow"] is None and all_strikes:
+        try:
+            call_vol = sum(int(r.get("callVolume") or 0) for r in all_strikes)
+            put_vol = sum(int(r.get("putVolume") or 0) for r in all_strikes)
+            call_oi = sum(int(r.get("callOpenInterest") or 0) for r in all_strikes)
+            put_oi = sum(int(r.get("putOpenInterest") or 0) for r in all_strikes)
+            total_vol = call_vol + put_vol
+            pc_vol_ratio = round(put_vol / max(1, call_vol), 3)
+            pc_oi_ratio = round(put_oi / max(1, call_oi), 3)
+
+            if call_vol > put_vol * 1.3:
+                sentiment = "bullish"
+            elif put_vol > call_vol * 1.3:
+                sentiment = "bearish"
+            else:
+                sentiment = "mixed"
+
+            result["unusualFlow"] = {
+                "totalSignals": total_vol,
+                "calls": call_vol,
+                "puts": put_vol,
+                "sweeps": 0,
+                "netSentiment": sentiment,
+                "pcVolumeRatio": pc_vol_ratio,
+                "pcOiRatio": pc_oi_ratio,
+                "callOi": call_oi,
+                "putOi": put_oi,
+                "_source": "orats_volume_proxy",
+            }
+        except Exception as exc:
+            LOG.debug("Engine13 unusual flow (ORATS proxy): %s", exc)
 
     return result
 
