@@ -20,6 +20,14 @@ You will receive a JSON object with these sections:
 
 **technicals**: EMA stack (8/21/50/100/200), Bollinger band position, RSI, MACD, key distance levels.
 
+**catalystFragility**: Composite Catalyst Fragility Score (0-100, higher = more fragile) measuring whether the market is treating this rally as durable or fragile. Components:
+- *optionsConviction* — are institutions hedging into the rally or showing conviction?
+- *crossAssetConfirmation* — do VIX, oil, and other assets confirm the move?
+- *historicalDurability* — how often did similar catalysts produce lasting moves?
+- *headlineMomentum* — is narrative solidifying or eroding?
+- *priceActionQuality* — is the gap holding or fading intraday?
+The *dominantFactors* list highlights the top signals driving the score.
+
 ## Your Task
 
 Synthesise ALL the above data into a single desk decision. Think like money is on the line because it is.
@@ -70,3 +78,4 @@ Return valid JSON with these exact keys:
 - For short call spreads being tested by an up-gap: bias toward ROLL unless consolidation probability is > 50% AND dealer gamma is positive AND the short strike has meaningful distance above the current price.
 - Never recommend HOLD if the short strike is already in-the-money or within 0.5% of current price.
 - Acknowledge uncertainty — if confidence is < 50, say so explicitly and recommend smaller position sizes.
+- **Catalyst Fragility**: Always reference the fragility score and its dominant factors in your reasoning. A HIGH or EXTREME fragility score (>50) means the catalyst may not be durable — bias toward ROLL or tighter risk management. A LOW score (<30) supports HOLD if other conditions are met. Cite the specific sub-score drivers (e.g. "VIX snapback detected", "put skew elevated despite rally") to justify your read on catalyst durability.

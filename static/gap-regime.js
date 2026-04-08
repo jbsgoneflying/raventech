@@ -76,6 +76,7 @@ var lastPayload = null;
 
   function renderAll(data) {
     renderGapCards(data.gap || {});
+    renderFragility(data.catalystFragility || {});
     renderScenarios(data.scenarios || {});
     renderHistorical(data.historicalAnalogues || {}, data.geopoliticalAnalogues);
     renderOptions(data.optionsMicrostructure || {});
@@ -115,6 +116,90 @@ var lastPayload = null;
         gap.catalystTag ? '<span style="font-size:16px;font-weight:800">' + gap.catalystTag + '</span>' : "\u2014",
         "From Daily Market State themes"),
     ].join("");
+  }
+
+
+  // ── Catalyst Fragility ──────────────────────────────────────────────────
+
+  function renderFragility(frag) {
+    var compEl = $("fragilityComposite");
+    var gridEl = $("fragilitySubGrid");
+    var factEl = $("fragilityFactors");
+
+    if (!frag.enabled) {
+      compEl.innerHTML = "";
+      gridEl.innerHTML = "";
+      factEl.innerHTML = "";
+      return;
+    }
+
+    var score = frag.score || 0;
+    var label = frag.label || "UNKNOWN";
+    var catalystType = frag.catalystType || "unknown";
+
+    function fragColor(s) {
+      if (s <= 30) return "var(--green)";
+      if (s <= 50) return "var(--amber)";
+      return "var(--red)";
+    }
+
+    function fragBadgeCls(s) {
+      if (s <= 30) return "green";
+      if (s <= 50) return "amber";
+      return "red";
+    }
+
+    var isExtreme = score > 70;
+    compEl.innerHTML = '<div class="e13FragComposite' + (isExtreme ? ' extreme' : '') +
+      '" style="border-left:4px solid ' + fragColor(score) + '">' +
+      '<div>' +
+        '<div class="e13FragScore" style="color:' + fragColor(score) + '">' + score.toFixed(0) + '</div>' +
+        '<div class="e13FragBar"><div class="e13FragBarFill" style="width:' + score + '%;background:' + fragColor(score) + '"></div></div>' +
+      '</div>' +
+      '<div class="e13FragMeta">' +
+        '<div class="e13FragLabel" style="color:' + fragColor(score) + '">' + label + ' Fragility</div>' +
+        '<div class="e13FragType">Catalyst: ' + catalystType.replace(/_/g, " ") + '</div>' +
+      '</div>' +
+      '<div>' + badge(score.toFixed(0) + "/100", fragBadgeCls(score)) + '</div>' +
+    '</div>';
+
+    var SUB_LABELS = {
+      optionsConviction: "Options Conviction",
+      crossAssetConfirmation: "Cross-Asset Confirmation",
+      historicalDurability: "Historical Durability",
+      headlineMomentum: "Headline Momentum",
+      priceActionQuality: "Price Action Quality",
+    };
+
+    var components = frag.components || {};
+    var subHtml = "";
+    var keys = ["optionsConviction", "crossAssetConfirmation", "historicalDurability", "headlineMomentum", "priceActionQuality"];
+    keys.forEach(function (key) {
+      var comp = components[key];
+      if (!comp) return;
+      var s = comp.score || 0;
+      var sigs = comp.signals || [];
+      var sigHtml = sigs.map(function (sig) {
+        return '<div class="e13FragSignal">' + sig + '</div>';
+      }).join("");
+
+      subHtml += '<div class="e13FragSub">' +
+        '<div class="e13FragSubName">' + (SUB_LABELS[key] || key) + '</div>' +
+        '<div class="e13FragSubScore" style="color:' + fragColor(s) + '">' + s.toFixed(0) + '</div>' +
+        '<div class="e13FragSubBar"><div class="e13FragSubBarFill" style="width:' + s + '%;background:' + fragColor(s) + '"></div></div>' +
+        '<div class="e13FragSignals">' + sigHtml + '</div>' +
+      '</div>';
+    });
+    gridEl.innerHTML = subHtml;
+
+    var factors = frag.dominantFactors || [];
+    if (factors.length) {
+      factEl.innerHTML = factors.map(function (f) {
+        return '<span class="e13ModTag" style="background:rgba(255,59,48,0.06);color:var(--red)">' + f + '</span>';
+      }).join("");
+    } else {
+      factEl.innerHTML = "";
+    }
   }
 
 

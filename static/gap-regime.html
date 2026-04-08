@@ -137,9 +137,68 @@
       .e13InsightBtn:hover { background: var(--hover); color: var(--text); border-color: var(--text); }
       .e13InsightBtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+      /* Fragility composite card */
+      .e13FragComposite {
+        padding: 20px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        display: flex; align-items: center; gap: 20px;
+        margin-bottom: 14px;
+      }
+      .e13FragScore {
+        font-size: 42px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        line-height: 1;
+      }
+      .e13FragMeta { flex: 1; min-width: 0; }
+      .e13FragLabel {
+        font-size: 16px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 4px;
+      }
+      .e13FragType { font-size: 11px; color: var(--muted); font-weight: 600; }
+      .e13FragBar {
+        height: 6px; border-radius: 3px; background: var(--line);
+        overflow: hidden; margin-top: 8px; max-width: 240px;
+      }
+      .e13FragBarFill {
+        height: 100%; border-radius: 3px; transition: width 0.5s ease;
+      }
+
+      .e13FragSubGrid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 10px; margin-bottom: 12px;
+      }
+      .e13FragSub {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+      }
+      .e13FragSubName {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px;
+      }
+      .e13FragSubScore {
+        font-size: 20px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .e13FragSubBar {
+        height: 3px; border-radius: 2px; background: var(--line);
+        overflow: hidden; margin-top: 6px;
+      }
+      .e13FragSubBarFill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+      .e13FragSignals { margin-top: 6px; }
+      .e13FragSignal {
+        font-size: 10px; color: var(--muted); font-weight: 500;
+        line-height: 1.5; padding-left: 10px; text-indent: -10px;
+      }
+      .e13FragSignal::before { content: "\2022\00a0"; color: var(--muted2); }
+
+      @keyframes e13fragPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.75; } }
+      .e13FragComposite.extreme { animation: e13fragPulse 2s infinite; }
+
       @media (max-width: 700px) {
         .e13ScenarioPanel { grid-template-columns: 1fr; }
         .e13Grid { grid-template-columns: 1fr; }
+        .e13FragSubGrid { grid-template-columns: 1fr; }
+        .e13FragComposite { flex-direction: column; text-align: center; }
       }
     </style>
   </head>
@@ -171,6 +230,11 @@
         <div class="e13Divider"><span>Gap Overview</span></div>
         <div id="gapCards" class="e13Grid"></div>
 
+        <div class="e13Divider"><span>Catalyst Fragility</span></div>
+        <div id="fragilityComposite"></div>
+        <div id="fragilitySubGrid" class="e13FragSubGrid"></div>
+        <div id="fragilityFactors" class="e13ModRow"></div>
+
         <div class="e13Divider"><span>Scenario Probabilities</span></div>
         <div id="scenarioPanel" class="e13ScenarioPanel"></div>
         <div id="modifiers" class="e13ModRow"></div>
@@ -201,6 +265,6 @@
 
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
-    <script src="/static/gap-regime.js?v=2"></script>
+    <script src="/static/gap-regime.js?v=3"></script>
   </body>
 </html>

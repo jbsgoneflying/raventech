@@ -96,7 +96,7 @@ def _sanitize_scan_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Trim large fields to keep the LLM context lean."""
     ctx: Dict[str, Any] = {}
 
-    for key in ("gap", "scenarios", "vixBehaviour", "geopoliticalAnalogues"):
+    for key in ("gap", "scenarios", "vixBehaviour", "geopoliticalAnalogues", "catalystFragility"):
         if key in payload:
             ctx[key] = payload[key]
 

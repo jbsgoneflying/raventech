@@ -601,10 +601,13 @@ def compute_gap_regime_scan(
     """Build the full Engine 13 scan payload."""
     today = dt.date.today()
     lookback_start = today - dt.timedelta(days=365 * 5 + 60)
+    oil_lookback = today - dt.timedelta(days=10)
 
     # --- Fetch data in parallel ---
     spx_bars: List[Any] = []
     vix_bars: List[Any] = []
+    oil_bars: List[Any] = []
+    headlines: List[str] = []
     live_spx: Optional[float] = None
     live_vix: Optional[float] = None
 
@@ -648,8 +651,50 @@ def compute_gap_regime_scan(
             except Exception:
                 pass
 
+    def _fetch_oil():
+        nonlocal oil_bars
+        if eodhd:
+            try:
+                resp = eodhd.get_eod("USO.US", from_date=str(oil_lookback), to_date=str(today))
+                oil_bars = resp.rows if resp and resp.rows else []
+            except Exception as exc:
+                LOG.debug("E13 oil (USO) bars: %s", exc)
+
+    def _fetch_headlines():
+        nonlocal headlines
+        if benzinga:
+            try:
+                resp = benzinga.news(
+                    tickers="SPY,SPX",
+                    date_from=str(today - dt.timedelta(days=1)),
+                    date_to=str(today),
+                    page_size=50,
+                )
+                rows = resp.rows if resp else []
+                for r in rows:
+                    title = r.get("title") or r.get("headline") or ""
+                    if title:
+                        headlines.append(title)
+            except Exception as exc:
+                LOG.debug("E13 headlines: %s", exc)
+        if not headlines and eodhd:
+            try:
+                resp = eodhd.get_news(ticker="SPY.US", from_date=str(today - dt.timedelta(days=1)),
+                                      to_date=str(today), limit=30)
+                for r in (resp.rows if resp else []):
+                    title = r.get("title") or ""
+                    if title:
+                        headlines.append(title)
+            except Exception as exc:
+                LOG.debug("E13 EODHD headlines: %s", exc)
+
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(_fetch_spx), pool.submit(_fetch_vix)]
+        futures = [
+            pool.submit(_fetch_spx),
+            pool.submit(_fetch_vix),
+            pool.submit(_fetch_oil),
+            pool.submit(_fetch_headlines),
+        ]
         for f in as_completed(futures):
             try:
                 f.result()
@@ -722,6 +767,51 @@ def compute_gap_regime_scan(
         technicals=technicals,
     )
 
+    # --- Layer 7: Catalyst Fragility Score ---
+    fragility: Dict[str, Any] = {"enabled": False}
+    try:
+        from backend.config import get_flags as _get_flags
+        _fl = flags or _get_flags()
+        if getattr(_fl, "ENGINE13_FRAGILITY_ENABLED", True):
+            from backend.engine13_fragility import compute_catalyst_fragility
+
+            frag_weights = {
+                "optionsConviction": getattr(_fl, "ENGINE13_FRAGILITY_W_OPTIONS", 0.30),
+                "crossAssetConfirmation": getattr(_fl, "ENGINE13_FRAGILITY_W_CROSS_ASSET", 0.25),
+                "historicalDurability": getattr(_fl, "ENGINE13_FRAGILITY_W_HISTORICAL", 0.20),
+                "headlineMomentum": getattr(_fl, "ENGINE13_FRAGILITY_W_HEADLINE", 0.15),
+                "priceActionQuality": getattr(_fl, "ENGINE13_FRAGILITY_W_PRICE_ACTION", 0.10),
+            }
+
+            theme_snapshot = None
+            try:
+                from backend.daily_market_state import load_dms as _load_dms
+                from backend.redis_store import get_store_optional as _get_store
+                _st = _get_store()
+                if _st:
+                    _dms = _load_dms(today.isoformat(), _st)
+                    if _dms:
+                        d = _dms.to_dict()
+                        themes = d.get("news_themes") or []
+                        if themes:
+                            theme_snapshot = {"readings": themes}
+            except Exception:
+                pass
+
+            fragility = compute_catalyst_fragility(
+                gap_info=gap_info,
+                options=options,
+                vix=vix_behaviour,
+                historical=historical,
+                geo_analogues=geo_analogues,
+                oil_bars=oil_bars,
+                headlines=headlines,
+                theme_snapshot=theme_snapshot,
+                weights=frag_weights,
+            )
+    except Exception as exc:
+        LOG.debug("Engine13 fragility: %s", exc)
+
     return {
         "asOfDate": today.isoformat(),
         "ticker": "SPX",
@@ -732,5 +822,6 @@ def compute_gap_regime_scan(
         "technicals": technicals,
         "vixBehaviour": vix_behaviour,
         "scenarios": scenarios,
+        "catalystFragility": fragility,
         "notes": [],
     }
