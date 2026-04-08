@@ -215,11 +215,24 @@
       </header>
 
       <section class="controlBar" aria-label="Engine 13 Controls">
-        <div class="controlBarForm controlBarForm--engine2">
+        <div class="controlBarForm" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;min-height:56px;">
           <button id="runBtn" class="primaryButton">Run Scan</button>
-          <div class="controlGroup" style="min-width:130px;">
+          <div class="controlGroup" style="min-width:110px;">
             <label class="controlLabel" for="gapThreshold">Gap Threshold %</label>
-            <input type="number" id="gapThreshold" class="controlInput" placeholder="1.5" min="0.5" max="5" step="0.25" value="1.5" style="width:120px;" />
+            <input type="number" id="gapThreshold" class="controlInput" placeholder="1.5" min="0.5" max="5" step="0.25" value="1.5" style="width:100px;" />
+          </div>
+          <div style="width:1px;height:28px;background:var(--border);margin:0 2px;"></div>
+          <div class="controlGroup" style="min-width:100px;">
+            <label class="controlLabel" for="shortCall">Short Call</label>
+            <input type="number" id="shortCall" class="controlInput" placeholder="e.g. 6850" step="5" style="width:100px;" />
+          </div>
+          <div class="controlGroup" style="min-width:100px;">
+            <label class="controlLabel" for="shortPut">Short Put</label>
+            <input type="number" id="shortPut" class="controlInput" placeholder="e.g. 6650" step="5" style="width:100px;" />
+          </div>
+          <div class="controlGroup" style="min-width:120px;">
+            <label class="controlLabel" for="icExpiry">IC Expiry</label>
+            <input type="date" id="icExpiry" class="controlInput" style="width:130px;" />
           </div>
           <span id="status" class="status">Ready</span>
         </div>
@@ -265,6 +278,6 @@
 
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
-    <script src="/static/gap-regime.js?v=3"></script>
+    <script src="/static/gap-regime.js?v=4"></script>
   </body>
 </html>

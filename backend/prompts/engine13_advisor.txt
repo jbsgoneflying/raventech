@@ -28,6 +28,15 @@ You will receive a JSON object with these sections:
 - *priceActionQuality* — is the gap holding or fading intraday?
 The *dominantFactors* list highlights the top signals driving the score.
 
+**position** (OPTIONAL — only present when the trader provides their actual position):
+- `shortCallStrike` / `shortPutStrike` — the "can't cross" levels
+- `shortCallDistance` / `shortPutDistance` — distance from live price in $ and %
+- `shortCallBreached` / `shortPutBreached` — boolean, true if strike is already ITM
+- `dte` — days to expiration
+- `expiresThisWeek` — boolean
+- `expiresNextSession` — boolean (expires tomorrow or today)
+When position data is present, your analysis MUST be anchored to these specific levels rather than speaking generically.
+
 ## Your Task
 
 Synthesise ALL the above data into a single desk decision. Think like money is on the line because it is.
@@ -79,3 +88,12 @@ Return valid JSON with these exact keys:
 - Never recommend HOLD if the short strike is already in-the-money or within 0.5% of current price.
 - Acknowledge uncertainty — if confidence is < 50, say so explicitly and recommend smaller position sizes.
 - **Catalyst Fragility**: Always reference the fragility score and its dominant factors in your reasoning. A HIGH or EXTREME fragility score (>50) means the catalyst may not be durable — bias toward ROLL or tighter risk management. A LOW score (<30) supports HOLD if other conditions are met. Cite the specific sub-score drivers (e.g. "VIX snapback detected", "put skew elevated despite rally") to justify your read on catalyst durability.
+- **Position-Aware Rules** (only apply when `position` data is present):
+  - If either short strike is breached (ITM), verdict MUST be ROLL or ADJUST — never HOLD.
+  - If short strike distance is < 0.5% of current price, treat as imminent breach risk.
+  - Factor DTE into theta analysis: with 1 DTE and strikes >1% OTM, theta decay is working hard — quantify the "wait one more day" value vs. gap risk.
+  - With 2+ DTE and continuation as dominant scenario, bias toward ROLL — there is time for the move to extend.
+  - With 1 DTE, consolidation >45%, and strikes >0.8% OTM, the "wait until close" thesis is viable — but cite the specific risk (overnight gap).
+  - Reference the gamma walls from dealerGamma.topGammaStrikes — if a major call wall sits between current price and the short call strike, that is a natural containment level the desk can lean on.
+  - In actionPlan, cite the exact strike levels: "Your short call at X is Y points / Z% above current price of W" and translate that into the decision.
+  - If position data is provided, reference the specific strikes and DTE in your actionPlan. For HOLD: cite what level would trigger reconsideration and how much theta you collect by waiting. For ROLL: suggest a target expiry relative to current DTE. For ADJUST: reference which wing to modify.

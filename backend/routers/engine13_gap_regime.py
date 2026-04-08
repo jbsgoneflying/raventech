@@ -117,6 +117,7 @@ async def engine13_advisor(request: Request):
         body = {}
 
     scan_payload = body.get("scanPayload")
+    position = body.get("position")  # optional dict with shortCallStrike, shortPutStrike, expirationDate
 
     if not isinstance(scan_payload, dict) or not scan_payload.get("gap"):
         from backend.deps import get_client_optional, get_benzinga_client_optional
@@ -144,7 +145,7 @@ async def engine13_advisor(request: Request):
     from backend.engine13_advisor import generate_gap_regime_analysis
 
     try:
-        result = generate_gap_regime_analysis(scan_payload, flags=flags)
+        result = generate_gap_regime_analysis(scan_payload, position=position, flags=flags)
         return {
             "asOfDate": dt.date.today().isoformat(),
             "advisor": result,

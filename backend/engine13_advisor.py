@@ -142,12 +142,61 @@ def _sanitize_scan_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Position context — derive actionable metrics from optional IC inputs
+# ---------------------------------------------------------------------------
+
+def _compute_position_context(
+    position: Optional[Dict[str, Any]],
+    scan_payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Derive strike distances, DTE, and breach flags from optional position data."""
+    if not position:
+        return None
+
+    ctx: Dict[str, Any] = {}
+    live_price = (scan_payload.get("gap") or {}).get("livePrice")
+    today = dt.date.today()
+
+    short_call = position.get("shortCallStrike")
+    short_put = position.get("shortPutStrike")
+    exp_str = position.get("expirationDate")
+
+    if short_call and live_price:
+        dist = short_call - live_price
+        ctx["shortCallStrike"] = short_call
+        ctx["shortCallDistance"] = round(dist, 2)
+        ctx["shortCallDistancePct"] = round(dist / live_price * 100, 2)
+        ctx["shortCallBreached"] = live_price >= short_call
+
+    if short_put and live_price:
+        dist = live_price - short_put
+        ctx["shortPutStrike"] = short_put
+        ctx["shortPutDistance"] = round(dist, 2)
+        ctx["shortPutDistancePct"] = round(dist / live_price * 100, 2)
+        ctx["shortPutBreached"] = live_price <= short_put
+
+    if exp_str:
+        try:
+            exp_date = dt.date.fromisoformat(exp_str)
+            dte = (exp_date - today).days
+            ctx["expirationDate"] = exp_str
+            ctx["dte"] = dte
+            ctx["expiresThisWeek"] = dte <= 5
+            ctx["expiresNextSession"] = dte <= 1
+        except ValueError:
+            pass
+
+    return ctx if ctx else None
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
 def generate_gap_regime_analysis(
     scan_payload: Dict[str, Any],
     *,
+    position: Optional[Dict[str, Any]] = None,
     flags: Any = None,
 ) -> Dict[str, Any]:
     """Run the Engine 13 advisor: sanitise → prompt → LLM → validate."""
@@ -179,6 +228,9 @@ def generate_gap_regime_analysis(
         return fallback
 
     context = _sanitize_scan_for_llm(scan_payload)
+    pos_ctx = _compute_position_context(position, scan_payload)
+    if pos_ctx:
+        context["position"] = pos_ctx
     payload_str = json.dumps(context, default=str)
     if len(payload_str) > 25000:
         payload_str = payload_str[:25000]

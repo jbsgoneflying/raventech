@@ -435,6 +435,15 @@ var lastPayload = null;
     panel.innerHTML = '<div class="e13Advisor"><div style="color:var(--muted);font-size:13px;font-weight:600">Running desk analysis\u2026</div></div>';
 
     var body = lastPayload ? { scanPayload: lastPayload } : {};
+    var shortCall = parseFloat($("shortCall").value);
+    var shortPut = parseFloat($("shortPut").value);
+    var icExpiry = $("icExpiry").value;
+    if (shortCall || shortPut || icExpiry) {
+      body.position = {};
+      if (shortCall) body.position.shortCallStrike = shortCall;
+      if (shortPut) body.position.shortPutStrike = shortPut;
+      if (icExpiry) body.position.expirationDate = icExpiry;
+    }
     fetchJson("/api/engine13/advisor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
