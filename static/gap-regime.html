@@ -57,9 +57,9 @@
       .e13Table td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
       .e13Table tr:hover td { background: var(--hover); }
 
-      /* Scenario probability bars */
+      /* Scenario probability cards */
       .e13ScenarioPanel {
-        display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px;
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;
       }
       .e13Scenario {
         padding: 18px; border-radius: var(--radius-card);
@@ -68,8 +68,8 @@
       }
       .e13Scenario.dominant { border-color: var(--blue); border-width: 2px; }
       .e13ScenarioName {
-        font-size: 11px; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px;
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px;
       }
       .e13ScenarioProb {
         font-size: 28px; font-weight: 900;
@@ -84,7 +84,15 @@
       .e13ScenarioBarFill.cons { background: var(--amber); }
       .e13ScenarioBarFill.rev  { background: var(--red); }
 
-      .e13ScenarioRange { font-size: 11px; color: var(--muted); margin-top: 6px; }
+      .e13ScenarioCaption { font-size: 10px; color: var(--muted); margin-top: 6px; }
+
+      /* Modifier / context tags row */
+      .e13ModRow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+      .e13ModTag {
+        display: inline-block; padding: 3px 10px; border-radius: 6px;
+        font-size: 10px; font-weight: 700; background: var(--hover);
+        color: var(--muted); letter-spacing: 0.02em;
+      }
 
       /* Advisor panel */
       .e13Advisor {
@@ -93,7 +101,8 @@
         border-left: 4px solid var(--blue); margin-bottom: 18px;
       }
       .e13AdvisorHeader {
-        display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
       }
       .e13AdvisorTitle { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
       .e13VerdictBadge {
@@ -109,23 +118,24 @@
         font-size: 10px; font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px;
       }
-      .e13AdvisorSectionBody { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.5; }
+      .e13AdvisorSectionBody { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.6; }
 
-      /* Modifier tags */
-      .e13ModTag {
-        display: inline-block; padding: 2px 8px; border-radius: 4px;
-        font-size: 10px; font-weight: 700; background: var(--hover);
-        color: var(--muted); margin: 2px 4px 2px 0;
+      /* Geopolitical sub-header */
+      .e13SubHeader {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted);
+        margin: 14px 0 8px; padding-bottom: 4px;
       }
 
-      /* Run button */
-      .e13RunBtn {
-        padding: 10px 24px; border-radius: 8px; border: none;
-        background: var(--text); color: var(--bg); font-weight: 700;
-        font-size: 13px; cursor: pointer; letter-spacing: 0.02em;
+      /* Insight buttons (matches E12) */
+      .e13InsightBtn {
+        display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+        border-radius: 6px; border: 1px solid var(--border); background: var(--surfaceSolid);
+        font-size: 9px; font-weight: 600; color: var(--muted); cursor: pointer;
+        transition: all .15s ease; letter-spacing: 0.02em; vertical-align: middle;
       }
-      .e13RunBtn:hover { opacity: 0.85; }
-      .e13RunBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .e13InsightBtn:hover { background: var(--hover); color: var(--text); border-color: var(--text); }
+      .e13InsightBtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
       @media (max-width: 700px) {
         .e13ScenarioPanel { grid-template-columns: 1fr; }
@@ -134,71 +144,63 @@
     </style>
   </head>
   <body>
-    <header class="appHeader">
-      <div class="appHeaderInner">
-        <a href="/" class="appLogo">
-          <img src="/static/RavenONLY.png" width="28" height="28" alt="" />
-          <span><strong>Raven-Tech.co</strong></span>
-        </a>
-        <span class="appHeaderSub">Engine 13 — Gap Regime Scanner</span>
-        <button class="menuBtn" onclick="document.querySelector('.navDrawer').classList.toggle('open')">&#9776;</button>
-      </div>
-    </header>
-
-    <main class="appMain">
-      <div class="pageHeader" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-        <div>
-          <h1 style="font-size:18px;font-weight:800;margin:0">Gap Regime Scanner</h1>
-          <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Post-gap regime analysis — continuation vs consolidation vs reversion</p>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Engine 13 — Gap Regime Scanner</div>
+          </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <label style="font-size:11px;font-weight:600;color:var(--muted)">Gap threshold %</label>
-          <input id="gapThreshold" type="number" min="0.5" max="5" step="0.25" value="1.5"
-            style="width:60px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);font-size:12px;font-weight:700;background:var(--surfaceSolid);color:var(--text)" />
-          <button id="runBtn" class="e13RunBtn" onclick="runScan()">Run Scan</button>
+      </header>
+
+      <section class="controlBar" aria-label="Engine 13 Controls">
+        <div class="controlBarForm controlBarForm--engine2">
+          <button id="runBtn" class="primaryButton">Run Scan</button>
+          <div class="controlGroup" style="min-width:130px;">
+            <label class="controlLabel" for="gapThreshold">Gap Threshold %</label>
+            <input type="number" id="gapThreshold" class="controlInput" placeholder="1.5" min="0.5" max="5" step="0.25" value="1.5" style="width:120px;" />
+          </div>
+          <span id="status" class="status">Ready</span>
         </div>
-      </div>
+      </section>
 
-      <div id="loading" style="display:none;text-align:center;padding:48px 0">
-        <div style="font-size:14px;font-weight:700;color:var(--muted)">Scanning SPX gap regime...</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:6px">Fetching 5 years of SPX data, options chains, VIX, and technicals</div>
-      </div>
+      <div class="results hidden" id="results">
 
-      <div id="results" style="display:none">
-        <!-- Gap header cards -->
+        <div class="e13Divider"><span>Gap Overview</span></div>
         <div id="gapCards" class="e13Grid"></div>
 
-        <!-- Scenario panel -->
-        <div class="e13Divider">Scenario Probabilities</div>
+        <div class="e13Divider"><span>Scenario Probabilities</span></div>
         <div id="scenarioPanel" class="e13ScenarioPanel"></div>
-        <div id="modifiers" style="margin-bottom:18px"></div>
+        <div id="modifiers" class="e13ModRow"></div>
 
-        <!-- Historical analogues -->
-        <div class="e13Divider">Historical Gap Analogues</div>
+        <div class="e13Divider"><span>Historical Gap Analogues</span></div>
         <div id="histStats" class="e13Grid"></div>
         <div id="histTable"></div>
 
-        <!-- Options microstructure -->
-        <div class="e13Divider">Options Microstructure</div>
+        <div id="geoSection" style="display:none">
+          <div class="e13SubHeader">Geopolitical Shock Analogues</div>
+          <div id="geoTable"></div>
+        </div>
+
+        <div class="e13Divider"><span>Options Microstructure</span></div>
         <div id="optionsCards" class="e13Grid"></div>
 
-        <!-- Technicals + VIX -->
-        <div class="e13Divider">Technical Context &amp; VIX</div>
+        <div class="e13Divider"><span>Technical Context &amp; VIX</span></div>
         <div id="techVixCards" class="e13Grid"></div>
 
-        <!-- Advisor -->
-        <div class="e13Divider" style="justify-content:space-between">
+        <div class="e13Divider">
           <span>LLM Desk Note</span>
-          <button id="advisorBtn" class="e13RunBtn" onclick="runAdvisor()" style="padding:6px 16px;font-size:11px">Get Desk Note</button>
+          <button id="advisorBtn" class="e13InsightBtn" onclick="runAdvisor()"><span class="ico">&#9998;</span> Get Desk Note</button>
         </div>
         <div id="advisorPanel"></div>
-      </div>
 
-      <div id="errorPanel" style="display:none;padding:24px;text-align:center;color:var(--red);font-weight:700"></div>
+      </div>
     </main>
 
-    <script src="/static/ui_kit.js"></script>
+    <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
-    <script src="/static/gap-regime.js"></script>
+    <script src="/static/gap-regime.js?v=2"></script>
   </body>
 </html>
