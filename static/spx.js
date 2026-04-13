@@ -1759,6 +1759,7 @@ function renderEngine2DecisionPanel(payload) {
 
 function render(payload) {
   lastPayload = payload;
+  if (window.RavenChat) RavenChat.setEngineContext("engine2", payload);
   const status = $("status");
   const results = $("results");
   if (results) results.classList.toggle("hidden", false);

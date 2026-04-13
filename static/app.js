@@ -2596,6 +2596,7 @@ function renderQuarterCards(quarters) {
 function render(payload) {
   $("results").classList.remove("hidden");
   lastPayload = payload;
+  if (window.RavenChat) RavenChat.setEngineContext("engine1", payload);
   if (window._e1InsightCacheClear) window._e1InsightCacheClear();
   earningsExpanded = false;
   const toggle = $("earningsToggle");

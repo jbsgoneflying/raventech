@@ -56,6 +56,7 @@ var lastPayload = null;
     fetchJson(url)
       .then(function (data) {
         lastPayload = data;
+        if (window.RavenChat) RavenChat.setEngineContext("engine13", data);
         renderAll(data);
         $("results").classList.remove("hidden");
         $("status").textContent = "Scan complete";

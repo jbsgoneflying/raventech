@@ -594,6 +594,7 @@
           return;
         }
         lastPayload = data;
+        if (window.RavenChat) RavenChat.setEngineContext("engine12", data);
         try { renderRegime(data); } catch (e) { console.error("[E12] renderRegime:", e); }
         try { renderEdges(data); } catch (e) { console.error("[E12] renderEdges:", e); }
         try { renderOU(data); } catch (e) { console.error("[E12] renderOU:", e); }

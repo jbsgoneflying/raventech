@@ -386,6 +386,13 @@ class FeatureFlags:
     FRONT_LAYER_DMS_HISTORY_DAYS: int = 7          # rolling context for LLM
     FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE: int = 4
 
+    # --- Raven Chat (Senior Quant Advisor) ---
+    ENABLE_RAVEN_CHAT: bool = True
+    RAVEN_CHAT_MODEL: str = "gpt-5.4"
+    RAVEN_CHAT_MAX_TURNS: int = 30
+    RAVEN_CHAT_RATE_LIMIT: int = 10               # per minute
+    RAVEN_CHAT_MAX_CONTEXT_CHARS: int = 40000
+
     # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
     LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
     LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
@@ -667,6 +674,12 @@ class FeatureFlags:
             FRONT_LAYER_THEME_LOOKBACK_DAYS=_get_int("FRONT_LAYER_THEME_LOOKBACK_DAYS", 14),
             FRONT_LAYER_DMS_HISTORY_DAYS=_get_int("FRONT_LAYER_DMS_HISTORY_DAYS", 7),
             FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE=_get_int("FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE", 4),
+
+            ENABLE_RAVEN_CHAT=_get_bool("ENABLE_RAVEN_CHAT", True),
+            RAVEN_CHAT_MODEL=os.getenv("RAVEN_CHAT_MODEL", "gpt-5.4"),
+            RAVEN_CHAT_MAX_TURNS=_get_int("RAVEN_CHAT_MAX_TURNS", 30),
+            RAVEN_CHAT_RATE_LIMIT=_get_int("RAVEN_CHAT_RATE_LIMIT", 10),
+            RAVEN_CHAT_MAX_CONTEXT_CHARS=_get_int("RAVEN_CHAT_MAX_CONTEXT_CHARS", 40000),
 
             LEGAL_REG_TICKER_DENYLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_DENYLIST", [])),
             LEGAL_REG_TICKER_ALLOWLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_ALLOWLIST", [])),

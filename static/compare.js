@@ -279,6 +279,7 @@
    */
   function renderResults(payload) {
     lastPayload = payload;
+    if (window.RavenChat) RavenChat.setEngineContext("engine10", payload);
 
     // Show results section
     $("results").classList.remove("hidden");

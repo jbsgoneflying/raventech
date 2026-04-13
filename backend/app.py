@@ -30,6 +30,7 @@ from backend.routers import (
     calendar,
     market_intel,
     front_layer,
+    raven_chat,
 )
 
 try:
@@ -362,6 +363,7 @@ app.include_router(engine13_gap_regime.router)
 app.include_router(calendar.router)
 app.include_router(market_intel.router)
 app.include_router(front_layer.router)
+app.include_router(raven_chat.router)
 
 
 # ── Startup: rebuild trade indexes if they expired while the app was down ──
