@@ -352,8 +352,23 @@
       }
     }
     s = JSON.stringify(slim);
+    while (s.length > MAX_ENGINE_CHARS && slim && typeof slim === "object") {
+      var sk = Object.keys(slim);
+      if (!sk.length) break;
+      var worst = sk[0];
+      var wl = 0;
+      for (var i = 0; i < sk.length; i++) {
+        var L = JSON.stringify(slim[sk[i]]).length;
+        if (L > wl) {
+          wl = L;
+          worst = sk[i];
+        }
+      }
+      delete slim[worst];
+      s = JSON.stringify(slim);
+    }
     if (s.length > MAX_ENGINE_CHARS) {
-      return JSON.parse(s.substring(0, MAX_ENGINE_CHARS - 1) + "}");
+      return { _truncated: true, preview: s.substring(0, MAX_ENGINE_CHARS - 80) };
     }
     return slim;
   }

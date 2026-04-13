@@ -8,6 +8,7 @@ Streaming, context-aware chatbot that layers:
 """
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import json
 import logging
@@ -129,14 +130,49 @@ def _load_market_snapshot() -> Optional[Dict[str, Any]]:
 
 
 def _trim_engine_data(engine_data: Optional[Dict[str, Any]], max_chars: int = 15000) -> Optional[Dict[str, Any]]:
-    """Trim engine data to fit within context budget."""
+    """Trim engine data to fit within context budget without slicing JSON (which breaks json.loads)."""
+
+    def _serialized_len(obj: Any) -> int:
+        return len(json.dumps(obj, default=str))
+
     if not engine_data:
         return None
-    s = json.dumps(engine_data, default=str)
-    if len(s) <= max_chars:
-        return engine_data
-    trimmed = json.loads(s[:max_chars - 50] + "}")
-    return trimmed
+
+    if not isinstance(engine_data, dict):
+        blob = json.dumps(engine_data, default=str)
+        if len(blob) <= max_chars:
+            return engine_data  # type: ignore[return-value]
+        return {
+            "_truncated": True,
+            "type": type(engine_data).__name__,
+            "preview": blob[: max(0, max_chars - 120)] + "…",
+        }
+
+    data: Dict[str, Any] = copy.deepcopy(engine_data)
+
+    while _serialized_len(data) > max_chars:
+        if len(data) > 1:
+            largest_key = max(data.keys(), key=lambda k: _serialized_len(data[k]))
+            del data[largest_key]
+            continue
+        key, val = next(iter(data.items()))
+        inner = json.dumps(val, default=str)
+        lo, hi = 0, len(inner)
+        best_frag = "…"
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            suffix = "…" if mid < len(inner) else ""
+            fragment = inner[:mid] + suffix
+            trial = {key: fragment}
+            if _serialized_len(trial) <= max_chars:
+                best_frag = fragment
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        data[key] = best_frag
+        break
+
+    return data
 
 
 def build_chat_context(
