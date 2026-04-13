@@ -17,8 +17,8 @@
   // ── Inject CSS ─────────────────────────────────────────────────────────
   var style = document.createElement("style");
   style.textContent = [
-    /* FAB */
-    ".rcFab{position:fixed;bottom:24px;right:24px;z-index:9990;width:54px;height:54px;border-radius:50%;" +
+    /* FAB — sits above the calculator toggle (bottom:20px) */
+    ".rcFab{position:fixed;bottom:86px;right:24px;z-index:9990;width:54px;height:54px;border-radius:50%;" +
       "background:linear-gradient(135deg,rgba(0,122,255,0.92),rgba(88,86,214,0.92));" +
       "border:1px solid rgba(255,255,255,0.25);box-shadow:0 4px 20px rgba(0,0,0,0.15);" +
       "cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .2s,box-shadow .2s}",
@@ -26,13 +26,13 @@
     ".rcFab svg{width:24px;height:24px;fill:#fff}",
     ".rcFab.rcHidden{display:none}",
 
-    /* Backdrop */
-    ".rcBackdrop{position:fixed;inset:0;z-index:9991;background:rgba(0,0,0,0.18);opacity:0;" +
+    /* Backdrop — must cover the nav hamburger (z-index:20001) */
+    ".rcBackdrop{position:fixed;inset:0;z-index:20010;background:rgba(0,0,0,0.18);opacity:0;" +
       "pointer-events:none;transition:opacity .25s}",
     ".rcBackdrop.rcShow{opacity:1;pointer-events:auto}",
 
-    /* Drawer */
-    ".rcDrawer{position:fixed;top:0;right:0;bottom:0;z-index:9992;width:420px;max-width:92vw;" +
+    /* Drawer — above backdrop and nav */
+    ".rcDrawer{position:fixed;top:0;right:0;bottom:0;z-index:20011;width:420px;max-width:92vw;" +
       "background:rgba(255,255,255,0.88);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);" +
       "border-left:1px solid var(--border,rgba(15,23,42,0.10));" +
       "box-shadow:-8px 0 40px rgba(0,0,0,0.08);display:flex;flex-direction:column;" +
