@@ -326,6 +326,38 @@
     return bubble;
   }
 
+  // ── Trim engine data to avoid Nginx 413 / payload bloat ─────────────
+  var MAX_ENGINE_CHARS = 120000;
+  function trimEngineData(data) {
+    if (!data) return null;
+    var s = JSON.stringify(data);
+    if (s.length <= MAX_ENGINE_CHARS) return data;
+    var slim = {};
+    for (var k in data) {
+      if (!data.hasOwnProperty(k)) continue;
+      var v = data[k];
+      if (Array.isArray(v) && v.length > 10) {
+        slim[k] = v.slice(0, 10);
+      } else if (typeof v === "object" && v !== null && JSON.stringify(v).length > 8000) {
+        var inner = {};
+        for (var ik in v) {
+          if (!v.hasOwnProperty(ik)) continue;
+          var iv = v[ik];
+          if (Array.isArray(iv) && iv.length > 5) inner[ik] = iv.slice(0, 5);
+          else inner[ik] = iv;
+        }
+        slim[k] = inner;
+      } else {
+        slim[k] = v;
+      }
+    }
+    s = JSON.stringify(slim);
+    if (s.length > MAX_ENGINE_CHARS) {
+      return JSON.parse(s.substring(0, MAX_ENGINE_CHARS - 1) + "}");
+    }
+    return slim;
+  }
+
   // ── Send message + stream response ─────────────────────────────────────
   function sendMessage() {
     var text = input.value.trim();
@@ -348,7 +380,7 @@
 
     var body = { messages: messages };
     if (engineId) body.engineId = engineId;
-    if (engineData) body.engineData = engineData;
+    if (engineData) body.engineData = trimEngineData(engineData);
 
     fetch("/api/chat", {
       method: "POST",
