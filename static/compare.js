@@ -24,8 +24,91 @@
 
   // State
   let lastPayload = null;
+  let lastGamePlan = null;
   let isBusy = false;
   let gamePlanBusy = false;
+
+  /**
+   * Slim compare + optional game plan for Raven Chat (omit full breach payloads so
+   * trimEngineData never drops rankings entirely).
+   */
+  function buildChatContextPayload(comparePayload, gamePlanResponse) {
+    const rankings = (comparePayload.rankings || []).map((r) => {
+      const fp = r.fullPayload || {};
+      const vrp = fp.vrpAnalysis || {};
+      return {
+        ticker: r.ticker,
+        rank: r.rank,
+        compositeScore: r.compositeScore,
+        tier: r.tier,
+        tierLabel: r.tierLabel,
+        factors: r.factors,
+        quickStats: r.quickStats,
+        liquidityWarning: r.liquidityWarning,
+        liquidityBlock: r.liquidityBlock,
+        deskConsensus: fp.deskConsensus,
+        nextEvent: fp.nextEvent,
+        entryQuality: fp.entryQuality,
+        widthComparison: fp.widthComparison,
+        emPreference: fp.emPreference,
+        vrpAnalysis:
+          vrp && typeof vrp === "object"
+            ? {
+                vrpScore: vrp.vrpScore,
+                ivElevation: vrp.ivElevation,
+              }
+            : undefined,
+      };
+    });
+
+    const ctx = {
+      engine: "Engine 10 — Multi-ticker Compare",
+      asOfDate: comparePayload.asOfDate,
+      k: comparePayload.k,
+      n: comparePayload.n,
+      years: comparePayload.years,
+      tickersRequested: comparePayload.tickersRequested,
+      tickersAnalyzed: comparePayload.tickersAnalyzed,
+      tickerList: rankings.map((x) => x.ticker),
+      summary: comparePayload.summary,
+      rankings,
+      errors: comparePayload.errors,
+    };
+
+    if (gamePlanResponse) {
+      const advisor = gamePlanResponse.advisor || {};
+      const det = gamePlanResponse.deterministicAllocation || {};
+      const plan = advisor.allocationPlan || det.allocations || [];
+      ctx.gamePlan = {
+        source: advisor._source || "fallback",
+        model: advisor._model || null,
+        concentration: advisor.concentrationChoice,
+        totalDeployedPct: advisor.totalDeployedPct ?? det.totalDeployed,
+        cashReservePct: advisor.cashReservePct ?? det.cashReserve,
+        regimeLabel: det.regimeLabel,
+        regimeCap: det.regimeCap,
+        allocations: plan,
+        sectorBuckets: det.sectorBuckets,
+        conflicts: det.conflicts,
+        keyRisks: advisor.keyRisks,
+        correlationNote: advisor.correlationNote,
+        portfolioRationale: advisor.portfolioRationale,
+        deskNote: advisor.deskNote,
+        regimeAdjustment: advisor.regimeAdjustment,
+        conflictResolution: advisor.conflictResolution,
+      };
+    }
+
+    return ctx;
+  }
+
+  function pushRavenChatContext() {
+    if (!window.RavenChat || !lastPayload) return;
+    RavenChat.setEngineContext(
+      "engine10",
+      buildChatContextPayload(lastPayload, lastGamePlan)
+    );
+  }
 
   // Status icons
   const STATUS_ICONS = {
@@ -279,7 +362,8 @@
    */
   function renderResults(payload) {
     lastPayload = payload;
-    if (window.RavenChat) RavenChat.setEngineContext("engine10", payload);
+    lastGamePlan = null;
+    pushRavenChatContext();
 
     // Show results section
     $("results").classList.remove("hidden");
@@ -622,6 +706,8 @@
       }
 
       renderGamePlan(data);
+      lastGamePlan = data;
+      pushRavenChatContext();
     } catch (err) {
       console.error("Game plan failed:", err);
       panel.innerHTML = `<div class="loadingState" style="color: #b42823;">Game plan failed: ${escapeHtml(err.message)}</div>`;

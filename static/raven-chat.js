@@ -310,6 +310,16 @@
     return html;
   }
 
+  /** Only auto-scroll during streaming if the user is already near the bottom (read older bubbles freely). */
+  var RC_SCROLL_PIN_PX = 120;
+  function msgAreaNearBottom() {
+    var el = msgArea;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= RC_SCROLL_PIN_PX;
+  }
+  function scrollMsgAreaToBottom() {
+    msgArea.scrollTop = msgArea.scrollHeight;
+  }
+
   // ── Append message bubble ──────────────────────────────────────────────
   function appendMessage(role, content) {
     var welcomeEl = msgArea.querySelector(".rcWelcome");
@@ -322,7 +332,7 @@
       bubble.innerHTML = renderMarkdown(content);
     }
     msgArea.appendChild(bubble);
-    msgArea.scrollTop = msgArea.scrollHeight;
+    scrollMsgAreaToBottom();
     return bubble;
   }
 
@@ -443,7 +453,7 @@
                 fullText += payload.chunk;
                 botBubble.innerHTML = renderMarkdown(fullText);
                 botBubble.appendChild(cursor);
-                msgArea.scrollTop = msgArea.scrollHeight;
+                if (msgAreaNearBottom()) scrollMsgAreaToBottom();
               }
             }
             return pump();
