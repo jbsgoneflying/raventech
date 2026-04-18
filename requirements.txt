@@ -9,4 +9,5 @@ python-multipart==0.0.20
 redis==5.0.8
 certifi==2024.12.14
 pytest==8.3.4
+httpx==0.28.1
 openai>=1.68.0

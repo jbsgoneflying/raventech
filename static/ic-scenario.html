@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Engine 14 — IC Scenario Simulator | Raven-Tech.co</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 14: Path-dependent iron condor scenario simulator with empirical historical replay." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+      .e14Grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 18px; }
+      .e14Card {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+      }
+      .e14CardLabel {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px;
+      }
+      .e14CardValue {
+        font-size: 22px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--text); line-height: 1.2;
+      }
+      .e14CardCaption { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 4px; line-height: 1.4; }
+
+      .e14Divider {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted);
+        margin: 24px 0 12px; padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .e14Outcomes {
+        display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+        margin-bottom: 16px;
+      }
+      @media (max-width: 800px) { .e14Outcomes { grid-template-columns: repeat(2, 1fr); } }
+      .e14OutcomeCard {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        text-align: center;
+      }
+      .e14OutcomeCard.dominant { border-color: var(--blue); border-width: 2px; }
+      .e14OutcomeName {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px;
+      }
+      .e14OutcomePct {
+        font-size: 24px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        line-height: 1.2;
+      }
+      .e14OutcomeBar {
+        height: 4px; border-radius: 2px; background: var(--line); margin-top: 10px; overflow: hidden;
+      }
+      .e14OutcomeBarFill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+      .e14OutcomeMeta {
+        font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 6px; line-height: 1.4;
+      }
+
+      .green  { color: var(--green); }
+      .amber  { color: var(--amber); }
+      .red    { color: var(--red); }
+      .blue   { color: var(--blue); }
+      .muted  { color: var(--muted); }
+      .bgGreen  { background: var(--green); }
+      .bgAmber  { background: var(--amber); }
+      .bgRed    { background: var(--red); }
+      .bgBlue   { background: var(--blue); }
+      .bgMuted  { background: var(--muted); }
+
+      .e14ChartWrap {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        margin-bottom: 18px;
+      }
+
+      .e14Table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 18px; }
+      .e14Table th {
+        text-align: left; padding: 8px 10px; font-weight: 700; font-size: 10px;
+        text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+        border-bottom: 2px solid var(--border); white-space: nowrap;
+      }
+      .e14Table td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+      .e14Table tr:hover td { background: var(--hover); }
+
+      .e14NoteList {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        margin-bottom: 18px;
+      }
+      .e14Note {
+        font-size: 12px; color: var(--text); font-weight: 500;
+        line-height: 1.5; padding-left: 14px; text-indent: -14px; margin-bottom: 4px;
+      }
+      .e14Note::before { content: "\2022\00a0\00a0"; color: var(--muted2); }
+
+      .e14ExitCard {
+        padding: 18px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        margin-bottom: 18px;
+      }
+      .e14ExitRow {
+        display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+      }
+      .e14ExitLabel {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        color: var(--muted); letter-spacing: 0.05em;
+      }
+      .e14ExitValue {
+        font-size: 20px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .e14ExitDelta {
+        font-size: 12px; font-weight: 600; color: var(--muted);
+      }
+
+      .e14Banner {
+        padding: 14px 18px; border-radius: var(--radius-card);
+        border: 1px solid var(--amber);
+        background: rgba(255,159,10,0.06);
+        color: var(--text); font-size: 13px; font-weight: 600;
+        margin-bottom: 16px; line-height: 1.5;
+      }
+      .e14Banner.red { border-color: var(--red); background: rgba(255,59,48,0.08); }
+      .e14Banner.blue { border-color: var(--blue); background: rgba(0,122,255,0.06); }
+
+      .controlGrid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Engine 14 — IC Scenario Simulator</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Engine 14 Controls">
+        <form id="icForm" class="controlBarForm" style="display:flex;flex-direction:column;gap:10px;">
+          <div class="controlGrid">
+            <div class="controlGroup">
+              <label class="controlLabel" for="entryDate">Entry Date</label>
+              <input type="date" id="entryDate" class="controlInput" required />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="expiry">Expiry</label>
+              <input type="date" id="expiry" class="controlInput" required />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="creditReceived">Credit</label>
+              <input type="number" id="creditReceived" class="controlInput" step="0.05" min="0" placeholder="1.85" required />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="longPut">Long Put</label>
+              <input type="number" id="longPut" class="controlInput" step="1" placeholder="5170" required />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="shortPut">Short Put</label>
+              <input type="number" id="shortPut" class="controlInput" step="1" placeholder="5180" required />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="shortCall">Short Call</label>
+              <input type="number" id="shortCall" class="controlInput" step="1" placeholder="5380" required />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="longCall">Long Call</label>
+              <input type="number" id="longCall" class="controlInput" step="1" placeholder="5390" required />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="profitTargetPct">Profit Target %</label>
+              <input type="number" id="profitTargetPct" class="controlInput" step="5" value="50" min="10" max="100" />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="stopLossPct">Stop Loss %</label>
+              <input type="number" id="stopLossPct" class="controlInput" step="25" value="200" min="50" max="500" />
+            </div>
+            <div class="controlGroup">
+              <label class="controlLabel" for="seasonMode">Season Filter</label>
+              <select id="seasonMode" class="controlInput">
+                <option value="none">None</option>
+                <option value="summer">Summer (Jun-Aug)</option>
+                <option value="opex">OpEx Week</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button type="submit" id="runBtn" class="primaryButton">Run Scenario</button>
+            <span id="status" class="status">Ready</span>
+          </div>
+        </form>
+      </section>
+
+      <div id="banner" class="e14Banner" style="display:none;"></div>
+
+      <div class="results hidden" id="results">
+
+        <div class="e14Divider">Entry State</div>
+        <div id="entryCards" class="e14Grid"></div>
+
+        <div class="e14Divider">Outcome Distribution</div>
+        <div id="outcomePanel" class="e14Outcomes"></div>
+
+        <div class="e14Divider" id="adjustedDividerLabel" style="display:none;">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after Phase 2 conditioning)</span></div>
+        <div id="adjustedOutcomePanel" class="e14Outcomes" style="display:none;"></div>
+
+        <div class="e14Divider" id="modifiersDividerLabel" style="display:none;">Conditioning Modifiers</div>
+        <div id="modifiersPanel" class="e14Grid" style="display:none;"></div>
+
+        <div class="e14Divider">MTM Timeline (P10 / P50 / P90)</div>
+        <div class="e14ChartWrap">
+          <canvas id="mtmChart" height="260"></canvas>
+        </div>
+
+        <div class="e14Divider">Exit-Rule Optimization</div>
+        <div id="exitPanel"></div>
+
+        <div class="e14Divider" id="sliderDividerLabel" style="display:none;">Exit-Rule Sensitivity</div>
+        <div id="sliderPanel" class="e14ExitCard" style="display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div>
+              <div class="e14ExitLabel">Profit Target: <span id="slidePtLabel">50%</span></div>
+              <input type="range" id="slidePt" min="25" max="75" step="5" value="50" style="width:100%;" />
+            </div>
+            <div>
+              <div class="e14ExitLabel">Stop Loss: <span id="slideSlLabel">200%</span></div>
+              <input type="range" id="slideSl" min="100" max="300" step="25" value="200" style="width:100%;" />
+            </div>
+          </div>
+          <div class="e14ExitRow" style="margin-top:14px;">
+            <div><div class="e14ExitLabel">Win Rate</div><div class="e14ExitValue" id="slideWr">—</div></div>
+            <div><div class="e14ExitLabel">Avg P&amp;L</div><div class="e14ExitValue" id="slideAvg">—</div></div>
+            <div class="e14ExitDelta" id="slideDelta">Scrub to explore rule sensitivity across the replay grid.</div>
+          </div>
+        </div>
+
+        <div class="e14Divider">Conditioning Notes</div>
+        <div id="notesList" class="e14NoteList"></div>
+
+        <div class="e14Divider">Matched Analogues</div>
+        <div id="analoguesTableWrap"></div>
+
+        <div class="e14Divider">Actions</div>
+        <div class="e14ExitCard">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" id="journalBtn" class="primaryButton">Save to Trade Log</button>
+            <button type="button" id="chatBtn" class="primaryButton" style="background:var(--blue);">Copy Chat Summary</button>
+          </div>
+          <div id="actionStatus" class="e14ExitDelta" style="margin-top:10px;">&nbsp;</div>
+        </div>
+
+        <div class="e14Divider">Post-Trade Review</div>
+        <div class="e14ExitCard">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <label class="controlLabel" for="reviewTradeId" style="margin:0;">Trade ID</label>
+            <input type="text" id="reviewTradeId" class="controlInput" placeholder="e2-YYYYMMDD-SPX-xxxxxxxx" style="flex:1;min-width:260px;" />
+            <button type="button" id="reviewBtn" class="primaryButton" style="background:var(--blue);">Load Review</button>
+          </div>
+          <div id="reviewPanel" style="margin-top:14px;"></div>
+        </div>
+
+      </div>
+    </main>
+
+    <script src="/static/ui_kit.js?v=4"></script>
+    <script src="/static/nav.js"></script>
+    <script src="/static/ic-scenario.js?v=2"></script>
+  </body>
+</html>

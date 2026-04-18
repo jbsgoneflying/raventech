@@ -37,4 +37,8 @@ dist/
 # Trade archive JSON backups (contain live trade data)
 data/trade_archive/*.json
 
+# Engine 14 — historical option chain cache (backfilled on deploy)
+data/engine14_chains.db
+data/engine14_chains.db-*
+
 

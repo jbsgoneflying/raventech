@@ -27,6 +27,7 @@ from backend.routers import (
     engine9_credit,
     engine12_vix_fade,
     engine13_gap_regime,
+    engine14_ic_scenario,
     calendar,
     market_intel,
     front_layer,
@@ -338,6 +339,14 @@ def gap_regime_page():
     return FileResponse(str(STATIC_DIR / "gap-regime.html"))
 
 
+@app.get("/ic-scenario")
+def ic_scenario_page():
+    fl = get_flags()
+    if not getattr(fl, "ENABLE_ENGINE14_IC_SCENARIO", False):
+        raise HTTPException(status_code=404, detail="Engine 14 disabled")
+    return FileResponse(str(STATIC_DIR / "ic-scenario.html"))
+
+
 @app.get("/compare")
 def serve_compare():
     return FileResponse(str(STATIC_DIR / "compare.html"))
@@ -360,6 +369,7 @@ app.include_router(engine8_post_event.router)
 app.include_router(engine9_credit.router)
 app.include_router(engine12_vix_fade.router)
 app.include_router(engine13_gap_regime.router)
+app.include_router(engine14_ic_scenario.router)
 app.include_router(calendar.router)
 app.include_router(market_intel.router)
 app.include_router(front_layer.router)

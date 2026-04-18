@@ -22,6 +22,7 @@ ENGINE_REGISTRY = {
     11: {"name": "Macro Events & Headline Risk",      "backend": "market_intel",        "api": "/api/news-risk"},
     12: {"name": "VIX Spike Fade",                    "backend": "engine12_vix_fade",   "api": "/api/engine12"},
     13: {"name": "Gap Regime Scanner",                "backend": "engine13_gap_regime", "api": "/api/engine13"},
+    14: {"name": "IC Scenario Simulator",             "backend": "engine14_ic_scenario", "api": "/api/ic-scenario"},
 }
 
 
@@ -362,6 +363,24 @@ class FeatureFlags:
     ENGINE13_FRAGILITY_W_HEADLINE: float = 0.15
     ENGINE13_FRAGILITY_W_PRICE_ACTION: float = 0.10
 
+    # --- Engine 14: IC Scenario Simulator (path-dependent replay) ---
+    # Default OFF: requires an ORATS historical chain cache to be backfilled
+    # via scripts/engine14_backfill_chains.py before it can produce payloads.
+    ENABLE_ENGINE14_IC_SCENARIO: bool = False
+    ENGINE14_CACHE_TTL_SCAN: int = 10 * 60           # 10 min in-memory request cache
+    ENGINE14_LOOKBACK_YEARS: int = 2                  # depth of chain backfill
+    ENGINE14_MIN_ANALOGUES: int = 20                  # min historical pool to return a payload
+    ENGINE14_MAX_ANALOGUES: int = 250                 # cap returned analogue detail
+    ENGINE14_REGIME_BUCKET_TOL: float = 12.0          # score points; +/- vs entry regime to admit
+    ENGINE14_DEFAULT_PROFIT_TARGET_PCT: float = 50.0  # exit at 50% of credit
+    ENGINE14_DEFAULT_STOP_LOSS_PCT: float = 200.0     # stop at -200% of credit
+    ENGINE14_SQLITE_PATH: str = "data/engine14_chains.db"
+    ENGINE14_STRIKE_SNAP_MAX_PTS: float = 5.0         # max SPX points we will snap a strike
+    ENGINE14_BID_ASK_FILL_MODE: str = "mid"           # mid|conservative (ask-side close)
+    ENGINE14_ENABLE_CONDITIONING: bool = True         # Phase 2 modifiers (calendar/gamma/stress/gap)
+    ENGINE14_ADMIN_TOKEN: str = ""                    # header token for /api/ic-scenario/backfill
+    ENGINE14_BACKFILL_MAX_YEARS: float = 3.0          # safety cap on admin-triggered backfills
+
     # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
     GATE_RD_REGIME_ALLOW: str = "Transitional,Stressed"
@@ -623,6 +642,22 @@ class FeatureFlags:
             ENGINE13_FRAGILITY_W_HISTORICAL=_get_float("ENGINE13_FRAGILITY_W_HISTORICAL", 0.20),
             ENGINE13_FRAGILITY_W_HEADLINE=_get_float("ENGINE13_FRAGILITY_W_HEADLINE", 0.15),
             ENGINE13_FRAGILITY_W_PRICE_ACTION=_get_float("ENGINE13_FRAGILITY_W_PRICE_ACTION", 0.10),
+
+            # --- Engine 14 ---
+            ENABLE_ENGINE14_IC_SCENARIO=_get_bool("ENABLE_ENGINE14_IC_SCENARIO", False),
+            ENGINE14_CACHE_TTL_SCAN=_get_int("ENGINE14_CACHE_TTL_SCAN", 10 * 60),
+            ENGINE14_LOOKBACK_YEARS=_get_int("ENGINE14_LOOKBACK_YEARS", 2),
+            ENGINE14_MIN_ANALOGUES=_get_int("ENGINE14_MIN_ANALOGUES", 20),
+            ENGINE14_MAX_ANALOGUES=_get_int("ENGINE14_MAX_ANALOGUES", 250),
+            ENGINE14_REGIME_BUCKET_TOL=_get_float("ENGINE14_REGIME_BUCKET_TOL", 12.0),
+            ENGINE14_DEFAULT_PROFIT_TARGET_PCT=_get_float("ENGINE14_DEFAULT_PROFIT_TARGET_PCT", 50.0),
+            ENGINE14_DEFAULT_STOP_LOSS_PCT=_get_float("ENGINE14_DEFAULT_STOP_LOSS_PCT", 200.0),
+            ENGINE14_SQLITE_PATH=os.getenv("ENGINE14_SQLITE_PATH", "data/engine14_chains.db"),
+            ENGINE14_STRIKE_SNAP_MAX_PTS=_get_float("ENGINE14_STRIKE_SNAP_MAX_PTS", 5.0),
+            ENGINE14_BID_ASK_FILL_MODE=os.getenv("ENGINE14_BID_ASK_FILL_MODE", "mid"),
+            ENGINE14_ENABLE_CONDITIONING=_get_bool("ENGINE14_ENABLE_CONDITIONING", True),
+            ENGINE14_ADMIN_TOKEN=os.getenv("ENGINE14_ADMIN_TOKEN", ""),
+            ENGINE14_BACKFILL_MAX_YEARS=_get_float("ENGINE14_BACKFILL_MAX_YEARS", 3.0),
 
             # --- Engine 8 ---
             ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),
@@ -910,6 +945,21 @@ class FeatureFlags:
             ("ENGINE8_LLM_MODEL_VERSION", str(self.ENGINE8_LLM_MODEL_VERSION)),
             ("ENGINE8_LOOKBACK_EVENTS", int(self.ENGINE8_LOOKBACK_EVENTS)),
             ("ENGINE8_MAX_CONTROLLED_LOSS_PCT", float(self.ENGINE8_MAX_CONTROLLED_LOSS_PCT)),
+        )
+
+    def cache_key_engine14(self) -> tuple:
+        """Engine 14 cache fingerprint (IC Scenario Simulator)."""
+        return (
+            ("ENABLE_ENGINE14_IC_SCENARIO", bool(self.ENABLE_ENGINE14_IC_SCENARIO)),
+            ("ENGINE14_LOOKBACK_YEARS", int(self.ENGINE14_LOOKBACK_YEARS)),
+            ("ENGINE14_MIN_ANALOGUES", int(self.ENGINE14_MIN_ANALOGUES)),
+            ("ENGINE14_MAX_ANALOGUES", int(self.ENGINE14_MAX_ANALOGUES)),
+            ("ENGINE14_REGIME_BUCKET_TOL", float(self.ENGINE14_REGIME_BUCKET_TOL)),
+            ("ENGINE14_DEFAULT_PROFIT_TARGET_PCT", float(self.ENGINE14_DEFAULT_PROFIT_TARGET_PCT)),
+            ("ENGINE14_DEFAULT_STOP_LOSS_PCT", float(self.ENGINE14_DEFAULT_STOP_LOSS_PCT)),
+            ("ENGINE14_STRIKE_SNAP_MAX_PTS", float(self.ENGINE14_STRIKE_SNAP_MAX_PTS)),
+            ("ENGINE14_BID_ASK_FILL_MODE", str(self.ENGINE14_BID_ASK_FILL_MODE)),
+            ("ENGINE14_ENABLE_CONDITIONING", bool(self.ENGINE14_ENABLE_CONDITIONING)),
         )
 
     def cache_key_engine12(self) -> tuple:
