@@ -322,6 +322,30 @@ def test_build_weekly_windows_basic():
         assert dte_c == 4
 
 
+def test_count_trading_sessions_handles_future_dates():
+    """Regression: when entry/expiry are beyond the historical bar series,
+    we must still return a session count that matches what the window
+    enumerator will emit for the same weekday shape. Otherwise the ±2
+    DTE filter drops every real analogue and we return 0 results."""
+    from backend.engine14.simulator import _count_trading_sessions
+
+    # Historical series ends on a Friday before the user's trade.
+    hist = {"2026-04-13": 5000.0, "2026-04-14": 5010.0, "2026-04-15": 5020.0,
+            "2026-04-16": 5030.0, "2026-04-17": 5040.0}
+
+    # Mon -> Fri of next week (both future): expect 5 sessions, not 1.
+    assert _count_trading_sessions("2026-04-20", "2026-04-24", hist) == 5
+
+    # Fri (historical) -> Mon (future overnight): expect 2 sessions.
+    assert _count_trading_sessions("2026-04-17", "2026-04-20", hist) == 2
+
+    # Same-day degenerate: still returns 1.
+    assert _count_trading_sessions("2026-04-17", "2026-04-17", hist) == 1
+
+    # Weekend-only range in the future: heuristic says 0 → floored to 1.
+    assert _count_trading_sessions("2026-04-25", "2026-04-26", hist) == 1
+
+
 def test_build_matching_windows_fri_to_mon_overnight():
     """Regression: Friday→Monday 1-session trades must produce analogue
     windows (old enumerator collapsed them to empty)."""

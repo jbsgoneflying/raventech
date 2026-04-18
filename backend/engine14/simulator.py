@@ -613,7 +613,10 @@ def _count_trading_sessions(
 
     Uses the caller's close series as the trading-day calendar so the value
     is consistent with what `_build_matching_windows` emits as dte_sessions.
-    Falls back to 1 when dates are malformed or outside the cached range.
+    For dates beyond the historical series (common case: user prices a
+    forward-dated trade), we fall back to a weekday heuristic (Mon-Fri
+    count as sessions). This is ~perfect for the next couple of weeks —
+    long enough that any missed holiday is inside the ±2 DTE tolerance.
     """
     try:
         a = dt.date.fromisoformat(entry_iso)
@@ -622,10 +625,15 @@ def _count_trading_sessions(
         return 1
     if b < a:
         return 1
+    last_hist = max(trading_days.keys()) if trading_days else ""
     n = 0
     d = a
     while d <= b:
-        if d.isoformat() in trading_days:
+        ds = d.isoformat()
+        if ds in trading_days:
+            n += 1
+        elif ds > last_hist and d.weekday() < 5:
+            # Beyond the cached bar series — assume weekday = trading day.
             n += 1
         d += dt.timedelta(days=1)
     return max(1, n)
