@@ -9,6 +9,11 @@ services:
     environment:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
     restart: unless-stopped
+    volumes:
+      # Persist long-lived disk state across `docker compose up` rebuilds.
+      # Engine 14's SQLite chain cache (and anything else under data/)
+      # lives here so a 2-year backfill is not wiped on every deploy.
+      - app_data:/app/data
 
   redis:
     image: redis:7-alpine
@@ -19,3 +24,4 @@ services:
 
 volumes:
   redis_data:
+  app_data:
