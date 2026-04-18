@@ -135,25 +135,31 @@ def _atm_iv_from_cache(ticker: str, trade_date: str, expiry: str, spot: float) -
     return float(iv)
 
 
-def _build_weekly_windows(closes_sorted: List[Tuple[str, float]], entry_dow: int = 0) -> List[Tuple[str, str, int, int]]:
-    """Enumerate (entry_date, expiry_date, dte_sessions, dte_calendar) tuples.
+def _build_matching_windows(
+    closes_sorted: List[Tuple[str, float]],
+    *,
+    entry_dow: int = 0,
+    target_dte_calendar: int = 4,
+) -> List[Tuple[str, str, int, int]]:
+    """Enumerate (entry_date, expiry_date, dte_sessions, dte_calendar) tuples
+    that match the user's calendar shape.
 
-    `closes_sorted` is [(YYYY-MM-DD, close)] ascending. Entry anchor:
-    Monday + entry_dow (0=Mon, 1=Tue, 2=Wed). Expiry anchor: Friday of the
-    same week. Anchors snap forward to the next available trading day if
-    they fall on a holiday.
+    For each historical trading day whose weekday matches `entry_dow`, pair
+    it with the trading day `target_dte_calendar` calendar days later
+    (snapping forward to the next trading day if the raw target is a
+    weekend/holiday). This naturally supports:
+
+      * Weekly Mon→Fri ICs (entry_dow=0, target_dte_calendar=4)
+      * Weekly Wed→Fri trades (entry_dow=2, target_dte_calendar=2)
+      * Fri→Mon overnights (entry_dow=4, target_dte_calendar=3)
+      * Any custom SPXW expiry the user types in.
     """
     if not closes_sorted:
         return []
     date_to_idx = {d: i for i, (d, _) in enumerate(closes_sorted)}
     sorted_dates = [d for d, _ in closes_sorted]
-    try:
-        start = dt.date.fromisoformat(sorted_dates[0])
-        end = dt.date.fromisoformat(sorted_dates[-1])
-    except Exception:
-        return []
 
-    def _snap_fwd(target: dt.date, max_steps: int = 8) -> Optional[str]:
+    def _snap_fwd(target: dt.date, max_steps: int = 5) -> Optional[str]:
         for _ in range(max_steps):
             s = target.isoformat()
             if s in date_to_idx:
@@ -161,24 +167,35 @@ def _build_weekly_windows(closes_sorted: List[Tuple[str, float]], entry_dow: int
             target += dt.timedelta(days=1)
         return None
 
+    target_dte_calendar = max(1, int(target_dte_calendar))
     out: List[Tuple[str, str, int, int]] = []
-    d = start
-    while d.weekday() != 0:  # start on a Monday
-        d += dt.timedelta(days=1)
-    while d <= end:
-        entry_anchor = d + dt.timedelta(days=int(entry_dow))
-        expiry_anchor = d + dt.timedelta(days=4)  # Friday
-        e = _snap_fwd(entry_anchor)
-        x = _snap_fwd(expiry_anchor)
-        if e and x and e < x:
-            ei = date_to_idx[e]
-            xi = date_to_idx[x]
-            dte_sessions = xi - ei + 1
-            dte_calendar = (dt.date.fromisoformat(x) - dt.date.fromisoformat(e)).days
-            if dte_sessions > 0:
-                out.append((e, x, dte_sessions, dte_calendar))
-        d += dt.timedelta(days=7)
+    for entry_date in sorted_dates:
+        try:
+            ed = dt.date.fromisoformat(entry_date)
+        except Exception:
+            continue
+        if ed.weekday() != int(entry_dow):
+            continue
+        x = _snap_fwd(ed + dt.timedelta(days=target_dte_calendar))
+        if not x or x <= entry_date:
+            continue
+        ei = date_to_idx[entry_date]
+        xi = date_to_idx[x]
+        dte_sessions = xi - ei + 1
+        dte_calendar = (dt.date.fromisoformat(x) - ed).days
+        if dte_sessions > 0:
+            out.append((entry_date, x, dte_sessions, dte_calendar))
     return out
+
+
+# Backward-compat shim: default Mon→Fri weekly shape.
+def _build_weekly_windows(
+    closes_sorted: List[Tuple[str, float]], entry_dow: int = 0
+) -> List[Tuple[str, str, int, int]]:
+    """Enumerate Mon→Fri weekly windows (legacy entrypoint)."""
+    return _build_matching_windows(
+        closes_sorted, entry_dow=entry_dow, target_dte_calendar=4
+    )
 
 
 def build_analogue_universe(
@@ -186,19 +203,27 @@ def build_analogue_universe(
     ticker: str,
     closes_sorted: List[Tuple[str, float]],
     entry_dow: int = 0,
+    target_dte_calendar_days: int = 4,
     max_windows: int = 260,
 ) -> List[AnalogueWindow]:
     """Enumerate analogue windows and annotate with regime/season metadata.
 
     Requires the caller to pass a pre-fetched SPX close series (trading
-    days only, ascending). We deliberately avoid hitting ORATS here —
-    IV enrichment comes from the cached option chain (if present).
+    days only, ascending). `target_dte_calendar_days` is the user's
+    (expiry - entry) calendar-day delta; windows are shaped to match so
+    overnight/3-day/weekly trades all get apples-to-apples analogues.
+    We deliberately avoid hitting ORATS here — IV enrichment comes from
+    the cached option chain (if present).
     """
     ticker = str(ticker).upper()
     if not closes_sorted:
         return []
 
-    windows = _build_weekly_windows(closes_sorted, entry_dow=entry_dow)
+    windows = _build_matching_windows(
+        closes_sorted,
+        entry_dow=entry_dow,
+        target_dte_calendar=target_dte_calendar_days,
+    )
     if not windows:
         return []
     windows = windows[-max_windows:]

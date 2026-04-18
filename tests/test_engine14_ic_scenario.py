@@ -322,6 +322,29 @@ def test_build_weekly_windows_basic():
         assert dte_c == 4
 
 
+def test_build_matching_windows_fri_to_mon_overnight():
+    """Regression: Friday→Monday 1-session trades must produce analogue
+    windows (old enumerator collapsed them to empty)."""
+    from backend.engine14.analogue_matcher import _build_matching_windows
+
+    dates = []
+    d = dt.date(2025, 1, 6)  # Monday
+    for _ in range(4):
+        for off in range(5):  # Mon..Fri
+            dates.append(((d + dt.timedelta(days=off)).isoformat(), 100.0))
+        d += dt.timedelta(days=7)
+
+    windows = _build_matching_windows(dates, entry_dow=4, target_dte_calendar=3)
+    # Expect a window for each Friday that has a Monday trading day ahead
+    # (3 of 4 weeks in this fixture — the final Friday has no follow-on Mon).
+    assert len(windows) == 3
+    for entry, expiry, dte_s, dte_c in windows:
+        assert dt.date.fromisoformat(entry).weekday() == 4  # Fri
+        assert dt.date.fromisoformat(expiry).weekday() == 0  # Mon
+        assert dte_s == 2  # Fri + Mon inclusive
+        assert dte_c == 3
+
+
 def test_regime_from_rv_pct_boundaries():
     assert _regime_from_rv_pct(0.0) == "LOW"
     assert _regime_from_rv_pct(0.25) == "LOW"

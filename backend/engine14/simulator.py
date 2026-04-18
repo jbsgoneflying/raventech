@@ -419,23 +419,35 @@ def run_scenario(
 
     # 3. Build + filter analogue universe.
     entry_dow = 0
+    target_dte_calendar = 4
     try:
         entry_dow = dt.date.fromisoformat(request.entry_date).weekday()
         if entry_dow > 4:
             entry_dow = 2  # Wed fallback
+        target_dte_calendar = max(
+            1,
+            (dt.date.fromisoformat(request.expiry) - dt.date.fromisoformat(request.entry_date)).days,
+        )
     except Exception:
         pass
+
+    # Count the user's trading-day sessions using the same close series
+    # used to build analogue windows — keeps the dte_sessions filter
+    # apples-to-apples with what the enumerator emits.
+    target_dte_sessions = _count_trading_sessions(
+        request.entry_date, request.expiry, closes_by_date
+    )
 
     universe = build_analogue_universe(
         ticker=ticker,
         closes_sorted=closes_sorted,
         entry_dow=entry_dow,
+        target_dte_calendar_days=target_dte_calendar,
         max_windows=260,
     )
     criteria = MatchCriteria(
         target_regime=user_regime,
-        target_dte_sessions=max(1, (dt.date.fromisoformat(request.expiry) - dt.date.fromisoformat(request.entry_date)).days)
-        if _is_iso(request.entry_date) and _is_iso(request.expiry) else 5,
+        target_dte_sessions=target_dte_sessions,
         regime_bucket_tol=float(flags.ENGINE14_REGIME_BUCKET_TOL),
         season_mode=str(request.season_mode or "none"),
         season_value=request.season_value,
@@ -592,6 +604,31 @@ def _neighbor_bucket(b: str) -> str:
         return REGIME_BUCKETS[i - 1]
     except ValueError:
         return b
+
+
+def _count_trading_sessions(
+    entry_iso: str, expiry_iso: str, trading_days: Dict[str, float]
+) -> int:
+    """Count trading sessions from entry through expiry (inclusive both ends).
+
+    Uses the caller's close series as the trading-day calendar so the value
+    is consistent with what `_build_matching_windows` emits as dte_sessions.
+    Falls back to 1 when dates are malformed or outside the cached range.
+    """
+    try:
+        a = dt.date.fromisoformat(entry_iso)
+        b = dt.date.fromisoformat(expiry_iso)
+    except Exception:
+        return 1
+    if b < a:
+        return 1
+    n = 0
+    d = a
+    while d <= b:
+        if d.isoformat() in trading_days:
+            n += 1
+        d += dt.timedelta(days=1)
+    return max(1, n)
 
 
 def _is_iso(s: str) -> bool:
