@@ -214,6 +214,27 @@ def _row_to_rec(row: dict, *, ticker: str, trade_date: str) -> Optional[Tuple]:
     )
 
 
+def _rec_quote_quality(rec: Tuple) -> int:
+    """Score a row by how much usable option-price data it carries.
+
+    Used to break ties when ORATS returns duplicate (expiry, strike) rows
+    for SPX (AM-settled vs PM-settled contracts). Higher score wins.
+    Scoring:
+      +2 for any non-null mid price (call_mid rec[7], put_mid rec[11])
+      +1 for any non-null bid/ask (call rec[5]/[6], put rec[9]/[10])
+    """
+    score = 0
+    if rec[7] is not None and float(rec[7]) > 0:   # call_mid
+        score += 2
+    if rec[11] is not None and float(rec[11]) > 0:  # put_mid
+        score += 2
+    if rec[5] is not None and rec[6] is not None:   # call bid+ask
+        score += 1
+    if rec[9] is not None and rec[10] is not None:  # put bid+ask
+        score += 1
+    return score
+
+
 def _rec_to_chainrow(rec: Tuple) -> ChainRow:
     return ChainRow(
         trade_date=str(rec[0]),
@@ -331,11 +352,23 @@ def upsert_chain(
     """
     ticker = str(ticker).upper()
     td = str(trade_date)[:10]
-    recs: List[Tuple] = []
+
+    # ORATS /hist/strikes can legitimately return >1 row for the same
+    # (ticker, tradeDate, expirDate, strike) — e.g. SPX publishes both
+    # AM-settled monthly and PM-settled weekly contracts at overlapping
+    # strikes. Our PK is the quartet above, so we dedupe here and prefer
+    # the row with the richest option-price data (PM weeklies have real
+    # mids; AM monthlies often report stale/null quotes between expiries).
+    dedupe: Dict[Tuple[str, float], Tuple] = {}
     for r in rows or []:
         rec = _row_to_rec(r, ticker=ticker, trade_date=td)
-        if rec is not None:
-            recs.append(rec)
+        if rec is None:
+            continue
+        key = (rec[2], rec[3])  # (expiry, strike)
+        prev = dedupe.get(key)
+        if prev is None or _rec_quote_quality(rec) > _rec_quote_quality(prev):
+            dedupe[key] = rec
+    recs: List[Tuple] = list(dedupe.values())
 
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE;")
