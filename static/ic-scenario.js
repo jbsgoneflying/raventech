@@ -662,9 +662,82 @@
     }
   }
 
+  // Build a compact, chat-friendly slice of the scenario payload.
+  // Full payload includes matchedAnalogues (50-70 rows) and a per-day mtm
+  // grid which blow through the chat context budget without adding signal.
+  function buildChatContext(data, req) {
+    if (!data) return null;
+    var ctx = {};
+    var keep = [
+      "asOf",
+      "analoguesUsed",
+      "analoguesConsidered",
+      "entryState",
+      "fillModel",
+      "regimeMatchQuality",
+      "outcomeDistribution",
+      "outcomeDistributionMid",
+      "outcomeDistributionCI",
+      "adjustedOutcomeDistribution",
+      "conditioningModifiers",
+      "conditioningNotes",
+      "expectedValue",
+      "sizing",
+      "exitRulesOptimization",
+      "greeksAttribution",
+    ];
+    for (var i = 0; i < keep.length; i++) {
+      var k = keep[i];
+      if (data[k] !== undefined && data[k] !== null) ctx[k] = data[k];
+    }
+    // mtmTimeline: keep the p10/p50/p90 shape but thin to ≤20 points.
+    var tl = data.mtmTimeline;
+    if (Array.isArray(tl) && tl.length) {
+      var step = Math.max(1, Math.ceil(tl.length / 20));
+      var thin = [];
+      for (var j = 0; j < tl.length; j += step) thin.push(tl[j]);
+      if (thin[thin.length - 1] !== tl[tl.length - 1]) thin.push(tl[tl.length - 1]);
+      ctx.mtmTimeline = thin;
+    }
+    // Matched analogues: keep a top-5 preview so the chat can cite examples
+    // without drowning in the full table.
+    var rows = Array.isArray(data.matchedAnalogues) ? data.matchedAnalogues : [];
+    if (rows.length) {
+      ctx.matchedAnaloguesPreview = rows.slice(0, 5);
+      ctx.matchedAnaloguesCount = rows.length;
+    }
+    if (req) {
+      ctx.request = {
+        underlying: req.underlying,
+        entryDate: req.entryDate,
+        expiry: req.expiry,
+        shortPut: req.shortPut,
+        longPut: req.longPut,
+        shortCall: req.shortCall,
+        longCall: req.longCall,
+        creditReceived: req.creditReceived,
+        profitTargetPct: req.profitTargetPct,
+        stopLossPct: req.stopLossPct,
+        seasonMode: req.seasonMode,
+      };
+    }
+    return ctx;
+  }
+
+  function pushRavenChatContext(data, req) {
+    if (!window.RavenChat || typeof window.RavenChat.setEngineContext !== "function") return;
+    try {
+      window.RavenChat.setEngineContext("engine14", buildChatContext(data, req));
+    } catch (e) {
+      // Never let chat wiring break the engine UI.
+      if (window.console) console.warn("[E14] RavenChat context push failed:", e);
+    }
+  }
+
   function render(data, req) {
     lastPayload = data;
     lastRequestBody = req;
+    pushRavenChatContext(data, req);
     $("results").classList.remove("hidden");
     if ((data.analoguesUsed || 0) === 0) {
       showBanner(

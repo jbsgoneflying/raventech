@@ -36,6 +36,7 @@ ENGINE_LABELS = {
     "engine11": "Engine 11 — Macro Events & Headline Risk",
     "engine12": "Engine 12 — VIX Spike Fade",
     "engine13": "Engine 13 — Gap Regime Scanner",
+    "engine14": "Engine 14 — Iron Condor Scenario Simulator",
     "market-intelligence": "Market Intelligence — Front Layer",
 }
 
