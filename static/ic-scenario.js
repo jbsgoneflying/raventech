@@ -414,7 +414,29 @@
 
   /* ── Entry state cards ─────────────────────────────────────────── */
 
-  function renderEntryCards(data) {
+  // Distance (% of spot) from entry spot to a short-wing strike, plus that
+  // distance expressed in multiples of the 1σ expected move. A multiple >1
+  // means the short strike sits *outside* the 1σ cone (safer wing); <1 means
+  // it's inside the cone (higher breach probability).
+  function shortWingStats(spot, strike, emPct, side) {
+    if (!Number.isFinite(spot) || !Number.isFinite(strike) || spot <= 0) return null;
+    var distPct = ((side === "put" ? (spot - strike) : (strike - spot)) / spot) * 100;
+    var emMult  = (Number.isFinite(emPct) && emPct > 0) ? (distPct / emPct) : null;
+    return { distPct: distPct, emMult: emMult, strike: strike };
+  }
+
+  // Green = comfortably outside 1σ, blue = just outside, amber = just inside,
+  // red = deep inside the cone. Keeps the visual consistent with the rest of
+  // the UI (short-put delta, sizing caps, etc.).
+  function shortWingColor(emMult) {
+    if (emMult === null || emMult === undefined || !Number.isFinite(emMult)) return "";
+    if (emMult >= 1.25) return "green";
+    if (emMult >= 1.00) return "blue";
+    if (emMult >= 0.75) return "amber";
+    return "red";
+  }
+
+  function renderEntryCards(data, req) {
     var cards = $("entryCards");
     cards.innerHTML = "";
     var es = data.entryState;
@@ -422,11 +444,30 @@
       cards.innerHTML = '<div class="e14Card"><div class="e14CardLabel">Entry state</div><div class="e14CardValue">—</div><div class="e14CardCaption">Simulator returned no entry state.</div></div>';
       return;
     }
+
+    var spot  = Number(es.userSpot);
+    var emPct = Number(es.userEmPct);
+    var sp    = req ? Number(req.shortPut)  : NaN;
+    var sc    = req ? Number(req.shortCall) : NaN;
+    var putWing  = shortWingStats(spot, sp, emPct, "put");
+    var callWing = shortWingStats(spot, sc, emPct, "call");
+
+    function wingValue(w) {
+      return w ? w.distPct.toFixed(2) + "%" : "—";
+    }
+    function wingCaption(w) {
+      if (!w) return "strike not set";
+      var mult = (w.emMult !== null) ? w.emMult.toFixed(2) + "× EM · " : "";
+      return mult + "K=" + w.strike;
+    }
+
     var items = [
       { label: "Analogues Used",  value: data.analoguesUsed,              caption: "of " + (data.analoguesConsidered || 0) + " candidates" },
       { label: "Regime Bucket",   value: es.regimeBucket,                 caption: "proxy: RV20 percentile" },
       { label: "Spot (Entry)",    value: fmtNum(es.userSpot, 2) },
       { label: "1σ EM %",         value: fmtNum(es.userEmPct, 2) + "%" },
+      { label: "Short PUT Dist",  value: wingValue(putWing),              caption: wingCaption(putWing),  colorClass: shortWingColor(putWing  && putWing.emMult) },
+      { label: "Short CALL Dist", value: wingValue(callWing),             caption: wingCaption(callWing), colorClass: shortWingColor(callWing && callWing.emMult) },
       { label: "Wing Width",      value: es.wingWidth,                    caption: "smaller of put/call wings" },
       { label: "Mean P&L",        value: fmtPct(data.expectedValue.meanPnlPct, 1), caption: "across all analogues" },
       { label: "Median P&L",      value: fmtPct(data.expectedValue.medianPnlPct, 1) },
@@ -435,9 +476,10 @@
     items.forEach(function (it) {
       var card = document.createElement("div");
       card.className = "e14Card";
+      var valCls = "e14CardValue" + (it.colorClass ? " " + it.colorClass : "");
       card.innerHTML =
         '<div class="e14CardLabel">' + it.label + '</div>' +
-        '<div class="e14CardValue">' + (it.value === undefined || it.value === null ? "—" : it.value) + '</div>' +
+        '<div class="' + valCls + '">' + (it.value === undefined || it.value === null ? "—" : it.value) + '</div>' +
         (it.caption ? '<div class="e14CardCaption">' + it.caption + '</div>' : '');
       cards.appendChild(card);
     });
@@ -625,7 +667,7 @@
         "red"
       );
     }
-    renderEntryCards(data);
+    renderEntryCards(data, req);
     renderRegimeMatchQuality(data.regimeMatchQuality, data.analoguesUsed);
     renderFillModelBadge(data.fillModel);
     renderThinSampleBanner(data.outcomeDistributionCI, data.analoguesUsed);
@@ -826,13 +868,24 @@
   function extractCardData(slug, payload) {
     if (!payload) return {};
     switch (slug) {
-      case "entry_state":
+      case "entry_state": {
+        var es2   = payload.entryState || {};
+        var req2  = lastRequestBody || {};
+        var spot2 = Number(es2.userSpot);
+        var em2   = Number(es2.userEmPct);
+        var putW  = shortWingStats(spot2, Number(req2.shortPut),  em2, "put");
+        var callW = shortWingStats(spot2, Number(req2.shortCall), em2, "call");
         return {
-          entryState:          payload.entryState || null,
+          entryState:          es2,
           analoguesUsed:       payload.analoguesUsed,
           analoguesConsidered: payload.analoguesConsidered,
           expectedValue:       payload.expectedValue || null,
+          shortWings: {
+            put:  putW  ? { strike: putW.strike,  distPct: putW.distPct,  emMult: putW.emMult  } : null,
+            call: callW ? { strike: callW.strike, distPct: callW.distPct, emMult: callW.emMult } : null,
+          },
         };
+      }
       case "regime_match":
         return payload.regimeMatchQuality || {};
       case "outcome_distribution":
