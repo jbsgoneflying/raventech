@@ -420,9 +420,10 @@
   // it's inside the cone (higher breach probability).
   function shortWingStats(spot, strike, emPct, side) {
     if (!Number.isFinite(spot) || !Number.isFinite(strike) || spot <= 0) return null;
-    var distPct = ((side === "put" ? (spot - strike) : (strike - spot)) / spot) * 100;
+    var pts     = (side === "put") ? (spot - strike) : (strike - spot);  // always positive for a well-formed IC
+    var distPct = (pts / spot) * 100;
     var emMult  = (Number.isFinite(emPct) && emPct > 0) ? (distPct / emPct) : null;
-    return { distPct: distPct, emMult: emMult, strike: strike };
+    return { distPct: distPct, emMult: emMult, strike: strike, pts: pts };
   }
 
   // Green = comfortably outside 1σ, blue = just outside, amber = just inside,
@@ -458,17 +459,22 @@
     function wingCaption(w) {
       if (!w) return "strike not set";
       var mult = (w.emMult !== null) ? w.emMult.toFixed(2) + "× EM · " : "";
-      return mult + "K=" + w.strike;
+      var pts  = (Number.isFinite(w.pts)) ? " · " + fmtNum(w.pts, (w.pts === Math.round(w.pts) ? 0 : 1)) + " pts" : "";
+      return mult + "K=" + w.strike + pts;
     }
 
+    // Order is deliberate: row 1 shows the vol-cone view (EM + both short
+    // wings + where they sit vs spot and wing width) so the desk can see at
+    // a glance whether the structure is inside or outside the 1σ cone. Row 2
+    // holds replay metadata + outcome stats.
     var items = [
-      { label: "Analogues Used",  value: data.analoguesUsed,              caption: "of " + (data.analoguesConsidered || 0) + " candidates" },
-      { label: "Regime Bucket",   value: es.regimeBucket,                 caption: "proxy: RV20 percentile" },
-      { label: "Spot (Entry)",    value: fmtNum(es.userSpot, 2) },
       { label: "1σ EM %",         value: fmtNum(es.userEmPct, 2) + "%" },
       { label: "Short PUT Dist",  value: wingValue(putWing),              caption: wingCaption(putWing),  colorClass: shortWingColor(putWing  && putWing.emMult) },
       { label: "Short CALL Dist", value: wingValue(callWing),             caption: wingCaption(callWing), colorClass: shortWingColor(callWing && callWing.emMult) },
+      { label: "Spot (Entry)",    value: fmtNum(es.userSpot, 2) },
       { label: "Wing Width",      value: es.wingWidth,                    caption: "smaller of put/call wings" },
+      { label: "Analogues Used",  value: data.analoguesUsed,              caption: "of " + (data.analoguesConsidered || 0) + " candidates" },
+      { label: "Regime Bucket",   value: es.regimeBucket,                 caption: "proxy: RV20 percentile" },
       { label: "Mean P&L",        value: fmtPct(data.expectedValue.meanPnlPct, 1), caption: "across all analogues" },
       { label: "Median P&L",      value: fmtPct(data.expectedValue.medianPnlPct, 1) },
       { label: "Sharpe (proxy)",  value: fmtNum(data.expectedValue.sharpeProxy, 2) },
