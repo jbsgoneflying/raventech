@@ -543,6 +543,47 @@ def test_filter_analogues_em_multiple_filter_drops_out_of_range():
 # MAE proxy (Phase A2)
 # ---------------------------------------------------------------------------
 
+def test_is_scary_mae_uses_half_stop_when_stop_is_wide():
+    from backend.engine14.simulator import _is_scary_mae
+    # stop_loss=200 -> threshold=-100. MAE at -99 is NOT scary; -100 IS; -120 IS.
+    assert _is_scary_mae(-99.0,  stop_loss_pct=200.0) is False
+    assert _is_scary_mae(-100.0, stop_loss_pct=200.0) is True
+    assert _is_scary_mae(-120.0, stop_loss_pct=200.0) is True
+    # Very positive MAE (no drawdown) is never scary.
+    assert _is_scary_mae(0.0,   stop_loss_pct=200.0) is False
+    assert _is_scary_mae(25.0,  stop_loss_pct=200.0) is False
+
+
+def test_is_scary_mae_floors_at_half_credit_when_stop_is_tight():
+    from backend.engine14.simulator import _is_scary_mae
+    # stop_loss=50 -> half=-25, floor=-50. Threshold should be -50.
+    assert _is_scary_mae(-40.0, stop_loss_pct=50.0) is False
+    assert _is_scary_mae(-50.0, stop_loss_pct=50.0) is True
+    # stop_loss=0 -> floor kicks in; threshold=-50.
+    assert _is_scary_mae(-49.9, stop_loss_pct=0.0) is False
+    assert _is_scary_mae(-50.0, stop_loss_pct=0.0) is True
+
+
+def test_reclassify_only_promotes_winning_outcomes_to_white_knuckle():
+    from backend.engine14.simulator import _should_reclassify_as_white_knuckle
+    # Wins with scary MAE -> promote.
+    assert _should_reclassify_as_white_knuckle(
+        current_outcome="earlyTarget", effective_mae_at_exit=-150.0, stop_loss_pct=200.0,
+    ) is True
+    assert _should_reclassify_as_white_knuckle(
+        current_outcome="fullCollect", effective_mae_at_exit=-120.0, stop_loss_pct=200.0,
+    ) is True
+    # Wins with calm MAE -> leave as-is.
+    assert _should_reclassify_as_white_knuckle(
+        current_outcome="earlyTarget", effective_mae_at_exit=-20.0, stop_loss_pct=200.0,
+    ) is False
+    # Losing outcomes are never reclassified, even with extreme MAE.
+    for loser in ("stopOut", "breach", "whiteKnuckle"):
+        assert _should_reclassify_as_white_knuckle(
+            current_outcome=loser, effective_mae_at_exit=-500.0, stop_loss_pct=200.0,
+        ) is False
+
+
 def test_ohlc_mae_proxy_is_more_conservative_than_eod():
     """A day whose intraday low breached the short-put strike should yield
     a worse (more-negative) MAE proxy than the EOD MAE that missed it."""

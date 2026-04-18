@@ -118,6 +118,40 @@ def _daily_chain_for(ticker: str, trade_date: str, expiry: str):
     return chain_cache.fetch_chain_slice(ticker=ticker, trade_date=trade_date, expiry=expiry)
 
 
+def _is_scary_mae(mae_pct: float, stop_loss_pct: float) -> bool:
+    """Classify a max-adverse-excursion as 'scary' for whiteKnuckle purposes.
+
+    Scary means the trade's MAE reached at least 50% of the stop-loss
+    distance, with an absolute floor at -50% of credit so the classifier
+    stays meaningful when stop_loss_pct is very small or zero.
+
+    Example: stop_loss_pct=200 -> threshold=-100% (half the stop);
+             stop_loss_pct=50  -> threshold=-50%  (floor hits);
+             stop_loss_pct=0   -> threshold=-50%  (floor hits).
+    """
+    scary_threshold = -max(50.0, 0.5 * float(stop_loss_pct))
+    return float(mae_pct) <= scary_threshold
+
+
+def _should_reclassify_as_white_knuckle(
+    *,
+    current_outcome: str,
+    effective_mae_at_exit: float,
+    stop_loss_pct: float,
+) -> bool:
+    """Return True if a winning analogue should be reclassified as whiteKnuckle.
+
+    An analogue is a whiteKnuckle win when it exited profitably (either via
+    the profit target rule or by rolling to expiry positive) *and* its
+    intraday/EOD MAE during the trade reached stop territory per
+    :func:`_is_scary_mae`. Losing outcomes (stopOut/breach) are never
+    reclassified.
+    """
+    if current_outcome not in ("earlyTarget", "fullCollect"):
+        return False
+    return _is_scary_mae(float(effective_mae_at_exit), float(stop_loss_pct))
+
+
 def _ohlc_mae_proxy_pct(
     *,
     ohlc_by_date: Dict[str, DailyOHLC],
@@ -217,6 +251,7 @@ def _simulate_single_analogue(
     daily: List[Tuple[int, float]] = []
     daily_mid: List[Tuple[int, float]] = []
     mae = 0.0
+    mae_at_exit: Optional[float] = None  # snapshot of mae when exit rule fires
     exit_day: Optional[int] = None
     exit_pnl: Optional[float] = None
     exit_pnl_mid: Optional[float] = None
@@ -291,11 +326,13 @@ def _simulate_single_analogue(
                 exit_day = i
                 exit_pnl = pnl_pct
                 exit_pnl_mid = pnl_pct_mid
+                mae_at_exit = float(mae)
                 outcome = "earlyTarget"
             elif pnl_pct <= -float(stop_loss_pct):
                 exit_day = i
                 exit_pnl = pnl_pct
                 exit_pnl_mid = pnl_pct_mid
+                mae_at_exit = float(mae)
                 outcome = "stopOut"
 
     if not daily:
@@ -308,15 +345,21 @@ def _simulate_single_analogue(
         exit_pnl = float(final)
         if daily_mid:
             exit_pnl_mid = daily_mid[-1][1]
+        mae_at_exit = float(mae)
         if final >= 95.0:
             outcome = "fullCollect"
         elif final < -float(stop_loss_pct):
-            # Gapped past stop on final day
+            # Gapped past stop on final day.
             outcome = "stopOut"
         elif final < 0.0:
-            outcome = "whiteKnuckle"
+            # Held to expiry and ended negative without the stop rule
+            # firing. Functionally a loss — group with stopOut rather than
+            # whiteKnuckle. whiteKnuckle is now reserved for "won despite a
+            # scary drawdown" (see reclassification below).
+            outcome = "stopOut"
+            notes.append("held to expiry and ended negative below zero (stop rule not hit)")
         else:
-            outcome = "fullCollect"  # >0 but <95% -> still "kept" the trade, call it fullCollect-ish
+            outcome = "fullCollect"  # >0 but <95% -> still "kept" the trade
             notes.append("partial credit kept (final pnl < 95% but positive)")
 
     # Detect breach (expiry close beyond short strike).
@@ -331,23 +374,48 @@ def _simulate_single_analogue(
     if breached and (exit_pnl is not None and exit_pnl <= -50.0):
         outcome = "breach"
 
-    # Phase A2 — compute OHLC-based intraday MAE proxy.
+    # Phase A2 — compute OHLC-based intraday MAE proxy over the *active*
+    # trade window (entry through exit), not the full replay tail. This
+    # keeps the MAE consistent with what the trader actually experienced
+    # and avoids contaminating whiteKnuckle classification with post-exit
+    # drawdown that the trader had already banked P&L on.
+    active_days = trade_days[: int(exit_day) + 1] if exit_day is not None else trade_days
     mae_proxy: Optional[float] = None
     mae_source = "eod"
     if mae_proxy_enabled and ohlc_by_date:
         try:
             mae_proxy = _ohlc_mae_proxy_pct(
                 ohlc_by_date=ohlc_by_date,
-                trade_days=trade_days,
+                trade_days=active_days,
                 mapped_strikes=mapped,
                 entry_credit=float(entry_credit),
-                entry_eod_mae=float(mae),
+                entry_eod_mae=float(mae_at_exit if mae_at_exit is not None else mae),
             )
-            if mae_proxy < mae:
+            if mae_proxy < float(mae_at_exit if mae_at_exit is not None else mae):
                 mae_source = "ohlc_proxy"
         except Exception as e:
             LOG.debug("mae proxy failed for %s: %s", window.entry_date, e)
             mae_proxy = None
+
+    # --- whiteKnuckle reclassification (path-aware "scary-but-won") --------
+    # A win whose intraday/EOD drawdown reached stop territory is more
+    # informative to the desk than the same number buried in earlyTarget /
+    # fullCollect. See :func:`_is_scary_mae` for the threshold.
+    effective_mae_at_exit = float(mae_at_exit if mae_at_exit is not None else mae)
+    if mae_proxy is not None and float(mae_proxy) < effective_mae_at_exit:
+        effective_mae_at_exit = float(mae_proxy)
+    if _should_reclassify_as_white_knuckle(
+        current_outcome=str(outcome),
+        effective_mae_at_exit=effective_mae_at_exit,
+        stop_loss_pct=float(stop_loss_pct),
+    ):
+        prior = outcome
+        outcome = "whiteKnuckle"
+        notes.append(
+            f"whiteKnuckle: won (exit via {prior}) but MAE={effective_mae_at_exit:.1f}% "
+            f"during trade reached scary threshold "
+            f"{-max(50.0, 0.5 * float(stop_loss_pct)):.1f}%"
+        )
 
     # Phase E3 — capture spot at exit for greeks attribution.
     try:
@@ -370,7 +438,7 @@ def _simulate_single_analogue(
         outcome=str(outcome),
         exit_day=int(exit_day),
         exit_pnl_pct=float(exit_pnl if exit_pnl is not None else 0.0),
-        max_adverse_excursion_pct=float(mae),
+        max_adverse_excursion_pct=float(mae_at_exit if mae_at_exit is not None else mae),
         breached=bool(breached),
         notes=notes,
         exit_pnl_pct_mid=(None if exit_pnl_mid is None else float(exit_pnl_mid)),

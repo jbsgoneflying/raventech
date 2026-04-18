@@ -7,8 +7,10 @@ ORATS option chains as empirical evidence. Given a user's proposed IC
   1) Finds historical weekly windows with comparable regime/season/macro.
   2) Re-prices the user's IC at each day-in-trade using real chain mids
      snapped to EM-distance-equivalent strikes.
-  3) Classifies each analogue outcome (earlyTarget | fullCollect |
-     whiteKnuckle | stopOut | breach) and aggregates a distribution.
+  3) Classifies each analogue outcome into one of five buckets
+     (earlyTarget | fullCollect | whiteKnuckle | stopOut | breach) using
+     a path-aware, MAE-driven taxonomy: whiteKnuckle = a win whose
+     intraday/EOD drawdown reached stop territory.
   4) Surfaces MTM percentile timeline + an optimal exit recommendation.
 
 Phase 1 scope: SPX only, weeklies only, empirical MTM from day one.

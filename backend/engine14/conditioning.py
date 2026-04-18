@@ -680,8 +680,12 @@ def apply_modifiers_to_distribution(
 
     The algorithm:
       1. Scale `breach` and `stopOut` probabilities by the net tail multiplier.
-      2. Shift `earlyTarget + fullCollect` combined probability by `net_wr_shift_pct`.
-         (`whiteKnuckle` absorbs the residual.)
+      2. Shift the combined win probability (`earlyTarget + fullCollect +
+         whiteKnuckle`) by `net_wr_shift_pct`, distributed across the three
+         winning buckets proportionally. whiteKnuckle is a scary-but-won
+         outcome under the current simulator (see
+         ``_simulate_single_analogue`` — a win whose MAE reached stop
+         territory) so it's treated as a win here too.
       3. Renormalize so the five buckets still sum to 100%.
     Averages (avgPnlPct, avgDays, MAE) are preserved as-is — we don't touch
     the empirical means; only probabilities shift.
@@ -703,24 +707,25 @@ def apply_modifiers_to_distribution(
     p_stop   *= float(net_tail_multiplier)
     p_breach *= float(net_tail_multiplier)
 
-    # 2) Win-rate shift distributed across earlyTarget/fullCollect proportionally.
-    total_win = max(1e-6, p_early + p_full)
+    # 2) Win-rate shift distributed across all three winning buckets
+    #    (earlyTarget / fullCollect / whiteKnuckle) proportionally.
+    total_win = max(1e-6, p_early + p_full + p_white)
     shift = float(net_wr_shift_pct)
     p_early_new = max(0.0, p_early + shift * (p_early / total_win))
     p_full_new  = max(0.0, p_full  + shift * (p_full  / total_win))
+    p_white_new = max(0.0, p_white + shift * (p_white / total_win))
 
-    # 3) Compute residual for whiteKnuckle and renormalize.
-    total_now = p_early_new + p_full_new + p_white + p_stop + p_breach
+    # 3) Renormalize to 100.
+    total_now = p_early_new + p_full_new + p_white_new + p_stop + p_breach
     if total_now <= 0:
         return base
 
-    # Renormalize to 100.
     scale = 100.0 / total_now
     out: Dict[str, Dict[str, Any]] = {}
     for k, p in (
         ("earlyTarget",  p_early_new * scale),
         ("fullCollect",  p_full_new * scale),
-        ("whiteKnuckle", p_white * scale),
+        ("whiteKnuckle", p_white_new * scale),
         ("stopOut",      p_stop * scale),
         ("breach",       p_breach * scale),
     ):

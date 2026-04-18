@@ -268,7 +268,13 @@ def test_apply_modifiers_scales_tails_and_renormalizes():
     assert adj["stopOut"]["pct"] > base["stopOut"]["pct"] * 0.95
     assert adj["breach"]["pct"] > base["breach"]["pct"] * 0.95
 
-    # Wins must shrink.
+    # Wins must shrink. Under the path-aware taxonomy, whiteKnuckle is a
+    # win (exit > 0 after a scary drawdown) so it's included in the pool.
+    win_adj = adj["earlyTarget"]["pct"] + adj["fullCollect"]["pct"] + adj["whiteKnuckle"]["pct"]
+    win_base = base["earlyTarget"]["pct"] + base["fullCollect"]["pct"] + base["whiteKnuckle"]["pct"]
+    assert win_adj < win_base
+    # And the non-whiteKnuckle win subset must shrink as well (wr_shift_pct
+    # distributes proportionally, so any individual winning bucket shrinks).
     assert adj["earlyTarget"]["pct"] + adj["fullCollect"]["pct"] < \
            base["earlyTarget"]["pct"] + base["fullCollect"]["pct"]
 
