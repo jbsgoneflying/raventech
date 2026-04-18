@@ -569,34 +569,87 @@ def _summarize_outcomes_mid(paths: List[AnaloguePath]) -> Dict[str, Any]:
 
 # ---- Entry-state inference ----
 
-def _infer_user_em_pct(req: IcScenarioRequest, closes_by_date: Dict[str, float]) -> Tuple[float, float, str]:
+def _infer_user_em_pct(
+    req: IcScenarioRequest,
+    closes_by_date: Dict[str, float],
+) -> Tuple[float, float, str, Optional[str]]:
     """Estimate the user's entry spot + 1-sigma EM% for the requested expiry.
 
-    Preference order:
-      1) ATM IV from the *cached* chain at entry_date (option-market implied).
-      2) Midpoint of short strikes as spot proxy + realized-vol-derived EM.
-      3) Hard fallback: spot=(shortPut+shortCall)/2, EM=1.5% * sqrt(dte/7).
+    Returns ``(spot, em_pct, source_str, spot_as_of)`` where ``spot_as_of`` is
+    the trade date the spot was actually observed on. ``spot_as_of`` equals
+    ``req.entry_date`` when we have a live close on that date; otherwise it's
+    the most recent available close on or before ``req.entry_date`` (e.g.
+    Friday's close when a Monday trade is requested on a Saturday). Returned
+    as ``None`` only in the pathological case where no history at all is
+    available.
+
+    Preference order for spot:
+      1) Close on ``req.entry_date`` (live).
+      2) Most recent close on or before ``req.entry_date`` (weekends, holidays,
+         future-dated runs before the bar is published).
+      3) Midpoint of short strikes — last-resort only; previously the default
+         fallback, but it produced a synthetic spot that silently moved with
+         the user's strike edits and made wing-distance % cards meaningless.
+
+    Preference order for EM:
+      a) ATM IV from the cached chain at ``spot_as_of`` (option-market
+         implied). When the entry date has no chain (future date, weekend),
+         looking up IV at the same ``spot_as_of`` date that we resolved spot
+         from keeps both numbers internally consistent.
+      b) Hard fallback: generic 15% annualized IV scaled by DTE.
     """
     spot = closes_by_date.get(req.entry_date)
-    notes = "live"
-    if spot is None:
-        spot = (float(req.short_put) + float(req.short_call)) / 2.0
-        notes = "spot proxied from strike midpoint"
+    spot_as_of: Optional[str] = req.entry_date if spot is not None else None
 
+    if spot is None:
+        # Walk back to the most recent close on or before entry_date. This
+        # is the common case on a weekend/holiday or when running a Monday
+        # scenario before Monday's close has printed.
+        prior_dates = sorted(d for d in closes_by_date if d <= req.entry_date)
+        if prior_dates:
+            spot_as_of = prior_dates[-1]
+            spot = closes_by_date[spot_as_of]
+
+    if spot is None:
+        # Truly no history (shouldn't happen; the caller already guards on
+        # len(closes_sorted) < 180). Fall back to strike midpoint and flag it.
+        spot = (float(req.short_put) + float(req.short_call)) / 2.0
+        spot_as_of = None
+        spot_source_str = "synthetic strike midpoint (no history)"
+    elif spot_as_of == req.entry_date:
+        spot_source_str = "live close"
+    else:
+        spot_source_str = f"stale close {spot_as_of}"
+
+    # Use the spot_as_of date for the chain lookup so spot + IV come from the
+    # same session. Otherwise a Monday run on a Saturday would pair Friday's
+    # spot with a missing Monday chain, unnecessarily falling back to the
+    # generic 15% IV proxy.
+    chain_trade_date = spot_as_of or req.entry_date
     chain = chain_cache.fetch_chain_slice(
-        ticker=req.underlying, trade_date=req.entry_date, expiry=req.expiry
+        ticker=req.underlying, trade_date=chain_trade_date, expiry=req.expiry
     )
     if chain:
         best = min(chain, key=lambda r: abs(float(r.strike) - float(spot)))
         iv = best.call_iv if best.call_iv is not None else best.put_iv
         if iv is not None and iv > 0:
-            em = iv_to_em1sigma_pct(iv_pct=float(iv) * 100.0, dte_calendar_days=req.dte_calendar())
-            return float(spot), float(em), "IV from cached chain"
+            em = iv_to_em1sigma_pct(
+                iv_pct=float(iv) * 100.0, dte_calendar_days=req.dte_calendar()
+            )
+            return (
+                float(spot),
+                float(em),
+                f"IV from cached chain ({chain_trade_date}); spot={spot_source_str}",
+                spot_as_of,
+            )
 
-    # Conservative fallback when we have no entry-day chain (e.g., for a future-dated
-    # expiry before market open). Use a generic 15% annualized IV proxy.
     em = iv_to_em1sigma_pct(iv_pct=15.0, dte_calendar_days=req.dte_calendar())
-    return float(spot), float(em), "fallback IV=15% annualized"
+    return (
+        float(spot),
+        float(em),
+        f"fallback IV=15% annualized; spot={spot_source_str}",
+        spot_as_of,
+    )
 
 
 def _entry_regime_bucket(user_em_pct: float, req: IcScenarioRequest) -> str:
@@ -652,7 +705,7 @@ def run_scenario(
         )
 
     # 2. Infer user's entry state.
-    user_spot, user_em_pct, em_source = _infer_user_em_pct(request, closes_by_date)
+    user_spot, user_em_pct, em_source, user_spot_as_of = _infer_user_em_pct(request, closes_by_date)
     user_regime = _entry_regime_bucket(user_em_pct, request)
 
     # 3. Build + filter analogue universe.
@@ -912,6 +965,8 @@ def run_scenario(
         },
         "entryState": {
             "userSpot": round(float(user_spot), 2),
+            "userSpotAsOf": user_spot_as_of,
+            "userSpotIsLive": bool(user_spot_as_of == request.entry_date),
             "userEmPct": round(float(user_em_pct), 3),
             "wingWidth": round(float(request.wing_width()), 2),
             "regimeBucket": user_regime,

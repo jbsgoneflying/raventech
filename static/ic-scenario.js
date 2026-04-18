@@ -471,7 +471,7 @@
       { label: "1σ EM %",         value: fmtNum(es.userEmPct, 2) + "%" },
       { label: "Short PUT Dist",  value: wingValue(putWing),              caption: wingCaption(putWing),  colorClass: shortWingColor(putWing  && putWing.emMult) },
       { label: "Short CALL Dist", value: wingValue(callWing),             caption: wingCaption(callWing), colorClass: shortWingColor(callWing && callWing.emMult) },
-      { label: "Spot (Entry)",    value: fmtNum(es.userSpot, 2) },
+      { label: "Spot (Entry)",    value: fmtNum(es.userSpot, 2), caption: (es.userSpotIsLive === false && es.userSpotAsOf) ? ("as of " + es.userSpotAsOf + " (market closed)") : undefined, colorClass: (es.userSpotIsLive === false ? "amber" : "") },
       { label: "Wing Width",      value: es.wingWidth,                    caption: "smaller of put/call wings" },
       { label: "Analogues Used",  value: data.analoguesUsed,              caption: "of " + (data.analoguesConsidered || 0) + " candidates" },
       { label: "Regime Bucket",   value: es.regimeBucket,                 caption: "proxy: RV20 percentile" },
