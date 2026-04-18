@@ -376,10 +376,37 @@ class FeatureFlags:
     ENGINE14_DEFAULT_STOP_LOSS_PCT: float = 200.0     # stop at -200% of credit
     ENGINE14_SQLITE_PATH: str = "data/engine14_chains.db"
     ENGINE14_STRIKE_SNAP_MAX_PTS: float = 5.0         # max SPX points we will snap a strike
-    ENGINE14_BID_ASK_FILL_MODE: str = "mid"           # mid|conservative (ask-side close)
+    ENGINE14_BID_ASK_FILL_MODE: str = "mid"           # legacy key — use ENGINE14_FILL_MODEL
     ENGINE14_ENABLE_CONDITIONING: bool = True         # Phase 2 modifiers (calendar/gamma/stress/gap)
     ENGINE14_ADMIN_TOKEN: str = ""                    # header token for /api/ic-scenario/backfill
     ENGINE14_BACKFILL_MAX_YEARS: float = 3.0          # safety cap on admin-triggered backfills
+
+    # Phase A — fill realism & placement filter
+    ENGINE14_FILL_MODEL: str = "nbbo"                 # mid|nbbo|mid_penalty
+    ENGINE14_FILL_PENALTY_PCT: float = 15.0           # % of half-spread in mid_penalty mode
+    ENGINE14_EMIT_LEGACY_MID_DIST: bool = True        # emit outcomeDistributionMid side-by-side
+    ENGINE14_ENTRY_FILL_CHECK: bool = False           # (future) validate entry credit vs NBBO
+    ENGINE14_EM_MULTIPLE_TOL: float = 0.25            # sigma tolerance on short-strike EM match
+    ENGINE14_ENABLE_EM_MULTIPLE_FILTER: bool = True   # Phase A3 placement filter on/off
+    ENGINE14_MAE_PROXY_ENABLED: bool = True           # inflate MAE using underlying OHLC range
+
+    # Phase B — empirical modifier coefficients (learned from cache)
+    ENGINE14_MODIFIER_COEFFICIENTS_PATH: str = "data/engine14_modifier_coefficients.json"
+
+    # Phase C — multi-factor regime match
+    ENGINE14_REGIME_FEATURES_PATH: str = "data/engine14_regime_features.db"
+    ENGINE14_ENABLE_KNN_REGIME: bool = False          # gated until features backfilled
+    ENGINE14_KNN_TOP_N: int = 80                      # size of KNN analogue pool
+
+    # Phase D — bootstrap CIs
+    ENGINE14_BOOTSTRAP_B: int = 500
+    ENGINE14_BOOTSTRAP_SEED: int = 14
+    ENGINE14_THIN_SAMPLE_N: int = 20                  # below this -> UI warning
+
+    # Phase E — decision utility
+    ENGINE14_PER_DTE_EXITS: bool = True
+    ENGINE14_ENABLE_SIZING: bool = True
+    ENGINE14_ENABLE_GREEKS_ATTRIBUTION: bool = True
 
     # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
@@ -658,6 +685,29 @@ class FeatureFlags:
             ENGINE14_ENABLE_CONDITIONING=_get_bool("ENGINE14_ENABLE_CONDITIONING", True),
             ENGINE14_ADMIN_TOKEN=os.getenv("ENGINE14_ADMIN_TOKEN", ""),
             ENGINE14_BACKFILL_MAX_YEARS=_get_float("ENGINE14_BACKFILL_MAX_YEARS", 3.0),
+            ENGINE14_FILL_MODEL=os.getenv("ENGINE14_FILL_MODEL", "nbbo"),
+            ENGINE14_FILL_PENALTY_PCT=_get_float("ENGINE14_FILL_PENALTY_PCT", 15.0),
+            ENGINE14_EMIT_LEGACY_MID_DIST=_get_bool("ENGINE14_EMIT_LEGACY_MID_DIST", True),
+            ENGINE14_ENTRY_FILL_CHECK=_get_bool("ENGINE14_ENTRY_FILL_CHECK", False),
+            ENGINE14_EM_MULTIPLE_TOL=_get_float("ENGINE14_EM_MULTIPLE_TOL", 0.25),
+            ENGINE14_ENABLE_EM_MULTIPLE_FILTER=_get_bool("ENGINE14_ENABLE_EM_MULTIPLE_FILTER", True),
+            ENGINE14_MAE_PROXY_ENABLED=_get_bool("ENGINE14_MAE_PROXY_ENABLED", True),
+            ENGINE14_MODIFIER_COEFFICIENTS_PATH=os.getenv(
+                "ENGINE14_MODIFIER_COEFFICIENTS_PATH",
+                "data/engine14_modifier_coefficients.json",
+            ),
+            ENGINE14_REGIME_FEATURES_PATH=os.getenv(
+                "ENGINE14_REGIME_FEATURES_PATH",
+                "data/engine14_regime_features.db",
+            ),
+            ENGINE14_ENABLE_KNN_REGIME=_get_bool("ENGINE14_ENABLE_KNN_REGIME", False),
+            ENGINE14_KNN_TOP_N=_get_int("ENGINE14_KNN_TOP_N", 80),
+            ENGINE14_BOOTSTRAP_B=_get_int("ENGINE14_BOOTSTRAP_B", 500),
+            ENGINE14_BOOTSTRAP_SEED=_get_int("ENGINE14_BOOTSTRAP_SEED", 14),
+            ENGINE14_THIN_SAMPLE_N=_get_int("ENGINE14_THIN_SAMPLE_N", 20),
+            ENGINE14_PER_DTE_EXITS=_get_bool("ENGINE14_PER_DTE_EXITS", True),
+            ENGINE14_ENABLE_SIZING=_get_bool("ENGINE14_ENABLE_SIZING", True),
+            ENGINE14_ENABLE_GREEKS_ATTRIBUTION=_get_bool("ENGINE14_ENABLE_GREEKS_ATTRIBUTION", True),
 
             # --- Engine 8 ---
             ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),
@@ -960,6 +1010,16 @@ class FeatureFlags:
             ("ENGINE14_STRIKE_SNAP_MAX_PTS", float(self.ENGINE14_STRIKE_SNAP_MAX_PTS)),
             ("ENGINE14_BID_ASK_FILL_MODE", str(self.ENGINE14_BID_ASK_FILL_MODE)),
             ("ENGINE14_ENABLE_CONDITIONING", bool(self.ENGINE14_ENABLE_CONDITIONING)),
+            ("ENGINE14_FILL_MODEL", str(self.ENGINE14_FILL_MODEL)),
+            ("ENGINE14_FILL_PENALTY_PCT", float(self.ENGINE14_FILL_PENALTY_PCT)),
+            ("ENGINE14_ENABLE_EM_MULTIPLE_FILTER", bool(self.ENGINE14_ENABLE_EM_MULTIPLE_FILTER)),
+            ("ENGINE14_EM_MULTIPLE_TOL", float(self.ENGINE14_EM_MULTIPLE_TOL)),
+            ("ENGINE14_MAE_PROXY_ENABLED", bool(self.ENGINE14_MAE_PROXY_ENABLED)),
+            ("ENGINE14_ENABLE_KNN_REGIME", bool(self.ENGINE14_ENABLE_KNN_REGIME)),
+            ("ENGINE14_KNN_TOP_N", int(self.ENGINE14_KNN_TOP_N)),
+            ("ENGINE14_BOOTSTRAP_B", int(self.ENGINE14_BOOTSTRAP_B)),
+            ("ENGINE14_BOOTSTRAP_SEED", int(self.ENGINE14_BOOTSTRAP_SEED)),
+            ("ENGINE14_PER_DTE_EXITS", bool(self.ENGINE14_PER_DTE_EXITS)),
         )
 
     def cache_key_engine12(self) -> tuple:

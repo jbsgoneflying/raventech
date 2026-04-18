@@ -20,6 +20,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import math
+import random
 import statistics
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,11 +34,14 @@ from backend.engine14.analogue_matcher import (
     build_analogue_universe,
     filter_analogues,
     map_user_strikes_to_analogue,
+    user_em_multiple,
 )
-from backend.engine14.chain_replay import expiry_payoff, reprice_ic
+from backend.engine14.chain_replay import FillModel, expiry_payoff, reprice_ic
 from backend.engine14.conditioning import apply_modifiers_to_distribution, compute_conditioning
 from backend.engine14.exit_rules import optimize_exit_rules
-from backend.spx_ic.ohlc import fetch_dailies_ohlc_range, iv_to_em1sigma_pct
+from backend.engine14.greeks import aggregate_attribution, attribute_path
+from backend.engine14.sizing import compute_sizing
+from backend.spx_ic.ohlc import DailyOHLC, fetch_dailies_ohlc_range, iv_to_em1sigma_pct
 
 LOG = logging.getLogger("engine14.simulator")
 
@@ -94,10 +98,68 @@ class AnaloguePath:
     max_adverse_excursion_pct: float
     breached: bool
     notes: List[str] = field(default_factory=list)
+    # Phase A — when an NBBO run also runs a legacy-mid replay for the
+    # same path, we record the mid-mode exit P&L alongside for honesty.
+    exit_pnl_pct_mid: Optional[float] = None
+    # Phase A2 — MAE enhanced with an OHLC-range proxy (EOD values only
+    # miss intraday wicks; this approximates the worst-case IC MTM using
+    # the day the underlying traveled farthest against the short strikes).
+    mae_proxy_pct: Optional[float] = None
+    mae_source: str = "eod"   # "eod" | "ohlc_proxy"
+    # Phase E3 — spot / IV anchors used for greeks-based P&L attribution.
+    entry_close: Optional[float] = None
+    exit_close: Optional[float] = None
+    entry_iv: Optional[float] = None     # decimal (e.g. 0.18)
+    entry_credit: Optional[float] = None
+    years_to_expiry: Optional[float] = None
 
 
 def _daily_chain_for(ticker: str, trade_date: str, expiry: str):
     return chain_cache.fetch_chain_slice(ticker=ticker, trade_date=trade_date, expiry=expiry)
+
+
+def _ohlc_mae_proxy_pct(
+    *,
+    ohlc_by_date: Dict[str, DailyOHLC],
+    trade_days: List[str],
+    mapped_strikes: Tuple[float, float, float, float],
+    entry_credit: float,
+    entry_eod_mae: float,
+) -> float:
+    """Best-effort intraday MAE using daily high/low of the underlying.
+
+    We don't have intraday option-chain bars, but we DO have the daily
+    OHLC of the underlying. For each replay day, compute the worst-case
+    IC intrinsic P&L if the underlying had expired at that day's low
+    (put-side scare) or high (call-side scare) — whichever was worse —
+    and take the min across the window.
+
+    This OVERstates MAE slightly (treats each day as expiry) but it's a
+    conservative floor that surfaces "this day saw a real scare" better
+    than EOD-only. We return the more-adverse of (EOD MAE, OHLC proxy).
+    """
+    sp_k, lp_k, sc_k, lc_k = mapped_strikes
+    worst = float(entry_eod_mae)
+    for td in trade_days:
+        bar = ohlc_by_date.get(td)
+        if bar is None:
+            continue
+        candidates: List[float] = []
+        if bar.low is not None:
+            candidates.append(float(bar.low))
+        if bar.high is not None:
+            candidates.append(float(bar.high))
+        for px in candidates:
+            pnl_val = expiry_payoff(
+                expiry_spot=px,
+                short_put_strike=sp_k, long_put_strike=lp_k,
+                short_call_strike=sc_k, long_call_strike=lc_k,
+                entry_credit=float(entry_credit),
+            )
+            pct = 100.0 * pnl_val / float(entry_credit) if float(entry_credit) > 0 else 0.0
+            if pct < worst:
+                worst = float(pct)
+    return float(worst)
 
 
 def _simulate_single_analogue(
@@ -112,6 +174,10 @@ def _simulate_single_analogue(
     stop_loss_pct: float,
     closes_by_date: Dict[str, float],
     snap_max_pts: float,
+    fill_model: Optional[FillModel] = None,
+    also_price_mid: bool = False,
+    ohlc_by_date: Optional[Dict[str, DailyOHLC]] = None,
+    mae_proxy_enabled: bool = True,
 ) -> Optional[AnaloguePath]:
     try:
         mapped = map_user_strikes_to_analogue(
@@ -149,16 +215,21 @@ def _simulate_single_analogue(
         return None
 
     daily: List[Tuple[int, float]] = []
+    daily_mid: List[Tuple[int, float]] = []
     mae = 0.0
     exit_day: Optional[int] = None
     exit_pnl: Optional[float] = None
+    exit_pnl_mid: Optional[float] = None
     outcome: Optional[str] = None
     notes: List[str] = []
+    fm = fill_model or FillModel()
+    mid_fm = FillModel(mode="mid") if also_price_mid else None
 
     for i, td in enumerate(trade_days):
         dte_remaining = len(trade_days) - 1 - i
         chain = _daily_chain_for(ticker, td, window.expiry_date)
         pnl_pct: Optional[float] = None
+        pnl_pct_mid: Optional[float] = None
 
         if chain:
             priced = reprice_ic(
@@ -169,9 +240,23 @@ def _simulate_single_analogue(
                 long_call_strike=lc_k,
                 entry_credit=float(entry_credit),
                 snap_max_pts=float(snap_max_pts),
+                fill_model=fm,
             )
             if priced is not None:
                 pnl_pct = float(priced.pnl_pct_of_credit)
+            if mid_fm is not None:
+                priced_mid = reprice_ic(
+                    chain=chain,
+                    short_put_strike=sp_k,
+                    long_put_strike=lp_k,
+                    short_call_strike=sc_k,
+                    long_call_strike=lc_k,
+                    entry_credit=float(entry_credit),
+                    snap_max_pts=float(snap_max_pts),
+                    fill_model=mid_fm,
+                )
+                if priced_mid is not None:
+                    pnl_pct_mid = float(priced_mid.pnl_pct_of_credit)
 
         # Fallback: terminal-day intrinsic payoff when chain missing at T=0.
         if pnl_pct is None and i == len(trade_days) - 1:
@@ -186,6 +271,8 @@ def _simulate_single_analogue(
                     entry_credit=float(entry_credit),
                 )
                 pnl_pct = 100.0 * pnl_val / float(entry_credit)
+                if mid_fm is not None:
+                    pnl_pct_mid = pnl_pct
                 notes.append("expiry pnl computed from intrinsic payoff (chain missing)")
 
         if pnl_pct is None:
@@ -193,18 +280,22 @@ def _simulate_single_analogue(
             continue
 
         daily.append((int(dte_remaining), float(pnl_pct)))
+        if pnl_pct_mid is not None:
+            daily_mid.append((int(dte_remaining), float(pnl_pct_mid)))
         if pnl_pct < mae:
             mae = float(pnl_pct)
 
         if exit_day is None:
-            # Check exit rules on EOD mark.
+            # Check exit rules on EOD mark (primary fill-model P&L).
             if pnl_pct >= float(profit_target_pct):
                 exit_day = i
                 exit_pnl = pnl_pct
+                exit_pnl_mid = pnl_pct_mid
                 outcome = "earlyTarget"
             elif pnl_pct <= -float(stop_loss_pct):
                 exit_day = i
                 exit_pnl = pnl_pct
+                exit_pnl_mid = pnl_pct_mid
                 outcome = "stopOut"
 
     if not daily:
@@ -215,6 +306,8 @@ def _simulate_single_analogue(
         final = daily[-1][1]
         exit_day = len(daily) - 1
         exit_pnl = float(final)
+        if daily_mid:
+            exit_pnl_mid = daily_mid[-1][1]
         if final >= 95.0:
             outcome = "fullCollect"
         elif final < -float(stop_loss_pct):
@@ -238,6 +331,36 @@ def _simulate_single_analogue(
     if breached and (exit_pnl is not None and exit_pnl <= -50.0):
         outcome = "breach"
 
+    # Phase A2 — compute OHLC-based intraday MAE proxy.
+    mae_proxy: Optional[float] = None
+    mae_source = "eod"
+    if mae_proxy_enabled and ohlc_by_date:
+        try:
+            mae_proxy = _ohlc_mae_proxy_pct(
+                ohlc_by_date=ohlc_by_date,
+                trade_days=trade_days,
+                mapped_strikes=mapped,
+                entry_credit=float(entry_credit),
+                entry_eod_mae=float(mae),
+            )
+            if mae_proxy < mae:
+                mae_source = "ohlc_proxy"
+        except Exception as e:
+            LOG.debug("mae proxy failed for %s: %s", window.entry_date, e)
+            mae_proxy = None
+
+    # Phase E3 — capture spot at exit for greeks attribution.
+    try:
+        exit_td = trade_days[int(exit_day)]
+    except Exception:
+        exit_td = trade_days[-1]
+    exit_close = closes_by_date.get(exit_td)
+
+    try:
+        years_to_expiry = max(1.0 / 365.0, (x_date - e_date).days / 365.0)
+    except Exception:
+        years_to_expiry = float(window.dte_sessions) / 252.0
+
     return AnaloguePath(
         entry_date=window.entry_date,
         expiry_date=window.expiry_date,
@@ -250,6 +373,14 @@ def _simulate_single_analogue(
         max_adverse_excursion_pct=float(mae),
         breached=bool(breached),
         notes=notes,
+        exit_pnl_pct_mid=(None if exit_pnl_mid is None else float(exit_pnl_mid)),
+        mae_proxy_pct=(None if mae_proxy is None else float(mae_proxy)),
+        mae_source=mae_source,
+        entry_close=float(window.entry_close),
+        exit_close=(None if exit_close is None else float(exit_close)),
+        entry_iv=(float(window.entry_iv_pct) / 100.0 if window.entry_iv_pct is not None else None),
+        entry_credit=float(entry_credit),
+        years_to_expiry=float(years_to_expiry),
     )
 
 
@@ -316,7 +447,9 @@ def _summarize_outcomes(paths: List[AnaloguePath]) -> Dict[str, Any]:
         bkt["n"] += 1
         bkt["pnl"].append(float(p.exit_pnl_pct))
         bkt["days"].append(int(p.exit_day))
-        bkt["mae"].append(float(p.max_adverse_excursion_pct))
+        # Prefer the OHLC-proxy MAE when available — that's the "honest" worst-case
+        mae_val = float(p.mae_proxy_pct) if p.mae_proxy_pct is not None else float(p.max_adverse_excursion_pct)
+        bkt["mae"].append(mae_val)
     summary: Dict[str, Any] = {}
     for k, v in out.items():
         n = int(v["n"])
@@ -326,6 +459,110 @@ def _summarize_outcomes(paths: List[AnaloguePath]) -> Dict[str, Any]:
             "avgPnlPct": round(statistics.mean(v["pnl"]), 1) if v["pnl"] else 0.0,
             "avgDays": round(statistics.mean(v["days"]), 2) if v["days"] else 0.0,
             "maxAdverseExcursionPct": round(min(v["mae"]), 1) if v["mae"] else 0.0,
+        }
+    return summary
+
+
+def _bootstrap_outcome_ci(
+    paths: List[AnaloguePath],
+    *,
+    iterations: int = 500,
+    confidence: float = 0.90,
+    seed: int = 1337,
+) -> Dict[str, Any]:
+    """Bootstrap a confidence interval for each outcome's pct + avgPnl.
+
+    We draw `iterations` resamples of size N=len(paths) with replacement
+    and recompute pct and avgPnl per outcome, then keep the low/high
+    quantiles set by `confidence` (default 90%).
+
+    Returned shape::
+
+        {
+          "<outcome>": {
+            "pctLow": float, "pctHigh": float,
+            "pnlLow": float, "pnlHigh": float,
+          },
+          ...,
+          "_meta": {"n": N, "iterations": I, "confidence": 0.90,
+                    "thinSample": bool},
+        }
+    """
+    n = int(len(paths))
+    meta = {
+        "n": n,
+        "iterations": int(iterations),
+        "confidence": float(confidence),
+        "thinSample": bool(n < 20),
+    }
+    if n == 0:
+        out: Dict[str, Any] = {o: {"pctLow": 0.0, "pctHigh": 0.0, "pnlLow": 0.0, "pnlHigh": 0.0}
+                               for o in OUTCOMES}
+        out["_meta"] = meta
+        return out
+
+    rng = random.Random(int(seed))
+    # Pre-materialize (label, pnl) to avoid attribute lookups inside the loop.
+    obs = [(p.outcome, float(p.exit_pnl_pct)) for p in paths]
+    # Collect bootstrap samples.
+    pct_samples: Dict[str, List[float]] = {o: [] for o in OUTCOMES}
+    pnl_samples: Dict[str, List[float]] = {o: [] for o in OUTCOMES}
+    for _ in range(int(iterations)):
+        # Reservoir-free standard bootstrap: sample with replacement.
+        draw = [obs[rng.randrange(n)] for _ in range(n)]
+        cnt: Dict[str, int] = {o: 0 for o in OUTCOMES}
+        pnl_sum: Dict[str, float] = {o: 0.0 for o in OUTCOMES}
+        for label, pnl in draw:
+            if label not in cnt:
+                label = "whiteKnuckle"
+            cnt[label] += 1
+            pnl_sum[label] += pnl
+        for o in OUTCOMES:
+            pct_samples[o].append(100.0 * cnt[o] / n)
+            pnl_samples[o].append((pnl_sum[o] / cnt[o]) if cnt[o] else 0.0)
+
+    alpha = (1.0 - float(confidence)) / 2.0
+    lo_idx = max(0, int(alpha * iterations))
+    hi_idx = min(iterations - 1, int((1.0 - alpha) * iterations))
+
+    result: Dict[str, Any] = {}
+    for o in OUTCOMES:
+        p = sorted(pct_samples[o])
+        q = sorted(pnl_samples[o])
+        result[o] = {
+            "pctLow":  round(p[lo_idx], 1),
+            "pctHigh": round(p[hi_idx], 1),
+            "pnlLow":  round(q[lo_idx], 1),
+            "pnlHigh": round(q[hi_idx], 1),
+        }
+    result["_meta"] = meta
+    return result
+
+
+def _summarize_outcomes_mid(paths: List[AnaloguePath]) -> Dict[str, Any]:
+    """Parallel distribution computed from the legacy mid-price P&L.
+
+    Only paths with a non-null `exit_pnl_pct_mid` contribute. This lets
+    the UI show mid vs NBBO side-by-side for one release so users can
+    calibrate the fill-realism delta on their own data.
+
+    We reuse the *outcome labels* from the primary (NBBO) path so the two
+    distributions line up row-for-row; only the P&L magnitudes differ.
+    """
+    contributors = [p for p in paths if p.exit_pnl_pct_mid is not None]
+    total = max(1, len(contributors))
+    out: Dict[str, Dict[str, Any]] = {o: {"n": 0, "pnl": []} for o in OUTCOMES}
+    for p in contributors:
+        bkt = out.get(p.outcome) or out["whiteKnuckle"]
+        bkt["n"] += 1
+        bkt["pnl"].append(float(p.exit_pnl_pct_mid))  # type: ignore[arg-type]
+    summary: Dict[str, Any] = {}
+    for k, v in out.items():
+        n = int(v["n"])
+        summary[k] = {
+            "pct": round(100.0 * n / total, 1),
+            "n": n,
+            "avgPnlPct": round(statistics.mean(v["pnl"]), 1) if v["pnl"] else 0.0,
         }
     return summary
 
@@ -407,6 +644,7 @@ def run_scenario(
     ]
     closes_sorted.sort(key=lambda x: x[0])
     closes_by_date = {d: c for d, c in closes_sorted}
+    ohlc_by_date: Dict[str, DailyOHLC] = {b.trade_date: b for b in bars if b is not None}
     if len(closes_sorted) < 180:
         return _empty_payload(
             request=request,
@@ -445,14 +683,58 @@ def run_scenario(
         target_dte_calendar_days=target_dte_calendar,
         max_windows=260,
     )
+    # Phase A3 — compute the user's short-strike EM multiple and push it
+    # through MatchCriteria so analogues whose listed chains cannot cover
+    # a comparable placement are rejected.
+    user_em_mult = user_em_multiple(
+        user_spot=float(user_spot), user_em_pct=float(user_em_pct),
+        short_put=float(request.short_put), short_call=float(request.short_call),
+    )
+    # Phase C2 — KNN multi-factor regime match. We load the features store
+    # for every analogue's entry date (and the user's own entry date) and
+    # pass the map into `filter_analogues`. If the store is empty we fall
+    # back to the legacy RV20 bucket gate transparently.
+    knn_on = bool(getattr(flags, "ENGINE14_ENABLE_KNN_REGIME", False))
+    knn_top_n = int(getattr(flags, "ENGINE14_KNN_TOP_N", 80))
+    user_features = None
+    cand_features: Optional[Dict[str, Any]] = None
+    regime_match_quality: Optional[Dict[str, Any]] = None
+    if knn_on:
+        try:
+            from backend.engine14 import regime_features as _rf
+            user_features = _rf.fetch_features(request.entry_date)
+            if user_features is not None:
+                dates = [w.entry_date for w in universe]
+                rows = _rf.fetch_features_range(start=min(dates), end=max(dates)) if dates else []
+                cand_features = {r.trade_date: r for r in rows}
+            else:
+                LOG.info("KNN regime: no features for user entry date %s — falling back to bucket match.",
+                         request.entry_date)
+                knn_on = False
+        except Exception as e:
+            LOG.warning("KNN regime setup failed: %s — falling back to bucket match.", e)
+            knn_on = False
+
     criteria = MatchCriteria(
         target_regime=user_regime,
         target_dte_sessions=target_dte_sessions,
         regime_bucket_tol=float(flags.ENGINE14_REGIME_BUCKET_TOL),
         season_mode=str(request.season_mode or "none"),
         season_value=request.season_value,
+        target_em_multiple=user_em_mult,
+        em_multiple_tol=float(getattr(flags, "ENGINE14_EM_MULTIPLE_TOL", 0.25)),
+        enable_em_multiple_filter=bool(getattr(flags, "ENGINE14_ENABLE_EM_MULTIPLE_FILTER", False)),
+        enable_knn_regime=bool(knn_on),
+        knn_top_n=knn_top_n,
     )
-    candidates = filter_analogues(universe, criteria=criteria, flags=flags)
+    if knn_on:
+        candidates, regime_match_quality = filter_analogues(
+            universe, criteria=criteria, flags=flags,
+            user_features=user_features, candidate_features=cand_features,
+            return_match_quality=True,
+        )
+    else:
+        candidates = filter_analogues(universe, criteria=criteria, flags=flags)
     if len(candidates) < int(flags.ENGINE14_MIN_ANALOGUES):
         # Relax DTE filter as a second-pass attempt (still require regime match).
         relaxed = [w for w in universe
@@ -470,6 +752,12 @@ def run_scenario(
 
     # 4. Replay each analogue.
     user_strikes = request.strike_tuple()
+    fill_model = FillModel.from_str(
+        getattr(flags, "ENGINE14_FILL_MODEL", "nbbo"),
+        penalty_pct=float(getattr(flags, "ENGINE14_FILL_PENALTY_PCT", 15.0)),
+    )
+    also_mid = bool(getattr(flags, "ENGINE14_EMIT_LEGACY_MID_DIST", True)) and fill_model.mode != "mid"
+    mae_proxy_on = bool(getattr(flags, "ENGINE14_MAE_PROXY_ENABLED", True))
     paths: List[AnaloguePath] = []
     for w in candidates:
         p = _simulate_single_analogue(
@@ -483,6 +771,10 @@ def run_scenario(
             stop_loss_pct=float(request.stop_loss_pct),
             closes_by_date=closes_by_date,
             snap_max_pts=float(flags.ENGINE14_STRIKE_SNAP_MAX_PTS),
+            fill_model=fill_model,
+            also_price_mid=also_mid,
+            ohlc_by_date=ohlc_by_date,
+            mae_proxy_enabled=mae_proxy_on,
         )
         if p is not None:
             paths.append(p)
@@ -496,6 +788,8 @@ def run_scenario(
 
     # 5. Aggregate.
     outcome_summary = _summarize_outcomes(paths)
+    outcome_summary_mid = _summarize_outcomes_mid(paths) if also_mid else {}
+    outcome_distribution_ci = _bootstrap_outcome_ci(paths)
     timeline = _build_mtm_timeline(paths)
     final_pnls = [p.exit_pnl_pct for p in paths]
     mean_pnl = statistics.mean(final_pnls)
@@ -509,6 +803,33 @@ def run_scenario(
         default_stop_loss_pct=float(request.stop_loss_pct),
     )
 
+    # Sizing — independent of exit optimization, purely distributional.
+    sizing = compute_sizing(paths)
+
+    # Phase E3 — greeks attribution per path, aggregated across analogues.
+    attributions: List[Any] = []
+    for p in paths:
+        if (p.entry_close is None or p.exit_close is None or p.entry_iv is None
+                or p.entry_credit is None or p.years_to_expiry is None):
+            continue
+        try:
+            days_held = max(1, int(p.exit_day) + 1)
+            attributions.append(attribute_path(
+                entry_date=str(p.entry_date),
+                entry_credit=float(p.entry_credit),
+                entry_spot=float(p.entry_close),
+                exit_spot=float(p.exit_close),
+                entry_iv=float(p.entry_iv),
+                exit_iv=None,
+                days_held=days_held,
+                years_to_expiry=float(p.years_to_expiry),
+                mapped_strikes=p.mapped_strikes,
+                realized_pnl_pct=float(p.exit_pnl_pct),
+            ))
+        except Exception as e:
+            LOG.debug("greeks attribution failed for %s: %s", p.entry_date, e)
+    greeks_attribution = aggregate_attribution(attributions)
+
     # Sample recent analogues for the UI table.
     paths_by_entry = sorted(paths, key=lambda p: p.entry_date, reverse=True)
     sample_n = min(int(flags.ENGINE14_MAX_ANALOGUES), len(paths_by_entry))
@@ -519,7 +840,10 @@ def run_scenario(
             "outcome": p.outcome,
             "exitDay": p.exit_day,
             "pnlPct": round(float(p.exit_pnl_pct), 1),
+            "pnlPctMid": None if p.exit_pnl_pct_mid is None else round(float(p.exit_pnl_pct_mid), 1),
             "mae": round(float(p.max_adverse_excursion_pct), 1),
+            "maeProxyPct": None if p.mae_proxy_pct is None else round(float(p.mae_proxy_pct), 1),
+            "maeSource": p.mae_source,
             "mappedStrikes": {
                 "shortPut": p.mapped_strikes[0],
                 "longPut": p.mapped_strikes[1],
@@ -535,7 +859,18 @@ def run_scenario(
         f"Analogue pool: {len(paths)} windows (regime={user_regime}, tol=±{int(flags.ENGINE14_REGIME_BUCKET_TOL)}pts)",
         f"Entry EM inferred via {em_source}; 1σ={user_em_pct:.2f}%",
         "Strike mapping preserves EM-distance across historical spot levels.",
+        f"Exit fill model: {fill_model.mode}"
+        + (f" (+{fill_model.penalty_pct:.0f}% half-spread)" if fill_model.mode == "mid_penalty" else ""),
     ]
+    if user_em_mult is not None:
+        notes.append(
+            f"Trade placement: |z|={user_em_mult:.2f}σ short strikes"
+            + (" — EM-multiple filter ON" if criteria.enable_em_multiple_filter else "")
+        )
+    if mae_proxy_on:
+        hit = sum(1 for p in paths if p.mae_source == "ohlc_proxy")
+        if hit:
+            notes.append(f"OHLC MAE proxy engaged on {hit}/{len(paths)} analogues (intraday scares).")
 
     # Phase 2: forward-looking conditioning modifiers.
     # These NEVER mutate the empirical outcomeDistribution; we emit them
@@ -566,7 +901,7 @@ def run_scenario(
 
     return {
         "engine": 14,
-        "version": "1.1.0",
+        "version": "1.3.0",
         "request": asdict(request),
         "analoguesUsed": len(paths),
         "analoguesConsidered": len(candidates),
@@ -580,8 +915,22 @@ def run_scenario(
             "userEmPct": round(float(user_em_pct), 3),
             "wingWidth": round(float(request.wing_width()), 2),
             "regimeBucket": user_regime,
+            "userEmMultiple": None if user_em_mult is None else round(float(user_em_mult), 2),
+        },
+        "fillModel": {
+            "mode": fill_model.mode,
+            "penaltyPct": float(fill_model.penalty_pct),
+            "emitLegacyMidDistribution": bool(also_mid),
+            "maeProxyEnabled": bool(mae_proxy_on),
+        },
+        "regimeMatchQuality": regime_match_quality or {
+            "source": "bucket",
+            "bucket": user_regime,
+            "n": int(len(candidates)),
         },
         "outcomeDistribution": outcome_summary,
+        "outcomeDistributionMid": outcome_summary_mid,
+        "outcomeDistributionCI": outcome_distribution_ci,
         "adjustedOutcomeDistribution": adjusted_distribution,
         "conditioningModifiers": conditioning,
         "mtmTimeline": timeline,
@@ -591,6 +940,8 @@ def run_scenario(
             "sharpeProxy": round(float(sharpe), 2),
         },
         "exitRulesOptimization": exit_opt,
+        "sizing": sizing,
+        "greeksAttribution": greeks_attribution,
         "conditioningNotes": notes,
         "matchedAnalogues": matched_analogues,
     }
@@ -651,13 +1002,20 @@ def _empty_payload(*, request: IcScenarioRequest, reason: str, analogues_conside
     empty_dist = {o: {"pct": 0.0, "n": 0, "avgPnlPct": 0.0, "avgDays": 0.0, "maxAdverseExcursionPct": 0.0} for o in OUTCOMES}
     return {
         "engine": 14,
-        "version": "1.1.0",
+        "version": "1.3.0",
         "request": asdict(request),
         "analoguesUsed": 0,
         "analoguesConsidered": int(analogues_considered),
         "analogueBucket": {"regime": None, "macro": None, "season": request.season_mode or "ALL"},
         "entryState": None,
+        "fillModel": {
+            "mode": "nbbo", "penaltyPct": 15.0,
+            "emitLegacyMidDistribution": False, "maeProxyEnabled": False,
+        },
+        "regimeMatchQuality": {"source": "bucket", "n": 0},
         "outcomeDistribution": empty_dist,
+        "outcomeDistributionMid": {},
+        "outcomeDistributionCI": {"_meta": {"n": 0, "iterations": 0, "confidence": 0.90, "thinSample": True}},
         "adjustedOutcomeDistribution": {},
         "conditioningModifiers": {},
         "mtmTimeline": [],
@@ -667,6 +1025,10 @@ def _empty_payload(*, request: IcScenarioRequest, reason: str, analogues_conside
             "recommendedStopLoss": float(request.stop_loss_pct),
             "deltaFromDefault": {"winRatePct": 0.0, "avgPnlPct": 0.0},
         },
+        "sizing": {"n": 0, "consensusFraction": 0.0},
+        "greeksAttribution": {"n": 0, "deltaPct": 0.0, "gammaPct": 0.0, "thetaPct": 0.0,
+                              "vegaPct": 0.0, "residualPct": 0.0, "totalPct": 0.0,
+                              "shareOfAbsPnl": {}},
         "conditioningNotes": [reason],
         "matchedAnalogues": [],
     }

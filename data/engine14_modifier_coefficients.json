@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "generatedAt": "2026-04-18T00:00:00Z",
+  "generator": "hand_coded",
+  "lookbackYears": 0,
+  "sampleCount": {
+    "total": 0,
+    "calendar": 0,
+    "dealerGamma": 0,
+    "creditStress": 0,
+    "gapRegime": 0
+  },
+  "notes": "Initial hand-coded baseline. Overwrite via `scripts/engine14_fit_modifiers.py` once enough historical data is cached. Every bucket below has `source: \"hand_coded\"` until it has been fit from real samples.",
+  "calendar": {
+    "keywords": [
+      {"keyword": "FOMC",                 "severity": "extreme",  "tailBump": 0.45, "wrShift": -6.0, "source": "hand_coded", "n": 0},
+      {"keyword": "Interest Rate",        "severity": "extreme",  "tailBump": 0.45, "wrShift": -6.0, "source": "hand_coded", "n": 0},
+      {"keyword": "CPI",                  "severity": "elevated", "tailBump": 0.25, "wrShift": -3.5, "source": "hand_coded", "n": 0},
+      {"keyword": "PPI",                  "severity": "elevated", "tailBump": 0.20, "wrShift": -3.0, "source": "hand_coded", "n": 0},
+      {"keyword": "Core PCE",             "severity": "elevated", "tailBump": 0.22, "wrShift": -3.2, "source": "hand_coded", "n": 0},
+      {"keyword": "Nonfarm Payroll",      "severity": "elevated", "tailBump": 0.25, "wrShift": -3.5, "source": "hand_coded", "n": 0},
+      {"keyword": "Employment Situation", "severity": "elevated", "tailBump": 0.25, "wrShift": -3.5, "source": "hand_coded", "n": 0},
+      {"keyword": "Unemployment",         "severity": "moderate", "tailBump": 0.15, "wrShift": -2.0, "source": "hand_coded", "n": 0},
+      {"keyword": "GDP",                  "severity": "moderate", "tailBump": 0.15, "wrShift": -2.0, "source": "hand_coded", "n": 0},
+      {"keyword": "Retail Sales",         "severity": "moderate", "tailBump": 0.12, "wrShift": -1.5, "source": "hand_coded", "n": 0},
+      {"keyword": "ISM",                  "severity": "moderate", "tailBump": 0.10, "wrShift": -1.0, "source": "hand_coded", "n": 0},
+      {"keyword": "Jobless Claims",       "severity": "low",      "tailBump": 0.05, "wrShift": -0.5, "source": "hand_coded", "n": 0},
+      {"keyword": "Consumer Confidence",  "severity": "low",      "tailBump": 0.05, "wrShift": -0.5, "source": "hand_coded", "n": 0}
+    ],
+    "tailBumpCapTotal": 1.2,
+    "wrShiftFloorTotal": -18.0
+  },
+  "dealerGamma": {
+    "POSITIVE_high":   {"tailMult": 0.85, "wrShift":  3.0, "severity": "low",      "source": "hand_coded", "n": 0},
+    "POSITIVE_medium": {"tailMult": 0.85, "wrShift":  3.0, "severity": "low",      "source": "hand_coded", "n": 0},
+    "POSITIVE_low":    {"tailMult": 0.92, "wrShift":  1.5, "severity": "low",      "source": "hand_coded", "n": 0},
+    "NEUTRAL":         {"tailMult": 1.00, "wrShift":  0.0, "severity": "none",     "source": "hand_coded", "n": 0},
+    "NEGATIVE_low":    {"tailMult": 1.10, "wrShift": -1.5, "severity": "moderate", "source": "hand_coded", "n": 0},
+    "NEGATIVE_medium": {"tailMult": 1.20, "wrShift": -3.0, "severity": "elevated", "source": "hand_coded", "n": 0},
+    "NEGATIVE_high":   {"tailMult": 1.20, "wrShift": -3.0, "severity": "elevated", "source": "hand_coded", "n": 0}
+  },
+  "creditStress": {
+    "Risk-On":  {"tailMult": 0.90, "wrShift":  1.5, "severity": "low",      "source": "hand_coded", "n": 0},
+    "Neutral":  {"tailMult": 1.00, "wrShift":  0.0, "severity": "none",     "source": "hand_coded", "n": 0},
+    "Risk-Off": {"tailMult": 1.15, "wrShift": -2.5, "severity": "moderate", "source": "hand_coded", "n": 0},
+    "Stressed": {"tailMult": 1.30, "wrShift": -5.0, "severity": "elevated", "source": "hand_coded", "n": 0}
+  },
+  "gapRegime": {
+    "small":    {"absGapFloor": 1.50, "tailMult": 1.12, "wrShift": -1.5, "severity": "moderate", "source": "hand_coded", "n": 0},
+    "elevated": {"absGapFloor": 1.75, "tailMult": 1.25, "wrShift": -3.5, "severity": "elevated", "source": "hand_coded", "n": 0},
+    "extreme":  {"absGapFloor": 2.50, "tailMult": 1.45, "wrShift": -5.5, "severity": "extreme",  "source": "hand_coded", "n": 0}
+  }
+}

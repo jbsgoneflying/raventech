@@ -295,8 +295,20 @@
         <div class="e14Divider">Entry State</div>
         <div id="entryCards" class="e14Grid"></div>
 
-        <div class="e14Divider">Outcome Distribution</div>
+        <div class="e14Divider" id="regimeMatchDivider" style="display:none;">Regime Match Quality</div>
+        <div id="regimeMatchPanel" class="e14Grid" style="display:none;"></div>
+
+        <div class="e14Divider">
+          Outcome Distribution
+          <span id="fillModelBadge" class="muted" style="margin-left:8px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;display:none;"></span>
+        </div>
         <div id="outcomePanel" class="e14Outcomes"></div>
+
+        <div class="e14Divider" id="midDividerLabel" style="display:none;">
+          Legacy Mid-Fill Distribution
+          <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;margin-left:6px;">(for calibration — shows what the numbers looked like before NBBO fills)</span>
+        </div>
+        <div id="outcomePanelMid" class="e14Outcomes" style="display:none;"></div>
 
         <div class="e14Divider" id="adjustedDividerLabel" style="display:none;">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after Phase 2 conditioning)</span></div>
         <div id="adjustedOutcomePanel" class="e14Outcomes" style="display:none;"></div>
@@ -308,6 +320,12 @@
         <div class="e14ChartWrap">
           <canvas id="mtmChart" height="260"></canvas>
         </div>
+
+        <div class="e14Divider" id="sizingDivider" style="display:none;">Position Sizing</div>
+        <div id="sizingPanel" class="e14Grid" style="display:none;"></div>
+
+        <div class="e14Divider" id="greeksDivider" style="display:none;">P&amp;L Attribution (Greeks)</div>
+        <div id="greeksPanel" style="display:none;"></div>
 
         <div class="e14Divider">Exit-Rule Optimization</div>
         <div id="exitPanel"></div>
@@ -361,6 +379,6 @@
 
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
-    <script src="/static/ic-scenario.js?v=3"></script>
+    <script src="/static/ic-scenario.js?v=8"></script>
   </body>
 </html>

@@ -22,12 +22,174 @@ Design rules
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import math
+import os
+import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 LOG = logging.getLogger("engine14.conditioning")
+
+
+# ---------------------------------------------------------------------------
+# Phase B — empirical modifier coefficients
+# ---------------------------------------------------------------------------
+#
+# Coefficients are loaded once from the JSON file pointed to by
+# `FeatureFlags.ENGINE14_MODIFIER_COEFFICIENTS_PATH`. Each bucket records its
+# `source` ("empirical" | "hand_coded") and sample count so the UI/admin
+# endpoint can tell users when they're looking at a learned vs a seed value.
+#
+# The hand-coded fallbacks below are used if the JSON is missing, malformed,
+# or a specific bucket is absent — so behavior never regresses below the
+# original Phase 2 defaults.
+
+_HAND_CODED_CALENDAR: List[Tuple[str, str, float, float]] = [
+    ("FOMC",                    "extreme",   0.45, -6.0),
+    ("Interest Rate",           "extreme",   0.45, -6.0),
+    ("CPI",                     "elevated",  0.25, -3.5),
+    ("PPI",                     "elevated",  0.20, -3.0),
+    ("Core PCE",                "elevated",  0.22, -3.2),
+    ("Nonfarm Payroll",         "elevated",  0.25, -3.5),
+    ("Employment Situation",    "elevated",  0.25, -3.5),
+    ("Unemployment",            "moderate",  0.15, -2.0),
+    ("GDP",                     "moderate",  0.15, -2.0),
+    ("Retail Sales",            "moderate",  0.12, -1.5),
+    ("ISM",                     "moderate",  0.10, -1.0),
+    ("Jobless Claims",          "low",       0.05, -0.5),
+    ("Consumer Confidence",     "low",       0.05, -0.5),
+]
+
+_HAND_CODED_CALENDAR_CAPS = {"tailBumpCapTotal": 1.2, "wrShiftFloorTotal": -18.0}
+
+_HAND_CODED_DEALER_GAMMA: Dict[str, Tuple[float, float, str]] = {
+    # bucket key = f"{sign}_{magnitude}" — always upper/lowercase per below.
+    "POSITIVE_high":   (0.85,  3.0, "low"),
+    "POSITIVE_medium": (0.85,  3.0, "low"),
+    "POSITIVE_low":    (0.92,  1.5, "low"),
+    "NEUTRAL":         (1.00,  0.0, "none"),
+    "NEGATIVE_low":    (1.10, -1.5, "moderate"),
+    "NEGATIVE_medium": (1.20, -3.0, "elevated"),
+    "NEGATIVE_high":   (1.20, -3.0, "elevated"),
+}
+
+_HAND_CODED_CREDIT_STRESS: Dict[str, Tuple[float, float, str]] = {
+    "Risk-On":  (0.90,  1.5, "low"),
+    "Neutral":  (1.00,  0.0, "none"),
+    "Risk-Off": (1.15, -2.5, "moderate"),
+    "Stressed": (1.30, -5.0, "elevated"),
+}
+
+_HAND_CODED_GAP_REGIME: List[Dict[str, Any]] = [
+    # Ordered by absGapFloor desc — first match wins.
+    {"name": "extreme",  "absGapFloor": 2.50, "tailMult": 1.45, "wrShift": -5.5, "severity": "extreme"},
+    {"name": "elevated", "absGapFloor": 1.75, "tailMult": 1.25, "wrShift": -3.5, "severity": "elevated"},
+    {"name": "small",    "absGapFloor": 0.00, "tailMult": 1.12, "wrShift": -1.5, "severity": "moderate"},
+]
+
+
+_coeff_lock = threading.Lock()
+_coeff_cache: Dict[str, Any] = {}
+
+
+def _hand_coded_payload() -> Dict[str, Any]:
+    """Return a self-contained hand-coded coefficients dict.
+
+    Used as the last-resort fallback when no JSON is readable. The shape
+    matches what the fitting script emits, so downstream consumers (admin
+    endpoint, UI) always see the same schema.
+    """
+    return {
+        "version": 1,
+        "generatedAt": None,
+        "generator": "hand_coded_fallback",
+        "lookbackYears": 0,
+        "sampleCount": {"total": 0, "calendar": 0, "dealerGamma": 0, "creditStress": 0, "gapRegime": 0},
+        "notes": "In-memory hand-coded defaults (coefficients JSON missing or unreadable).",
+        "calendar": {
+            "keywords": [
+                {"keyword": kw, "severity": sev, "tailBump": bump, "wrShift": wr,
+                 "source": "hand_coded", "n": 0}
+                for kw, sev, bump, wr in _HAND_CODED_CALENDAR
+            ],
+            **_HAND_CODED_CALENDAR_CAPS,
+        },
+        "dealerGamma": {
+            k: {"tailMult": t, "wrShift": w, "severity": s, "source": "hand_coded", "n": 0}
+            for k, (t, w, s) in _HAND_CODED_DEALER_GAMMA.items()
+        },
+        "creditStress": {
+            k: {"tailMult": t, "wrShift": w, "severity": s, "source": "hand_coded", "n": 0}
+            for k, (t, w, s) in _HAND_CODED_CREDIT_STRESS.items()
+        },
+        "gapRegime": {
+            b["name"]: {
+                "absGapFloor": float(b["absGapFloor"]),
+                "tailMult": float(b["tailMult"]),
+                "wrShift": float(b["wrShift"]),
+                "severity": str(b["severity"]),
+                "source": "hand_coded", "n": 0,
+            }
+            for b in _HAND_CODED_GAP_REGIME
+        },
+    }
+
+
+def _resolve_coeff_path() -> str:
+    """Locate the coefficients JSON. Env var wins; otherwise use FeatureFlags."""
+    env = os.getenv("ENGINE14_MODIFIER_COEFFICIENTS_PATH", "").strip()
+    if env:
+        return env
+    try:
+        from backend.config import get_flags
+        return str(getattr(get_flags(), "ENGINE14_MODIFIER_COEFFICIENTS_PATH", "") or "")
+    except Exception:
+        return ""
+
+
+def load_modifier_coefficients(*, force_reload: bool = False) -> Dict[str, Any]:
+    """Thread-safe, cached loader for the modifier coefficients JSON.
+
+    Returns the parsed dict with hand-coded fallbacks merged in for any
+    missing bucket. Subsequent calls are memoized; pass `force_reload=True`
+    (e.g. from admin endpoints or tests) to re-read from disk.
+    """
+    global _coeff_cache
+    with _coeff_lock:
+        if _coeff_cache and not force_reload:
+            return _coeff_cache
+        path = _resolve_coeff_path()
+        data: Optional[Dict[str, Any]] = None
+        if path:
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+            except Exception as e:
+                LOG.warning("modifier coefficients: failed to read %s: %s", path, e)
+                data = None
+
+        merged = _hand_coded_payload()
+        if isinstance(data, dict):
+            # Shallow-merge top-level sections so partial JSONs still work.
+            for key in ("calendar", "dealerGamma", "creditStress", "gapRegime"):
+                if isinstance(data.get(key), (dict, list)):
+                    merged[key] = data[key]
+            for meta in ("version", "generatedAt", "generator", "lookbackYears",
+                         "sampleCount", "notes"):
+                if meta in data:
+                    merged[meta] = data[meta]
+        _coeff_cache = merged
+        return _coeff_cache
+
+
+def _reset_coefficients_cache_for_tests() -> None:
+    """Test helper: flush the in-memory cache so a fresh read happens."""
+    global _coeff_cache
+    with _coeff_lock:
+        _coeff_cache = {}
 
 
 # ---------------------------------------------------------------------------
@@ -62,33 +224,53 @@ class Modifier:
 
 # Event-keyword → (severity, tail_mult_bump, wr_shift). Keys are matched
 # case-insensitively against the event's `description`/`key`.
-_HIGH_IMPACT_KEYWORDS: List[tuple[str, str, float, float]] = [
-    ("FOMC",                    "extreme",   0.45, -6.0),
-    ("Interest Rate",           "extreme",   0.45, -6.0),
-    ("CPI",                     "elevated",  0.25, -3.5),
-    ("PPI",                     "elevated",  0.20, -3.0),
-    ("Core PCE",                "elevated",  0.22, -3.2),
-    ("Nonfarm Payroll",         "elevated",  0.25, -3.5),
-    ("Employment Situation",    "elevated",  0.25, -3.5),
-    ("Unemployment",            "moderate",  0.15, -2.0),
-    ("GDP",                     "moderate",  0.15, -2.0),
-    ("Retail Sales",            "moderate",  0.12, -1.5),
-    ("ISM",                     "moderate",  0.10, -1.0),
-    ("Jobless Claims",          "low",       0.05, -0.5),
-    ("Consumer Confidence",     "low",       0.05, -0.5),
-]
+# Learned coefficients (when available) are loaded from
+# `data/engine14_modifier_coefficients.json`; the hand-coded rows in
+# `_HAND_CODED_CALENDAR` above are used as a fallback.
 
 _SEVERITY_ORDER = {"none": 0, "low": 1, "moderate": 2, "elevated": 3, "extreme": 4}
 
 
-def _classify_event(desc: str) -> Optional[tuple[str, float, float]]:
-    """Return (severity, tail_bump, wr_shift) for a matching event, else None."""
+def _calendar_keyword_rows() -> List[Dict[str, Any]]:
+    """Return the ordered list of keyword→coefficient rows currently in use."""
+    coeffs = load_modifier_coefficients()
+    cal = (coeffs.get("calendar") or {})
+    kws = cal.get("keywords")
+    if isinstance(kws, list) and kws:
+        return kws
+    return [
+        {"keyword": kw, "severity": sev, "tailBump": bump, "wrShift": wr,
+         "source": "hand_coded", "n": 0}
+        for kw, sev, bump, wr in _HAND_CODED_CALENDAR
+    ]
+
+
+def _calendar_caps() -> Tuple[float, float]:
+    coeffs = load_modifier_coefficients()
+    cal = (coeffs.get("calendar") or {})
+    cap_tail = float(cal.get("tailBumpCapTotal", _HAND_CODED_CALENDAR_CAPS["tailBumpCapTotal"]))
+    floor_wr = float(cal.get("wrShiftFloorTotal", _HAND_CODED_CALENDAR_CAPS["wrShiftFloorTotal"]))
+    return cap_tail, floor_wr
+
+
+def _classify_event(desc: str) -> Optional[Tuple[str, float, float]]:
+    """Return (severity, tail_bump, wr_shift) for a matching event, else None.
+
+    Rows are consulted in order, first keyword substring match wins. This
+    mirrors the original hand-coded behavior and keeps empirical overrides
+    predictable (put higher-severity keywords first in the JSON).
+    """
     if not desc:
         return None
     d = desc.lower()
-    for kw, sev, bump, wr in _HIGH_IMPACT_KEYWORDS:
-        if kw.lower() in d:
-            return (sev, bump, wr)
+    for row in _calendar_keyword_rows():
+        kw = str(row.get("keyword", "")).lower()
+        if kw and kw in d:
+            return (
+                str(row.get("severity", "low")),
+                float(row.get("tailBump", 0.0)),
+                float(row.get("wrShift", 0.0)),
+            )
     return None
 
 
@@ -159,8 +341,9 @@ def compute_calendar_modifier(
         hits.append({**ev, "severity": sev})
 
     # Cap adjustments so one frothy week can't blow out the payload.
-    tail_bump = min(1.2, tail_bump)
-    wr_shift = max(-18.0, wr_shift)
+    cap_tail, floor_wr = _calendar_caps()
+    tail_bump = min(cap_tail, tail_bump)
+    wr_shift = max(floor_wr, wr_shift)
 
     if not hits:
         return Modifier(
@@ -221,20 +404,20 @@ def compute_dealer_gamma_modifier(
     magnitude = str(dg.get("magnitudeBucket") or "low").lower()
     net_gex = float(dg.get("netGex") or 0.0)
 
+    coeffs = (load_modifier_coefficients().get("dealerGamma") or {})
+    if sign == "NEUTRAL":
+        bucket_key = "NEUTRAL"
+    else:
+        bucket_key = f"{sign}_{magnitude}"
+    row = coeffs.get(bucket_key) or coeffs.get(f"{sign}_low") or {}
+    tail_mult = float(row.get("tailMult", _HAND_CODED_DEALER_GAMMA.get(bucket_key, (1.0, 0.0, "none"))[0]))
+    wr_shift = float(row.get("wrShift", _HAND_CODED_DEALER_GAMMA.get(bucket_key, (1.0, 0.0, "none"))[1]))
+    severity = str(row.get("severity", _HAND_CODED_DEALER_GAMMA.get(bucket_key, (1.0, 0.0, "none"))[2]))
     if sign == "POSITIVE":
-        tail_mult = 0.85 if magnitude in ("medium", "high") else 0.92
-        wr_shift = +3.0 if magnitude in ("medium", "high") else +1.5
-        severity = "low"
         note = f"Dealer gamma POSITIVE ({magnitude}) — intraday pinning tailwind for short-vol."
     elif sign == "NEGATIVE":
-        tail_mult = 1.20 if magnitude in ("medium", "high") else 1.10
-        wr_shift = -3.0 if magnitude in ("medium", "high") else -1.5
-        severity = "moderate" if magnitude == "low" else "elevated"
         note = f"Dealer gamma NEGATIVE ({magnitude}) — realized-vol amplification headwind."
     else:
-        tail_mult = 1.0
-        wr_shift = 0.0
-        severity = "none"
         note = "Dealer gamma NEUTRAL — no significant pinning/amplification bias."
 
     return Modifier(
@@ -255,12 +438,48 @@ def compute_dealer_gamma_modifier(
 # 2c. Credit stress (from today's DMS)
 # ---------------------------------------------------------------------------
 
-_STRESS_TABLE = {
-    "Risk-On":     ("low",      0.90, +1.5),
-    "Neutral":     ("none",     1.00,  0.0),
-    "Risk-Off":    ("moderate", 1.15, -2.5),
-    "Stressed":    ("elevated", 1.30, -5.0),
-}
+def _gap_regime_row(abs_pct: float) -> Tuple[str, float, float]:
+    """Pick the (severity, tail_mult, wr_shift) row for today's gap magnitude.
+
+    Rows are scanned in descending `absGapFloor` order; the first row whose
+    floor is <= abs_pct wins. Falls back to the hand-coded ladder when the
+    coefficients dict is missing or malformed.
+    """
+    coeffs = (load_modifier_coefficients().get("gapRegime") or {})
+    rows: List[Dict[str, Any]] = []
+    if isinstance(coeffs, dict) and coeffs:
+        for name, cfg in coeffs.items():
+            if not isinstance(cfg, dict):
+                continue
+            rows.append({
+                "name": name,
+                "absGapFloor": float(cfg.get("absGapFloor", 0.0)),
+                "tailMult": float(cfg.get("tailMult", 1.0)),
+                "wrShift": float(cfg.get("wrShift", 0.0)),
+                "severity": str(cfg.get("severity", "moderate")),
+            })
+    if not rows:
+        rows = list(_HAND_CODED_GAP_REGIME)
+    rows.sort(key=lambda r: r["absGapFloor"], reverse=True)
+    for r in rows:
+        if abs_pct >= r["absGapFloor"]:
+            return (r["severity"], r["tailMult"], r["wrShift"])
+    last = rows[-1]
+    return (last["severity"], last["tailMult"], last["wrShift"])
+
+
+def _credit_stress_row(label: str) -> Tuple[str, float, float]:
+    """Lookup (severity, tail_mult, wr_shift) for a DMS cross-asset label."""
+    coeffs = (load_modifier_coefficients().get("creditStress") or {})
+    row = coeffs.get(label)
+    if isinstance(row, dict):
+        return (
+            str(row.get("severity", "none")),
+            float(row.get("tailMult", 1.0)),
+            float(row.get("wrShift", 0.0)),
+        )
+    fb = _HAND_CODED_CREDIT_STRESS.get(label) or (1.0, 0.0, "none")
+    return (fb[2], fb[0], fb[1])
 
 
 def compute_credit_stress_modifier(
@@ -297,7 +516,7 @@ def compute_credit_stress_modifier(
     cas = getattr(dms, "cross_asset_stress", {}) or {}
     label = str(cas.get("composite_label") or "Neutral")
     score = float(cas.get("composite_score") or 50.0)
-    sev, tail_mult, wr_shift = _STRESS_TABLE.get(label, ("none", 1.0, 0.0))
+    sev, tail_mult, wr_shift = _credit_stress_row(label)
 
     note = (
         f"Cross-asset stress: {label} (score {score:.0f}/100)."
@@ -366,13 +585,7 @@ def compute_gap_regime_modifier(
             details={"enabled": False, "absGapPct": abs_pct},
         )
 
-    # Scale with gap magnitude.
-    if abs_pct >= 2.5:
-        severity, tail_mult, wr_shift = "extreme", 1.45, -5.5
-    elif abs_pct >= 1.75:
-        severity, tail_mult, wr_shift = "elevated", 1.25, -3.5
-    else:
-        severity, tail_mult, wr_shift = "moderate", 1.12, -1.5
+    severity, tail_mult, wr_shift = _gap_regime_row(abs_pct)
 
     note = f"Gap regime ACTIVE: {direction} {abs_pct:.2f}% — scenario '{dom or 'n/a'}'."
     return Modifier(

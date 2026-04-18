@@ -31,7 +31,7 @@ import logging
 import math
 import statistics
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config import FeatureFlags, get_flags
 from backend.engine14 import chain_cache
@@ -93,6 +93,11 @@ class AnalogueWindow:
     rv20_pct: Optional[float]      # percentile in rolling 252d lookback [0,1]
     regime_bucket: str
     season: Dict[str, str] = field(default_factory=dict)
+    # Phase A3 — coverage of the analogue's chain at likely 1σ / 1.5σ / 2σ short-strike
+    # placements. Used by the EM-multiple filter to reject windows where
+    # the caller's short strike (in sigma space) falls outside what the
+    # listed chain actually quotes. None = unknown / not pre-computed.
+    short_strike_em_coverage: Optional[Tuple[float, float]] = None  # (min_em_mult, max_em_mult)
 
 
 def _log_returns(closes: List[float]) -> List[float]:
@@ -275,6 +280,14 @@ def build_analogue_universe(
             continue
         season = _season_bucket(ed)
 
+        # Pre-compute the analogue's EM-multiple coverage so the downstream
+        # placement filter runs in O(1). Only do this for windows whose
+        # cache was populated (fetch_chain_slice returns [] otherwise).
+        coverage = compute_short_strike_em_coverage(
+            ticker=ticker, trade_date=entry_date, expiry=expiry_date,
+            entry_close=float(entry_close), entry_em_pct=float(em_pct),
+        )
+
         out.append(
             AnalogueWindow(
                 entry_date=entry_date,
@@ -288,6 +301,7 @@ def build_analogue_universe(
                 rv20_pct=(None if rv20_pct is None else float(rv20_pct)),
                 regime_bucket=regime,
                 season=season,
+                short_strike_em_coverage=coverage,
             )
         )
 
@@ -308,6 +322,18 @@ class MatchCriteria:
     regime_bucket_tol: float   # in regime "score points" (0..100) — used via bucket-index distance
     season_mode: str           # "none" | "quarter" | "month" | "summer" | "opex"
     season_value: Optional[str] = None  # for quarter/month etc.
+    # Phase A3 — placement filter: only admit analogues whose listed chain
+    # covers strike placements comparable to the user's |z|. `None` disables.
+    target_em_multiple: Optional[float] = None       # |z| of user's short strikes (avg)
+    em_multiple_tol: float = 0.25                    # sigma tolerance (+/-)
+    enable_em_multiple_filter: bool = False
+    # Phase C2 — KNN multi-factor regime match. When enabled we drop the
+    # regime-bucket gate and instead rank analogues by weighted L2 distance
+    # in (VIX, VIX9D, VVIX, term_slope, RV20, net_gex, credit_score) space.
+    # The RV20 bucket label is preserved on each `AnalogueWindow` for the
+    # UI; `regime_bucket_tol` is ignored in KNN mode.
+    enable_knn_regime: bool = False
+    knn_top_n: int = 80
 
 
 def _bucket_distance(a: str, b: str) -> int:
@@ -317,27 +343,117 @@ def _bucket_distance(a: str, b: str) -> int:
         return 99
 
 
+def compute_short_strike_em_coverage(
+    *,
+    ticker: str,
+    trade_date: str,
+    expiry: str,
+    entry_close: float,
+    entry_em_pct: float,
+) -> Optional[Tuple[float, float]]:
+    """Return (min_short_em_mult, max_short_em_mult) covered by the listed
+    chain on the analogue's entry day.
+
+    We pull the cached chain and compute each listed strike's |z| (distance
+    from spot in sigma units using the window's EM). The MIN is the closest
+    strike to spot, the MAX is the farthest. Any user-requested short-strike
+    placement whose |z| falls inside [min, max] can be mapped without
+    pathological snap failures.
+    """
+    if not entry_close or entry_em_pct <= 0:
+        return None
+    rows = chain_cache.fetch_chain_slice(ticker=ticker, trade_date=trade_date, expiry=expiry)
+    if not rows:
+        return None
+    zs: List[float] = []
+    for r in rows:
+        try:
+            k = float(r.strike)
+        except (TypeError, ValueError):
+            continue
+        if k <= 0:
+            continue
+        z = abs((k / float(entry_close) - 1.0) * 100.0 / float(entry_em_pct))
+        zs.append(z)
+    if not zs:
+        return None
+    zs_sorted = sorted(zs)
+    return (float(zs_sorted[0]), float(zs_sorted[-1]))
+
+
+def user_em_multiple(
+    *,
+    user_spot: float,
+    user_em_pct: float,
+    short_put: float,
+    short_call: float,
+) -> Optional[float]:
+    """Average |z| distance (sigma units) of the user's short strikes.
+
+    z_put  = (short_put  / spot - 1) * 100 / em_pct    (negative)
+    z_call = (short_call / spot - 1) * 100 / em_pct    (positive)
+    Returns (|z_put| + |z_call|) / 2, which is the canonical EM multiple
+    for a symmetric IC (and a good average for slightly skewed ones).
+    """
+    if user_spot <= 0 or user_em_pct <= 0:
+        return None
+    zp = abs((float(short_put) / float(user_spot) - 1.0) * 100.0 / float(user_em_pct))
+    zc = abs((float(short_call) / float(user_spot) - 1.0) * 100.0 / float(user_em_pct))
+    return float((zp + zc) / 2.0)
+
+
 def filter_analogues(
     universe: List[AnalogueWindow],
     *,
     criteria: MatchCriteria,
     flags: Optional[FeatureFlags] = None,
-) -> List[AnalogueWindow]:
-    """Retain windows that match the user's regime (bucket-distance <= 1 by default).
+    user_features: Optional[Any] = None,
+    candidate_features: Optional[Dict[str, Any]] = None,
+    return_match_quality: bool = False,
+) -> Any:
+    """Filter + rank analogues for the user's trade.
 
-    DTE is filtered to ±2 sessions from the user's trade horizon, since
-    a 7-session replay on a 4-session cached window makes no sense.
+    Stage 1 — hard gates (DTE ±2, season, EM-multiple coverage).
+    Stage 2 — regime selection:
+        * Legacy: RV20 bucket distance (tol derived from
+          `regime_bucket_tol`).
+        * Phase C2 KNN (when `criteria.enable_knn_regime=True`):
+          weighted L2 distance over `(VIX, VIX9D, VVIX, term_slope, RV20,
+          net_gex, credit_score)`, truncated to `criteria.knn_top_n`.
+          Candidates without a features row gracefully fall back to the
+          bucket test so we don't silently drop half the pool.
+
+    Parameters
+    ----------
+    user_features / candidate_features:
+        Required when `enable_knn_regime=True`. `candidate_features` is a
+        dict keyed by analogue `entry_date`.
+    return_match_quality:
+        When True the return value is a tuple
+        `(list[AnalogueWindow], match_quality_dict)`. `match_quality_dict`
+        is `None` outside KNN mode.
     """
     flags = flags or get_flags()
     tol_buckets = max(0, int(round(float(criteria.regime_bucket_tol) / 25.0)))  # 25 pts per bucket
-    # At the default tol=12pts, we allow adjacent bucket matches (tol_buckets=0 would be strict).
     if tol_buckets == 0:
         tol_buckets = 1
 
-    out: List[AnalogueWindow] = []
+    em_filter_on = bool(criteria.enable_em_multiple_filter and criteria.target_em_multiple is not None)
+    target_z = float(criteria.target_em_multiple or 0.0)
+    em_tol = float(criteria.em_multiple_tol or 0.25)
+
+    knn_on = bool(
+        criteria.enable_knn_regime
+        and user_features is not None
+        and candidate_features is not None
+    )
+
+    # Stage 1: hard gates (DTE / season / EM-coverage) + bucket gate when not in KNN mode.
+    gated: List[AnalogueWindow] = []
     for w in universe:
-        if _bucket_distance(w.regime_bucket, criteria.target_regime) > tol_buckets:
-            continue
+        if not knn_on:
+            if _bucket_distance(w.regime_bucket, criteria.target_regime) > tol_buckets:
+                continue
         if abs(int(w.dte_sessions) - int(criteria.target_dte_sessions)) > 2:
             continue
         if criteria.season_mode == "quarter" and criteria.season_value:
@@ -352,8 +468,50 @@ def filter_analogues(
         elif criteria.season_mode == "opex":
             if w.season.get("isOpex") != "YES":
                 continue
-        out.append(w)
-    return out
+        if em_filter_on and w.short_strike_em_coverage is not None:
+            zmin, zmax = w.short_strike_em_coverage
+            if target_z + em_tol < zmin or target_z - em_tol > zmax:
+                continue
+        gated.append(w)
+
+    match_quality: Optional[Dict[str, Any]] = None
+
+    # Stage 2: KNN rank (if enabled).
+    if knn_on:
+        from backend.engine14.regime_knn import (
+            knn_top_n,
+            summarize_match_quality,
+        )
+        # Candidate RegimeFeatures by entry_date — only include windows with a features row.
+        cand_map = {
+            w.entry_date: candidate_features[w.entry_date]
+            for w in gated if w.entry_date in (candidate_features or {})
+        }
+        # Windows *without* a features row fall through the KNN stage — we
+        # keep them if they also pass the bucket gate, marked "bucket" source.
+        missing = [w for w in gated if w.entry_date not in cand_map]
+        scored = knn_top_n(user=user_features, candidates=cand_map, k=int(criteria.knn_top_n))
+        kept_dates = {s.trade_date for s in scored}
+        kept_by_date = {w.entry_date: w for w in gated if w.entry_date in kept_dates}
+        # Preserve KNN rank order.
+        ordered_knn = [kept_by_date[s.trade_date] for s in scored if s.trade_date in kept_by_date]
+        # Append bucket-fallback windows (legacy RV20 gate).
+        bucket_fallback = [
+            w for w in missing
+            if _bucket_distance(w.regime_bucket, criteria.target_regime) <= tol_buckets
+        ]
+        out = ordered_knn + bucket_fallback
+        match_quality = summarize_match_quality(scored)
+        match_quality["source"] = "knn"
+        match_quality["kBucketFallback"] = int(len(bucket_fallback))
+        match_quality["kKnn"] = int(len(ordered_knn))
+        if return_match_quality:
+            return out, match_quality
+        return out
+
+    if return_match_quality:
+        return gated, None
+    return gated
 
 
 def map_user_strikes_to_analogue(

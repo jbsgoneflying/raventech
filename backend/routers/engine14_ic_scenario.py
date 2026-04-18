@@ -13,7 +13,8 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 
 from backend.config import get_flags
 from backend.deps import get_benzinga_client_optional, get_client
-from backend.engine14 import chain_cache
+from backend.engine14 import chain_cache, regime_features
+from backend.engine14.conditioning import load_modifier_coefficients
 from backend.engine14.simulator import IcScenarioRequest, run_scenario
 from backend.engine2_trades import get_trade, log_trade
 from backend.redis_store import get_store_optional
@@ -403,4 +404,60 @@ def ic_scenario_backfill_status() -> Dict[str, Any]:
         "error": _backfill_state.get("error"),
         "params": _backfill_state.get("params"),
         "coverage": cov,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase B: modifier-coefficients inspection
+# ---------------------------------------------------------------------------
+
+def _summarize_coeff_sources(coeffs: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
+    """Count hand_coded vs empirical buckets per modifier section."""
+    out: Dict[str, Dict[str, int]] = {}
+    cal_kws = ((coeffs.get("calendar") or {}).get("keywords")) or []
+    out["calendar"] = {
+        "empirical": sum(1 for r in cal_kws if r.get("source") == "empirical"),
+        "handCoded": sum(1 for r in cal_kws if r.get("source") != "empirical"),
+    }
+    for section in ("dealerGamma", "creditStress", "gapRegime"):
+        rows = (coeffs.get(section) or {})
+        emp = sum(1 for v in rows.values() if isinstance(v, dict) and v.get("source") == "empirical")
+        hc = sum(1 for v in rows.values() if isinstance(v, dict) and v.get("source") != "empirical")
+        out[section] = {"empirical": int(emp), "handCoded": int(hc)}
+    return out
+
+
+@router.get("/api/ic-scenario/regime-features/coverage")
+def ic_scenario_regime_features_coverage() -> Dict[str, Any]:
+    """Open coverage probe for the Phase C1 multi-factor regime features store."""
+    _ensure_enabled()
+    try:
+        cov = regime_features.coverage()
+    except Exception as e:
+        LOG.exception("regime features coverage failed")
+        cov = {"error": f"{type(e).__name__}: {e}"}
+    return {"store": cov}
+
+
+@router.get("/api/ic-scenario/modifier-coefficients")
+def ic_scenario_modifier_coefficients(
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+    reload: bool = Query(default=False, description="Force re-read from disk."),
+) -> Dict[str, Any]:
+    """Inspect the currently-loaded Phase B modifier coefficients.
+
+    Token-gated because the learned values are considered tuning data.
+    The returned payload includes the raw coefficients, the resolved
+    source path, and a per-section hand-coded vs empirical tally.
+    """
+    _ensure_enabled()
+    _check_admin_token(x_admin_token)
+    f = get_flags()
+    path = str(getattr(f, "ENGINE14_MODIFIER_COEFFICIENTS_PATH", "") or "")
+    coeffs = load_modifier_coefficients(force_reload=bool(reload))
+    return {
+        "path": path,
+        "exists": bool(path and os.path.exists(path)),
+        "coefficients": coeffs,
+        "sources": _summarize_coeff_sources(coeffs),
     }

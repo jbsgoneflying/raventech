@@ -67,7 +67,7 @@
     breach:       { label: "Breach",       color: "red" },
   };
 
-  function renderOutcomes(dist, targetId) {
+  function renderOutcomes(dist, targetId, ci) {
     var panel = $(targetId || "outcomePanel");
     if (!panel) return;
     panel.innerHTML = "";
@@ -80,19 +80,258 @@
 
     keys.forEach(function (k) {
       var v = (dist && dist[k]) || { pct: 0, n: 0, avgPnlPct: 0, avgDays: 0, maxAdverseExcursionPct: 0 };
+      var band = ci && ci[k] ? ci[k] : null;
       var meta = OUTCOME_META[k];
+      var pct = Math.max(0, Math.min(100, v.pct));
       var card = document.createElement("div");
       card.className = "e14OutcomeCard" + (best && best.key === k ? " dominant" : "");
+
+      var barInner = '<div class="e14OutcomeBarFill bg' + cap(meta.color) + '" style="width:' + Math.max(2, pct) + '%"></div>';
+      if (band && typeof band.pctLow === "number" && typeof band.pctHigh === "number" && band.pctHigh > band.pctLow) {
+        var lo = Math.max(0, Math.min(100, band.pctLow));
+        var hi = Math.max(0, Math.min(100, band.pctHigh));
+        // Overlay: error-bar whisker from lo → hi, drawn on top of the bar.
+        barInner +=
+          '<div class="e14OutcomeBarCI" style="position:absolute;left:' + lo + '%;width:' + Math.max(0.5, hi - lo) + '%;top:0;bottom:0;' +
+          'background:rgba(255,255,255,0.12);border-left:2px solid var(--muted);border-right:2px solid var(--muted);pointer-events:none;"></div>';
+      }
+
+      var ciLine = "";
+      if (band && typeof band.pctLow === "number" && typeof band.pctHigh === "number") {
+        ciLine = '<div class="e14OutcomeMeta" style="opacity:0.85;">90% CI ' +
+          fmtNum(band.pctLow) + '–' + fmtNum(band.pctHigh) + '% · P&L ' +
+          fmtPct(band.pnlLow) + ' → ' + fmtPct(band.pnlHigh) + '</div>';
+      }
+
       card.innerHTML =
         '<div class="e14OutcomeName">' + meta.label + '</div>' +
         '<div class="e14OutcomePct ' + meta.color + '">' + fmtNum(v.pct) + '%</div>' +
-        '<div class="e14OutcomeBar"><div class="e14OutcomeBarFill bg' + cap(meta.color) + '" style="width:' + Math.max(2, Math.min(100, v.pct)) + '%"></div></div>' +
+        '<div class="e14OutcomeBar" style="position:relative;">' + barInner + '</div>' +
         '<div class="e14OutcomeMeta">' +
           'n=' + (v.n || 0) + ' · avg ' + fmtPct(v.avgPnlPct) +
           (v.avgDays ? ' · ~' + fmtNum(v.avgDays, 1) + 'd' : '') +
-        '</div>';
+        '</div>' +
+        ciLine;
       panel.appendChild(card);
     });
+  }
+
+  /* ── Phase E2: Position sizing card ──────────────────────────── */
+
+  function renderSizing(s) {
+    var panel = $("sizingPanel");
+    var label = $("sizingDivider");
+    if (!panel || !label) return;
+    if (!s || !s.n) { panel.style.display = "none"; label.style.display = "none"; return; }
+
+    function pct(x) { return (typeof x === "number") ? (x * 100).toFixed(1) + "%" : "—"; }
+    function num(x, d) { return (typeof x === "number") ? x.toFixed(d || 2) : "—"; }
+
+    var cards = [];
+
+    // Consensus (most conservative) card — dominant.
+    cards.push(
+      '<div class="e14Card dominant"><div class="e14CardLabel">Consensus (min of three)</div>' +
+      '<div class="e14CardValue blue" style="font-size:18px;">' + pct(s.consensusFraction) + '</div>' +
+      '<div class="muted" style="font-size:10px;">fraction of equity · most conservative cap</div></div>'
+    );
+
+    // Kelly.
+    var k = s.kelly || {};
+    cards.push(
+      '<div class="e14Card"><div class="e14CardLabel">Kelly (½-Kelly)</div>' +
+      '<div class="e14CardValue">' + pct(k.fraction) + '</div>' +
+      '<div class="muted" style="font-size:10px;">win prob ' + (typeof k.winProb === "number" ? (k.winProb*100).toFixed(0) + '%' : '—') +
+      ' · payoff ' + num(k.payoffRatio, 2) + (k.clamp ? ' · clamped' : '') + '</div></div>'
+    );
+
+    // Fixed-fractional.
+    var ff = s.fixedFractional || {};
+    cards.push(
+      '<div class="e14Card"><div class="e14CardLabel">Fixed-Fractional</div>' +
+      '<div class="e14CardValue">' + pct(ff.fraction) + '</div>' +
+      '<div class="muted" style="font-size:10px;">risk ' + num(ff.riskPerTradePct, 1) + '% / worst loss ' +
+      num(ff.worstLossPctCredit, 0) + '% of credit</div></div>'
+    );
+
+    // Empirical max-DD.
+    var dd = s.empiricalMaxDd || {};
+    cards.push(
+      '<div class="e14Card"><div class="e14CardLabel">Empirical Max-DD</div>' +
+      '<div class="e14CardValue">' + pct(dd.fraction) + '</div>' +
+      '<div class="muted" style="font-size:10px;">cap ' + num(dd.maxDrawdownPct, 1) + '% / empirical ' +
+      num(dd.empiricalDdPctCredit, 0) + '% of credit</div></div>'
+    );
+
+    panel.innerHTML = cards.join("");
+    panel.style.display = "grid";
+    label.style.display = "";
+  }
+
+  /* ── Phase E3: greeks P&L attribution card ───────────────────── */
+
+  function renderGreeksAttribution(g) {
+    var panel = $("greeksPanel");
+    var label = $("greeksDivider");
+    if (!panel || !label) return;
+    if (!g || !g.n) { panel.style.display = "none"; label.style.display = "none"; return; }
+
+    var comps = [
+      { key: "delta",    label: "Delta",    color: "var(--blue)",   val: g.deltaPct },
+      { key: "gamma",    label: "Gamma",    color: "var(--amber)",  val: g.gammaPct },
+      { key: "theta",    label: "Theta",    color: "var(--green)",  val: g.thetaPct },
+      { key: "vega",     label: "Vega",     color: "var(--red)",    val: g.vegaPct  },
+      { key: "residual", label: "Residual", color: "var(--muted)",  val: g.residualPct },
+    ];
+
+    var shares = g.shareOfAbsPnl || {};
+    function cellVal(v) { return (typeof v === "number") ? (v >= 0 ? "+" : "") + v.toFixed(1) + "%" : "—"; }
+    function share(k) { return (typeof shares[k] === "number") ? shares[k].toFixed(0) + "%" : "—"; }
+
+    // Stacked horizontal bar — shares normalized to 100.
+    var bar = '<div style="display:flex;height:16px;border-radius:4px;overflow:hidden;margin:10px 0;background:var(--bg2);">';
+    comps.forEach(function (c) {
+      var w = Math.max(0, (typeof shares[c.key] === "number") ? shares[c.key] : 0);
+      if (w <= 0) return;
+      bar += '<div title="' + c.label + ': ' + share(c.key) + '" style="background:' + c.color + ';width:' + w + '%;"></div>';
+    });
+    bar += '</div>';
+
+    // Per-greek stats cards.
+    var cards = '<div class="e14Grid" style="gap:10px;">';
+    comps.forEach(function (c) {
+      cards +=
+        '<div class="e14Card"><div class="e14CardLabel" style="color:' + c.color + ';">' + c.label + '</div>' +
+        '<div class="e14CardValue">' + cellVal(c.val) + '</div>' +
+        '<div class="muted" style="font-size:10px;">' + share(c.key) + ' of |P&amp;L|</div></div>';
+    });
+    cards += '</div>';
+
+    panel.innerHTML =
+      '<div class="e14ExitCard">' +
+      '<div class="muted" style="font-size:11px;margin-bottom:4px;">Average decomposition across ' + g.n + ' analogue paths · entry-Taylor approximation · residual absorbs unmodeled IV path and fill slippage.</div>' +
+      bar +
+      cards +
+      '</div>';
+    panel.style.display = "";
+    label.style.display = "";
+  }
+
+  /* ── Phase D: thin-sample banner ─────────────────────────────── */
+
+  function renderThinSampleBanner(ci, analoguesUsed) {
+    var id = "thinSampleBanner";
+    var existing = document.getElementById(id);
+    if (existing) existing.parentNode.removeChild(existing);
+    var meta = ci && ci._meta;
+    if (!meta || !meta.thinSample) return;
+    var parent = $("outcomePanel");
+    if (!parent || !parent.parentNode) return;
+    var banner = document.createElement("div");
+    banner.id = id;
+    banner.style.cssText =
+      "margin:8px 0 10px;padding:10px 14px;border-radius:8px;border:1px solid var(--amber);" +
+      "background:rgba(255,176,32,0.08);color:var(--amber);font-size:12px;line-height:1.5;";
+    banner.innerHTML =
+      '<strong style="letter-spacing:0.04em;text-transform:uppercase;">Thin sample</strong> · ' +
+      'Only ' + (meta.n || analoguesUsed || 0) + ' analogues survived the filter — ' +
+      'confidence intervals below are wide. Loosen match criteria (DTE tolerance, regime bucket, EM-multiple) ' +
+      'or extend the backfill horizon before leaning on this distribution.';
+    parent.parentNode.insertBefore(banner, parent);
+  }
+
+  /* ── Phase A: Fill model badge + mid-distribution side-by-side ── */
+
+  function renderFillModelBadge(fm) {
+    var badge = $("fillModelBadge");
+    if (!badge) return;
+    if (!fm || !fm.mode) { badge.style.display = "none"; return; }
+    var labels = {
+      nbbo:        { text: "NBBO close",     color: "var(--blue)" },
+      mid:         { text: "Mid-only",       color: "var(--muted)" },
+      mid_penalty: { text: "Mid + penalty",  color: "var(--amber)" },
+    };
+    var L = labels[fm.mode] || { text: fm.mode, color: "var(--muted)" };
+    var mae = fm.maeProxyEnabled ? " · OHLC MAE proxy" : "";
+    badge.textContent = L.text + mae;
+    badge.style.color = L.color;
+    badge.style.borderColor = L.color;
+    badge.style.display = "inline-block";
+  }
+
+  function renderOutcomesMid(dist) {
+    var panel = $("outcomePanelMid");
+    var label = $("midDividerLabel");
+    if (!panel || !label) return;
+    if (!dist || Object.keys(dist).length === 0) {
+      panel.style.display = "none"; label.style.display = "none"; return;
+    }
+    // Reuse the main renderer but strip the unavailable fields gracefully.
+    renderOutcomes(dist, "outcomePanelMid");
+    panel.style.display = "grid";
+    label.style.display = "";
+  }
+
+  /* ── Phase C3: Regime match quality card ─────────────────────── */
+
+  function renderRegimeMatchQuality(q, analoguesUsed) {
+    var panel = $("regimeMatchPanel");
+    var label = $("regimeMatchDivider");
+    if (!panel || !label) return;
+    if (!q) { panel.style.display = "none"; label.style.display = "none"; return; }
+
+    var cards = [];
+    var source = (q.source || "bucket").toString().toLowerCase();
+    var sourceBadge;
+    var badgeStyleBase = "display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;";
+    if (source === "knn") {
+      sourceBadge = '<span style="' + badgeStyleBase + 'background:var(--blue);color:#fff;">KNN multi-factor</span>';
+    } else {
+      sourceBadge = '<span style="' + badgeStyleBase + 'background:var(--bg2);color:var(--muted);border:1px solid var(--border);">RV20 bucket</span>';
+    }
+    var headerRhs = typeof q.n === "number" ? (q.n + " analogues") : "—";
+    cards.push(
+      '<div class="e14Card"><div class="e14CardLabel">Match Source</div>' +
+      '<div class="e14CardValue" style="display:flex;align-items:center;gap:8px;">' + sourceBadge +
+      '<span class="muted" style="font-size:11px;">' + headerRhs + '</span></div></div>'
+    );
+
+    if (source === "knn") {
+      var dMean = (typeof q.meanDistance === "number") ? q.meanDistance.toFixed(2) : "—";
+      var dMin  = (typeof q.minDistance  === "number") ? q.minDistance.toFixed(2)  : "—";
+      var dMax  = (typeof q.maxDistance  === "number") ? q.maxDistance.toFixed(2)  : "—";
+      cards.push(
+        '<div class="e14Card"><div class="e14CardLabel">Distance (weighted L2)</div>' +
+        '<div class="e14CardValue">' + dMin + ' → ' + dMean + ' → ' + dMax + '</div>' +
+        '<div class="muted" style="font-size:10px;">min · mean · max — lower is closer</div></div>'
+      );
+
+      var impPct = (typeof q.meanImputationFraction === "number")
+        ? (q.meanImputationFraction * 100).toFixed(0) + "%" : "—";
+      cards.push(
+        '<div class="e14Card"><div class="e14CardLabel">Feature Imputation</div>' +
+        '<div class="e14CardValue">' + impPct + '</div>' +
+        '<div class="muted" style="font-size:10px;">share of feature cells filled from median</div></div>'
+      );
+
+      var kKnn = (typeof q.kKnn === "number") ? q.kKnn : "—";
+      var kFb  = (typeof q.kBucketFallback === "number") ? q.kBucketFallback : 0;
+      cards.push(
+        '<div class="e14Card"><div class="e14CardLabel">Admitted</div>' +
+        '<div class="e14CardValue">' + kKnn + ' KNN + ' + kFb + ' fallback</div>' +
+        '<div class="muted" style="font-size:10px;">KNN-scored vs. legacy bucket fallback</div></div>'
+      );
+    } else if (q.bucket) {
+      cards.push(
+        '<div class="e14Card"><div class="e14CardLabel">RV20 Bucket</div>' +
+        '<div class="e14CardValue">' + String(q.bucket) + '</div>' +
+        '<div class="muted" style="font-size:10px;">feature store unavailable — using legacy bucket gate</div></div>'
+      );
+    }
+
+    panel.innerHTML = cards.join("");
+    panel.style.display = "grid";
+    label.style.display = "";
   }
 
   /* ── Phase 2: Conditioning modifiers ─────────────────────────── */
@@ -387,10 +626,16 @@
       );
     }
     renderEntryCards(data);
-    renderOutcomes(data.outcomeDistribution);
+    renderRegimeMatchQuality(data.regimeMatchQuality, data.analoguesUsed);
+    renderFillModelBadge(data.fillModel);
+    renderThinSampleBanner(data.outcomeDistributionCI, data.analoguesUsed);
+    renderOutcomes(data.outcomeDistribution, "outcomePanel", data.outcomeDistributionCI);
+    renderOutcomesMid(data.outcomeDistributionMid);
     renderAdjusted(data.adjustedOutcomeDistribution);
     renderModifiers(data.conditioningModifiers);
     renderMtmChart(data.mtmTimeline || []);
+    renderSizing(data.sizing);
+    renderGreeksAttribution(data.greeksAttribution);
     renderExitPanel(data.exitRulesOptimization, req);
     renderSlider(data.exitRulesOptimization, req);
     renderNotes(data.conditioningNotes || []);

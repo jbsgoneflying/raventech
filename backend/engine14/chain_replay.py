@@ -11,14 +11,36 @@ Inputs:
     spot + EM scale. Strikes are *snapped* to the nearest listed strike
     within `ENGINE14_STRIKE_SNAP_MAX_PTS`; failures surface explicitly so
     the caller can drop the analogue.
+  * An optional `FillModel` selecting how each leg's closing price is
+    drawn from the cached quote.
 
 Sign convention: an iron condor SHORT position has P&L =
   credit_received - net_debit_to_close
-where `net_debit_to_close = (short_call_mid + short_put_mid)
-                           - (long_call_mid + long_put_mid)`.
+where `net_debit_to_close = (short_call_px + short_put_px)
+                           - (long_call_px + long_put_px)`.
 
 Positive P&L = profit. P&L expressed as % of credit received in the
 user-facing payload.
+
+Fill models
+-----------
+Three modes are supported via `FillModel.mode`:
+
+  * ``"mid"``           — historical default. Uses the cached mid on every
+                          leg. Optimistic: ignores spread cost entirely.
+  * ``"nbbo"``           — realistic close. Buys back the shorts at the ASK
+                          and sells the longs at the BID. This is what a
+                          resting market order actually pays on exit. When
+                          bid/ask are missing for a leg we fall back to
+                          ``mid_penalty`` pricing for that leg so a single
+                          missing quote doesn't abort the replay.
+  * ``"mid_penalty"``    — mid-price plus a configurable fraction of the
+                          half-spread. Good for back-tests where NBBO data
+                          is only partially available.
+
+Sign of slippage on each leg:
+  - SHORT leg being CLOSED => buying to close => paying the ASK (worse price)
+  - LONG  leg being CLOSED => selling to close => receiving the BID (worse price)
 """
 
 from __future__ import annotations
@@ -33,6 +55,35 @@ from backend.engine14.chain_cache import ChainRow
 LOG = logging.getLogger("engine14.chain_replay")
 
 
+# ---- Fill model ---------------------------------------------------------
+
+DEFAULT_PENALTY_PCT = 15.0  # % of half-spread added on top of mid in mid_penalty
+
+
+@dataclass(frozen=True)
+class FillModel:
+    """How to price a leg on close.
+
+    ``penalty_pct`` is interpreted as a percentage of the *half-spread*
+    that gets added (for shorts being bought back) or subtracted (for
+    longs being sold out) from the mid. 15% is a reasonable default for
+    SPX weeklies where published NBBO is usually tight but retail fills
+    rarely hit pure mid.
+    """
+
+    mode: str = "nbbo"             # "mid" | "nbbo" | "mid_penalty"
+    penalty_pct: float = DEFAULT_PENALTY_PCT
+
+    @classmethod
+    def from_str(cls, mode: Optional[str], penalty_pct: float = DEFAULT_PENALTY_PCT) -> "FillModel":
+        m = str(mode or "nbbo").strip().lower()
+        if m not in ("mid", "nbbo", "mid_penalty"):
+            m = "nbbo"
+        return cls(mode=m, penalty_pct=float(penalty_pct))
+
+
+# ---- Data classes -------------------------------------------------------
+
 @dataclass(frozen=True)
 class LegPrice:
     strike_target: float
@@ -41,6 +92,8 @@ class LegPrice:
     mid: float
     bid: Optional[float]
     ask: Optional[float]
+    close_px: float            # the price actually used to close this leg
+    fill_source: str           # "mid" | "nbbo" | "mid_penalty" | "mid_fallback"
 
 
 @dataclass(frozen=True)
@@ -52,6 +105,7 @@ class IcPrice:
     long_call: LegPrice
     pnl_vs_credit: float        # credit - net_debit_to_close (per point)
     pnl_pct_of_credit: float   # 100 * (credit - net_debit) / credit
+    fill_mode: str             # the FillModel.mode used
 
 
 def _snap(strikes: List[float], target: float, max_dist: float) -> Optional[int]:
@@ -79,6 +133,62 @@ def _call_mid_from(row: ChainRow) -> Optional[float]:
     return row.call_mid_px()
 
 
+def _leg_close_price(
+    *,
+    row: ChainRow,
+    side: str,
+    is_short: bool,
+    fill_model: FillModel,
+) -> Optional[tuple]:
+    """Return (close_px, mid, bid, ask, fill_source) for a single leg.
+
+    close_px applies `fill_model` realistically:
+      - mid           -> always mid
+      - nbbo          -> short=ASK, long=BID (worse side); falls back to
+                         mid_penalty if bid/ask missing.
+      - mid_penalty   -> mid +/- penalty * (half-spread); if bid/ask missing,
+                         falls back to pure mid.
+    """
+    mid = _put_mid_from(row) if side == "put" else _call_mid_from(row)
+    if mid is None or mid <= 0:
+        return None
+    bid = row.put_bid if side == "put" else row.call_bid
+    ask = row.put_ask if side == "put" else row.call_ask
+
+    mode = fill_model.mode
+    if mode == "mid":
+        return (float(mid), float(mid), bid, ask, "mid")
+
+    have_nbbo = (
+        bid is not None and ask is not None
+        and float(ask) > 0 and float(bid) >= 0 and float(ask) >= float(bid)
+    )
+
+    if mode == "nbbo":
+        if have_nbbo:
+            close_px = float(ask) if is_short else float(bid)
+            # Guard: if NBBO produces a non-positive short-close price (can
+            # happen on deep OTM rows with bad quotes) fall back to mid.
+            if close_px <= 0:
+                close_px = float(mid)
+                return (close_px, float(mid), bid, ask, "mid_fallback")
+            return (close_px, float(mid), float(bid), float(ask), "nbbo")
+        # NBBO requested but unavailable -> fall through to mid_penalty style
+        mode = "mid_penalty"
+
+    if mode == "mid_penalty":
+        if have_nbbo:
+            half = max(0.0, (float(ask) - float(bid)) / 2.0)
+            bump = half * (float(fill_model.penalty_pct) / 100.0)
+            close_px = float(mid) + bump if is_short else max(0.0, float(mid) - bump)
+            return (close_px, float(mid), float(bid), float(ask), "mid_penalty")
+        # No NBBO — degrade gracefully to mid.
+        return (float(mid), float(mid), bid, ask, "mid_fallback")
+
+    # Unknown mode — default to mid.
+    return (float(mid), float(mid), bid, ask, "mid")
+
+
 def reprice_ic(
     *,
     chain: List[ChainRow],
@@ -88,6 +198,7 @@ def reprice_ic(
     long_call_strike: float,
     entry_credit: float,
     snap_max_pts: float = 5.0,
+    fill_model: Optional[FillModel] = None,
 ) -> Optional[IcPrice]:
     """Return per-day IC valuation, or None if any leg can't be priced.
 
@@ -97,24 +208,31 @@ def reprice_ic(
 
     Caller supplies the chain slice pre-filtered to a single (trade_date,
     expiry) pair — see `chain_cache.fetch_chain_slice`.
+
+    Pass a `FillModel` to control how leg exit prices are drawn. When
+    omitted, defaults to NBBO (realistic close) with mid fallback for
+    rows that lack published bid/ask data.
     """
     if not chain:
         return None
     if entry_credit is None or not math.isfinite(float(entry_credit)) or float(entry_credit) <= 0:
         return None
 
+    fm = fill_model or FillModel()
+
     strikes = [float(r.strike) for r in chain]
 
-    def _leg(target: float, side: str) -> Optional[LegPrice]:
+    def _leg(target: float, side: str, is_short: bool) -> Optional[LegPrice]:
         idx = _snap(strikes, float(target), float(snap_max_pts))
         if idx is None:
             return None
         row = chain[idx]
-        mid = _put_mid_from(row) if side == "put" else _call_mid_from(row)
-        if mid is None or mid <= 0:
+        priced = _leg_close_price(
+            row=row, side=side, is_short=is_short, fill_model=fm,
+        )
+        if priced is None:
             return None
-        bid = row.put_bid if side == "put" else row.call_bid
-        ask = row.put_ask if side == "put" else row.call_ask
+        close_px, mid, bid, ask, src = priced
         return LegPrice(
             strike_target=float(target),
             strike_snapped=float(row.strike),
@@ -122,16 +240,18 @@ def reprice_ic(
             mid=float(mid),
             bid=(None if bid is None else float(bid)),
             ask=(None if ask is None else float(ask)),
+            close_px=float(close_px),
+            fill_source=str(src),
         )
 
-    sp = _leg(short_put_strike, "put")
-    lp = _leg(long_put_strike, "put")
-    sc = _leg(short_call_strike, "call")
-    lc = _leg(long_call_strike, "call")
+    sp = _leg(short_put_strike, "put", is_short=True)
+    lp = _leg(long_put_strike, "put", is_short=False)
+    sc = _leg(short_call_strike, "call", is_short=True)
+    lc = _leg(long_call_strike, "call", is_short=False)
     if not (sp and lp and sc and lc):
         return None
 
-    net_debit = (sp.mid + sc.mid) - (lp.mid + lc.mid)
+    net_debit = (sp.close_px + sc.close_px) - (lp.close_px + lc.close_px)
     # Short IC was opened for a credit; closing it back costs `net_debit`.
     pnl = float(entry_credit) - float(net_debit)
     pnl_pct = 100.0 * pnl / float(entry_credit) if float(entry_credit) > 0 else 0.0
@@ -144,6 +264,7 @@ def reprice_ic(
         long_call=lc,
         pnl_vs_credit=float(pnl),
         pnl_pct_of_credit=float(pnl_pct),
+        fill_mode=str(fm.mode),
     )
 
 
