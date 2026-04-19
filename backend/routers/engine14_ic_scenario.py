@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import datetime as dt
 import logging
 import os
@@ -13,16 +14,18 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 
 from backend.config import get_flags
 from backend.deps import get_benzinga_client_optional, get_client
-from backend.engine14 import chain_cache, regime_features
+from backend.engine14 import chain_cache, reconciliation, regime_features
 from backend.engine14.card_explain import (
     CARD_CATALOG,
     generate_card_explanation,
     supported_card_types,
 )
 from backend.engine14.conditioning import load_modifier_coefficients
+from backend.engine14.live_chain import fetch_live_chain_nbbo, validate_strikes_exist
 from backend.engine14.simulator import IcScenarioRequest, run_scenario
 from backend.engine2_trades import get_trade, log_trade
 from backend.redis_store import get_store_optional
+from backend.spx_ic import compute_engine2_spx_ic
 
 LOG = logging.getLogger("engine14.router")
 
@@ -143,6 +146,409 @@ def ic_scenario(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Engine-14 ↔ Engine-2 reconciliation endpoint (Stage 1 + 1.5)
+# ---------------------------------------------------------------------------
+
+_reconcile_cache_lock = threading.Lock()
+_reconcile_cache: TTLCache = TTLCache(maxsize=256, ttl=5 * 60)
+_reconcile_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="engine14-reconcile",
+)
+
+
+def _compute_engine2_payload(under: str) -> Dict[str, Any]:
+    """Run a vanilla Engine-2 scan with default params for reconciliation."""
+    try:
+        return compute_engine2_spx_ic(
+            client=get_client(),
+            benzinga_client=get_benzinga_client_optional(),
+            flags=get_flags(),
+            underlying_preference=under,
+            entry_day="mon",
+            years=3,
+            widths=[0.8, 1.0, 1.2, 1.5, 2.0],
+            risk_target_breach_pct=25.0,
+            seasonality_mode="none",
+        )
+    except Exception as e:
+        LOG.warning("reconcile: Engine-2 scan failed: %s", e)
+        return {}
+
+
+def _compute_advisor_with_timeout(
+    engine2_payload: Dict[str, Any],
+    timeout_s: float,
+) -> Optional[Dict[str, Any]]:
+    """Run the LLM advisor off-thread with a hard wall-clock timeout."""
+    f = get_flags()
+    if not getattr(f, "ENGINE2_ADVISOR_ENABLED", False):
+        return None
+    if not engine2_payload or not engine2_payload.get("current"):
+        return None
+
+    # Local import keeps the router import-light when advisor is disabled.
+    from backend.engine2_advisor import generate_trade_analysis
+
+    def _run() -> Dict[str, Any]:
+        return generate_trade_analysis(
+            engine2_payload=engine2_payload,
+            width_analysis=engine2_payload.get("widthComparison"),
+            flags=f,
+        )
+
+    fut = _reconcile_executor.submit(_run)
+    try:
+        return fut.result(timeout=float(timeout_s))
+    except concurrent.futures.TimeoutError:
+        LOG.info("reconcile: advisor timed out after %.1fs", timeout_s)
+        fut.cancel()
+        return None
+    except Exception as e:
+        LOG.warning("reconcile: advisor failed: %s", e)
+        return None
+
+
+@router.post("/api/ic-scenario/reconcile")
+def ic_scenario_reconcile(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Cross-check a simulated scenario against Engine 2 + LLM advisor + live chain.
+
+    Body can be either:
+
+      * Previously-run output of ``/api/ic-scenario`` — pass under key
+        ``scenario``. This avoids re-running the sim.
+      * A raw scenario request — we run the simulation ourselves.
+
+    Options:
+
+      * ``runAdvisor`` (default True): kick off the LLM advisor (async,
+        12s timeout). Set False for a fast deterministic-only reconcile.
+      * ``checkLiveChain`` (default True): pull live NBBO for the four
+        legs and include it as a credit anchor.
+      * ``engine2`` (optional): pre-computed E2 payload. Saves ~2s.
+    """
+    _ensure_enabled()
+
+    scenario = body.get("scenario")
+    if not isinstance(scenario, dict) or not scenario.get("entryState"):
+        # Treat the body itself as a scenario request.
+        req = _parse_request(body.get("request") or body)
+        try:
+            client = get_client()
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"ORATS client unavailable: {e}")
+        try:
+            bz = get_benzinga_client_optional()
+        except Exception:
+            bz = None
+        try:
+            store = get_store_optional()
+        except Exception:
+            store = None
+        try:
+            scenario = run_scenario(req, client=client, benzinga_client=bz, store=store)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            LOG.exception("reconcile: run_scenario failed")
+            raise HTTPException(status_code=500, detail=f"Scenario replay failed: {type(e).__name__}: {e}")
+
+    # Engine 2 scan — prefer caller-supplied payload; otherwise compute fresh.
+    e2_payload = body.get("engine2")
+    if not isinstance(e2_payload, dict) or not e2_payload:
+        under = str((scenario.get("request") or {}).get("underlying") or "SPX").upper()
+        e2_payload = _compute_engine2_payload(under)
+
+    run_advisor = bool(body.get("runAdvisor", True))
+    check_chain = bool(body.get("checkLiveChain", True))
+    advisor_timeout_s = float(body.get("advisorTimeoutSeconds") or 12.0)
+
+    advisor: Optional[Dict[str, Any]] = None
+    live_chain: Optional[Dict[str, Any]] = None
+    errors: Dict[str, str] = {}
+
+    # Kick the advisor off FIRST so it runs concurrently with the live-chain fetch.
+    advisor_fut = None
+    if run_advisor and e2_payload:
+        f = get_flags()
+        if getattr(f, "ENGINE2_ADVISOR_ENABLED", False):
+            advisor_fut = _reconcile_executor.submit(
+                _compute_advisor_with_timeout, e2_payload, advisor_timeout_s,
+            )
+
+    if check_chain:
+        try:
+            req_fields = scenario.get("request") or {}
+            client = get_client()
+            live_chain = fetch_live_chain_nbbo(
+                client,
+                ticker=str(req_fields.get("underlying") or "SPX").upper(),
+                expiry=str(req_fields.get("expiry") or ""),
+                short_put=float(req_fields.get("short_put")),
+                long_put=float(req_fields.get("long_put")),
+                short_call=float(req_fields.get("short_call")),
+                long_call=float(req_fields.get("long_call")),
+            )
+        except Exception as e:
+            LOG.warning("reconcile: live chain fetch failed: %s", e)
+            errors["liveChain"] = f"{type(e).__name__}: {e}"
+
+    if advisor_fut is not None:
+        try:
+            advisor = advisor_fut.result(timeout=float(advisor_timeout_s) + 2.0)
+        except concurrent.futures.TimeoutError:
+            errors["advisor"] = f"timeout after {advisor_timeout_s}s"
+        except Exception as e:
+            errors["advisor"] = f"{type(e).__name__}: {e}"
+
+    reconcile_payload = reconciliation.reconcile_full(
+        scenario_result=scenario,
+        engine2_payload=e2_payload or {},
+        engine2_advisor=advisor,
+        live_chain=live_chain,
+    )
+
+    return {
+        "reconcile": reconcile_payload,
+        "scenario": scenario,
+        "engine2": {
+            "asOfDate": (e2_payload or {}).get("asOfDate"),
+            "current": (e2_payload or {}).get("current"),
+            "expectedMove": (e2_payload or {}).get("expectedMove"),
+            "strikeTargets": (e2_payload or {}).get("strikeTargets"),
+            "deskConsensus": (e2_payload or {}).get("deskConsensus"),
+            "recommendation": (e2_payload or {}).get("recommendation"),
+            "widthComparison": (e2_payload or {}).get("widthComparison"),
+            "oddsLikeNow": (e2_payload or {}).get("oddsLikeNow"),
+        },
+        "advisor": advisor,
+        "liveChain": live_chain,
+        "errors": errors or None,
+        "generatedAt": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Pre-submit guardrails (Stage 3)
+# ---------------------------------------------------------------------------
+
+def _pre_check_block(kind: str, message: str, **extra: Any) -> Dict[str, Any]:
+    return {"severity": "block", "kind": kind, "message": message, **extra}
+
+
+def _pre_check_warn(kind: str, message: str, **extra: Any) -> Dict[str, Any]:
+    return {"severity": "warn", "kind": kind, "message": message, **extra}
+
+
+@router.post("/api/ic-scenario/pre-check")
+def ic_scenario_pre_check(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Fast pre-submit guardrails for the scenario form.
+
+    Responsibilities:
+
+      * Hard-block when any of the four strikes does not exist on the
+        live option chain for the requested expiry. The response includes
+        a ``suggestion`` with nearest-available strikes so the UI can
+        offer a one-click fix.
+      * Warn when the user-typed credit is outside the live NBBO or far
+        off the width-comparison proxy / advisor estimate.
+      * Warn when the user's EM multiple is below Engine 2's
+        ``deskConsensus.suggestedEmFloor``.
+      * Warn when the chosen cell violates the Engine 2 policy
+        thresholds (breach / outside / MAE).
+
+    Intentionally avoids the LLM advisor (sync path, sub-second).
+    """
+    _ensure_enabled()
+
+    def _req_float(k: str) -> float:
+        v = body.get(k)
+        if v is None or v == "":
+            raise HTTPException(status_code=400, detail=f"Missing required field: {k}")
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Field {k} must be numeric.")
+
+    underlying = str(body.get("underlying") or "SPX").upper()
+    if underlying != "SPX":
+        raise HTTPException(status_code=400, detail="Engine 14 supports SPX only.")
+    expiry = str(body.get("expiry") or "").strip()
+    if not expiry:
+        raise HTTPException(status_code=400, detail="expiry is required.")
+
+    short_put = _req_float("shortPut")
+    long_put = _req_float("longPut")
+    short_call = _req_float("shortCall")
+    long_call = _req_float("longCall")
+    credit = _req_float("creditReceived")
+
+    if not (long_put < short_put < short_call < long_call):
+        raise HTTPException(
+            status_code=400,
+            detail="Strikes must satisfy: longPut < shortPut < shortCall < longCall.",
+        )
+
+    blocks: list[Dict[str, Any]] = []
+    warnings: list[Dict[str, Any]] = []
+
+    # --- Strike existence on the live chain -------------------------------
+    try:
+        client = get_client()
+    except Exception as e:
+        return {
+            "ok": True,
+            "blocks": [],
+            "warnings": [_pre_check_warn(
+                "liveChainUnavailable",
+                f"Live chain unavailable ({type(e).__name__}); proceeding without strike verification.",
+            )],
+            "liveChain": None,
+            "suggestion": None,
+        }
+
+    strike_check = validate_strikes_exist(
+        client, ticker=underlying, expiry=expiry,
+        short_put=short_put, long_put=long_put,
+        short_call=short_call, long_call=long_call,
+    )
+
+    suggestion: Optional[Dict[str, Any]] = None
+    if strike_check.get("expiryFound") and not strike_check.get("ok"):
+        missing = strike_check.get("missing") or []
+        blocks.append(_pre_check_block(
+            "missingStrike",
+            f"{len(missing)} leg(s) do not exist for {underlying} {expiry}.",
+            missing=missing,
+        ))
+        # Build a full suggestion struct with nearest-strike replacements.
+        fix = {
+            "shortPut": short_put, "longPut": long_put,
+            "shortCall": short_call, "longCall": long_call,
+        }
+        for m in missing:
+            fix[m["leg"]] = m["nearest"]
+        suggestion = {"strikes": fix}
+
+    if not strike_check.get("expiryFound"):
+        warnings.append(_pre_check_warn(
+            "liveChainUnavailable",
+            f"No live chain data for {underlying} {expiry}. Strike existence not verified.",
+        ))
+
+    # --- Live NBBO credit anchor ------------------------------------------
+    live_chain: Optional[Dict[str, Any]] = None
+    if strike_check.get("ok"):
+        try:
+            live_chain = fetch_live_chain_nbbo(
+                client, ticker=underlying, expiry=expiry,
+                short_put=short_put, long_put=long_put,
+                short_call=short_call, long_call=long_call,
+            )
+        except Exception as e:
+            LOG.warning("pre-check: live NBBO fetch failed: %s", e)
+
+    if live_chain:
+        mid = float(live_chain.get("mid") or 0.0)
+        net_bid = live_chain.get("netBid")
+        net_ask = live_chain.get("netAsk")
+        inside = True
+        if net_bid is not None and credit < float(net_bid) - 1e-6:
+            inside = False
+        if net_ask is not None and credit > float(net_ask) + 1e-6:
+            inside = False
+        if not inside:
+            warnings.append(_pre_check_warn(
+                "creditOutsideNBBO",
+                f"User credit ${credit:.2f} is outside live NBBO "
+                f"[${net_bid:.2f}, ${net_ask:.2f}] for mid ${mid:.2f}.",
+                userCredit=credit, nbbo={"bid": net_bid, "ask": net_ask, "mid": mid},
+            ))
+        elif mid > 0 and abs(credit - mid) / mid > 0.25:
+            warnings.append(_pre_check_warn(
+                "creditFarFromMid",
+                f"User credit ${credit:.2f} is >25% off live mid ${mid:.2f}.",
+                userCredit=credit, mid=mid,
+            ))
+
+    # --- Engine 2 policy / floor / box ------------------------------------
+    try:
+        e2 = _compute_engine2_payload(underlying)
+    except Exception:
+        e2 = {}
+
+    if e2:
+        # Synthesize a minimal "scenario-like" dict so we can reuse the
+        # single-check helpers from reconciliation.
+        em = e2.get("expectedMove") or {}
+        spot = float(em.get("smartSpotPrice") or em.get("spotPrice") or 0.0) or None
+        put_dist = abs(spot - short_put) if spot else 0.0
+        call_dist = abs(short_call - spot) if spot else 0.0
+        em_pct = float(em.get("oratsExpectedMovePct") or em.get("delayedImpliedMovePct") or 0.0) or None
+        em_dollars = (em_pct / 100.0) * spot if (em_pct and spot) else None
+        user_em_mult = None
+        if em_dollars and em_dollars > 0:
+            user_em_mult = round(((put_dist + call_dist) / 2.0) / em_dollars, 2)
+        wing_width = float(min(short_put - long_put, long_call - short_call))
+
+        synthetic_scenario = {
+            "request": {
+                "short_put": short_put, "long_put": long_put,
+                "short_call": short_call, "long_call": long_call,
+                "credit_received": credit, "underlying": underlying,
+                "expiry": expiry,
+            },
+            "entryState": {
+                "userSpot": spot,
+                "userEmPct": em_pct,
+                "userEmMultiple": user_em_mult,
+                "wingWidth": wing_width,
+                "regimeBucket": ((e2.get("current") or {}).get("regime") or {}).get("bucket"),
+                "regimeSource": "em_proxy",
+            },
+        }
+
+        policy_chip = reconciliation._check_policy(synthetic_scenario, e2)
+        floor_chip = reconciliation._check_desk_floor(synthetic_scenario, e2)
+        box_chip = reconciliation._check_em_multiple_label(synthetic_scenario, e2)
+
+        if policy_chip["status"] == "mismatch":
+            warnings.append(_pre_check_warn(
+                "policyMultipleViolations",
+                policy_chip["note"],
+                chip=policy_chip,
+            ))
+        elif policy_chip["status"] == "drift":
+            warnings.append(_pre_check_warn(
+                "policyDrift",
+                policy_chip["note"],
+                chip=policy_chip,
+            ))
+
+        if floor_chip["status"] == "mismatch":
+            warnings.append(_pre_check_warn(
+                "belowDeskEmFloor",
+                floor_chip["note"],
+                chip=floor_chip,
+            ))
+
+        if box_chip["status"] in ("drift", "mismatch"):
+            warnings.append(_pre_check_warn(
+                "emMultipleMisaligned",
+                box_chip["note"],
+                chip=box_chip,
+            ))
+
+    return {
+        "ok": len(blocks) == 0,
+        "blocks": blocks,
+        "warnings": warnings,
+        "liveChain": live_chain,
+        "availableStrikes": strike_check.get("availableStrikes") or [],
+        "suggestion": suggestion,
+    }
+
+
 @router.get("/api/ic-scenario/health")
 def ic_scenario_health() -> Dict[str, Any]:
     """Cache coverage + enablement probe, used by the UI before enabling the Run button."""
@@ -234,15 +640,44 @@ def ic_scenario_journal(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Persist a simulated IC to the Engine 2 trade journal.
 
     Expected body:
-      { "scenario": <full payload from /api/ic-scenario>,
-        "request":  <original form submission>,
-        "note":     "optional free-text" }
+      { "scenario":  <full payload from /api/ic-scenario>,
+        "request":   <original form submission>,
+        "reconcile": <optional: full /reconcile payload. If omitted, we
+                     compute a fresh one here so the trade record always
+                     captures what the desk saw at entry>,
+        "engine2":   <optional: already-fetched Engine 2 scan to avoid
+                     re-running it during snapshot capture>,
+        "note":      "optional free-text" }
     """
     _ensure_enabled()
     scenario = body.get("scenario") or {}
     form = body.get("request") or scenario.get("request") or {}
     if not form:
         raise HTTPException(status_code=400, detail="request payload missing.")
+
+    # --- Capture a reconcile snapshot at entry -------------------------------
+    # Callers that just ran /reconcile can pass the payload through; otherwise
+    # we synthesize a deterministic-only snapshot (cheap, no LLM / live NBBO)
+    # so every logged trade carries a "what the desk knew at entry" chip.
+    reconcile_full_payload: Optional[Dict[str, Any]] = None
+    raw_reconcile = body.get("reconcile")
+    if isinstance(raw_reconcile, dict) and raw_reconcile.get("overall"):
+        reconcile_full_payload = raw_reconcile
+    elif scenario:
+        e2_payload = body.get("engine2")
+        if not isinstance(e2_payload, dict) or not e2_payload:
+            under = str(form.get("underlying") or "SPX").upper()
+            e2_payload = _compute_engine2_payload(under) or {}
+        try:
+            reconcile_full_payload = reconciliation.reconcile_deterministic(
+                scenario_result=scenario,
+                engine2_payload=e2_payload,
+            )
+        except Exception:
+            LOG.exception("journal: reconcile_deterministic failed; logging trade without snapshot")
+            reconcile_full_payload = None
+
+    reconcile_snapshot = reconciliation.summarize_for_journal(reconcile_full_payload)
 
     # Normalize into the Engine 2 trade-log schema.
     strikes = {
@@ -251,6 +686,13 @@ def ic_scenario_journal(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "shortCall": form.get("short_call") or form.get("shortCall"),
         "longCall": form.get("long_call") or form.get("longCall"),
     }
+    entry_context: Dict[str, Any] = {
+        "engine14Scenario": scenario,
+        "note": str(body.get("note") or "").strip() or None,
+    }
+    if reconcile_snapshot:
+        entry_context["reconcile"] = reconcile_snapshot
+
     trade_data = {
         "source": "engine14",
         "entry": {
@@ -262,10 +704,7 @@ def ic_scenario_journal(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             "profitTargetPct": form.get("profit_target_pct") or form.get("profitTargetPct"),
             "stopLossPct": form.get("stop_loss_pct") or form.get("stopLossPct"),
         },
-        "entryContext": {
-            "engine14Scenario": scenario,
-            "note": str(body.get("note") or "").strip() or None,
-        },
+        "entryContext": entry_context,
         "advisorVerdict": {
             "engine": 14,
             "expectedValue": scenario.get("expectedValue"),
@@ -281,7 +720,11 @@ def ic_scenario_journal(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             status_code=503,
             detail="Trade journal unavailable (Redis not configured).",
         )
-    return {"tradeId": trade_id, "viewUrl": f"/spx?tradeId={trade_id}"}
+    return {
+        "tradeId": trade_id,
+        "viewUrl": f"/spx?tradeId={trade_id}",
+        "reconcile": reconcile_snapshot,
+    }
 
 
 @router.get("/api/ic-scenario/review")
@@ -343,6 +786,8 @@ def ic_scenario_review(trade_id: str = Query(..., alias="tradeId")) -> Dict[str,
             else:
                 verdict = f"Actual underperformed sim by {-diff:.1f}pp — headwinds stronger than modeled."
 
+    entry_reconcile = (trade.get("entryContext") or {}).get("reconcile")
+
     return {
         "tradeId": trade_id,
         "predicted": predicted,
@@ -351,6 +796,7 @@ def ic_scenario_review(trade_id: str = Query(..., alias="tradeId")) -> Dict[str,
         "verdict": verdict,
         "scenarioVersion": scenario.get("version"),
         "analoguesUsed": scenario.get("analoguesUsed"),
+        "entryReconcile": entry_reconcile,
     }
 
 

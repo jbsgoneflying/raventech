@@ -1983,6 +1983,33 @@ function _statusBadge(s) {
   return '<span style="display:inline-block;padding:2px 10px;border-radius:6px;font-size:11px;font-weight:700;color:#fff;background:' + c + '">' + escapeHtml(l) + '</span>';
 }
 
+// Engine-14 reconcile chip — shown next to a trade when the entry-time
+// reconciliation snapshot is available. Gives the desk an at-a-glance read
+// on whether the trade was opened with a clean E2↔E14↔LLM↔live alignment,
+// with the top finding surfaced as a tooltip.
+function _reconcileBadge(reconcile) {
+  if (!reconcile || !reconcile.overall) return "";
+  var ov = reconcile.overall || {};
+  var status = String(ov.status || "na").toLowerCase();
+  var colors = { agree: "#34c759", drift: "#ff9f0a", mismatch: "#ff453a", na: "#8e8e93" };
+  var labels = { agree: "Recon ✓", drift: "Recon drift", mismatch: "Recon mismatch", na: "Recon n/a" };
+  var color = colors[status] || colors.na;
+  var label = labels[status] || ("Recon " + status);
+  var counts = ov.counts || {};
+  var countSummary = [];
+  ["agree", "drift", "mismatch", "na"].forEach(function (k) {
+    var n = Number(counts[k]);
+    if (n > 0) countSummary.push(n + " " + k);
+  });
+  var firstFinding = (ov.topFindings && ov.topFindings[0]) || "";
+  var tipParts = [label, countSummary.join(" · ")];
+  if (firstFinding) tipParts.push(firstFinding);
+  var tip = tipParts.filter(Boolean).join(" — ");
+  return '<span title="' + escapeHtml(tip) + '" ' +
+    'style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;' +
+    'color:#fff;background:' + color + ';letter-spacing:0.2px;">' + escapeHtml(label) + '</span>';
+}
+
 function renderAdvisorPanel(advisorResult) {
   var el = $("e2AdvisorContent");
   var sec = $("e2AdvisorSection");
@@ -2470,9 +2497,15 @@ async function _loadActiveTrades() {
         staleCheckinTradeIds.push(t.tradeId);
       }
 
+      var entryReconcile = (t.entryContext || {}).reconcile;
       html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
       html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-      html += '<div style="font-size:13px;font-weight:600">' + escapeHtml(entry.underlying || "SPX") + ' IC · $' + escapeHtml(String(entry.wingWidth || "")) + ' wings' + (t.source === "adjusted" ? ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#5856d6;color:#fff;font-weight:600">ADJ</span>' : "") + '</div>';
+      html += '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">';
+      html += escapeHtml(entry.underlying || "SPX") + ' IC · $' + escapeHtml(String(entry.wingWidth || "")) + ' wings';
+      if (t.source === "engine14") html += ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#0a84ff;color:#fff;font-weight:600">E14</span>';
+      else if (t.source === "adjusted") html += ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#5856d6;color:#fff;font-weight:600">ADJ</span>';
+      if (entryReconcile) html += ' ' + _reconcileBadge(entryReconcile);
+      html += '</div>';
       html += '<div style="display:flex;align-items:center;gap:8px">' + _statusBadge(status);
       html += '<button class="chipToggle" data-checkin-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Check In</button>';
       html += '<button class="chipToggle" data-close-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Close</button>';
@@ -2486,6 +2519,20 @@ async function _loadActiveTrades() {
       html += '<div><span style="color:var(--text-secondary)">Put dist</span> <span class="mono">' + (tracking.distPutPct !== null ? tracking.distPutPct + "%" : "—") + '</span></div>';
       html += '<div><span style="color:var(--text-secondary)">Call dist</span> <span class="mono">' + (tracking.distCallPct !== null ? tracking.distCallPct + "%" : "—") + '</span></div>';
       html += '</div>';
+
+      if (entryReconcile && entryReconcile.overall) {
+        var ovStatus = String(entryReconcile.overall.status || "na").toLowerCase();
+        var findings = entryReconcile.overall.topFindings || [];
+        if ((ovStatus === "drift" || ovStatus === "mismatch") && findings.length) {
+          var border = ovStatus === "mismatch" ? "3px solid #ff453a" : "3px solid #ff9f0a";
+          html += '<div style="margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;font-size:11px;border-left:' + border + '">';
+          html += '<div style="font-weight:600;margin-bottom:2px;color:var(--text-primary)">Entry reconcile ' + escapeHtml(ovStatus) + '</div>';
+          findings.slice(0, 3).forEach(function (f) {
+            html += '<div style="color:var(--text-secondary);margin-top:2px">• ' + escapeHtml(String(f)) + '</div>';
+          });
+          html += '</div>';
+        }
+      }
 
       if (lastCheckin) {
         var ciBoxBorder = statusDiverged ? "border-left:3px solid #ff9f0a" : "";

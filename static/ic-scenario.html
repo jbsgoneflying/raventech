@@ -269,6 +269,135 @@
         color: var(--muted);
         margin-bottom: -4px;
       }
+
+      /* Stage 2: Engine 2 ↔ Engine 14 reconciliation strip + pre-check banner */
+      .e14ReconcileWrap {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        background: var(--surfaceSolid);
+        padding: 12px 14px;
+        margin: 16px 0 18px;
+      }
+      .e14ReconcileHead {
+        display: flex; align-items: center; gap: 10px;
+        margin-bottom: 8px;
+      }
+      .e14ReconcileTitle {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted);
+        flex: 0 0 auto;
+      }
+      .e14ReconcileOverall {
+        font-size: 11px; font-weight: 800;
+        padding: 2px 10px; border-radius: 999px;
+        border: 1px solid var(--border);
+        text-transform: uppercase; letter-spacing: 0.04em;
+      }
+      .e14ReconcileOverall.rAgree    { background: rgba(22,163,74,0.10);  color: #15803d; border-color: rgba(22,163,74,0.30); }
+      .e14ReconcileOverall.rDrift    { background: rgba(217,119,6,0.12);  color: #b45309; border-color: rgba(217,119,6,0.30); }
+      .e14ReconcileOverall.rMismatch { background: rgba(220,38,38,0.12);  color: #b91c1c; border-color: rgba(220,38,38,0.30); }
+      .e14ReconcileOverall.rNa       { background: var(--hover); color: var(--muted); }
+
+      .e14ReconcileTop {
+        display: flex; flex-wrap: wrap; gap: 6px;
+      }
+      .e14ReconcileChip {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 10px; border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surfaceSolid);
+        font-size: 11px; font-weight: 600;
+        cursor: default;
+      }
+      .e14ReconcileChip .dot {
+        width: 8px; height: 8px; border-radius: 999px;
+        flex: 0 0 auto;
+      }
+      .e14ReconcileChip.rAgree    .dot { background: #15803d; }
+      .e14ReconcileChip.rDrift    .dot { background: #d97706; }
+      .e14ReconcileChip.rMismatch .dot { background: #dc2626; }
+      .e14ReconcileChip.rNa       .dot { background: var(--muted); }
+      .e14ReconcileChip.rAgree    { border-color: rgba(22,163,74,0.25); }
+      .e14ReconcileChip.rDrift    { border-color: rgba(217,119,6,0.30); background: rgba(217,119,6,0.06); }
+      .e14ReconcileChip.rMismatch { border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.06); }
+
+      .e14ReconcileToggle {
+        margin-left: auto;
+        flex: 0 0 auto;
+        font-size: 11px; font-weight: 600;
+        padding: 4px 10px; border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surfaceSolid); color: var(--muted);
+        cursor: pointer;
+      }
+      .e14ReconcileToggle:hover { color: var(--text); }
+
+      .e14ReconcileDrawer { display: none; margin-top: 10px; }
+      .e14ReconcileDrawer.open { display: block; }
+      .e14ReconcileRow {
+        display: grid;
+        grid-template-columns: 120px 1fr 1fr 140px;
+        gap: 10px; padding: 8px 4px;
+        border-top: 1px dashed var(--border);
+        font-size: 12px;
+      }
+      .e14ReconcileRow:first-child { border-top: none; }
+      .e14ReconcileRow .reconLabel { font-weight: 700; color: var(--text); }
+      .e14ReconcileRow .reconVal {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px; color: var(--text);
+        white-space: pre-wrap; word-break: break-word;
+      }
+      .e14ReconcileRow .reconSrc { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
+      .e14ReconcileRow .reconNote { font-size: 11px; color: var(--muted); }
+      .e14ReconcileRow .reconStatus {
+        text-align: right; font-weight: 700; text-transform: uppercase;
+        font-size: 10px; letter-spacing: 0.06em; align-self: center;
+      }
+      @media (max-width: 720px) {
+        .e14ReconcileRow { grid-template-columns: 1fr; }
+        .e14ReconcileRow .reconStatus { text-align: left; }
+      }
+
+      .e14ReconcileFindings {
+        margin-top: 8px; padding: 8px 10px;
+        background: var(--hover); border-radius: 8px;
+        font-size: 12px; color: var(--text);
+      }
+      .e14ReconcileFindings li { margin-left: 18px; line-height: 1.4; }
+
+      .e14PreCheckBanner {
+        margin: 10px 0 0;
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 12px; line-height: 1.4;
+      }
+      .e14PreCheckBanner.block {
+        background: rgba(220,38,38,0.08);
+        border: 1px solid rgba(220,38,38,0.35);
+        color: #b91c1c;
+      }
+      .e14PreCheckBanner.warn {
+        background: rgba(217,119,6,0.08);
+        border: 1px solid rgba(217,119,6,0.30);
+        color: #b45309;
+      }
+      .e14PreCheckBanner button.applyFix {
+        margin-left: 8px;
+        font-size: 11px; padding: 3px 10px; border-radius: 6px;
+        border: 1px solid currentColor; background: var(--surfaceSolid);
+        color: inherit; font-weight: 700; cursor: pointer;
+      }
+      .e14PreCheckBanner ul { margin: 4px 0 0 18px; padding: 0; }
+
+      .e14ConditioningSummary {
+        margin: 10px 0 0; padding: 8px 12px;
+        border-radius: 8px; font-size: 12px;
+        background: var(--hover); color: var(--text);
+        line-height: 1.4;
+      }
+      .e14ConditioningSummary.tailwind { background: rgba(22,163,74,0.08);  color: #15803d; }
+      .e14ConditioningSummary.headwind { background: rgba(220,38,38,0.08);  color: #b91c1c; }
     </style>
   </head>
   <body>
@@ -348,7 +477,22 @@
           <button type="submit" id="runBtn" class="primaryButton">Run Scenario</button>
           <span id="status" class="status">Ready</span>
         </div>
+
+        <div id="preCheckBanner"></div>
       </form>
+
+      <div id="reconcileWrap" class="e14ReconcileWrap" style="display:none;">
+        <div class="e14ReconcileHead">
+          <span class="e14ReconcileTitle">Engine 2 ↔ Engine 14 reconciliation</span>
+          <span id="reconcileOverall" class="e14ReconcileOverall rNa">—</span>
+          <button type="button" id="reconcileToggle" class="e14ReconcileToggle" aria-expanded="false">
+            Show details
+          </button>
+        </div>
+        <div id="reconcileChips" class="e14ReconcileTop"></div>
+        <div id="reconcileFindings" class="e14ReconcileFindings" style="display:none;"></div>
+        <div id="reconcileDrawer" class="e14ReconcileDrawer"></div>
+      </div>
 
       <div class="results hidden" id="results">
 
@@ -375,6 +519,7 @@
         <div id="outcomePanelMid" class="e14Outcomes" style="display:none;"></div>
 
         <div class="e14Divider" id="adjustedDividerLabel" data-explain="outcome_adjusted" style="display:none;"><span class="e14DividerText">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after Phase 2 conditioning)</span></span></div>
+        <div id="conditioningSummary" class="e14ConditioningSummary" style="display:none;"></div>
         <div id="adjustedOutcomePanel" class="e14Outcomes" style="display:none;"></div>
 
         <div class="e14Divider" id="modifiersDividerLabel" data-explain="modifiers" style="display:none;"><span class="e14DividerText">Conditioning Modifiers</span></div>

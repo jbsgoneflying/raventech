@@ -607,6 +607,212 @@
     el.innerHTML = html.join("");
   }
 
+  /* ── Reconciliation + pre-check (Stages 1.5 / 2 / 3 / 4) ─────── */
+
+  var lastReconcile = null;
+
+  var RECON_PRIMARY_KEYS = [
+    "regimeBucket", "expectedMovePct", "emMultipleLabel",
+    "policyConstraints", "creditQuad", "llmVerdict",
+  ];
+
+  function reconcileClass(status) {
+    if (status === "agree") return "rAgree";
+    if (status === "drift") return "rDrift";
+    if (status === "mismatch") return "rMismatch";
+    return "rNa";
+  }
+
+  function reconcileShortLabel(c) {
+    var short = {
+      regimeBucket: "Regime",
+      spotPrice: "Spot",
+      expectedMovePct: "EM%",
+      emMultipleLabel: "Box",
+      deskEmFloor: "Floor",
+      policyConstraints: "Policy",
+      breachRate: "Breach",
+      conditioningNetEffect: "Cond",
+      creditQuad: "Credit",
+      llmVerdict: "Advisor",
+      llmStrikesMatchUser: "Strikes",
+      llmWingMatchUser: "Wing",
+    };
+    return short[c.key] || c.label || c.key;
+  }
+
+  function renderReconciliation(reconcile) {
+    var wrap = $("reconcileWrap");
+    if (!wrap || !reconcile || !reconcile.overall) return;
+    lastReconcile = reconcile;
+    wrap.style.display = "";
+
+    var overallEl = $("reconcileOverall");
+    var ov = reconcile.overall || {};
+    var status = ov.status || "na";
+    overallEl.className = "e14ReconcileOverall " + reconcileClass(status);
+    var counts = ov.counts || {};
+    overallEl.textContent =
+      status.toUpperCase() +
+      " · " + (counts.agree || 0) + "✓ " +
+      (counts.drift || 0) + "~ " +
+      (counts.mismatch || 0) + "✗" +
+      ((counts.na || 0) ? " " + counts.na + " n/a" : "");
+
+    var chipsEl = $("reconcileChips");
+    chipsEl.innerHTML = "";
+    var checks = reconcile.checks || [];
+    var primary = checks.filter(function (c) { return RECON_PRIMARY_KEYS.indexOf(c.key) >= 0; });
+    primary.forEach(function (c) {
+      var chip = document.createElement("span");
+      chip.className = "e14ReconcileChip " + reconcileClass(c.status);
+      chip.title = (c.rule ? c.rule + "\n\n" : "") + (c.note || "");
+      chip.innerHTML = '<span class="dot"></span><span>' +
+        reconcileShortLabel(c) + " · " + (c.status || "na").toUpperCase() + "</span>";
+      chipsEl.appendChild(chip);
+    });
+
+    var findings = $("reconcileFindings");
+    var list = ov.topFindings || [];
+    if (list.length) {
+      findings.style.display = "";
+      var lis = list.map(function (s) { return "<li>" + escapeHtml(s) + "</li>"; }).join("");
+      findings.innerHTML = "<strong>Top findings:</strong><ul>" + lis + "</ul>";
+    } else {
+      findings.style.display = "none";
+    }
+
+    var drawer = $("reconcileDrawer");
+    drawer.innerHTML = checks.map(function (c) {
+      var e2v = c.e2 == null ? "—" : (typeof c.e2 === "object" ? JSON.stringify(c.e2) : String(c.e2));
+      var e14v = c.e14 == null ? "—" : (typeof c.e14 === "object" ? JSON.stringify(c.e14) : String(c.e14));
+      return [
+        '<div class="e14ReconcileRow">',
+          '<div class="reconLabel">', escapeHtml(c.label || c.key), '</div>',
+          '<div><div class="reconSrc">Engine 2</div><div class="reconVal">', escapeHtml(e2v), '</div></div>',
+          '<div><div class="reconSrc">Engine 14</div><div class="reconVal">', escapeHtml(e14v), '</div></div>',
+          '<div class="reconStatus ', reconcileClass(c.status), '">',
+            (c.status || "na").toUpperCase(),
+            c.note ? '<div class="reconNote">' + escapeHtml(c.note) + '</div>' : '',
+          '</div>',
+        '</div>',
+      ].join("");
+    }).join("");
+  }
+
+  function escapeHtml(s) {
+    s = String(s == null ? "" : s);
+    return s.replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function renderConditioningSummary(summary) {
+    var el = $("conditioningSummary");
+    if (!el) return;
+    if (!summary || !summary.humanSummary) { el.style.display = "none"; return; }
+    el.style.display = "";
+    el.className = "e14ConditioningSummary " + (summary.direction || "flat");
+    el.textContent = summary.humanSummary;
+  }
+
+  /* ── Pre-check banner (Stage 3) ───────────────────────────────── */
+
+  function renderPreCheck(result) {
+    var el = $("preCheckBanner");
+    if (!el) return;
+    el.innerHTML = "";
+    if (!result) return;
+    var blocks = result.blocks || [];
+    var warnings = result.warnings || [];
+    if (!blocks.length && !warnings.length) return;
+
+    if (blocks.length) {
+      var div = document.createElement("div");
+      div.className = "e14PreCheckBanner block";
+      var btnHtml = "";
+      if (result.suggestion && result.suggestion.strikes) {
+        btnHtml = ' <button type="button" class="applyFix" id="applyFixBtn">Apply nearest strikes</button>';
+      }
+      var bullets = blocks.map(function (b) {
+        var missingList = "";
+        if (b.missing && b.missing.length) {
+          missingList = "<ul>" + b.missing.map(function (m) {
+            return "<li>" + escapeHtml(m.leg) + " = " + m.strike +
+              " · nearest live = <strong>" + m.nearest + "</strong></li>";
+          }).join("") + "</ul>";
+        }
+        return "<li>" + escapeHtml(b.message) + missingList + "</li>";
+      }).join("");
+      div.innerHTML = "<strong>Blocked — fix before running:</strong><ul>" + bullets + "</ul>" + btnHtml;
+      el.appendChild(div);
+
+      var btn = document.getElementById("applyFixBtn");
+      if (btn && result.suggestion && result.suggestion.strikes) {
+        btn.onclick = function () {
+          var s = result.suggestion.strikes;
+          if (s.shortPut != null)  $("shortPut").value  = s.shortPut;
+          if (s.longPut != null)   $("longPut").value   = s.longPut;
+          if (s.shortCall != null) $("shortCall").value = s.shortCall;
+          if (s.longCall != null)  $("longCall").value  = s.longCall;
+          el.innerHTML = "";
+          setStatus("Strikes updated to nearest live quotes. Re-run pre-check.", "info");
+        };
+      }
+    }
+
+    if (warnings.length) {
+      var wdiv = document.createElement("div");
+      wdiv.className = "e14PreCheckBanner warn";
+      wdiv.innerHTML = "<strong>Warnings:</strong><ul>" +
+        warnings.map(function (w) { return "<li>" + escapeHtml(w.message) + "</li>"; }).join("") +
+        "</ul>";
+      el.appendChild(wdiv);
+    }
+  }
+
+  async function runPreCheck() {
+    var body;
+    try { body = buildRequestBody(); } catch (e) { return null; }
+    if (!body.shortPut || !body.longPut || !body.shortCall || !body.longCall
+        || !body.creditReceived || !body.expiry) {
+      return null;  // user hasn't filled the form yet; skip silently
+    }
+    try {
+      var resp = await fetch("/api/ic-scenario/pre-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      var data = await resp.json();
+      renderPreCheck(data);
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function runReconcile(scenario, requestBody) {
+    try {
+      var resp = await fetch("/api/ic-scenario/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scenario: scenario,
+          runAdvisor: true,
+          checkLiveChain: true,
+        }),
+      });
+      var data = await resp.json();
+      if (data && data.reconcile) {
+        lastReconcile = data.reconcile;
+        renderReconciliation(data.reconcile);
+      }
+    } catch (e) {
+      if (window.console) console.warn("[E14] reconcile failed:", e);
+    }
+  }
+
   /* ── Submit handler ────────────────────────────────────────────── */
 
   function buildRequestBody() {
@@ -640,6 +846,13 @@
       return;
     }
 
+    // Stage 3: pre-check blocks submission on missing strikes.
+    var pre = await runPreCheck();
+    if (pre && pre.ok === false) {
+      setStatus("Pre-check blocked submission. Fix the issues above and retry.", "error");
+      return;
+    }
+
     var t0 = Date.now();
     try {
       var resp = await fetch("/api/ic-scenario", {
@@ -657,6 +870,8 @@
       render(data, body);
       var ms = Date.now() - t0;
       setStatus("Done in " + ms + "ms · " + (data.analoguesUsed || 0) + " analogues", "success");
+      // Stage 1.5/2: reconcile against Engine 2 (async, doesn't block UI).
+      runReconcile(data, body);
     } catch (e) {
       setStatus("Network error: " + e.message, "error");
     }
@@ -753,6 +968,7 @@
     renderOutcomes(data.outcomeDistribution, "outcomePanel", data.outcomeDistributionCI);
     renderOutcomesMid(data.outcomeDistributionMid);
     renderAdjusted(data.adjustedOutcomeDistribution);
+    renderConditioningSummary(data.conditioningSummary);
     renderModifiers(data.conditioningModifiers);
     renderMtmChart(data.mtmTimeline || []);
     renderSizing(data.sizing);
@@ -830,10 +1046,14 @@
     }
     setActionStatus("Saving trade…");
     try {
+      var journalBody = { scenario: lastPayload, request: lastRequestBody };
+      if (lastReconcile && lastReconcile.overall) {
+        journalBody.reconcile = lastReconcile;
+      }
       var resp = await fetch("/api/ic-scenario/journal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: lastPayload, request: lastRequestBody }),
+        body: JSON.stringify(journalBody),
       });
       var data = await resp.json();
       if (!resp.ok) {
@@ -1283,6 +1503,29 @@
     injectExplainButtons();
     wireInsightPopup();
     document.addEventListener("click", onExplainBtnClick);
+
+    // Stage 2: reconciliation drawer toggle.
+    var reconToggle = $("reconcileToggle");
+    if (reconToggle) {
+      reconToggle.addEventListener("click", function () {
+        var drawer = $("reconcileDrawer");
+        if (!drawer) return;
+        var open = drawer.classList.toggle("open");
+        reconToggle.textContent = open ? "Hide details" : "Show details";
+        reconToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+    }
+
+    // Stage 3: debounced pre-check on strike/credit/expiry edits.
+    var preCheckDebounce = null;
+    function schedulePreCheck() {
+      if (preCheckDebounce) clearTimeout(preCheckDebounce);
+      preCheckDebounce = setTimeout(runPreCheck, 600);
+    }
+    ["shortPut", "longPut", "shortCall", "longCall", "creditReceived", "expiry"].forEach(function (id) {
+      var el = $(id);
+      if (el) el.addEventListener("change", schedulePreCheck);
+    });
 
     // Health probe — if backend disabled or cache empty, surface a banner early.
     fetch("/api/ic-scenario/health")

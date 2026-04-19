@@ -451,6 +451,152 @@ def test_regime_from_rv_pct_boundaries():
     assert _regime_from_rv_pct(0.99) == "NO_TRADE"
 
 
+# ---------------------------------------------------------------------------
+# Stage 0 — _resolve_entry_regime: DMS-first with EM-proxy fallback
+# ---------------------------------------------------------------------------
+
+class _StubStore:
+    """Minimal store stand-in for load_dms(); maps ISO date -> regime dict."""
+
+    def __init__(self, by_date):
+        self._by_date = dict(by_date)
+
+    def get_json(self, key):
+        # load_dms builds key as f"{DMS_KEY_PREFIX}:{date_str}"; take the tail.
+        date_str = key.rsplit(":", 1)[-1]
+        payload = self._by_date.get(date_str)
+        if payload is None:
+            return None
+        return {"date": date_str, "regime": payload}
+
+
+def _req_for_regime(entry: str = "2026-04-20", expiry: str = "2026-04-24") -> IcScenarioRequest:
+    return IcScenarioRequest(
+        underlying="SPX", entry_date=entry, expiry=expiry,
+        short_put=6890.0, long_put=6880.0,
+        short_call=7360.0, long_call=7370.0,
+        credit_received=0.60,
+    )
+
+
+def test_resolve_entry_regime_dms_hit_same_day():
+    from backend.engine14.simulator import _resolve_entry_regime
+
+    store = _StubStore({
+        "2026-04-20": {"asOfDate": "2026-04-20", "bucket": "ELEVATED", "score100": 46.59},
+    })
+    out = _resolve_entry_regime(user_em_pct=1.35, request=_req_for_regime(), store=store)
+    assert out.bucket == "ELEVATED"
+    assert out.source == "dms"
+    assert out.as_of == "2026-04-20"
+    assert out.score100 == pytest.approx(46.59)
+    assert out.note is None
+
+
+def test_resolve_entry_regime_dms_walk_back_within_staleness():
+    """User priced a forward Monday; latest DMS is Friday. Walk back up to 3 days."""
+    from backend.engine14.simulator import _resolve_entry_regime
+
+    store = _StubStore({
+        "2026-04-17": {"asOfDate": "2026-04-17", "bucket": "ELEVATED", "score100": 46.59},
+    })
+    out = _resolve_entry_regime(user_em_pct=1.35, request=_req_for_regime(), store=store)
+    assert out.bucket == "ELEVATED"
+    assert out.source == "dms"
+    assert out.as_of == "2026-04-17"
+    assert out.note is not None  # stale note attached
+    assert "stale" in out.note.lower()
+
+
+def test_resolve_entry_regime_fallback_when_no_store():
+    from backend.engine14.simulator import _resolve_entry_regime
+
+    out = _resolve_entry_regime(user_em_pct=1.35, request=_req_for_regime(), store=None)
+    assert out.source == "em_proxy"
+    assert out.as_of is None
+    assert out.score100 is None
+    # 1.35% over 4 calendar days -> iv_ann ≈ 12.9% -> MODERATE
+    assert out.bucket in {"LOW", "MODERATE"}
+
+
+def test_resolve_entry_regime_fallback_when_dms_missing():
+    from backend.engine14.simulator import _resolve_entry_regime
+
+    store = _StubStore({})  # empty
+    out = _resolve_entry_regime(user_em_pct=1.35, request=_req_for_regime(), store=store)
+    assert out.source == "em_proxy"
+    assert out.note and "DMS unavailable" in out.note
+
+
+def test_summarize_conditioning_flat_when_neutral():
+    from backend.engine14.simulator import _summarize_conditioning
+
+    base = {b: {"pct": 50.0 if b == "fullCollect" else 10.0} for b in
+            ("earlyTarget", "fullCollect", "whiteKnuckle", "stopOut", "breach")}
+    adj = {k: dict(v) for k, v in base.items()}
+
+    out = _summarize_conditioning(
+        conditioning={"netTailMultiplier": 1.0, "netWinRateShiftPct": 0.0},
+        base=base, adjusted=adj,
+    )
+    assert out["material"] is False
+    assert out["direction"] == "flat"
+    assert "neutral" in out["humanSummary"].lower()
+
+
+def test_summarize_conditioning_reports_tailwind_when_win_rate_rises():
+    from backend.engine14.simulator import _summarize_conditioning
+
+    base = {
+        "earlyTarget": {"pct": 30.0}, "fullCollect": {"pct": 50.0},
+        "whiteKnuckle": {"pct": 10.0}, "stopOut": {"pct": 7.0},
+        "breach": {"pct": 3.0},
+    }
+    adj = {
+        "earlyTarget": {"pct": 35.0}, "fullCollect": {"pct": 52.0},
+        "whiteKnuckle": {"pct": 8.0}, "stopOut": {"pct": 4.0},
+        "breach": {"pct": 1.0},
+    }
+    out = _summarize_conditioning(
+        conditioning={"netTailMultiplier": 0.85, "netWinRateShiftPct": 4.0},
+        base=base, adjusted=adj,
+    )
+    assert out["material"] is True
+    assert out["direction"] == "tailwind"
+    assert out["netTailMultiplier"] == pytest.approx(0.85)
+    assert out["netWinRateShiftPct"] == pytest.approx(4.0)
+    assert out["biggestShiftBucket"] in {"earlyTarget", "fullCollect", "whiteKnuckle", "stopOut", "breach"}
+
+
+def test_summarize_conditioning_handles_missing_inputs():
+    from backend.engine14.simulator import _summarize_conditioning
+
+    out = _summarize_conditioning(conditioning={}, base={}, adjusted={})
+    assert out["material"] is False
+    assert "unavailable" in out["humanSummary"].lower()
+
+
+def test_summarize_conditioning_error_state_degrades_gracefully():
+    from backend.engine14.simulator import _summarize_conditioning
+
+    out = _summarize_conditioning(
+        conditioning={"error": "RedisUnavailable"}, base={}, adjusted={},
+    )
+    assert out["material"] is False
+
+
+def test_resolve_entry_regime_fallback_when_dms_too_stale():
+    """DMS exists but older than max_staleness_days -> fallback."""
+    from backend.engine14.simulator import _resolve_entry_regime
+
+    store = _StubStore({
+        # 5 days before entry; default max_staleness_days=3 -> ignored.
+        "2026-04-15": {"asOfDate": "2026-04-15", "bucket": "ELEVATED", "score100": 52.0},
+    })
+    out = _resolve_entry_regime(user_em_pct=1.35, request=_req_for_regime(), store=store)
+    assert out.source == "em_proxy"
+
+
 def test_filter_analogues_regime_and_dte():
     def win(entry: str, regime: str, dte_s: int, q: str = "Q1") -> AnalogueWindow:
         return AnalogueWindow(

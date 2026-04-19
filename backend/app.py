@@ -100,6 +100,14 @@ def _verify_token(token: str) -> bool:
 
 
 def _auth_enabled() -> bool:
+    # The app is intentionally public by default so the full desk-agent
+    # walkthrough (every route, every engine) is reachable without a cookie.
+    # Set ``PUBLIC_ACCESS=0`` (or any falsy value) in the environment to
+    # re-engage the invite-code gate. ``INVITE_CODE`` still must be set and
+    # non-empty for the gate to do anything.
+    public = (os.getenv("PUBLIC_ACCESS") or "1").strip().lower()
+    if public in ("1", "true", "yes", "on"):
+        return False
     return bool(INVITE_CODE)
 
 

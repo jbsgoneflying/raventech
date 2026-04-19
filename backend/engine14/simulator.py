@@ -724,8 +724,8 @@ def _entry_regime_bucket(user_em_pct: float, req: IcScenarioRequest) -> str:
     """Rough regime bucket for the user's entry using just IV/EM magnitude.
 
     We convert the implied 1-sigma % into an annualized IV estimate and
-    assign buckets using the Engine 2 labels. This is intentionally a
-    conservative proxy — Phase 2 will swap in true Engine 2 regime.
+    assign buckets using the Engine 2 labels. This remains as a fallback
+    when DailyMarketState is unavailable — see ``_resolve_entry_regime``.
     """
     try:
         dte_c = req.dte_calendar()
@@ -739,6 +739,196 @@ def _entry_regime_bucket(user_em_pct: float, req: IcScenarioRequest) -> str:
     if iv_ann <= 28.0:
         return "ELEVATED"
     return "NO_TRADE"
+
+
+def _summarize_conditioning(
+    *,
+    conditioning: Dict[str, Any],
+    base: Dict[str, Any],
+    adjusted: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Produce a compact summary of the net conditioning effect.
+
+    The engine already surfaces ``conditioningModifiers`` (component
+    contributions) and ``adjustedOutcomeDistribution`` (final state), but
+    those land in separate places in the UI. The summary answers a
+    single question up front: "did conditioning materially change what
+    the historical analogues suggested?"
+
+    Fields:
+      * ``netTailMultiplier`` / ``netWinRateShiftPct``: carried from the
+        modifier engine for convenience.
+      * ``material``: True iff the net effect would noticeably shift any
+        bucket's probability (``>=1pp absolute`` on any of the five
+        outcomes, or ``>=5%`` on the tail multiplier).
+      * ``direction``: ``"tailwind" | "headwind" | "flat"`` — whether
+        the modifiers improved or hurt the base win rate.
+      * ``biggestShiftPct`` / ``biggestShiftBucket``: largest per-bucket
+        absolute delta in percentage points (0 when no base/adjusted).
+      * ``humanSummary``: single-line desk-facing explanation.
+    """
+    if not conditioning or conditioning.get("error"):
+        return {
+            "material": False,
+            "direction": "flat",
+            "netTailMultiplier": None,
+            "netWinRateShiftPct": None,
+            "biggestShiftPct": 0.0,
+            "biggestShiftBucket": None,
+            "humanSummary": "Conditioning unavailable; showing base analogue distribution.",
+        }
+
+    tail = conditioning.get("netTailMultiplier")
+    wr = conditioning.get("netWinRateShiftPct")
+    try:
+        tail_f = float(tail) if tail is not None else 1.0
+    except (TypeError, ValueError):
+        tail_f = 1.0
+    try:
+        wr_f = float(wr) if wr is not None else 0.0
+    except (TypeError, ValueError):
+        wr_f = 0.0
+
+    # Per-bucket deltas (pp) when both base and adjusted are present.
+    biggest_bucket: Optional[str] = None
+    biggest_abs = 0.0
+    if base and adjusted:
+        for bucket in OUTCOMES:
+            b = float((base.get(bucket) or {}).get("pct") or 0.0)
+            a = float((adjusted.get(bucket) or {}).get("pct") or 0.0)
+            d = a - b
+            if abs(d) > biggest_abs:
+                biggest_abs = abs(d)
+                biggest_bucket = bucket
+
+    tail_material = abs(tail_f - 1.0) >= 0.05
+    wr_material = abs(wr_f) >= 1.0
+    dist_material = biggest_abs >= 1.0
+    material = bool(tail_material or wr_material or dist_material)
+
+    if not material:
+        direction = "flat"
+    elif wr_f > 0 or (wr_f == 0 and tail_f < 1.0):
+        direction = "tailwind"
+    else:
+        direction = "headwind"
+
+    if material:
+        parts = []
+        if tail_material:
+            parts.append(f"tail ×{tail_f:.2f}")
+        if wr_material:
+            parts.append(f"WR {wr_f:+.1f}pp")
+        if dist_material and biggest_bucket:
+            parts.append(f"Δ{biggest_bucket} {biggest_abs:+.1f}pp")
+        human = (
+            f"Conditioning {direction}: " + ", ".join(parts) + "."
+            if parts else f"Conditioning {direction}."
+        )
+    else:
+        human = (
+            f"Conditioning near-neutral (tail ×{tail_f:.2f}, WR {wr_f:+.1f}pp); "
+            "adjusted distribution ≈ base."
+        )
+
+    return {
+        "material": material,
+        "direction": direction,
+        "netTailMultiplier": round(tail_f, 3),
+        "netWinRateShiftPct": round(wr_f, 2),
+        "biggestShiftPct": round(biggest_abs, 2),
+        "biggestShiftBucket": biggest_bucket,
+        "humanSummary": human,
+    }
+
+
+@dataclass(frozen=True)
+class _ResolvedRegime:
+    bucket: str
+    source: str                     # "dms" | "em_proxy"
+    as_of: Optional[str] = None     # DMS asOfDate when source=="dms"
+    score100: Optional[float] = None
+    note: Optional[str] = None
+
+
+def _resolve_entry_regime(
+    *,
+    user_em_pct: float,
+    request: IcScenarioRequest,
+    store: Any,
+    max_staleness_days: int = 3,
+) -> _ResolvedRegime:
+    """Resolve the user's entry-day regime.
+
+    Priority order:
+
+    1. ``DailyMarketState`` loaded from Redis for ``request.entry_date``.
+       If not present, try the previous up-to ``max_staleness_days``
+       calendar days (the typical scenario: user is pricing a forward
+       Monday entry over the weekend, latest DMS is Friday's).
+    2. Fall back to the EM-proxy bucket (``_entry_regime_bucket``).
+
+    The DMS path is preferred because Engine 2's multi-component regime
+    (trend + volatility + stress + event + dispersion) is much richer
+    than a single IV-annualized number — it catches ELEVATED tape in
+    calm-vol windows like run-ups and geopolitical weeks.
+    """
+    # Lazy import to avoid circular dep with callers that don't want the DMS module.
+    try:
+        from backend.daily_market_state import load_dms  # type: ignore
+    except Exception:
+        load_dms = None  # type: ignore
+
+    if store is not None and load_dms is not None:
+        try:
+            entry_dt = dt.date.fromisoformat(request.entry_date)
+        except Exception:
+            entry_dt = None
+
+        if entry_dt is not None:
+            # Walk back day-by-day up to max_staleness_days (inclusive).
+            for offset in range(0, int(max_staleness_days) + 1):
+                probe = (entry_dt - dt.timedelta(days=offset)).isoformat()
+                try:
+                    dms = load_dms(probe, store)
+                except Exception:
+                    dms = None
+                if dms is None:
+                    continue
+                regime = getattr(dms, "regime", None) or {}
+                bucket = str(regime.get("bucket") or "").strip().upper()
+                if bucket in REGIME_BUCKETS:
+                    score = regime.get("score100")
+                    try:
+                        score_f = float(score) if score is not None else None
+                    except (TypeError, ValueError):
+                        score_f = None
+                    note = None
+                    if offset > 0:
+                        note = (
+                            f"Regime from DMS {probe} ({offset}d stale vs entry "
+                            f"{request.entry_date}); DMS for entry date not yet computed."
+                        )
+                    return _ResolvedRegime(
+                        bucket=bucket,
+                        source="dms",
+                        as_of=regime.get("asOfDate") or probe,
+                        score100=score_f,
+                        note=note,
+                    )
+
+    # Fall through to EM-proxy.
+    bucket = _entry_regime_bucket(user_em_pct, request)
+    return _ResolvedRegime(
+        bucket=bucket,
+        source="em_proxy",
+        as_of=None,
+        score100=None,
+        note=(
+            "Regime derived from entered EM% (DMS unavailable for entry date). "
+            "Bucket accuracy reduced in trend/event/news-driven regimes."
+        ),
+    )
 
 
 # ---- Public entrypoint ----
@@ -774,7 +964,12 @@ def run_scenario(
 
     # 2. Infer user's entry state.
     user_spot, user_em_pct, em_source, user_spot_as_of = _infer_user_em_pct(request, closes_by_date)
-    user_regime = _entry_regime_bucket(user_em_pct, request)
+    resolved_regime = _resolve_entry_regime(
+        user_em_pct=user_em_pct,
+        request=request,
+        store=store,
+    )
+    user_regime = resolved_regime.bucket
 
     # 3. Build + filter analogue universe.
     entry_dow = 0
@@ -976,13 +1171,20 @@ def run_scenario(
         for p in paths_by_entry[:sample_n]
     ]
 
+    _regime_note = (
+        f"Regime={user_regime} via DMS ({resolved_regime.as_of})"
+        if resolved_regime.source == "dms"
+        else f"Regime={user_regime} via EM-proxy fallback (DMS unavailable)"
+    )
     notes = [
-        f"Analogue pool: {len(paths)} windows (regime={user_regime}, tol=±{int(flags.ENGINE14_REGIME_BUCKET_TOL)}pts)",
+        f"Analogue pool: {len(paths)} windows ({_regime_note}, tol=±{int(flags.ENGINE14_REGIME_BUCKET_TOL)}pts)",
         f"Entry EM inferred via {em_source}; 1σ={user_em_pct:.2f}%",
         "Strike mapping preserves EM-distance across historical spot levels.",
         f"Exit fill model: {fill_model.mode}"
         + (f" (+{fill_model.penalty_pct:.0f}% half-spread)" if fill_model.mode == "mid_penalty" else ""),
     ]
+    if resolved_regime.note:
+        notes.append(resolved_regime.note)
     if user_em_mult is not None:
         notes.append(
             f"Trade placement: |z|={user_em_mult:.2f}σ short strikes"
@@ -1020,6 +1222,18 @@ def run_scenario(
             conditioning = {"error": f"{type(e).__name__}: {e}"}
             adjusted_distribution = {}
 
+    # Stage 4: summarize the *net* conditioning effect so the UI can tell
+    # the user, in one sentence, whether adjustedOutcomeDistribution is
+    # materially different from outcomeDistribution and why. When the
+    # modifiers largely cancel out (which is the common case — calendar
+    # headwinds offsetting dealer-gamma tailwinds, for instance), we
+    # explicitly say so instead of silently showing identical bars.
+    conditioning_summary = _summarize_conditioning(
+        conditioning=conditioning,
+        base=outcome_summary,
+        adjusted=adjusted_distribution,
+    )
+
     return {
         "engine": 14,
         "version": "1.3.0",
@@ -1038,6 +1252,12 @@ def run_scenario(
             "userEmPct": round(float(user_em_pct), 3),
             "wingWidth": round(float(request.wing_width()), 2),
             "regimeBucket": user_regime,
+            "regimeSource": resolved_regime.source,
+            "regimeSourceAsOf": resolved_regime.as_of,
+            "regimeScore": (
+                None if resolved_regime.score100 is None
+                else round(float(resolved_regime.score100), 2)
+            ),
             "userEmMultiple": None if user_em_mult is None else round(float(user_em_mult), 2),
         },
         "fillModel": {
@@ -1056,6 +1276,7 @@ def run_scenario(
         "outcomeDistributionCI": outcome_distribution_ci,
         "adjustedOutcomeDistribution": adjusted_distribution,
         "conditioningModifiers": conditioning,
+        "conditioningSummary": conditioning_summary,
         "mtmTimeline": timeline,
         "expectedValue": {
             "meanPnlPct": round(float(mean_pnl), 1),

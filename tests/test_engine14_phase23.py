@@ -377,6 +377,107 @@ def test_journal_endpoint_routes_to_log_trade(monkeypatch):
     assert captured["data"]["entry"]["strikes"]["shortPut"] == 5180
 
 
+def test_journal_endpoint_persists_inline_reconcile_snapshot(monkeypatch):
+    """When the frontend passes a reconcile payload, we store a compact snapshot."""
+    client, mod = _build_test_app(monkeypatch)
+    captured: Dict[str, Any] = {}
+
+    def _fake_log_trade(data, store=None, flags=None):
+        captured["data"] = data
+        return "e2-TEST-SPX-recon01"
+
+    monkeypatch.setattr(mod, "log_trade", _fake_log_trade)
+
+    reconcile_payload = {
+        "overall": {
+            "status": "mismatch",
+            "counts": {"agree": 4, "drift": 2, "mismatch": 1, "na": 1},
+            "topFindings": [
+                "Credit mismatch: user 1.85 vs live mid 0.60.",
+                "Policy: outside-wings exceeds 15%.",
+            ],
+        },
+        "checks": [
+            {"key": "credit", "label": "Credit", "status": "mismatch",
+             "note": "user 1.85 vs live mid 0.60", "rule": "verbose rule body",
+             "e2": {"a": 1}, "e14": {"b": 2}},
+            {"key": "policy", "label": "Policy", "status": "drift",
+             "note": "outside-wings > 15%", "extra": "drop me"},
+        ],
+    }
+
+    body = {
+        "scenario": {
+            "expectedValue": {"meanPnlPct": 20.0, "medianPnlPct": 50.0},
+            "outcomeDistribution": {"fullCollect": {"pct": 50}},
+            "adjustedOutcomeDistribution": {},
+        },
+        "request": {
+            "underlying": "SPX", "entry_date": "2026-04-17", "expiry": "2026-04-24",
+            "short_put": 6890, "long_put": 6880, "short_call": 7360, "long_call": 7370,
+            "credit_received": 0.65, "profit_target_pct": 50, "stop_loss_pct": 200,
+        },
+        "reconcile": reconcile_payload,
+    }
+    r = client.post("/api/ic-scenario/journal", json=body)
+    assert r.status_code == 200
+    out = r.json()
+
+    # The response exposes the snapshot for the UI.
+    assert out["reconcile"] is not None
+    assert out["reconcile"]["overall"]["status"] == "mismatch"
+
+    # The persisted trade carries the compact snapshot on entryContext.
+    stored_ctx = captured["data"]["entryContext"]
+    assert "reconcile" in stored_ctx
+    snap = stored_ctx["reconcile"]
+    assert snap["overall"]["status"] == "mismatch"
+    assert snap["overall"]["counts"] == {"agree": 4, "drift": 2, "mismatch": 1, "na": 1}
+    assert snap["overall"]["topFindings"][0].startswith("Credit mismatch")
+    # Verbose fields (rule/e2/e14/extra) stripped; only compact keys remain.
+    for c in snap["checks"]:
+        assert set(c.keys()) == {"key", "label", "status", "note"}
+    assert snap["generatedAt"].endswith("Z")
+
+
+def test_journal_endpoint_auto_computes_reconcile_when_missing(monkeypatch):
+    """When the client doesn't pass reconcile, we synthesize a deterministic one."""
+    client, mod = _build_test_app(monkeypatch)
+    captured: Dict[str, Any] = {}
+
+    def _fake_log_trade(data, store=None, flags=None):
+        captured["data"] = data
+        return "e2-TEST-SPX-autorec"
+
+    monkeypatch.setattr(mod, "log_trade", _fake_log_trade)
+    monkeypatch.setattr(mod, "_compute_engine2_payload", lambda u: None)
+
+    called: Dict[str, Any] = {"count": 0}
+
+    def _fake_reconcile_det(*, scenario_result, engine2_payload):
+        called["count"] += 1
+        return {
+            "overall": {"status": "agree", "counts": {"agree": 9}, "topFindings": []},
+            "checks": [{"key": "k1", "label": "L1", "status": "agree", "note": None}],
+        }
+
+    monkeypatch.setattr(mod.reconciliation, "reconcile_deterministic", _fake_reconcile_det)
+
+    body = {
+        "scenario": {"expectedValue": {"meanPnlPct": 10.0}, "outcomeDistribution": {}},
+        "request": {
+            "underlying": "SPX", "entry_date": "2026-04-17", "expiry": "2026-04-24",
+            "short_put": 6890, "long_put": 6880, "short_call": 7360, "long_call": 7370,
+            "credit_received": 0.65, "profit_target_pct": 50, "stop_loss_pct": 200,
+        },
+    }
+    r = client.post("/api/ic-scenario/journal", json=body)
+    assert r.status_code == 200
+    assert called["count"] == 1
+    snap = captured["data"]["entryContext"]["reconcile"]
+    assert snap["overall"]["status"] == "agree"
+
+
 def test_review_endpoint_returns_verdict_for_closed_trade(monkeypatch):
     client, mod = _build_test_app(monkeypatch)
 
