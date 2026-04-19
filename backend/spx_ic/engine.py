@@ -47,6 +47,27 @@ from backend.spx_ic.utils import (
     _iv_to_pct,
     _pick_spot_from_live_rows,
 )
+
+
+def _regime_score_value(regime_payload: Dict[str, Any], default: float = 50.0) -> float:
+    """Pull the 0-100 regime score out of ``compute_regime_score_for_date`` output.
+
+    The regime payload only exposes the field as ``score100``; older call sites
+    read ``score`` (never emitted) and silently fell back to ``default`` → the
+    desk-consensus / EM-preference layers were always running on a neutral 50.
+    Accept either key so we can't regress again.
+    """
+    if not isinstance(regime_payload, dict):
+        return default
+    for key in ("score100", "score"):
+        raw = regime_payload.get(key)
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return default
 from backend.spx_ic.ohlc import (
     DailyOHLC,
     fetch_dailies_ohlc_range,
@@ -1070,7 +1091,7 @@ def compute_engine2_spx_ic(
         pass
 
     em_preference = _compute_em_preference(
-        regime_score=float(regime_now.get("score", 50)),
+        regime_score=_regime_score_value(regime_now),
         macro_multiplier=float(macro_now.get("multiplier", 1.0)),
         news_gate_max_adj=_news_max_adj,
         vol_pressure_state=_vp_state,
@@ -1088,7 +1109,7 @@ def compute_engine2_spx_ic(
     try:
         from backend.engine2_advisor import compute_desk_consensus
         desk_consensus = compute_desk_consensus(
-            regime_score=float(regime_now.get("score", 50)),
+            regime_score=_regime_score_value(regime_now),
             regime_bucket=str(regime_now.get("bucket", "MODERATE")),
             macro_multiplier=float(macro_now.get("multiplier", 1.0)),
             news_gate=_news_gate_for_consensus,
@@ -1371,7 +1392,7 @@ def compute_engine2_spx_ic(
         try:
             from backend.engine2_advisor import compute_desk_consensus as _dc
             desk_consensus = _dc(
-                regime_score=float(regime_now.get("score", 50)),
+                regime_score=_regime_score_value(regime_now),
                 regime_bucket=str(regime_now.get("bucket", "MODERATE")),
                 macro_multiplier=float(macro_now.get("multiplier", 1.0)),
                 news_gate=_news_gate_for_consensus,

@@ -329,3 +329,120 @@ def test_overall_worst_status_roll_up():
     assert R._worst(["agree", "drift", "mismatch"]) == "mismatch"
     assert R._worst(["na", "na"]) == "na"
     assert R._worst([]) == "na"
+
+
+# ---------------------------------------------------------------------------
+# Pressure-test regressions: silent-wrong-output guards
+# ---------------------------------------------------------------------------
+
+def test_spot_zero_anchor_does_not_silently_agree():
+    """Guard: if E2 spot resolves to literal 0 (not None), the old ``_rel_pct``
+    path returned None, was coerced to ``or 0.0``, and silently voted
+    ``agree``. This test forces the code path where ``smartSpotPrice`` is
+    absent but ``spotPrice`` is exactly 0.0 so e2_spot=0 after coercion.
+    """
+    scen = {"entryState": {"userSpot": 6725.0}}
+    # smartSpotPrice missing, spotPrice = 0.0 → e2_spot coerces to 0.0 (truthy None check passes).
+    e2_zero = {"expectedMove": {"spotPrice": 0.0}}
+    chip = R._check_spot(scen, e2_zero)
+    assert chip["status"] == "na", f"expected na, got {chip}"
+    assert "zero" in (chip["note"] or "").lower()
+
+    # Purely missing anchor (both keys absent) → na via the missing-side branch.
+    e2_missing = {"expectedMove": {}}
+    chip2 = R._check_spot(scen, e2_missing)
+    assert chip2["status"] == "na"
+
+
+def test_expected_move_zero_anchor_does_not_silently_agree():
+    """Guard: delayedImpliedMovePct = 0.0 with ORATS missing used to silently
+    agree via the same ``_rel_pct`` + ``or 0.0`` pattern."""
+    scen = {"entryState": {"userEmPct": 1.90}}
+    e2_zero = {"expectedMove": {"delayedImpliedMovePct": 0.0}}
+    chip = R._check_expected_move(scen, e2_zero)
+    # With the or-chain dropping 0 to None, we land on missing-side na. The
+    # point of the regression is that we NEVER reach ``agree`` regardless of
+    # which na-path fires.
+    assert chip["status"] == "na"
+
+
+def test_expected_move_with_literal_zero_ref_stays_na():
+    """The or-chain treats 0 as falsy, so build an E2 payload where the
+    *only* EM field present resolves to exactly 0.0 after coercion, and make
+    sure we still return na rather than fake agree."""
+    scen = {"entryState": {"userEmPct": 1.90}}
+    # Only ``expectedMovePct`` key populated at 0.0 → _to_float returns 0.0 → guard fires.
+    # Note: we rely on the or-chain falling through None/None before hitting this key;
+    # the explicit None guard in the fix kicks in when e2_em is exactly 0.0.
+    # Force the path: set a non-zero first key to ensure we reach the zero guard.
+    # (The or-chain accepts any truthy float, so a literal 0 in a later key won't
+    # trigger the zero-guard — this test documents the defense-in-depth.)
+    e2 = {"expectedMove": {"oratsExpectedMovePct": 1e-9}}
+    chip = R._check_expected_move(scen, e2)
+    assert chip["status"] == "na"
+    assert "zero" in (chip["note"] or "").lower()
+
+
+def test_policy_cell_missing_metrics_does_not_silently_agree():
+    """Guard: a widthComparison cell with ``None`` metrics used to coerce to 0
+    via ``or 0`` and silently vote ``agree``. The chip must now surface the
+    gap as ``drift`` with an ``unverified`` note so the desk can see we
+    couldn't actually check that cap.
+    """
+    e2 = {
+        "widthComparison": [
+            # breachPct and outsidePct are None → the caps can't be evaluated.
+            {"emMult": 2.0, "wingWidthPts": 10,
+             "breachPct": None, "outsidePct": None, "avgMae95xWing": 0.4,
+             "creditProxy": 20.0},
+        ],
+        "recommendation": {"policy": {
+            "maxBreachPct": 25.0, "maxOutsideWingsPct": 10.0, "maxMae95xWing": 1.0,
+        }},
+    }
+    scen = {
+        "entryState": {"userEmMultiple": 2.0, "wingWidth": 10.0},
+        "request": {"short_put": 0, "long_put": 0, "short_call": 0, "long_call": 0},
+    }
+    chip = R._check_policy(scen, e2)
+    assert chip["status"] == "drift"
+    note = chip["note"] or ""
+    assert "unverified" in note.lower()
+    assert "breachpct" in note.lower()
+    assert "outsidepct" in note.lower()
+    # The agree-path metric (avgMae95xWing ≤ 1.0) must still be checked.
+    assert chip["e2"]["unverified"] and "avgMae95xWing" not in chip["e2"]["unverified"]
+
+
+def test_policy_single_violation_is_drift():
+    e2 = {
+        "widthComparison": [
+            {"emMult": 2.0, "wingWidthPts": 10,
+             "breachPct": 5.0, "outsidePct": 15.0, "avgMae95xWing": 0.4,
+             "creditProxy": 20.0},
+        ],
+        "recommendation": {"policy": {
+            "maxBreachPct": 25.0, "maxOutsideWingsPct": 10.0, "maxMae95xWing": 1.0,
+        }},
+    }
+    scen = {
+        "entryState": {"userEmMultiple": 2.0, "wingWidth": 10.0},
+        "request": {"short_put": 0, "long_put": 0, "short_call": 0, "long_call": 0},
+    }
+    chip = R._check_policy(scen, e2)
+    assert chip["status"] == "drift"
+    assert "outsidePct" in (chip["note"] or "")
+
+
+def test_llm_verdict_unknown_collapses_to_na():
+    """Guard: advisor returning an unrecognized verdict string must NOT
+    silently resolve to ``mismatch`` (that masquerades as advisor disagreement
+    when the real issue is schema drift)."""
+    chip = R._check_llm_verdict({"verdict": "MAYBE_PASS", "confidence": 0.6})
+    assert chip["status"] == "na"
+    assert "unrecognized" in (chip["note"] or "").lower()
+
+    chip_pass = R._check_llm_verdict({"verdict": "PASS", "confidence": 0.8})
+    assert chip_pass["status"] == "agree"
+    chip_fail = R._check_llm_verdict({"verdict": "FAIL", "confidence": 0.9})
+    assert chip_fail["status"] == "mismatch"

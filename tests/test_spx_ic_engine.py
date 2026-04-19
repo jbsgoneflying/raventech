@@ -6,7 +6,22 @@ import pytest
 from backend.config import FeatureFlags
 from backend.spx_ic import compute_engine2_spx_ic
 from backend.spx_ic.backtest import backtest_weekly_ic_risk, beta_binomial_mean, pctile
+from backend.spx_ic.engine import _regime_score_value
 from backend.spx_ic.utils import _pick_weekly_close_expiry_date
+
+
+def test_regime_score_value_reads_score100():
+    """Regression: `compute_regime_score_for_date` emits the score under
+    ``score100``; the old call sites read ``"score"`` (never present) and
+    silently fell back to 50 → desk-consensus and EM-preference were always
+    running on a neutral score."""
+    assert _regime_score_value({"score100": 46.59}) == pytest.approx(46.59)
+    assert _regime_score_value({"score100": 72.0, "score": 40.0}) == pytest.approx(72.0)
+    assert _regime_score_value({"score": 30.0}) == pytest.approx(30.0)
+    assert _regime_score_value({"bucket": "ELEVATED"}) == 50.0
+    assert _regime_score_value({}) == 50.0
+    assert _regime_score_value(None) == 50.0  # type: ignore[arg-type]
+    assert _regime_score_value({"score100": "not-a-number"}) == 50.0
 
 
 class FakeResp:

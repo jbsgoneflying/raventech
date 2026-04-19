@@ -139,7 +139,20 @@ def _check_spot(
     if e14_spot is None or e2_spot is None:
         return _na("spotPrice", label, "Spot missing on one side.", rule=rule)
 
-    diff_pct = _rel_pct(e14_spot, e2_spot) or 0.0
+    # A zero/near-zero reference price is never a real equilibrium here — it
+    # signals bad/stale E2 data. Don't let ``_rel_pct`` collapse to ``None``
+    # and silently become ``agree``; surface it as ``na`` so the desk knows
+    # the anchor failed.
+    if abs(e2_spot) < 1e-6:
+        return _na(
+            "spotPrice", label,
+            f"E2 spot anchor is effectively zero ({e2_spot}); cannot compute relative drift.",
+            rule=rule,
+        )
+
+    diff_pct = _rel_pct(e14_spot, e2_spot)
+    if diff_pct is None:
+        return _na("spotPrice", label, "Unable to compute spot drift.", rule=rule)
     if diff_pct <= 0.1:
         status = "agree"
     elif diff_pct <= 1.0:
@@ -174,7 +187,19 @@ def _check_expected_move(
     if e14_em is None or e2_em is None:
         return _na("expectedMovePct", label, "Expected-move data missing.", rule=rule)
 
-    diff_pct = _rel_pct(e14_em, e2_em) or 0.0
+    # Same trap as spot: a zero ORATS EM anchor would make ``_rel_pct``
+    # collapse to ``None`` and the old ``or 0.0`` silently voted "agree".
+    # Protect the desk by returning ``na`` instead.
+    if abs(e2_em) < 1e-6:
+        return _na(
+            "expectedMovePct", label,
+            f"E2 EM anchor is effectively zero ({e2_em}); cannot compute relative drift.",
+            rule=rule,
+        )
+
+    diff_pct = _rel_pct(e14_em, e2_em)
+    if diff_pct is None:
+        return _na("expectedMovePct", label, "Unable to compute EM drift.", rule=rule)
     if diff_pct <= 5.0:
         status = "agree"
     elif diff_pct <= 15.0:
@@ -316,24 +341,55 @@ def _check_policy(
     if cell is None or not policy:
         return _na("policyConstraints", label, "No widthComparison cell or policy.", rule=rule)
 
-    violations = []
-    max_breach = _to_float(policy.get("maxBreachPct"))
-    max_outside = _to_float(policy.get("maxOutsideWingsPct"))
-    max_mae = _to_float(policy.get("maxMae95xWing"))
+    # Cap + cell-field pairs the policy wants enforced.
+    pairs = [
+        ("maxBreachPct",       "breachPct",     "breachPct"),
+        ("maxOutsideWingsPct", "outsidePct",    "outsidePct"),
+        ("maxMae95xWing",      "avgMae95xWing", "avgMae95xWing"),
+    ]
 
-    if max_breach is not None and (_to_float(cell.get("breachPct")) or 0) > max_breach:
-        violations.append(f"breachPct {cell.get('breachPct')} > {max_breach}")
-    if max_outside is not None and (_to_float(cell.get("outsidePct")) or 0) > max_outside:
-        violations.append(f"outsidePct {cell.get('outsidePct')} > {max_outside}")
-    if max_mae is not None and (_to_float(cell.get("avgMae95xWing")) or 0) > max_mae:
-        violations.append(f"avgMae95xWing {cell.get('avgMae95xWing')} > {max_mae}")
+    violations: list[str] = []
+    unverified: list[str] = []
+    checked: list[str] = []
 
-    if not violations:
-        status = "agree"
-    elif len(violations) == 1:
+    for cap_key, cell_key, label_key in pairs:
+        cap = _to_float(policy.get(cap_key))
+        if cap is None:
+            continue  # desk turned this rail off; skip silently
+        cell_val = _to_float(cell.get(cell_key))
+        if cell_val is None:
+            # Old code silently voted "pass" by coercing missing to 0. That let
+            # a thin grid cell masquerade as policy-compliant. Flag it so the
+            # desk can see *that we couldn't check*, rather than trusting a
+            # false "agree".
+            unverified.append(f"{label_key} (cell value missing)")
+            continue
+        checked.append(label_key)
+        if cell_val > cap:
+            violations.append(f"{label_key} {cell_val} > {cap}")
+
+    if not checked and not violations and not unverified:
+        return _na("policyConstraints", label,
+                   "Policy has no enforceable thresholds against this cell.", rule=rule)
+
+    # Decide status. Unverified caps are treated as an "unknown" that should
+    # not confidently say "agree".
+    if violations:
+        status = "drift" if len(violations) == 1 else "mismatch"
+    elif unverified:
+        # No violations but one or more caps couldn't be checked → drift so
+        # the chip visibly nudges the desk, without going to full mismatch.
         status = "drift"
     else:
-        status = "mismatch"
+        status = "agree"
+
+    parts: list[str] = []
+    if violations:
+        parts.append(f"{len(violations)} violation(s): " + "; ".join(violations))
+    if unverified:
+        parts.append("unverified: " + ", ".join(unverified))
+    if not parts:
+        parts.append("Meets all policy thresholds.")
 
     return _chip(
         "policyConstraints", label, status,
@@ -341,11 +397,10 @@ def _check_policy(
             "emMult": cell.get("emMult"), "wingWidthPts": cell.get("wingWidthPts"),
             "breachPct": cell.get("breachPct"), "outsidePct": cell.get("outsidePct"),
             "avgMae95xWing": cell.get("avgMae95xWing"),
-        }},
+        }, "unverified": unverified or None},
         e14={"userEmMultiple": user_em_mult, "wingWidth": user_wing},
         rule=rule,
-        note=("Meets all policy thresholds."
-              if not violations else f"{len(violations)} violation(s): " + "; ".join(violations)),
+        note=" · ".join(parts),
     )
 
 
@@ -457,11 +512,23 @@ def _check_llm_verdict(advisor: Dict[str, Any]) -> Dict[str, Any]:
             rule=rule,
         )
 
+    _KNOWN = {"PASS", "LEAN_PASS", "LEAN_FAIL", "FAIL"}
+    if verdict not in _KNOWN:
+        # Previously unknown strings silently resolved to ``mismatch``.
+        # That falsely signals "advisor disagrees" when in reality the
+        # advisor emitted a label we don't recognize (schema drift, upstream
+        # bug). Surface as na so the desk sees the real issue.
+        return _na(
+            "llmVerdict", label,
+            f"Advisor returned unrecognized verdict '{verdict}'.",
+            rule=rule,
+        )
+
     if verdict == "PASS":
         status = "agree"
     elif verdict == "LEAN_PASS":
         status = "drift"
-    else:
+    else:  # LEAN_FAIL | FAIL
         status = "mismatch"
 
     return _chip(
