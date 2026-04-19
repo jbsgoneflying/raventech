@@ -1,0 +1,48 @@
+---
+description: Raven Tech access credentials, deployment workflow, and testing procedures for autonomous development.
+globs:
+alwaysApply: true
+---
+
+# Raven Tech — Autonomous Dev Access
+
+## Live Site
+
+- **URL**: https://app.raven-tech.co
+- **Invite Code**: RAVEN-BETA-2026
+
+## Deployment
+
+- **Repo**: git@github.com:jbsgoneflying/raventech.git (branch: main)
+- **Droplet path**: /opt/breach-algo
+- **Deploy trigger**: Push to main triggers GitHub Actions (`.github/workflows/deploy.yml`)
+- **Manual deploy** (if GH Actions unavailable): SSH into Droplet via DO console, run:
+  `cd /opt/breach-algo && git pull && docker compose up -d --build app`
+- **Health check**: `curl -sf https://app.raven-tech.co/api/health` (public, no auth)
+
+## Browser Testing Workflow
+
+When testing the live site with the browser MCP tool:
+
+1. Navigate to https://app.raven-tech.co
+2. If redirected to /login, fill the invite code field with `RAVEN-BETA-2026` and submit
+3. After login, navigate to the target page
+4. Use browser_snapshot before any interaction to get element refs
+
+## Autonomous Dev Cycle
+
+When building a feature:
+
+1. Make code changes in Cursor
+2. `git add . && git commit -m "description" && git push origin main`
+3. Wait ~90s for GitHub Actions to deploy
+4. Test via browser MCP (login if needed, navigate, interact, verify)
+5. If issues: fix, push, re-test
+6. Report to user when ready
+
+## Architecture Quick Reference
+
+- **Backend**: Python FastAPI (`backend/app.py` is the main file, ~4,900 lines)
+- **Frontend**: Vanilla JS — page-specific scripts in `static/` with shared helpers in `static/ui_kit.js`
+- **Docker**: single `app` service, gunicorn + uvicorn, port 8000, behind nginx
+- **Redis**: session state + engine caches

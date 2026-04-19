@@ -29,7 +29,9 @@ dist/
 *.tsbuildinfo
 
 # Cursor IDE
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 
 # OS
 .DS_Store
