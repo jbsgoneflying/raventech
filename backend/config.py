@@ -413,7 +413,9 @@ class FeatureFlags:
     # machinery. Analogue pool = this ticker's prior earnings events; exit
     # is a planned date + time-of-day (not expiry). Reuses the existing
     # engine14 chain cache schema (ticker-keyed) — no new DB file.
-    ENABLE_ENGINE15_EARNINGS_IC: bool = False
+    # Default ON so the desk-review build can hit /earnings-ic out of the box;
+    # flip back to False if you need to silence the engine without redeploying.
+    ENABLE_ENGINE15_EARNINGS_IC: bool = True
     ENGINE15_CACHE_TTL_SCAN: int = 10 * 60            # request-level TTL
     ENGINE15_MIN_EVENTS: int = 8                       # min event pool to return a payload
     ENGINE15_MAX_EVENTS: int = 20
@@ -736,7 +738,7 @@ class FeatureFlags:
             ENGINE14_ENABLE_GREEKS_ATTRIBUTION=_get_bool("ENGINE14_ENABLE_GREEKS_ATTRIBUTION", True),
 
             # --- Engine 15 ---
-            ENABLE_ENGINE15_EARNINGS_IC=_get_bool("ENABLE_ENGINE15_EARNINGS_IC", False),
+            ENABLE_ENGINE15_EARNINGS_IC=_get_bool("ENABLE_ENGINE15_EARNINGS_IC", True),
             ENGINE15_CACHE_TTL_SCAN=_get_int("ENGINE15_CACHE_TTL_SCAN", 10 * 60),
             ENGINE15_MIN_EVENTS=_get_int("ENGINE15_MIN_EVENTS", 8),
             ENGINE15_MAX_EVENTS=_get_int("ENGINE15_MAX_EVENTS", 20),
