@@ -206,6 +206,200 @@
         srcEl.textContent += " (stale — " + Math.round(ageMs / 60000) + "m ago)";
       }
     }
+
+    // ── MI v2 augmentation ──────────────────────────────────────
+    _renderMiV2(dms);
+  }
+
+  /* ──────────────────────────────────────────────────────────────
+     MI v2 renderers (probability bars, factor stack, diff, banner)
+     ────────────────────────────────────────────────────────────── */
+
+  function _pct(n) {
+    var x = Number(n) || 0;
+    return Math.max(0, Math.min(100, Math.round(x * 100))) + "%";
+  }
+
+  function _renderMiV2(dms) {
+    var probs = (dms.regime || {}).probs || null;
+    var probsEl = document.getElementById("miRegimeProbs");
+    var chipsEl = document.getElementById("miRegimeChips");
+    if (probs && probsEl && chipsEl) {
+      var ro = Number(probs.risk_on || 0);
+      var tr = Number(probs.transitional || 0);
+      var st = Number(probs.stressed || 0);
+      var roEl = document.getElementById("miProbRiskOn");
+      var trEl = document.getElementById("miProbTransitional");
+      var stEl = document.getElementById("miProbStressed");
+      if (roEl) roEl.style.width = (ro * 100).toFixed(0) + "%";
+      if (trEl) trEl.style.width = (tr * 100).toFixed(0) + "%";
+      if (stEl) stEl.style.width = (st * 100).toFixed(0) + "%";
+      var roV = document.getElementById("miProbRiskOnVal");
+      var trV = document.getElementById("miProbTransitionalVal");
+      var stV = document.getElementById("miProbStressedVal");
+      if (roV) roV.textContent = _pct(ro);
+      if (trV) trV.textContent = _pct(tr);
+      if (stV) stV.textContent = _pct(st);
+      probsEl.style.display = "flex";
+
+      var conf  = (dms.regime || {}).confidence;
+      var trisk = (dms.regime || {}).transition_risk_1d;
+      var anom  = (dms.regime || {}).anomaly_score;
+      var confChip   = document.getElementById("miRegimeConfidenceChip");
+      var triskChip  = document.getElementById("miRegimeTransitionChip");
+      var anomChip   = document.getElementById("miRegimeAnomalyChip");
+      if (confChip)  confChip.textContent  = "conf " + (conf  != null ? _pct(conf)  : "—");
+      if (triskChip) triskChip.textContent = "flip risk " + (trisk != null ? _pct(trisk) : "—");
+      if (anomChip)  anomChip.textContent  = "anomaly " + (anom  != null ? Number(anom).toFixed(2) : "—");
+      chipsEl.style.display = "flex";
+    } else if (probsEl) {
+      probsEl.style.display = "none";
+    }
+
+    // Data-quality banner.
+    var dq = ((dms.regime || {}).data_quality) || {};
+    var banner = document.getElementById("miDataQualityBanner");
+    if (banner) {
+      if (dq.insufficient) {
+        banner.className = "miDataQualityBanner miDQ--insufficient";
+        banner.textContent = "Insufficient factor data — regime served from legacy fallback. " +
+          "Missing factors: " + ((dq.missing || []).join(", ") || "(none)") + ".";
+        banner.style.display = "block";
+      } else if ((dq.missing || []).length > 0 || (dq.stale || []).length > 0) {
+        banner.className = "miDataQualityBanner";
+        banner.textContent = "Partial data: " +
+          (dq.missing || []).length + " missing, " +
+          (dq.stale || []).length + " stale of 8 factors.";
+        banner.style.display = "block";
+      } else {
+        banner.style.display = "none";
+      }
+    }
+
+    // Factor Stack card.
+    _renderFactorStack(dms);
+    _renderDiffPanelV2();
+  }
+
+  function _renderFactorStack(dms) {
+    var fr = (dms.regime || {}).factor_readings || {};
+    var contribs = (dms.regime || {}).factor_contributions || {};
+    var rowEl = document.getElementById("miFactorRow");
+    var sectionEl = document.getElementById("miFactorSection");
+    var stackEl = document.getElementById("miFactorStack");
+    if (!stackEl) return;
+    var keys = Object.keys(fr);
+    if (!keys.length) {
+      if (rowEl) rowEl.style.display = "none";
+      if (sectionEl) sectionEl.style.display = "none";
+      return;
+    }
+    // Canonical order matches FACTOR_KEYS in backend/market_intel/factors.py.
+    var ORDER = [
+      "rv_spx_20d", "vix_term_slope", "credit_hyg_lqd", "dxy_drift",
+      "commodity_stress", "btc_decoupling", "dealer_gamma", "breadth_proxy",
+    ];
+    var html = "";
+    ORDER.forEach(function (k) {
+      var r = fr[k];
+      if (!r) return;
+      var z = Number(r.z || 0);
+      var quality = String(r.quality || "MISSING");
+      var label = String(r.label || k);
+      var asof = String(r.as_of || "");
+      var contrib = contribs[k];
+      // Bar position: z in [-4,4] -> 0..100% (50% = z=0 midline)
+      var barPctWidth = Math.min(100, Math.abs(z) / 4 * 50);  // half-width
+      var barCls = z >= 0 ? "miFactorBar--pos" : "miFactorBar--neg";
+      var barLeft = z >= 0 ? 50 : (50 - barPctWidth);
+      var qCls = "miFactorChip--missing";
+      if (quality === "OK") qCls = "miFactorChip--ok";
+      else if (quality === "STALE") qCls = "miFactorChip--stale";
+      var contribTxt = (contrib != null && quality !== "MISSING")
+        ? " · " + (Number(contrib) >= 0 ? "+" : "") + Number(contrib).toFixed(2)
+        : "";
+      html += '<div class="miFactorRow" title="' +
+              (asof ? "as of " + asof : "") + (r.note ? " · " + r.note : "") +
+              '">' +
+        '<span class="miFactorLabel">' + label + '</span>' +
+        '<div class="miFactorBarWrap">' +
+          '<div class="miFactorBarMidline"></div>' +
+          '<div class="miFactorBar ' + barCls + '" style="left:' + barLeft + '%;width:' + barPctWidth + '%;"></div>' +
+        '</div>' +
+        '<span class="miFactorZ">' + (z >= 0 ? "+" : "") + z.toFixed(2) + "σ" + contribTxt + '</span>' +
+        '<span class="miFactorChip ' + qCls + '">' + quality + '</span>' +
+      '</div>';
+    });
+    stackEl.innerHTML = html;
+    if (rowEl) rowEl.style.display = "grid";
+    if (sectionEl) sectionEl.style.display = "flex";
+    if (window.DeskInsight) window.DeskInsight.refresh();
+  }
+
+  function _renderDiffPanelV2() {
+    var sectionEl = document.getElementById("miDiffSectionV2");
+    var rowEl = document.getElementById("miDiffRow");
+    var panelEl = document.getElementById("miDiffPanelV2");
+    var tsEl = document.getElementById("miDiffTs");
+    if (!panelEl) return;
+    fetch("/api/market-intel/diff", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || (!d.has_changes && !d.headline_summary)) {
+          if (rowEl) rowEl.style.display = "none";
+          if (sectionEl) sectionEl.style.display = "none";
+          return;
+        }
+        var html = "";
+        var headlineCls = d.regime_flip_is_material
+          ? "miDiffHeadline miDiffHeadline--material"
+          : "miDiffHeadline";
+        html += '<div class="' + headlineCls + '">' +
+                (d.headline_summary || "Quiet tape") + '</div>';
+        if (Array.isArray(d.top_factor_moves) && d.top_factor_moves.length) {
+          html += '<div class="miDiffSubsection">';
+          html += '<div class="miDiffSubLabel">Top factor moves</div>';
+          d.top_factor_moves.forEach(function (m) {
+            var dz = Number(m.delta_z || 0);
+            var sign = dz >= 0 ? "+" : "";
+            var cls = dz >= 0 ? "miDiffDelta--up" : "miDiffDelta--down";
+            html += '<div class="miDiffMoveRow">' +
+              '<strong>' + (m.label || m.key) + '</strong>' +
+              ' &middot; ' +
+              '<span class="miDiffDelta ' + cls + '">' + sign + dz.toFixed(2) + 'σ</span>' +
+              ' (was ' + Number(m.z_yesterday || 0).toFixed(2) +
+              ', now ' + Number(m.z_today || 0).toFixed(2) + ')' +
+            '</div>';
+          });
+          html += '</div>';
+        }
+        if (Array.isArray(d.engine_gate_changes) && d.engine_gate_changes.length) {
+          html += '<div class="miDiffSubsection">';
+          html += '<div class="miDiffSubLabel">Engine gate changes</div>';
+          d.engine_gate_changes.forEach(function (g) {
+            html += '<div class="miDiffGateRow"><strong>' + g.engine + '</strong>: ' +
+              g.from_state + " → <strong>" + g.to_state + "</strong></div>";
+          });
+          html += '</div>';
+        }
+        if (d.regime_threshold_proximity && d.regime_threshold_proximity.p_stressed_today != null) {
+          var prox = d.regime_threshold_proximity;
+          html += '<div class="miDiffSubsection">';
+          html += '<div class="miDiffSubLabel">Regime flip proximity</div>';
+          html += '<div class="miDiffMoveRow">P(stressed) today = <strong>' +
+                  (prox.p_stressed_today * 100).toFixed(1) + '%</strong>; ' +
+                  'distance to flip = ' + (prox.distance_to_flip * 100).toFixed(1) + 'pp.' +
+                  (prox.crossed_flip ? ' <strong>CROSSED 0.5 OVERNIGHT.</strong>' : '') +
+                  '</div>';
+          html += '</div>';
+        }
+        panelEl.innerHTML = html;
+        if (tsEl && d.to_date) tsEl.textContent = d.from_date + " → " + d.to_date;
+        if (rowEl) rowEl.style.display = "grid";
+        if (sectionEl) sectionEl.style.display = "flex";
+        if (window.DeskInsight) window.DeskInsight.refresh();
+      })
+      .catch(function () { /* swallow — silent if endpoint disabled */ });
   }
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -840,11 +1034,12 @@
         favored_play_types: _lastPatternMatch.favored_play_types || [],
         primary_risk: _lastPatternMatch.primary_risk || "",
       };
-      fetchCardInsight("regime", cardData, "pattern:" + key, [
-        { key: "what_regime_tells_us", title: "What This Pattern Tells Us" },
-        { key: "engine_implications",  title: "How the Desk Should Think About It" },
-        { key: "regime_context",       title: "When This Pattern Works / Fails" },
-        { key: "desk_takeaway",        title: "Desk Takeaway" },
+      fetchCardInsight("pattern_match", cardData, "pattern:" + key, [
+        { key: "pattern_mechanics",      title: "Pattern Mechanics" },
+        { key: "why_it_matched",         title: "Why It Matched" },
+        { key: "what_typically_happens", title: "What Typically Happens" },
+        { key: "what_invalidates_it",    title: "What Invalidates It" },
+        { key: "desk_takeaway",          title: "Desk Takeaway" },
       ], metaHtml);
     });
   }

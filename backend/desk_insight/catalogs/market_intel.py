@@ -10,14 +10,17 @@ from __future__ import annotations
 
 ENGINE_META = {
     "id":          "market-intel",
-    "name":        "Market Intelligence",
+    "name":        "Market Intelligence (v2)",
     "description": (
-        "The desk's cross-asset morning surface. Synthesizes regime state "
-        "(VIX, term structure, breadth, dealer gamma), overnight-to-open "
-        "diff, macro event density, pattern detection, and per-asset "
-        "stress cards into one pre-open brief."
+        "The desk's cross-asset morning surface, powered by a 3-state "
+        "Gaussian HMM (Risk-On / Transitional / Stressed) over an 8-factor "
+        "z-scored universe. Returns smooth posterior probabilities, a "
+        "confidence chip, transition-risk to the next state, per-factor "
+        "log-likelihood contributions, and bootstrap confidence bands. "
+        "Single source of truth consumed by E3/E4/E7 gating, E14 "
+        "conditioning, and Raven Chat."
     ),
-    "asset_class": "cross-asset (SPX, vol, rates, FX, credit, crypto, commodities)",
+    "asset_class": "cross-asset (SPX RV, VIX term, HYG/LQD credit, DXY, WTI/GLD, BTC, dealer gamma, sector breadth)",
 }
 
 
@@ -26,26 +29,65 @@ CATALOG = {
     "regime_card": {
         "title": "Regime State",
         "spec": (
-            "Today's cross-asset regime read, distilled into a single "
-            "label plus the inputs that drove it:\n"
-            "- Regime label: Risk-On / Transitional / Risk-Off / Stressed "
-            "— the Monte-Carlo ensemble over {VIX term structure, SPX "
-            "breadth, dealer gamma sign, credit-vol stress, FX DXY drift}.\n"
-            "- Score (0-100): higher = more defensive. Thresholds live in "
-            "config.ENGINE2_REGIME_* knobs.\n"
-            "- Vol State: compressing / stable / expanding / unstable — "
-            "driven by RV5 vs RV20 acceleration.\n"
-            "- Change vs yesterday: arrow + delta shows whether we drifted "
-            "toward risk-off or back to neutral overnight.\n"
-            "The label gates which engines are allowed to fire (see "
-            "ENABLE_GATING): Red Dog wants Transitional/Stressed, "
-            "Ichimoku wants Risk-On/Transitional."
+            "Today's market regime, served as a smooth posterior "
+            "probability vector from a 3-state Gaussian Hidden Markov "
+            "Model fit on a 5-year rolling window of 8 standardized "
+            "factors. The card shows three probability bars (Risk-On / "
+            "Transitional / Stressed), a confidence chip (= max prob), "
+            "a transition-risk chip (= P(state more-stressed in next "
+            "session) computed via the HMM transition matrix), and an "
+            "anomaly-score chip (Mahalanobis-style distance from "
+            "calibration window).\n"
+            "The 8 input factors are rv_spx_20d, vix_term_slope "
+            "(VX1-VX2), credit_hyg_lqd, dxy_drift, commodity_stress "
+            "(WTI+GLD), btc_decoupling, dealer_gamma (sign + z), and "
+            "breadth_proxy (sector ETF dispersion). Each factor is "
+            "z-scored against its trailing 252-day distribution before "
+            "being fed to the HMM.\n"
+            "The argmax label gates which engines fire (Red Dog wants "
+            "Transitional/Stressed, Ichimoku wants Risk-On/Transitional), "
+            "but the desk should read the FULL probability vector when "
+            "conviction matters - a P(stressed) of 0.55 is a very "
+            "different trade than 0.85 even though both label as "
+            "'Stressed'."
         ),
         "related_cards": [
+            {"engine": "market-intel", "slug": "factor_stack", "label": "Factor Stack"},
             {"engine": "market-intel", "slug": "morning_brief", "label": "Morning Brief"},
             {"engine": "market-intel", "slug": "diff_card", "label": "Overnight Diff"},
-            {"engine": "market-intel", "slug": "cross_asset_matrix", "label": "Cross-Asset Matrix"},
-            {"engine": "e5",           "slug": "global_regime_score", "label": "Global Lead/Lag Regime"},
+            {"engine": "market-intel", "slug": "cross_asset_matrix", "label": "Cross-Asset Stress"},
+            {"engine": "e5",           "slug": "global_regime_score", "label": "Engine 5 Regime (legacy)"},
+        ],
+    },
+
+    "factor_stack": {
+        "title": "Factor Stack (HMM Inputs)",
+        "spec": (
+            "The 8 z-scored factors that the regime HMM consumes to "
+            "compute today's posterior probability vector. Every row "
+            "shows the factor's name, a bidirectional z-bar (left = "
+            "negative z / risk-off; right = positive z / stress), the "
+            "raw z value, an OK/STALE/MISSING data-quality chip, and "
+            "the factor's log-likelihood contribution to the winning "
+            "regime state.\n"
+            "Factors:\n"
+            "- rv_spx_20d: 20-day annualized realized vol on SPY.\n"
+            "- vix_term_slope: VIX - VIX3M (positive = backwardation = stress).\n"
+            "- credit_hyg_lqd: HYG/LQD ratio z (sign-flipped so higher z = stress).\n"
+            "- dxy_drift: 20-day cumulative return on UUP, z-scored.\n"
+            "- commodity_stress: |WTI 20d return| + GLD 20d return, z-scored.\n"
+            "- btc_decoupling: |20d corr(BTC, SPY) - long-run mean|.\n"
+            "- dealer_gamma: sign + magnitude z of dealer net gamma.\n"
+            "- breadth_proxy: cross-sector ETF return dispersion z.\n"
+            "When 3+ factors go MISSING the regime service falls back "
+            "to a legacy linear composite. The data-quality banner at "
+            "the top of MI surfaces this state."
+        ),
+        "related_cards": [
+            {"engine": "market-intel", "slug": "regime_card", "label": "Regime State"},
+            {"engine": "market-intel", "slug": "diff_card", "label": "Day-over-Day Diff"},
+            {"engine": "market-intel", "slug": "cross_asset_matrix", "label": "Cross-Asset Stress"},
+            {"engine": "e9",           "slug": "credit_stress_score", "label": "E9 Credit Stress (drill-down)"},
         ],
     },
 
@@ -95,19 +137,24 @@ CATALOG = {
     },
 
     "diff_card": {
-        "title": "Overnight to Open Diff",
+        "title": "Day-over-Day Intelligence (v2)",
         "spec": (
-            "Day-over-day delta across the tracked universe since "
-            "yesterday's close — points you at what actually changed.\n"
-            "- Top movers: largest absolute % moves across the asset "
-            "universe (SPX futures, VIX, DXY, crude, gold, BTC, rates).\n"
-            "- Correlation breaks: pairs whose 20d correlation drifted "
-            "> 0.3 overnight.\n"
-            "- Regime proximity: how close we are to crossing a regime "
-            "threshold today (if green was 62 yesterday, threshold is "
-            "65, we're inside 3 pts).\n"
-            "If no meaningful overnight change, card says 'Quiet tape' — "
-            "use that to calibrate urgency."
+            "Real day-over-day diff panel computed by "
+            "backend.market_intel.diff. Shows what ACTUALLY changed "
+            "overnight using the v2 factor and HMM state vectors:\n"
+            "- Headline summary: a single sentence rolling up the "
+            "largest factor move + regime flip delta + gate changes.\n"
+            "- Top factor moves: factors ranked by |Delta z(today vs "
+            "yesterday)| from the 8-factor HMM input vector.\n"
+            "- Engine gate changes: which gates (E3/E4/E7) opened or "
+            "closed overnight as a side effect of the regime flip.\n"
+            "- Regime threshold proximity: today's P(stressed) and how "
+            "far it sits from the 0.5 flip line; flagged when the "
+            "0.5 line was crossed overnight.\n"
+            "- Regime flip delta: P(stressed today) - P(stressed "
+            "yesterday); flagged 'material' at >= 15pp.\n"
+            "If nothing meaningful changed the headline reads 'Quiet "
+            "tape' - use that to calibrate urgency for the open."
         ),
         "related_cards": [
             {"engine": "market-intel", "slug": "regime_card", "label": "Regime State"},

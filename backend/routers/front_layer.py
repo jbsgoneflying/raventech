@@ -69,10 +69,25 @@ router = APIRouter()
 def _build_live_dms(today_str: str, store) -> dict:
     """Build a DailyMarketState from live engine data.
 
-    Reads from existing engines without modifying their logic.
+    When ``ENABLE_MI_V2=1`` (default), delegates to the unified
+    ``backend.market_intel.dms_builder.build_dms_v2`` which adds the
+    HMM regime probabilities + factor stack + cross-asset PC1 proxy on
+    top of the legacy schema. Falls back to the inline v1 path if MI v2
+    fails for any reason.
     """
     flags = get_flags()
 
+    if getattr(flags, "ENABLE_MI_V2", True):
+        try:
+            from backend.market_intel.dms_builder import build_dms_v2
+            return build_dms_v2(today_str=today_str, store=store)
+        except Exception as e:
+            LOG.warning(
+                "front_layer: MI v2 builder failed (%s); falling back to v1 path",
+                e,
+            )
+
+    # --- v1 fallback path (legacy inline build) -----------------------
     # --- Engine 5: regime + vol ---
     regime_data = {}
     vol_direction = ""
@@ -438,9 +453,12 @@ def api_weekly_review_generate(body: dict = Body(default={})):
 def api_front_layer_consensus():
     """Cross-engine consensus dashboard.
 
-    Aggregates signals from regime (Engine 3), IC scanner (Engine 2),
-    VIX fade (Engine 12), and credit stress (Engine 8) into a single
-    agreement/disagreement view with composite conviction scoring.
+    Aggregates signals from MI v2 regime, Engine 2 IC scanner, Engine 12
+    VIX fade, and Engine 9 credit stress into a single agreement /
+    disagreement view with composite conviction scoring.
+
+    Engine 2 IC payload was previously stubbed (``ic_data = None``).
+    Now wired to read from the engine2_spx_ic scan cache.
     """
     from backend.consensus_engine import build_consensus_from_apis
 
@@ -450,11 +468,27 @@ def api_front_layer_consensus():
     vix_data = None
     credit_data = None
 
-    # Fetch regime from Engine 5 snapshot
-    if store is not None:
+    # Fetch regime — prefer MI v2 canonical, fall back to E5 snapshot.
+    flags = get_flags()
+    if getattr(flags, "ENABLE_MI_V2", True):
+        try:
+            from backend.market_intel import regime_snapshot
+            mi = regime_snapshot()
+            # Map MI v2 schema to the legacy regime_data shape used by
+            # the consensus engine.
+            regime_data = {
+                "label":      mi.label,
+                "score":      max(mi.probs.values()) * 100 if mi.probs else 50.0,
+                "components": {},  # consensus engine doesn't read components
+                "probs":      mi.probs,
+                "confidence": mi.confidence,
+                "source":     "market_intel.v2",
+            }
+        except Exception:
+            pass
+    if regime_data is None and store is not None:
         try:
             from backend.engine5_snapshot import select_best_snapshot
-            flags = get_flags()
             snap = select_best_snapshot(
                 store,
                 max_age_days=flags.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
@@ -462,6 +496,17 @@ def api_front_layer_consensus():
             )
             if snap:
                 regime_data = snap.get("data", {}).get("regime", {})
+        except Exception:
+            pass
+
+    # Fetch IC scanner from Engine 2 cache.
+    if store is not None:
+        try:
+            for k in ("engine2:cache:scan", "engine2_spx_ic:cache:scan"):
+                cached_ic = store.get_json(k)
+                if cached_ic:
+                    ic_data = cached_ic
+                    break
         except Exception:
             pass
 

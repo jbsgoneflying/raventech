@@ -472,6 +472,17 @@ class FeatureFlags:
     DESK_INSIGHT_MODEL: str = "gpt-5.4"
     DESK_INSIGHT_RATE_LIMIT_PER_MIN: int = 60     # shared across all engines
 
+    # --- Market Intelligence v2 (HMM regime + canonical service) ---
+    ENABLE_MI_V2: bool = True                      # kill-switch
+    MI_HMM_STATE_COUNT: int = 3
+    MI_HMM_LOOKBACK_DAYS: int = 1260              # 5y calibration window
+    MI_FACTOR_STALE_DAYS: int = 1
+    MI_INSUFFICIENT_DATA_MISSING_FLOOR: int = 3
+    MI_BOOTSTRAP_N: int = 500
+    MI_MODEL_STORAGE_PATH: str = "data/market_intel_regime_model.json"
+    MI_REDIS_MODEL_KEY: str = "market_intel:model:v1"
+    MI_REDIS_MODEL_TTL_S: int = 7 * 86400          # 7 days
+
     # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
     LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
     LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
@@ -824,6 +835,16 @@ class FeatureFlags:
             ENABLE_DESK_INSIGHT_V2=_get_bool("ENABLE_DESK_INSIGHT_V2", True),
             DESK_INSIGHT_MODEL=os.getenv("DESK_INSIGHT_MODEL", "gpt-5.4"),
             DESK_INSIGHT_RATE_LIMIT_PER_MIN=_get_int("DESK_INSIGHT_RATE_LIMIT_PER_MIN", 60),
+
+            ENABLE_MI_V2=_get_bool("ENABLE_MI_V2", True),
+            MI_HMM_STATE_COUNT=_get_int("MI_HMM_STATE_COUNT", 3),
+            MI_HMM_LOOKBACK_DAYS=_get_int("MI_HMM_LOOKBACK_DAYS", 1260),
+            MI_FACTOR_STALE_DAYS=_get_int("MI_FACTOR_STALE_DAYS", 1),
+            MI_INSUFFICIENT_DATA_MISSING_FLOOR=_get_int("MI_INSUFFICIENT_DATA_MISSING_FLOOR", 3),
+            MI_BOOTSTRAP_N=_get_int("MI_BOOTSTRAP_N", 500),
+            MI_MODEL_STORAGE_PATH=os.getenv("MI_MODEL_STORAGE_PATH", "data/market_intel_regime_model.json"),
+            MI_REDIS_MODEL_KEY=os.getenv("MI_REDIS_MODEL_KEY", "market_intel:model:v1"),
+            MI_REDIS_MODEL_TTL_S=_get_int("MI_REDIS_MODEL_TTL_S", 7 * 86400),
 
             LEGAL_REG_TICKER_DENYLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_DENYLIST", [])),
             LEGAL_REG_TICKER_ALLOWLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_ALLOWLIST", [])),

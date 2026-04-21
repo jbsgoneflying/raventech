@@ -114,6 +114,145 @@
         background: rgba(11,11,15,0.06); margin-bottom: 14px;
         position: relative; overflow: hidden;
       }
+
+      /* MI v2: Regime probability bars */
+      .miRegimeProbs {
+        display: flex; flex-direction: column; gap: 6px;
+        margin: 14px 0; width: 100%;
+      }
+      .miRegimeProbRow {
+        display: grid; grid-template-columns: 90px 1fr 50px;
+        gap: 10px; align-items: center; font-size: 11px;
+      }
+      .miRegimeProbLabel {
+        color: var(--muted, rgba(11,11,15,0.6));
+        font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+      }
+      .miRegimeProbBarWrap {
+        height: 8px; border-radius: 4px;
+        background: rgba(11,11,15,0.06); overflow: hidden;
+      }
+      .miRegimeProbBar {
+        height: 100%; border-radius: 4px;
+        transition: width 0.5s ease;
+      }
+      .miRegimeProbBar--riskon       { background: #34c759; }
+      .miRegimeProbBar--transitional { background: #ff9f0a; }
+      .miRegimeProbBar--stressed     { background: #ff3b30; }
+      .miRegimeProbVal {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 700; font-size: 11px;
+        color: var(--text); text-align: right;
+      }
+
+      /* MI v2: Regime chips */
+      .miRegimeChips {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        margin: 8px 0 12px;
+      }
+      .miRegimeChip {
+        padding: 3px 8px; border-radius: 999px;
+        background: rgba(0,122,255,0.08);
+        border: 1px solid rgba(0,122,255,0.2);
+        color: #0060cc; font-size: 10px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+      .miRegimeChip--mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: rgba(142,142,147,0.08);
+        border-color: rgba(142,142,147,0.18);
+        color: #636366;
+      }
+
+      /* MI v2: Data-quality banner */
+      .miDataQualityBanner {
+        margin: 0 0 14px;
+        padding: 10px 14px; border-radius: 10px;
+        background: rgba(255,159,10,0.12);
+        border: 1px solid rgba(255,159,10,0.32);
+        color: #996100; font-size: 13px;
+        line-height: 1.5;
+      }
+      .miDataQualityBanner.miDQ--insufficient {
+        background: rgba(255,59,48,0.10);
+        border-color: rgba(255,59,48,0.30);
+        color: #cc2f26;
+      }
+
+      /* MI v2: Factor stack */
+      .miFactorStack {
+        display: flex; flex-direction: column; gap: 8px;
+      }
+      .miFactorRow {
+        display: grid; grid-template-columns: 200px 1fr 80px 60px;
+        gap: 12px; align-items: center;
+        padding: 8px 10px; border-radius: 8px;
+        background: rgba(11,11,15,0.02);
+        font-size: 12px;
+      }
+      .miFactorLabel { font-weight: 600; color: var(--text); }
+      .miFactorBarWrap {
+        position: relative; height: 16px;
+        background: rgba(11,11,15,0.04); border-radius: 4px;
+        overflow: hidden;
+      }
+      .miFactorBarMidline {
+        position: absolute; left: 50%; top: 0; bottom: 0;
+        width: 1px; background: rgba(11,11,15,0.18);
+      }
+      .miFactorBar {
+        position: absolute; top: 0; bottom: 0; height: 100%;
+        background: rgba(0,122,255,0.5); border-radius: 4px;
+      }
+      .miFactorBar--neg { background: rgba(255,59,48,0.5); }
+      .miFactorBar--pos { background: rgba(255,159,10,0.5); }
+      .miFactorZ {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 700; font-size: 12px; text-align: right;
+        color: var(--text);
+      }
+      .miFactorChip {
+        padding: 2px 6px; border-radius: 999px;
+        font-size: 9px; font-weight: 800; text-align: center;
+        text-transform: uppercase; letter-spacing: 0.04em;
+      }
+      .miFactorChip--ok      { background: rgba(52,199,89,0.12);  color: #1b8a3e; }
+      .miFactorChip--stale   { background: rgba(255,159,10,0.14); color: #996100; }
+      .miFactorChip--missing { background: rgba(255,59,48,0.10);  color: #cc2f26; }
+
+      /* MI v2: Diff panel */
+      .miDiffPanel {
+        display: flex; flex-direction: column; gap: 14px; padding: 4px 0;
+      }
+      .miDiffHeadline {
+        font-size: 14px; font-weight: 700;
+        padding: 10px 12px; border-radius: 8px;
+        background: rgba(0,122,255,0.06);
+        border: 1px solid rgba(0,122,255,0.18);
+        color: var(--text);
+      }
+      .miDiffHeadline.miDiffHeadline--material {
+        background: rgba(255,159,10,0.10);
+        border-color: rgba(255,159,10,0.32); color: #996100;
+      }
+      .miDiffSubsection { display: flex; flex-direction: column; gap: 6px; }
+      .miDiffSubLabel {
+        font-size: 10px; font-weight: 800; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.05em;
+      }
+      .miDiffMoveRow, .miDiffGateRow {
+        display: flex; align-items: center; gap: 8px;
+        padding: 6px 10px; border-radius: 6px;
+        background: rgba(11,11,15,0.02); font-size: 12px;
+      }
+      .miDiffDelta {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 700;
+      }
+      .miDiffDelta--up   { color: #cc2f26; }
+      .miDiffDelta--down { color: #1b8a3e; }
+
       .miHeroBarFill {
         height: 100%; border-radius: 2px;
         transition: width 0.5s ease, background 0.3s ease;
@@ -479,6 +618,8 @@
       <!-- ── Status banners ──────────────────────────────────────── -->
       <div class="miRefreshBanner" id="miRefreshBanner"></div>
       <div class="miBackfillStatus" id="miBackfillStatus" style="display:none;"></div>
+      <!-- MI v2: data-quality banner — shown when too many factors are MISSING -->
+      <div id="miDataQualityBanner" class="miDataQualityBanner" style="display:none;"></div>
 
       <!-- ── Row 1: Regime ──────────────────────────────────────── -->
       <div class="deskDivider" data-insight="regime_card" id="miRegimeSection" style="display:none;">
@@ -494,11 +635,71 @@
             </div>
             <div class="miHeroLabel miHeroLabel--default" id="miRegimeLabel">--</div>
             <div class="miHeroBar"><div class="miHeroBarFill" id="miRegimeBar" style="width:0%;"></div></div>
+
+            <!-- MI v2: HMM probability bars (Risk-On / Transitional / Stressed) -->
+            <div class="miRegimeProbs" id="miRegimeProbs" style="display:none;">
+              <div class="miRegimeProbRow">
+                <span class="miRegimeProbLabel">Risk-On</span>
+                <div class="miRegimeProbBarWrap">
+                  <div class="miRegimeProbBar miRegimeProbBar--riskon" id="miProbRiskOn" style="width:0%;"></div>
+                </div>
+                <span class="miRegimeProbVal" id="miProbRiskOnVal">0%</span>
+              </div>
+              <div class="miRegimeProbRow">
+                <span class="miRegimeProbLabel">Transitional</span>
+                <div class="miRegimeProbBarWrap">
+                  <div class="miRegimeProbBar miRegimeProbBar--transitional" id="miProbTransitional" style="width:0%;"></div>
+                </div>
+                <span class="miRegimeProbVal" id="miProbTransitionalVal">0%</span>
+              </div>
+              <div class="miRegimeProbRow">
+                <span class="miRegimeProbLabel">Stressed</span>
+                <div class="miRegimeProbBarWrap">
+                  <div class="miRegimeProbBar miRegimeProbBar--stressed" id="miProbStressed" style="width:0%;"></div>
+                </div>
+                <span class="miRegimeProbVal" id="miProbStressedVal">0%</span>
+              </div>
+            </div>
+
+            <div class="miRegimeChips" id="miRegimeChips" style="display:none;">
+              <span class="miRegimeChip" id="miRegimeConfidenceChip" title="HMM posterior confidence (max state probability)">conf —</span>
+              <span class="miRegimeChip" id="miRegimeTransitionChip" title="P(state more-stressed in next session) via HMM transition matrix">flip risk —</span>
+              <span class="miRegimeChip miRegimeChip--mono" id="miRegimeAnomalyChip" title="Mahalanobis-style anomaly score across factor states (0=normal, 1=outlier)">anomaly —</span>
+            </div>
+
             <div class="miHeroDivider"></div>
             <div class="miHeroGates" id="miEngineGates"></div>
             <div class="miHeroMeta" id="miVolState"></div>
             <div class="miHeroMeta" id="miRegimeSource" style="display:none;font-size:10px;opacity:0.6;margin-top:4px;"></div>
           </div>
+        </div>
+      </div>
+
+      <!-- ── MI v2: Factor Stack ─────────────────────────────────── -->
+      <div class="deskDivider" data-insight="factor_stack" id="miFactorSection" style="display:none;">
+        <span class="deskDividerText">Factor Stack &middot; HMM Inputs</span>
+      </div>
+      <div class="miRow miRow--1" id="miFactorRow" style="display:none;">
+        <div class="miCard">
+          <div class="miHead">
+            <span class="miTitle">8-Factor View</span>
+            <span class="miTs" id="miFactorTs"></span>
+          </div>
+          <div id="miFactorStack" class="miFactorStack"></div>
+        </div>
+      </div>
+
+      <!-- ── MI v2: Day-over-Day Diff ────────────────────────────── -->
+      <div class="deskDivider" data-insight="diff_card" id="miDiffSectionV2" style="display:none;">
+        <span class="deskDividerText">Day-over-Day Intelligence</span>
+      </div>
+      <div class="miRow miRow--1" id="miDiffRow" style="display:none;">
+        <div class="miCard">
+          <div class="miHead">
+            <span class="miTitle">What Changed Overnight</span>
+            <span class="miTs" id="miDiffTs"></span>
+          </div>
+          <div id="miDiffPanelV2" class="miDiffPanel"></div>
         </div>
       </div>
 
@@ -559,8 +760,11 @@
       </div>
 
       <!-- ── Diff Panel ──────────────────────────────────────────── -->
-      <div class="deskDivider" data-insight="diff_card" id="miDiffSection" style="display:none;">
-        <span class="deskDividerText">Day-over-Day Changes</span>
+      <!-- Legacy diff panel (kept hidden — superseded by miDiffSectionV2 above
+           when MI v2 is enabled). When ENABLE_MI_V2=0, JS will fall back to
+           rendering legacy diff into miDiffContent and unhide miDiffSection. -->
+      <div class="deskDivider" id="miDiffSection" style="display:none;">
+        <span class="deskDividerText">Day-over-Day Changes (legacy)</span>
       </div>
       <div class="miRow miRow--1" id="miDiffPanel" style="display:none;">
         <div class="miCard">
@@ -594,7 +798,7 @@
     <script src="/static/nav.js"></script>
     <script src="/static/raven-chat.js?v=3"></script>
     <script src="/static/desk-insight.js?v=2"></script>
-    <script src="/static/market-intelligence.js?v=2"></script>
+    <script src="/static/market-intelligence.js?v=3"></script>
     <script>
       // Bind the shared Raven Desk Insight module to this page. Each
       // deskDivider[data-insight] above the main section rows lights up

@@ -3,10 +3,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 import threading
+from typing import Any, Dict, Optional
 
 from cachetools import TTLCache
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query
 
 from backend.deps import (
     LOG,
@@ -149,3 +151,117 @@ def news_risk(
     except Exception as e:
         LOG.exception("Unhandled failure (news-risk)")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ---------------------------------------------------------------------------
+# Market Intelligence v2 endpoints
+# ---------------------------------------------------------------------------
+
+
+def _mi_v2_enabled() -> bool:
+    try:
+        flags = get_flags()
+        return bool(getattr(flags, "ENABLE_MI_V2", True))
+    except Exception:
+        return True
+
+
+def _mi_admin_ok(supplied: Optional[str]) -> bool:
+    expected = (
+        os.getenv("MI_ADMIN_TOKEN", "").strip()
+        or os.getenv("DESK_INSIGHT_ADMIN_TOKEN", "").strip()
+        or os.getenv("ENGINE15_ADMIN_TOKEN", "").strip()
+        or os.getenv("ENGINE14_ADMIN_TOKEN", "").strip()
+    )
+    if not expected:
+        return False
+    return bool(supplied) and str(supplied).strip() == expected
+
+
+@router.get("/api/market-intel/health")
+def mi_v2_health() -> Dict[str, Any]:
+    """Public health probe: which model is serving + data knobs."""
+    if not _mi_v2_enabled():
+        return {"enabled": False, "source": "disabled"}
+    try:
+        from backend.market_intel import service_health
+        health = service_health()
+    except Exception as e:
+        return {"enabled": True, "error": f"{type(e).__name__}: {e}"}
+    return {"enabled": True, **health}
+
+
+@router.get("/api/market-intel/regime")
+def mi_v2_regime_endpoint(
+    force_refresh: bool = Query(False, description="Bypass the 5-min cache"),
+) -> Dict[str, Any]:
+    """Return the canonical RegimeSnapshot for today. Public."""
+    if not _mi_v2_enabled():
+        raise HTTPException(status_code=404, detail="Market Intelligence v2 disabled")
+    try:
+        from backend.market_intel import regime_snapshot
+        snap = regime_snapshot(force_refresh=force_refresh)
+        return snap.to_dict()
+    except Exception as e:
+        LOG.exception("mi_v2_regime_endpoint failed")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@router.post("/api/market-intel/calibrate")
+def mi_v2_calibrate_endpoint(
+    body: Dict[str, Any] = Body(default_factory=dict),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> Dict[str, Any]:
+    """Admin-gated: refit the HMM on the latest 5y of factor history."""
+    if not _mi_v2_enabled():
+        raise HTTPException(status_code=404, detail="Market Intelligence v2 disabled")
+    if not _mi_admin_ok(x_admin_token):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing X-Admin-Token "
+                   "(MI_ADMIN_TOKEN / DESK_INSIGHT_ADMIN_TOKEN / ENGINE*_ADMIN_TOKEN)."
+        )
+    try:
+        from backend.market_intel.calibration import run_calibration
+        lookback = int(body.get("lookback_days") or 1260)
+        persist = bool(body.get("persist", True))
+        report = run_calibration(lookback_days=lookback, persist=persist)
+        return report.to_dict()
+    except Exception as e:
+        LOG.exception("mi_v2_calibrate failed")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@router.get("/api/market-intel/diff")
+def mi_v2_diff_endpoint(
+    target_date: Optional[str] = Query(None, alias="date"),
+) -> Dict[str, Any]:
+    """Return the day-over-day intelligence diff.
+
+    If ``date`` is omitted, uses today vs the most recent prior day in
+    the DMS Redis index.
+    """
+    if not _mi_v2_enabled():
+        raise HTTPException(status_code=404, detail="Market Intelligence v2 disabled")
+    try:
+        from backend.market_intel import compute_market_diff
+        from backend.daily_market_state import load_dms, load_dms_history
+        from backend.redis_store import get_store_optional
+        store = get_store_optional()
+        history = load_dms_history(store, n=3) if store else []
+        if len(history) < 2:
+            return {
+                "has_changes": False,
+                "headline_summary": "Insufficient history for diff.",
+                "from_date": "",
+                "to_date": history[0].date if history else "",
+            }
+        today_dms = history[0].to_dict()
+        yesterday_dms = history[1].to_dict()
+        return compute_market_diff(
+            today_dms=today_dms,
+            yesterday_dms=yesterday_dms,
+        ).to_dict()
+    except Exception as e:
+        LOG.exception("mi_v2_diff failed")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")

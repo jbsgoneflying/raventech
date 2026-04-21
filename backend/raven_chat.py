@@ -37,7 +37,11 @@ ENGINE_LABELS = {
     "engine12": "Engine 12 — VIX Spike Fade",
     "engine13": "Engine 13 — Gap Regime Scanner",
     "engine14": "Engine 14 — Iron Condor Scenario Simulator",
-    "market-intelligence": "Market Intelligence — Front Layer",
+    "engine15": "Engine 15 — Earnings IC Scenario Advisor",
+    "market-intel":         "Market Intelligence — Cross-Asset HMM Front Layer",
+    "market-intelligence":  "Market Intelligence — Cross-Asset HMM Front Layer",
+    "calendar":             "Earnings Calendar",
+    "compare":              "Multi-Ticker Compare",
 }
 
 
@@ -99,7 +103,13 @@ def _get_openai_client():
 # ---------------------------------------------------------------------------
 
 def _load_market_snapshot() -> Optional[Dict[str, Any]]:
-    """Load the latest DMS and theme snapshot from Redis."""
+    """Load the latest DMS and theme snapshot from Redis.
+
+    Augments the persisted DMS with a live ``regime_snapshot()`` from
+    Market Intelligence v2 so chat answers always see today's HMM regime
+    probabilities + factor contributions even when the persisted DMS is
+    yesterday's. Falls back gracefully when MI v2 is disabled or fails.
+    """
     try:
         from backend.redis_store import get_store_optional
         from backend.daily_market_state import load_dms
@@ -117,17 +127,54 @@ def _load_market_snapshot() -> Optional[Dict[str, Any]]:
         dms = load_dms(yesterday_str, store)
 
     if dms is None:
-        return None
+        # Even with no persisted DMS, return the live MI v2 regime if available
+        # so chat has *something* to ground on.
+        try:
+            from backend.market_intel import regime_snapshot
+            mi = regime_snapshot()
+            return {"market_intel": _safe_mi_block(mi)}
+        except Exception:
+            return None
 
     d = dms.to_dict()
     snapshot: Dict[str, Any] = {}
     for key in ("date", "regime", "vol_state", "engine_gates", "news_risk",
                 "cross_asset_stress", "news_themes", "asymmetry_signals",
-                "earnings_candidates"):
+                "earnings_candidates", "market_intel"):
         if d.get(key):
             snapshot[key] = d[key]
 
+    # Augment with live MI v2 regime if the persisted DMS doesn't already
+    # carry it (legacy persisted DMS from before MI v2 won't).
+    if "market_intel" not in snapshot:
+        try:
+            from backend.market_intel import regime_snapshot
+            mi = regime_snapshot()
+            snapshot["market_intel"] = _safe_mi_block(mi)
+        except Exception:
+            pass
+
     return snapshot if snapshot else None
+
+
+def _safe_mi_block(mi_snap: Any) -> Dict[str, Any]:
+    """Squeeze a RegimeSnapshot into a chat-friendly dict (skip large arrays)."""
+    try:
+        return {
+            "as_of":               getattr(mi_snap, "as_of", ""),
+            "regime_label":        getattr(mi_snap, "label", "Transitional"),
+            "regime_probs":        getattr(mi_snap, "probs", {}),
+            "confidence":          getattr(mi_snap, "confidence", 0.0),
+            "transition_risk_1d":  getattr(mi_snap, "transition_risk_1d", 0.0),
+            "anomaly_score":       getattr(mi_snap, "anomaly_score", 0.0),
+            "data_quality":        getattr(mi_snap, "data_quality", {}),
+            "vol_state":           getattr(mi_snap, "vol_state", {}),
+            "factor_contributions": getattr(mi_snap, "factor_contributions", {}),
+            "model_version":       getattr(mi_snap, "model_version", ""),
+            "source":              getattr(mi_snap, "source", ""),
+        }
+    except Exception:
+        return {}
 
 
 def _trim_engine_data(engine_data: Optional[Dict[str, Any]], max_chars: int = 15000) -> Optional[Dict[str, Any]]:

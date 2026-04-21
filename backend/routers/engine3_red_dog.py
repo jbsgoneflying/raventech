@@ -27,13 +27,40 @@ router = APIRouter()
 
 
 def _get_gate_context(flags) -> dict:
-    """Gather regime and vol context for gating decisions."""
+    """Gather regime and vol context for gating decisions.
+
+    Prefers Market Intelligence v2's canonical regime + vol state when
+    available (single source of truth across E3/E4/E7), falls back to
+    the raw Engine 5 snapshot if MI v2 is disabled or insufficient.
+    """
     ctx: dict = {
         "regime_label": "",
         "vol_direction": "",
         "gamma_ctx": None,
         "high_events_within_days": 0,
     }
+
+    # --- 1) Try MI v2 canonical regime (single source of truth) -------
+    if getattr(flags, "ENABLE_MI_V2", True):
+        try:
+            from backend.market_intel import regime_snapshot
+            mi = regime_snapshot()
+            if mi.label:
+                ctx["regime_label"] = mi.label
+            vol_state = mi.vol_state or {}
+            term = str(vol_state.get("term_structure", "")).lower()
+            # Collapse term_structure into the legacy vol_direction vocabulary
+            # the gating policy strings expect.
+            if term == "backwardation":
+                ctx["vol_direction"] = "rising"
+            elif term == "contango":
+                ctx["vol_direction"] = "falling"
+            elif term == "flat":
+                ctx["vol_direction"] = "stable"
+        except Exception:
+            pass
+
+    # --- 2) Engine 5 snapshot fallback / supplement -------------------
     try:
         from backend.redis_store import get_store_optional
 
@@ -49,9 +76,11 @@ def _get_gate_context(flags) -> dict:
             if snap:
                 data = snap.get("data", {})
                 regime = data.get("regime", {})
-                ctx["regime_label"] = regime.get("label") or regime.get("current_label") or ""
-                vol = data.get("volLeadLag", {})
-                ctx["vol_direction"] = vol.get("global_vol_direction") or vol.get("globalVolDirection") or ""
+                if not ctx["regime_label"]:
+                    ctx["regime_label"] = regime.get("label") or regime.get("current_label") or ""
+                if not ctx["vol_direction"]:
+                    vol = data.get("volLeadLag", {})
+                    ctx["vol_direction"] = vol.get("global_vol_direction") or vol.get("globalVolDirection") or ""
     except Exception:
         pass
     return ctx

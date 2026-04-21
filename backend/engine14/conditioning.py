@@ -106,7 +106,7 @@ def _hand_coded_payload() -> Dict[str, Any]:
         "generatedAt": None,
         "generator": "hand_coded_fallback",
         "lookbackYears": 0,
-        "sampleCount": {"total": 0, "calendar": 0, "dealerGamma": 0, "creditStress": 0, "gapRegime": 0},
+        "sampleCount": {"total": 0, "calendar": 0, "dealerGamma": 0, "crossAssetStress": 0, "creditStress": 0, "gapRegime": 0},
         "notes": "In-memory hand-coded defaults (coefficients JSON missing or unreadable).",
         "calendar": {
             "keywords": [
@@ -174,7 +174,7 @@ def load_modifier_coefficients(*, force_reload: bool = False) -> Dict[str, Any]:
         merged = _hand_coded_payload()
         if isinstance(data, dict):
             # Shallow-merge top-level sections so partial JSONs still work.
-            for key in ("calendar", "dealerGamma", "creditStress", "gapRegime"):
+            for key in ("calendar", "dealerGamma", "crossAssetStress", "creditStress", "gapRegime"):
                 if isinstance(data.get(key), (dict, list)):
                     merged[key] = data[key]
             for meta in ("version", "generatedAt", "generator", "lookbackYears",
@@ -469,8 +469,15 @@ def _gap_regime_row(abs_pct: float) -> Tuple[str, float, float]:
 
 
 def _credit_stress_row(label: str) -> Tuple[str, float, float]:
+    """Look up tail-multiplier + WR shift for a cross-asset stress label.
+
+    Reads coefficients from ``crossAssetStress`` (canonical) with a
+    fallback to the legacy ``creditStress`` key for backwards compat.
+    """
     """Lookup (severity, tail_mult, wr_shift) for a DMS cross-asset label."""
-    coeffs = (load_modifier_coefficients().get("creditStress") or {})
+    all_coeffs = load_modifier_coefficients()
+    coeffs = (all_coeffs.get("crossAssetStress")
+              or all_coeffs.get("creditStress") or {})
     row = coeffs.get(label)
     if isinstance(row, dict):
         return (
@@ -487,11 +494,23 @@ def compute_credit_stress_modifier(
     store: Any = None,
     entry_date: str = "",
 ) -> Modifier:
-    """Read today's cross-asset stress label from DMS."""
+    """Read today's cross-asset stress from DMS / Market Intelligence v2.
+
+    NOTE — name is historical. This modifier reads **cross-asset stress**
+    (FX/commodity/crypto/vol/credit composite from DMS), not Engine 9's
+    credit-stress drift model. The output Modifier is now emitted under
+    BOTH ``name="crossAssetStress"`` (canonical, going forward) and the
+    legacy ``name="creditStress"`` for one release cycle so any cached
+    callers don't break. Prefer ``crossAssetStress`` in new code.
+
+    When MI v2 is enabled, prefers the data-driven ``pc1_proxy_stress``
+    z-score over the legacy weighted composite, with graceful fallback.
+    """
     if store is None:
         return Modifier(
-            name="creditStress", status="unavailable",
-            note="No Redis store — credit-stress modifier skipped.",
+            name="crossAssetStress", status="unavailable",
+            note="No Redis store — cross-asset-stress modifier skipped.",
+            details={"_legacy_name": "creditStress"},
         )
     try:
         from backend.daily_market_state import load_dms, load_dms_history
@@ -502,35 +521,61 @@ def compute_credit_stress_modifier(
             hist = load_dms_history(store, n=5)
             dms = hist[0] if hist else None
     except Exception as e:
-        LOG.debug("credit_stress modifier: DMS load failed: %s", e)
+        LOG.debug("cross_asset_stress modifier: DMS load failed: %s", e)
         return Modifier(
-            name="creditStress", status="unavailable",
+            name="crossAssetStress", status="unavailable",
             note=f"DMS load failed: {type(e).__name__}",
+            details={"_legacy_name": "creditStress"},
         )
     if dms is None:
         return Modifier(
-            name="creditStress", status="unavailable",
+            name="crossAssetStress", status="unavailable",
             note="No DailyMarketState snapshot available.",
+            details={"_legacy_name": "creditStress"},
         )
 
     cas = getattr(dms, "cross_asset_stress", {}) or {}
-    label = str(cas.get("composite_label") or "Neutral")
-    score = float(cas.get("composite_score") or 50.0)
+    # Prefer MI v2 z-composite if present; fall back to legacy weighted score.
+    pc1 = cas.get("pc1_proxy_stress")
+    label: str
+    score: float
+    if isinstance(pc1, (int, float)) and abs(float(pc1)) > 0.01:
+        # Map z-composite to a 0-100 score for backwards-compat, then label.
+        # z=+2 → ~85 (Stressed), z=+1 → ~70 (Risk-Off), z=0 → 50 (Neutral),
+        # z=-1 → 30 (Risk-On).
+        score = max(0.0, min(100.0, 50.0 + 17.5 * float(pc1)))
+        if score >= 70:
+            label = "Stressed"
+        elif score >= 55:
+            label = "Risk-Off"
+        elif score <= 35:
+            label = "Risk-On"
+        else:
+            label = "Neutral"
+        provenance = "mi_v2_pc1"
+    else:
+        label = str(cas.get("composite_label") or "Neutral")
+        score = float(cas.get("composite_score") or 50.0)
+        provenance = "legacy_composite"
+
     sev, tail_mult, wr_shift = _credit_stress_row(label)
 
     note = (
-        f"Cross-asset stress: {label} (score {score:.0f}/100)."
+        f"Cross-asset stress: {label} (score {score:.0f}/100, source {provenance})."
         if label != "Neutral"
-        else "Cross-asset stress neutral — no macro-risk adjustment."
+        else f"Cross-asset stress neutral (source {provenance})."
     )
     return Modifier(
-        name="creditStress", status="ok", severity=sev,
+        name="crossAssetStress", status="ok", severity=sev,
         tail_multiplier=tail_mult, win_rate_shift_pct=wr_shift,
         note=note,
         details={
+            "_legacy_name":   "creditStress",
             "compositeLabel": label,
             "compositeScore": score,
-            "asOf": getattr(dms, "date", None),
+            "pc1ProxyStress": pc1,
+            "source":         provenance,
+            "asOf":           getattr(dms, "date", None),
         },
     )
 
@@ -628,6 +673,9 @@ def compute_conditioning(
           "notes": [<strings>]
         }
     """
+    cross_asset_mod = compute_credit_stress_modifier(
+        store=store, entry_date=entry_date,
+    )
     mods: Dict[str, Modifier] = {
         "calendar": compute_calendar_modifier(
             entry_date=entry_date, expiry_date=expiry_date,
@@ -636,9 +684,8 @@ def compute_conditioning(
         "dealerGamma": compute_dealer_gamma_modifier(
             orats_client=orats_client, entry_date=entry_date,
         ),
-        "creditStress": compute_credit_stress_modifier(
-            store=store, entry_date=entry_date,
-        ),
+        # Canonical key going forward.
+        "crossAssetStress": cross_asset_mod,
         "gapRegime": compute_gap_regime_modifier(
             orats_client=orats_client, benzinga_client=benzinga_client,
             entry_date=entry_date,
@@ -660,6 +707,9 @@ def compute_conditioning(
     net_wr = max(-20.0, min(12.0, net_wr))
 
     out = {k: v.to_dict() for k, v in mods.items()}
+    # Backwards-compat: emit the legacy key alongside the new canonical
+    # one for one release cycle so any cached client doesn't break.
+    out["creditStress"] = out["crossAssetStress"]
     out["netTailMultiplier"] = round(float(net_tail), 3)
     out["netWinRateShiftPct"] = round(float(net_wr), 2)
     out["notes"] = notes

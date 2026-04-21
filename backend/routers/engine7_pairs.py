@@ -33,13 +33,35 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 def _get_gate_context(flags) -> dict:
-    """Gather regime and vol context for gating decisions."""
+    """Gather regime and vol context for gating decisions.
+
+    Routes through the canonical Market Intelligence v2 service when
+    available so E3/E4/E7 gates always agree. Falls back to the raw
+    Engine 5 snapshot when MI v2 is disabled.
+    """
     ctx = {
         "regime_label": "",
         "vol_direction": "",
         "gamma_ctx": None,
         "high_events_within_days": 0,
     }
+
+    if getattr(flags, "ENABLE_MI_V2", True):
+        try:
+            from backend.market_intel import regime_snapshot
+            mi = regime_snapshot()
+            if mi.label:
+                ctx["regime_label"] = mi.label
+            term = str((mi.vol_state or {}).get("term_structure", "")).lower()
+            if term == "backwardation":
+                ctx["vol_direction"] = "rising"
+            elif term == "contango":
+                ctx["vol_direction"] = "falling"
+            elif term == "flat":
+                ctx["vol_direction"] = "stable"
+        except Exception:
+            pass
+
     try:
         store = get_store_optional()
         if store and flags.ENABLE_ENGINE5_LEAD_LAG:
@@ -49,9 +71,11 @@ def _get_gate_context(flags) -> dict:
             if snap:
                 data = snap.get("data", {})
                 regime = data.get("regime", {})
-                ctx["regime_label"] = regime.get("label") or regime.get("current_label") or ""
-                vol = data.get("volLeadLag", {})
-                ctx["vol_direction"] = vol.get("global_vol_direction") or vol.get("globalVolDirection") or ""
+                if not ctx["regime_label"]:
+                    ctx["regime_label"] = regime.get("label") or regime.get("current_label") or ""
+                if not ctx["vol_direction"]:
+                    vol = data.get("volLeadLag", {})
+                    ctx["vol_direction"] = vol.get("global_vol_direction") or vol.get("globalVolDirection") or ""
     except Exception:
         pass
     return ctx

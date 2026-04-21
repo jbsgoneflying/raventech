@@ -31,12 +31,29 @@ LOG = logging.getLogger(__name__)
 
 
 class _FrontLayerRateLimiter:
-    """Token-bucket rate limiter for Front Layer LLM calls."""
+    """Token-bucket rate limiter for Front Layer LLM calls.
 
-    def __init__(self, max_calls_per_minute: int = 12):
+    Reads ``FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE`` from config at construct
+    time (default 12). Previous default-4 fallback strings were stale —
+    they now interpolate the live budget.
+    """
+
+    def __init__(self, max_calls_per_minute: Optional[int] = None):
         self._lock = threading.Lock()
-        self._max = max_calls_per_minute
+        if max_calls_per_minute is None:
+            try:
+                from backend.config import get_flags
+                max_calls_per_minute = int(
+                    getattr(get_flags(), "FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE", 12)
+                )
+            except Exception:
+                max_calls_per_minute = 12
+        self._max = int(max_calls_per_minute)
         self._timestamps: List[float] = []
+
+    @property
+    def max_per_minute(self) -> int:
+        return self._max
 
     def acquire(self) -> bool:
         with self._lock:
@@ -49,6 +66,11 @@ class _FrontLayerRateLimiter:
 
 
 _rate_limiter = _FrontLayerRateLimiter()
+
+
+def _rate_limit_msg(label: str = "LLM") -> str:
+    """Consistent rate-limit message referencing the live budget."""
+    return f"Rate limited (max {_rate_limiter.max_per_minute} {label} calls/minute). Wait a moment and try again."
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +201,7 @@ def generate_morning_brief(
     """
     if not _rate_limiter.acquire():
         LOG.info("Morning brief rate-limited; returning fallback")
-        return _fallback_brief("Rate limited (max 4 calls/minute)")
+        return _fallback_brief(_rate_limit_msg("morning brief"))
 
     client = _get_openai_client()
     if client is None:
@@ -293,7 +315,7 @@ def generate_weekly_roadmap(
     """
     if not _rate_limiter.acquire():
         LOG.info("Weekly roadmap rate-limited; returning fallback")
-        return _fallback_roadmap("Rate limited (max 4 calls/minute)")
+        return _fallback_roadmap(_rate_limit_msg("weekly roadmap"))
 
     client = _get_openai_client()
     if client is None:
@@ -421,7 +443,7 @@ def generate_asset_insight(
 
     if not _rate_limiter.acquire():
         LOG.info("Asset insight rate-limited; returning fallback")
-        fallback["_fallback_reason"] = "Rate limited (max 4 calls/minute). Wait a moment and try again."
+        fallback["_fallback_reason"] = _rate_limit_msg()
         return fallback
 
     client = _get_openai_client()
@@ -563,6 +585,29 @@ Rules: Never recommend trades. Be specific about which fields changed and by how
 
 Return valid JSON:
 { "what_changed": "...", "significance": "...", "cascading_effects": "...", "desk_takeaway": "..." }""",
+
+    "pattern_match": """You are a senior weekly-sequencer pattern analyst at a proprietary trading firm.
+
+Given a single matched weekly pattern (template name, confidence score, contributing events,
+projected continuation, conflicting signals if any) and the broader DailyMarketState context,
+produce a desk-ready insight focused on PATTERN BEHAVIOR specifically — not generic regime
+commentary:
+
+1. PATTERN MECHANICS — What this pattern template captures historically (e.g., "pin_and_grind"
+   = expiry-week vol compression with overnight grinds; "vol_expansion_accel" = consecutive
+   sessions where realized > implied widens). Be specific about the rule.
+2. WHY IT MATCHED — Which sequencer events (this week's calendar / vol prints / engine outputs)
+   triggered the match and how strongly (cite confidence).
+3. WHAT TYPICALLY HAPPENS — Historically when this pattern fires, how does the next 1-3 sessions
+   tend to unfold? What's the modal outcome vs the tail?
+4. WHAT INVALIDATES IT — Which event or print would break the pattern thesis?
+5. DESK TAKEAWAY — One sentence: should the desk lean into this pattern or treat it as
+   information-only this week?
+
+Rules: Never recommend specific trades. Cite confidence + matched events. Under 220 words.
+
+Return valid JSON:
+{ "pattern_mechanics": "...", "why_it_matched": "...", "what_typically_happens": "...", "what_invalidates_it": "...", "desk_takeaway": "..." }""",
 
     # ── Engine 5: Lead-Lag card types ──────────────────────────────────
 
@@ -1282,6 +1327,7 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "regime": {"what_regime_tells_us", "engine_implications", "regime_context", "desk_takeaway"},
     "asymmetry": {"what_this_means", "why_it_matters", "what_to_watch", "desk_takeaway"},
     "diff": {"what_changed", "significance", "cascading_effects", "desk_takeaway"},
+    "pattern_match": {"pattern_mechanics", "why_it_matched", "what_typically_happens", "what_invalidates_it", "desk_takeaway"},
     # Engine 5 card types
     "e5_regime": {"what_regime_means", "structure_guidance", "stress_components", "desk_takeaway"},
     "e5_vol": {"what_vol_tells_us", "structure_impact", "sizing_implications", "desk_takeaway"},
@@ -1369,7 +1415,7 @@ def generate_card_insight(
 
     if not _rate_limiter.acquire():
         LOG.info("Card insight rate-limited for %s", card_type)
-        fallback["_fallback_reason"] = "Rate limited (max 4 calls/minute). Wait a moment and try again."
+        fallback["_fallback_reason"] = _rate_limit_msg()
         return fallback
 
     client = _get_openai_client()
@@ -1570,6 +1616,63 @@ def detect_asymmetries(
             "action": "Monitor only. Await confirmation from vol term structure.",
             "sources": ["news_themes.persistence_days", "vol_state.skew"],
         })
+
+    # --- 4. FX stress with no equity reaction --------------------------
+    # Classic precursor to risk-off transitions: DXY / USDJPY / USDCHF
+    # all stressed (avg > 60) while SPX equity-relationship reads
+    # "diverging" — equities haven't priced the FX dislocation yet.
+    fx_readings = [r for r in xstress_readings if r.get("asset_class") == "fx"]
+    fx_stress_avg = 0.0
+    fx_diverging_count = 0
+    if fx_readings:
+        fx_stress_avg = sum(
+            float(r.get("stress_score", 50)) for r in fx_readings
+        ) / len(fx_readings)
+        fx_diverging_count = sum(
+            1 for r in fx_readings
+            if str(r.get("equity_relationship", "")) == "diverging"
+        )
+    if fx_stress_avg > 60 and fx_diverging_count >= 1 and regime_score < 60:
+        signals.append({
+            "type": "fx_stress_no_equity_reaction",
+            "description": (
+                f"FX composite stress is elevated ({fx_stress_avg:.0f}) and "
+                f"{fx_diverging_count} FX reading(s) diverge from equities, "
+                f"but regime score is {regime_score:.0f}. FX is leading "
+                f"a stress signal that equities haven't picked up yet."
+            ),
+            "severity": "elevated",
+            "action": "Monitor only. FX moves often lead equity vol by 1-3 sessions.",
+            "sources": ["cross_asset_stress.fx", "regime.score"],
+        })
+
+    # --- 5. Regime / cross-asset flow divergence -----------------------
+    # Composite regime label disagrees with the cross-asset composite
+    # label — i.e. one says Risk-On, the other says Risk-Off. Strong
+    # signal that one of the two models is mis-calibrated and the desk
+    # should distrust both until they reconverge.
+    cross_label = str(xstress.get("composite_label", ""))
+    regime_label = str(regime.get("state") or regime.get("label", ""))
+    if regime_label and cross_label:
+        risk_on_set  = {"Risk-On", "RiskOn", "risk_on"}
+        risk_off_set = {"Risk-Off", "RiskOff", "Stressed", "risk_off", "stressed"}
+        regime_riskon  = regime_label in risk_on_set
+        regime_riskoff = regime_label in risk_off_set
+        cross_riskon   = cross_label in risk_on_set
+        cross_riskoff  = cross_label in risk_off_set
+        # Hard divergence: opposite ends of the spectrum.
+        if (regime_riskon and cross_riskoff) or (regime_riskoff and cross_riskon):
+            signals.append({
+                "type": "regime_flow_divergence",
+                "description": (
+                    f"Regime label ({regime_label}) disagrees with cross-asset "
+                    f"composite ({cross_label}). One signal is wrong — distrust "
+                    f"both until they reconverge."
+                ),
+                "severity": "elevated",
+                "action": "Await confirmation. Reduce conviction on regime-dependent trades.",
+                "sources": ["regime.state", "cross_asset_stress.composite_label"],
+            })
 
     return signals
 
