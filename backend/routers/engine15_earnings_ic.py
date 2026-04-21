@@ -16,7 +16,8 @@ Public endpoints:
   * ``GET  /api/earnings-ic/health``          — flag + cache probe
   * ``POST /api/earnings-ic/backfill``        — admin-only per-ticker backfill (async)
   * ``GET  /api/earnings-ic/backfill/status`` — progress probe
-  * ``GET  /api/earnings-ic/explain-card/catalog`` / ``POST /api/earnings-ic/explain-card``
+  * Per-card LLM tooltips live in ``backend/routers/desk_insight.py`` (legacy
+    ``/api/earnings-ic/explain-card`` URLs are kept as shims there).
 """
 from __future__ import annotations
 
@@ -1129,41 +1130,10 @@ def earnings_ic_backfill_status(ticker: str = Query(..., description="Ticker to 
     return state
 
 
-# ---------------------------------------------------------------------------
-# /api/earnings-ic/explain-card — per-card LLM tooltips
-# ---------------------------------------------------------------------------
-
-@router.get("/api/earnings-ic/explain-card/catalog")
-def earnings_ic_explain_catalog() -> Dict[str, Any]:
-    _ensure_enabled()
-    from backend.engine15.card_explain import CARD_CATALOG, supported_card_types
-    return {
-        "cardTypes": supported_card_types(),
-        "titles": {k: v.get("title", k) for k, v in CARD_CATALOG.items()},
-    }
-
-
-@router.post("/api/earnings-ic/explain-card")
-def earnings_ic_explain_card(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    _ensure_enabled()
-    from backend.engine15.card_explain import (
-        CARD_CATALOG,
-        generate_card_explanation,
-        supported_card_types,
-    )
-    card_type = str(body.get("cardType") or "").strip()
-    if not card_type:
-        raise HTTPException(status_code=400, detail="cardType is required.")
-    if card_type not in CARD_CATALOG:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown cardType {card_type!r}. Valid: {', '.join(supported_card_types())}",
-        )
-    return generate_card_explanation(
-        card_type=card_type,
-        card_data=body.get("cardData") or {},
-        scenario_context=body.get("scenarioContext") or {},
-    )
+# NOTE: Per-card LLM tooltips used to live here as /api/earnings-ic/explain-card
+# + /catalog. Those routes are now served by the shared Raven Desk Insight v2
+# router (backend/routers/desk_insight.py), which retains the legacy URLs as
+# thin shims routed through the unified nine-section pipeline.
 
 
 # ---------------------------------------------------------------------------

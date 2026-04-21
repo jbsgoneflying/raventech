@@ -1266,226 +1266,41 @@
     return ctx;
   }
 
-  // Minimal popup controller — mirrors the e2Insight pattern but with a
-  // custom fetch target so we go to /api/ic-scenario/explain-card.
-  var _explainCache = Object.create(null);
-  var _lastActiveBtn = null;
-
-  function openInsightPopup(title, anchor) {
-    var pop = $("e14InsightPopup");
-    var titleEl = $("e14InsightTitle");
-    var bodyEl = $("e14InsightBody");
-    if (!pop || !titleEl || !bodyEl) return null;
-    titleEl.textContent = title || "Desk Insight";
-    bodyEl.innerHTML =
-      '<div class="e14InsightLoading">' +
-      '<span class="e14InsightDot"></span><span class="e14InsightDot"></span><span class="e14InsightDot"></span>' +
-      '<br>Generating desk insight…</div>';
-
-    // Position near the clicking button, clamped into the viewport.
-    var vw = window.innerWidth, vh = window.innerHeight;
-    var pw = 460, ph = Math.min(560, Math.floor(vh * 0.82));
-    var r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
-    var left, top;
-    if (r) {
-      left = Math.max(12, Math.min(vw - pw - 12, r.right + 12));
-      top  = Math.max(12, Math.min(vh - ph - 12, r.top));
-    } else {
-      left = Math.max(12, Math.floor(vw / 2 - pw / 2));
-      top  = Math.max(12, Math.floor(vh / 4));
-    }
-    pop.style.left = left + "px";
-    pop.style.top = top + "px";
-    pop.style.display = "block";
-    return pop;
-  }
-
-  function closeInsightPopup() {
-    var pop = $("e14InsightPopup");
-    if (pop) pop.style.display = "none";
-    if (_lastActiveBtn) {
-      _lastActiveBtn.setAttribute("aria-expanded", "false");
-      _lastActiveBtn = null;
-    }
-  }
-
-  function renderInsight(bodyEl, data) {
-    if (!bodyEl) return;
-    if (!data) {
-      bodyEl.innerHTML = '<div class="e14InsightLoading">No insight data.</div>';
-      return;
-    }
-
-    function esc(s) {
-      return String(s == null ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-
-    var SECTIONS = [
-      ["what_this_shows",  "What This Shows"],
-      ["how_to_read_it",   "How To Read It"],
-      ["how_to_use_it",    "How To Use It"],
-      ["watch_for",        "Watch For"],
-      ["desk_takeaway",    "Desk Takeaway"],
-    ];
-    var html = "";
-    if (data._fallback_reason) {
-      html +=
-        '<div style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.28);' +
-        'border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ffb347;">' +
-        'Spec fallback · ' + esc(data._fallback_reason) +
-        '</div>';
-    }
-    SECTIONS.forEach(function (pair) {
-      var key = pair[0], label = pair[1];
-      var v = data[key];
-      if (!v) return;
-      var accent = (key === "desk_takeaway")
-        ? ' style="color:#34c759;font-weight:600;"' : '';
-      html +=
-        '<div class="e14InsightSection">' +
-          '<div class="e14InsightSectionTitle">' + esc(label) + '</div>' +
-          '<div class="e14InsightText"' + accent + '>' + esc(v) + '</div>' +
-        '</div>';
+  /* ── Desk Insight wire-up (shared; popup + fetcher live in desk-insight.js) ── */
+  function wireDeskInsight() {
+    if (!window.DeskInsight) return;
+    window.DeskInsight.bind({
+      engineId:           "e14",
+      dividerSelector:    ".deskDivider[data-insight]",
+      slugTitles: {
+        entry_state:          "Entry State",
+        regime_match:         "Regime Match Quality",
+        outcome_distribution: "Outcome Distribution (NBBO)",
+        outcome_mid:          "Legacy Mid-Fill Distribution",
+        outcome_adjusted:     "Adjusted Distribution",
+        modifiers:            "Conditioning Modifiers",
+        mtm_timeline:         "MTM Timeline",
+        position_sizing:      "Position Sizing",
+        greeks_attribution:   "P&L Attribution (Greeks)",
+        exit_optimization:    "Exit-Rule Optimization",
+        exit_sensitivity:     "Exit-Rule Sensitivity",
+        conditioning_notes:   "Conditioning Notes",
+        matched_analogues:    "Matched Analogues",
+        actions:              "Actions",
+        post_trade_review:    "Post-Trade Review",
+      },
+      getCardData:        function (slug) { return extractCardData(slug, lastPayload); },
+      getScenarioContext: buildScenarioContext,
     });
-    var srcBits = [];
-    if (data._source) srcBits.push(data._source);
-    if (data._meta && data._meta.model) srcBits.push(data._meta.model);
-    if (srcBits.length) {
-      html += '<div class="e14InsightSource">Source: ' + esc(srcBits.join(" · ")) + '</div>';
-    }
-    bodyEl.innerHTML = html || '<div class="e14InsightLoading">No insight content returned.</div>';
-  }
-
-  function explainCard(slug, anchor) {
-    var titles = {
-      entry_state: "Entry State",
-      regime_match: "Regime Match Quality",
-      outcome_distribution: "Outcome Distribution (NBBO)",
-      outcome_mid: "Legacy Mid-Fill Distribution",
-      outcome_adjusted: "Adjusted Distribution",
-      modifiers: "Conditioning Modifiers",
-      mtm_timeline: "MTM Timeline",
-      position_sizing: "Position Sizing",
-      greeks_attribution: "P&L Attribution (Greeks)",
-      exit_optimization: "Exit-Rule Optimization",
-      exit_sensitivity: "Exit-Rule Sensitivity",
-      conditioning_notes: "Conditioning Notes",
-      matched_analogues: "Matched Analogues",
-      actions: "Actions",
-      post_trade_review: "Post-Trade Review",
-    };
-    openInsightPopup(titles[slug] || "Desk Insight", anchor);
-    var bodyEl = $("e14InsightBody");
-
-    var cardData = extractCardData(slug, lastPayload);
-    var scenarioContext = buildScenarioContext();
-
-    // Cache by slug + stringified payload so re-clicking is instant.
-    var ckey;
-    try { ckey = slug + "|" + JSON.stringify(cardData).slice(0, 2000); }
-    catch (e) { ckey = slug + "|" + Date.now(); }
-    if (_explainCache[ckey]) { renderInsight(bodyEl, _explainCache[ckey]); return; }
-
-    fetch("/api/ic-scenario/explain-card", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cardType: slug,
-        cardData: cardData,
-        scenarioContext: scenarioContext,
-      }),
-    })
-      .then(function (r) {
-        return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
-      })
-      .then(function (resp) {
-        if (!resp.ok) {
-          var detail = (resp.body && (resp.body.detail || resp.body.error)) || ("HTTP " + resp.status);
-          bodyEl.innerHTML =
-            '<div class="e14InsightLoading" style="color:#ff6b6b;">Failed to load explanation: ' +
-            String(detail).replace(/[<>&]/g, "") + '</div>';
-          return;
-        }
-        _explainCache[ckey] = resp.body;
-        renderInsight(bodyEl, resp.body);
-      })
-      .catch(function (e) {
-        bodyEl.innerHTML =
-          '<div class="e14InsightLoading" style="color:#ff6b6b;">Network error: ' +
-          String(e && e.message || e).replace(/[<>&]/g, "") + '</div>';
-      });
-  }
-
-  // Wire up the info buttons once the DOM is ready.
-  function injectExplainButtons() {
-    var dividers = document.querySelectorAll(".e14Divider[data-explain]");
-    dividers.forEach(function (div) {
-      if (div.querySelector(".e14ExplainBtn")) return;      // idempotent
-      // Ensure the label text is wrapped in .e14DividerText so flex layout
-      // keeps the button pinned right even on dividers that didn't pre-wrap.
-      if (!div.querySelector(".e14DividerText")) {
-        var txt = document.createElement("span");
-        txt.className = "e14DividerText";
-        while (div.firstChild) txt.appendChild(div.firstChild);
-        div.appendChild(txt);
-      }
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "e14ExplainBtn";
-      btn.setAttribute("aria-label", "Explain this card");
-      btn.setAttribute("aria-expanded", "false");
-      btn.title = "What is this card? Click for a desk-level LLM explanation.";
-      btn.textContent = "i";
-      div.appendChild(btn);
-    });
-  }
-
-  function onExplainBtnClick(ev) {
-    var btn = ev.target && ev.target.closest && ev.target.closest(".e14ExplainBtn");
-    if (!btn) return;
-    var div = btn.closest(".e14Divider[data-explain]");
-    if (!div) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-
-    var pop = $("e14InsightPopup");
-    var alreadyOpenOnThis = (_lastActiveBtn === btn) && pop && pop.style.display === "block";
-    if (alreadyOpenOnThis) { closeInsightPopup(); return; }
-
-    if (_lastActiveBtn) _lastActiveBtn.setAttribute("aria-expanded", "false");
-    _lastActiveBtn = btn;
-    btn.setAttribute("aria-expanded", "true");
-    var slug = div.getAttribute("data-explain");
-    explainCard(slug, btn);
-  }
-
-  function wireInsightPopup() {
-    var pop = $("e14InsightPopup");
-    var header = $("e14InsightHeader");
-    var closeBtn = $("e14InsightClose");
-    if (!pop) return;
-
-    if (closeBtn) closeBtn.addEventListener("click", closeInsightPopup);
-    if (typeof window.initDrag === "function" && header) {
-      try { window.initDrag(pop, header, { closeSelector: "#e14InsightClose" }); }
-      catch (e) { /* ignore */ }
-    }
-    document.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape" && pop.style.display === "block") closeInsightPopup();
-    });
-    // Click-outside to dismiss.
-    document.addEventListener("mousedown", function (ev) {
-      if (pop.style.display !== "block") return;
-      var t = ev.target;
-      if (t && t.closest && (t.closest("#e14InsightPopup") || t.closest(".e14ExplainBtn"))) return;
-      closeInsightPopup();
-    });
-
-    // A new scenario run replaces every card's data, so burn the cache.
+    // A new scenario run replaces every card's data — burn the cache.
     var results = $("results");
     if (results && typeof MutationObserver === "function") {
-      var mo = new MutationObserver(function () { _explainCache = Object.create(null); });
+      var mo = new MutationObserver(function () {
+        if (window.DeskInsight) {
+          window.DeskInsight.clearCache();
+          window.DeskInsight.refresh();
+        }
+      });
       mo.observe(results, { childList: true, subtree: false });
     }
   }
@@ -1500,9 +1315,7 @@
     var c = $("chatBtn"); if (c) c.addEventListener("click", copyChatSummary);
     var rv = $("reviewBtn"); if (rv) rv.addEventListener("click", loadReview);
 
-    injectExplainButtons();
-    wireInsightPopup();
-    document.addEventListener("click", onExplainBtnClick);
+    wireDeskInsight();
 
     // Stage 2: reconciliation drawer toggle.
     var reconToggle = $("reconcileToggle");

@@ -481,8 +481,11 @@
       <div class="miBackfillStatus" id="miBackfillStatus" style="display:none;"></div>
 
       <!-- ── Row 1: Regime ──────────────────────────────────────── -->
+      <div class="deskDivider" data-insight="regime_card" id="miRegimeSection" style="display:none;">
+        <span class="deskDividerText">Regime State</span>
+      </div>
       <div class="miRow miRow--1" id="miTopRow" style="display:none;">
-        <div class="miCard miCard--click" id="miRegimeCard" title="Click for desk insight" style="border-left:none;">
+        <div class="miCard miCard--click" id="miRegimeCard" title="Click for asset-level desk insight" style="border-left:none;">
           <div class="miHero" id="miRegimeHero">
             <div class="miHeroTag"><span class="miHeroTagDot miHeroTagDot--blue"></span> Regime State</div>
             <div class="miHeroScoreWrap">
@@ -500,6 +503,9 @@
       </div>
 
       <!-- ── Row 2: Morning Brief + Pattern Library ──────────────── -->
+      <div class="deskDivider" data-insight="morning_brief" id="miBriefSection" style="display:none;">
+        <span class="deskDividerText">Morning Brief &amp; Pattern Library</span>
+      </div>
       <div class="miRow miRow--brief" id="miBriefRow" style="display:none;">
         <div class="miCard" id="miBriefCard">
           <div class="miHead">
@@ -523,6 +529,9 @@
       </div>
 
       <!-- ── Row 3: Themes + Cross-Asset Stress ──────────────────── -->
+      <div class="deskDivider" data-insight="cross_asset_matrix" id="miBottomSection" style="display:none;">
+        <span class="deskDividerText">Active Themes &amp; Cross-Asset Stress</span>
+      </div>
       <div class="miRow miRow--2" id="miBottomGrid" style="display:none;">
         <div class="miCard miCard--purple">
           <div class="miHead">
@@ -550,6 +559,9 @@
       </div>
 
       <!-- ── Diff Panel ──────────────────────────────────────────── -->
+      <div class="deskDivider" data-insight="diff_card" id="miDiffSection" style="display:none;">
+        <span class="deskDividerText">Day-over-Day Changes</span>
+      </div>
       <div class="miRow miRow--1" id="miDiffPanel" style="display:none;">
         <div class="miCard">
           <div class="miHead">
@@ -577,9 +589,58 @@
       </div>
     </div>
 
+    <link rel="stylesheet" href="/static/desk-insight.css?v=1" />
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
     <script src="/static/raven-chat.js?v=3"></script>
-    <script src="/static/market-intelligence.js"></script>
+    <script src="/static/desk-insight.js?v=1"></script>
+    <script src="/static/market-intelligence.js?v=2"></script>
+    <script>
+      // Bind the shared Raven Desk Insight module to this page. Each
+      // deskDivider[data-insight] above the main section rows lights up
+      // with a 9-section LLM tooltip. Asset-tile insights remain served
+      // by the existing miInsight* popup inside market-intelligence.js.
+      (function () {
+        function bindDeskInsight() {
+          if (!window.DeskInsight) return;
+          window.DeskInsight.bind({
+            engineId:           "market-intel",
+            dividerSelector:    ".deskDivider[data-insight]",
+            slugTitles: {
+              regime_card:        "Regime State",
+              morning_brief:      "Morning Brief",
+              patterns_card:      "Pattern Library",
+              diff_card:          "Day-over-Day Changes",
+              asset_tile:         "Asset Tile",
+              cross_asset_matrix: "Cross-Asset Matrix",
+            },
+            getCardData: function (slug) {
+              // MI's frontend keeps its full context in a module-level
+              // store; we surface a compact slice per slug.
+              var ctx = window.__RAVEN_MI_CONTEXT || {};
+              switch (slug) {
+                case "regime_card":        return ctx.regime        || {};
+                case "morning_brief":      return ctx.morningBrief  || {};
+                case "patterns_card":      return ctx.patterns      || {};
+                case "diff_card":          return ctx.diff          || {};
+                case "cross_asset_matrix": return ctx.crossAsset    || {};
+                default:                   return {};
+              }
+            },
+            getScenarioContext: function () {
+              var ctx = window.__RAVEN_MI_CONTEXT || {};
+              return {
+                regimeLabel: ctx.regimeLabel,
+                regimeScore: ctx.regimeScore,
+                volState:    ctx.volState,
+              };
+            },
+          });
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", bindDeskInsight);
+        } else { bindDeskInsight(); }
+      })();
+    </script>
   </body>
 </html>

@@ -40,6 +40,25 @@
 
   var showDiff = true;
 
+  // Refs for the Desk Insight v2 section dividers (optional — the page
+  // functions without them if desk-insight.js isn't loaded).
+  var regimeSection = document.getElementById("miRegimeSection");
+  var briefSection  = document.getElementById("miBriefSection");
+  var bottomSection = document.getElementById("miBottomSection");
+  var diffSection   = document.getElementById("miDiffSection");
+
+  // Expose a lightweight context that the shared Desk Insight binding
+  // in the page HTML reads via getCardData / getScenarioContext.
+  var miContext = window.__RAVEN_MI_CONTEXT = window.__RAVEN_MI_CONTEXT || {};
+
+  function syncDeskInsightSections() {
+    if (regimeSection && topRow)      regimeSection.style.display = topRow.style.display === "grid"      ? "flex" : "none";
+    if (briefSection  && briefRow)    briefSection.style.display  = briefRow.style.display  === "grid"   ? "flex" : "none";
+    if (bottomSection && bottomGrid)  bottomSection.style.display = bottomGrid.style.display === "grid"  ? "flex" : "none";
+    if (diffSection   && diffPanel)   diffSection.style.display   = diffPanel.style.display  === "grid"  ? "flex" : "none";
+    if (window.DeskInsight) window.DeskInsight.refresh();
+  }
+
   /* ── Helpers ──────────────────────────────────────── */
   function pillClass(label) {
     var l = (label || "").toLowerCase().replace(/[^a-z]/g, "");
@@ -136,6 +155,16 @@
     regimeLabel.textContent = regime.state || "--";
     regimeLabel.className = "miHeroLabel " + _heroLabelClass(regime.state);
 
+    // Update the shared Desk Insight context so tooltip fetches can
+    // reference live regime / vol state / engine gates.
+    miContext.regime        = regime;
+    miContext.regimeLabel   = regime.state;
+    miContext.regimeScore   = rScore;
+    miContext.volState      = dms.vol_state;
+    miContext.engineGates   = dms.engine_gates;
+    miContext.crossAsset    = dms.cross_asset;
+    syncDeskInsightSections();
+
     var regimeBar = document.getElementById("miRegimeBar");
     if (regimeBar) {
       regimeBar.style.width = Math.min(rScore, 100) + "%";
@@ -183,6 +212,8 @@
      Render: Morning Brief
      ═══════════════════════════════════════════════════════════════════ */
   function renderBrief(brief) {
+    miContext.morningBrief = brief;
+    syncDeskInsightSections();
     briefRow.style.display = "grid";
     var isFallback = brief._source === "fallback";
     briefTs.textContent = fmt(brief._generated_at) + (isFallback ? " (fallback)" : "");
@@ -390,6 +421,8 @@
      Render: Diff
      ═══════════════════════════════════════════════════════════════════ */
   function renderDiff(diffData) {
+    miContext.diff = diffData;
+    syncDeskInsightSections();
     _lastDiff = diffData || {};
     diffPanel.style.display = showDiff ? "grid" : "none";
     if (!showDiff) return;

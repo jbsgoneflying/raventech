@@ -15,11 +15,6 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from backend.config import get_flags
 from backend.deps import get_benzinga_client_optional, get_client
 from backend.engine14 import chain_cache, reconciliation, regime_features
-from backend.engine14.card_explain import (
-    CARD_CATALOG,
-    generate_card_explanation,
-    supported_card_types,
-)
 from backend.engine14.conditioning import load_modifier_coefficients
 from backend.engine14.live_chain import fetch_live_chain_nbbo, validate_strikes_exist
 from backend.engine14.simulator import IcScenarioRequest, run_scenario
@@ -572,63 +567,11 @@ def ic_scenario_coverage() -> Dict[str, Any]:
     return {"SPX": chain_cache.cache_coverage(ticker="SPX")}
 
 
-# ---------------------------------------------------------------------------
-# Per-card LLM explainer — desk tooltips that describe what each results
-# card is, how to read it, and how to use it on a live trade.
-# ---------------------------------------------------------------------------
-
-@router.get("/api/ic-scenario/explain-card/catalog")
-def ic_scenario_explain_catalog() -> Dict[str, Any]:
-    """List every card that supports the /explain-card endpoint.
-
-    Handy for the frontend to validate its `data-explain` slugs against
-    the backend catalog at boot.
-    """
-    _ensure_enabled()
-    return {
-        "cardTypes": supported_card_types(),
-        "titles": {k: v.get("title", k) for k, v in CARD_CATALOG.items()},
-    }
-
-
-@router.post("/api/ic-scenario/explain-card")
-def ic_scenario_explain_card(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Return an LLM-generated, desk-friendly explanation for one card.
-
-    Expected body:
-      {
-        "cardType":        "entry_state" | "outcome_distribution" | ... ,
-        "cardData":        <JSON-serializable card payload as displayed>,
-        "scenarioContext": <optional: strikes/credit/expiry/analoguesUsed...>
-      }
-    """
-    _ensure_enabled()
-
-    card_type = str(body.get("cardType") or "").strip()
-    if not card_type:
-        raise HTTPException(status_code=400, detail="cardType is required.")
-    if card_type not in CARD_CATALOG:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Unknown cardType {card_type!r}. "
-                f"Valid: {', '.join(supported_card_types())}"
-            ),
-        )
-
-    card_data = body.get("cardData")
-    if card_data is None:
-        # Empty dict is fine — some cards (e.g. conditioning_notes) may be
-        # empty at the time the user clicks. Don't 400 on that.
-        card_data = {}
-
-    scenario_context = body.get("scenarioContext") or {}
-
-    return generate_card_explanation(
-        card_type=card_type,
-        card_data=card_data,
-        scenario_context=scenario_context,
-    )
+# NOTE: The per-card LLM explainer used to live here as /api/ic-scenario/
+# explain-card + /api/ic-scenario/explain-card/catalog. Those routes are
+# now served by the shared Raven Desk Insight v2 router
+# (backend/routers/desk_insight.py), which routes them through the unified
+# nine-section pipeline while keeping the legacy URL contract intact.
 
 
 # ---------------------------------------------------------------------------

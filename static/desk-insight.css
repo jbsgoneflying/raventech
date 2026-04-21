@@ -1,0 +1,269 @@
+/* ================================================================== */
+/* Raven Desk Insight v2 — shared styles                                */
+/*                                                                      */
+/* Every page that wants desk-insight tooltips loads this file and      */
+/* calls DeskInsight.bind(...). The .deskDivider / .deskInsightBtn      */
+/* pattern replaces the old engine-specific .e14Divider / .e15Divider / */
+/* .e14InsightPopup / etc. CSS variables come from static/styles.css.   */
+/* ================================================================== */
+
+/* Section divider with inline "i" info button.                         */
+.deskDivider {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 24px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.deskDivider > .deskDividerText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Info button pinned to the right of every divider.                    */
+.deskInsightBtn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surfaceSolid);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.deskInsightBtn:hover {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: rgba(0, 122, 255, 0.08);
+}
+.deskInsightBtn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.deskInsightBtn[aria-expanded="true"] {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: rgba(0, 122, 255, 0.12);
+}
+
+/* Popup shell — dark glass, draggable, clamped to the viewport.        */
+.deskInsightPopup {
+  position: fixed;
+  z-index: 10000;
+  width: 500px;
+  max-height: 82vh;
+  overflow-y: auto;
+  border-radius: 16px;
+  background: rgba(28, 28, 30, 0.98);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  user-select: none;
+  transition: opacity 0.15s ease;
+  color: #fff;
+  display: none;
+}
+.deskInsightPopup.isDragging {
+  cursor: grabbing;
+  transition: none;
+}
+.deskInsightHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: grab;
+}
+.deskInsightHeader:active { cursor: grabbing; }
+
+.deskInsightHeaderText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.deskInsightTitle {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #fff;
+}
+.deskInsightSubtitle {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.deskInsightClose {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+.deskInsightClose:hover {
+  background: rgba(255, 255, 255, 0.20);
+  color: #fff;
+}
+
+/* Breadcrumb row for cross-engine navigation (shown when user opens a
+   tooltip via a related_cards chip from another tooltip).             */
+.deskInsightBreadcrumb {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 16px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
+  overflow-x: auto;
+}
+.deskInsightBreadcrumb button {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.deskInsightBreadcrumb button:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.deskInsightBreadcrumb-sep { color: rgba(255, 255, 255, 0.25); }
+
+.deskInsightBody { padding: 16px; }
+
+.deskInsightSection { margin-bottom: 16px; }
+.deskInsightSection:last-child { margin-bottom: 0; }
+.deskInsightSectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.deskInsightSectionTitle .deskInsightIcon {
+  font-size: 11px;
+  opacity: 0.65;
+}
+.deskInsightText {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: pre-wrap;
+}
+.deskInsightText.deskTakeaway {
+  color: #34c759;
+  font-weight: 600;
+}
+
+/* related_cards — the cross-engine flywheel chips.                     */
+.deskInsightRelatedCards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.deskInsightRelatedChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.deskInsightRelatedChip:hover {
+  background: rgba(0, 122, 255, 0.18);
+  border-color: rgba(0, 122, 255, 0.45);
+  color: #fff;
+}
+.deskInsightRelatedChip .deskInsightRelatedEngine {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Loading + meta footer.                                               */
+.deskInsightLoading {
+  text-align: center;
+  padding: 32px 16px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+.deskInsightDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  margin: 0 2px;
+  animation: deskInsightDotPulse 1.2s ease-in-out infinite;
+}
+.deskInsightDot:nth-child(2) { animation-delay: 0.2s; }
+.deskInsightDot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes deskInsightDotPulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1;   }
+}
+
+.deskInsightSource {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: right;
+  margin-top: 12px;
+  font-style: italic;
+}
+.deskInsightFallbackBanner {
+  background: rgba(255, 159, 10, 0.12);
+  border: 1px solid rgba(255, 159, 10, 0.28);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  font-size: 11px;
+  color: #ffb347;
+}
+.deskInsightErrorBanner {
+  color: #ff6b6b;
+}

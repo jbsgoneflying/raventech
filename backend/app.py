@@ -33,6 +33,7 @@ from backend.routers import (
     market_intel,
     front_layer,
     raven_chat,
+    desk_insight,
 )
 
 try:
@@ -392,6 +393,7 @@ app.include_router(calendar.router)
 app.include_router(market_intel.router)
 app.include_router(front_layer.router)
 app.include_router(raven_chat.router)
+app.include_router(desk_insight.router)
 
 
 # ── Startup: rebuild trade indexes if they expired while the app was down ──

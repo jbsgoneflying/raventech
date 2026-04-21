@@ -467,6 +467,11 @@ class FeatureFlags:
     RAVEN_CHAT_RATE_LIMIT: int = 10               # per minute
     RAVEN_CHAT_MAX_CONTEXT_CHARS: int = 40000
 
+    # --- Raven Desk Insight v2 (unified LLM tooltip pipeline) ---
+    ENABLE_DESK_INSIGHT_V2: bool = True
+    DESK_INSIGHT_MODEL: str = "gpt-5.4"
+    DESK_INSIGHT_RATE_LIMIT_PER_MIN: int = 60     # shared across all engines
+
     # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
     LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
     LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
@@ -815,6 +820,10 @@ class FeatureFlags:
             RAVEN_CHAT_MAX_TURNS=_get_int("RAVEN_CHAT_MAX_TURNS", 30),
             RAVEN_CHAT_RATE_LIMIT=_get_int("RAVEN_CHAT_RATE_LIMIT", 10),
             RAVEN_CHAT_MAX_CONTEXT_CHARS=_get_int("RAVEN_CHAT_MAX_CONTEXT_CHARS", 40000),
+
+            ENABLE_DESK_INSIGHT_V2=_get_bool("ENABLE_DESK_INSIGHT_V2", True),
+            DESK_INSIGHT_MODEL=os.getenv("DESK_INSIGHT_MODEL", "gpt-5.4"),
+            DESK_INSIGHT_RATE_LIMIT_PER_MIN=_get_int("DESK_INSIGHT_RATE_LIMIT_PER_MIN", 60),
 
             LEGAL_REG_TICKER_DENYLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_DENYLIST", [])),
             LEGAL_REG_TICKER_ALLOWLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_ALLOWLIST", [])),

@@ -773,6 +773,7 @@
       </div>
     </div>
 
+    <link rel="stylesheet" href="/static/desk-insight.css?v=1" />
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/ta_panel.js"></script>
     <script src="/static/zip_store.js"></script>
@@ -780,6 +781,27 @@
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js"></script>
     <script src="/static/raven-chat.js?v=3"></script>
+    <script src="/static/desk-insight.js?v=1"></script>
+    <script>
+      // Auto-bind Raven Desk Insight for any .deskDivider[data-insight]
+      // added to this page. Engine 1 keeps its existing e1Insight popup
+      // for per-card drill-downs; desk-insight adds the shared 9-section
+      // tooltip pattern on top for section-level dividers.
+      (function () {
+        function bind() {
+          if (!window.DeskInsight) return;
+          window.DeskInsight.bind({
+            engineId:           "e1",
+            dividerSelector:    ".deskDivider[data-insight]",
+            getScenarioContext: function () {
+              var ctx = window.__RAVEN_E1_CONTEXT || {};
+              return { ticker: ctx.ticker || null };
+            },
+          });
+        }
+        if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", bind); } else { bind(); }
+      })();
+    </script>
   </body>
 </html>
 

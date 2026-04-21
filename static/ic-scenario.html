@@ -26,72 +26,11 @@
       }
       .e14CardCaption { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 4px; line-height: 1.4; }
 
-      .e14Divider {
-        font-size: 11px; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.06em; color: var(--muted);
-        margin: 24px 0 12px; padding-bottom: 6px;
-        border-bottom: 1px solid var(--border);
-        display: flex; align-items: center; gap: 8px;
-      }
-      .e14Divider > .e14DividerText { flex: 1 1 auto; min-width: 0; }
-      .e14ExplainBtn {
-        flex: 0 0 auto;
-        width: 20px; height: 20px; border-radius: 999px;
-        border: 1px solid var(--border); background: var(--surfaceSolid);
-        color: var(--muted); font-size: 11px; font-weight: 800;
-        line-height: 18px; padding: 0; cursor: pointer;
-        transition: background 0.15s, color 0.15s, border-color 0.15s;
-        font-family: ui-sans-serif, system-ui, sans-serif;
-      }
-      .e14ExplainBtn:hover { color: var(--blue); border-color: var(--blue); background: rgba(0,122,255,0.08); }
-      .e14ExplainBtn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-      .e14ExplainBtn[aria-expanded="true"] { color: var(--blue); border-color: var(--blue); background: rgba(0,122,255,0.12); }
-
-      /* ── LLM Desk Insight popup (shared with Engine 2 styling pattern) ── */
-      .e14InsightPopup {
-        position: fixed; z-index: 10000; width: 460px; max-height: 82vh;
-        overflow-y: auto; border-radius: 16px;
-        background: rgba(28,28,30,0.98);
-        backdrop-filter: blur(40px) saturate(180%);
-        -webkit-backdrop-filter: blur(40px) saturate(180%);
-        box-shadow: 0 20px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08) inset;
-        user-select: none; transition: opacity 0.15s ease;
-        color: #fff; display: none;
-      }
-      .e14InsightPopup.isDragging { cursor: grabbing; transition: none; }
-      .e14InsightHeader {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: 12px; padding: 14px 16px; background: rgba(255,255,255,0.06);
-        border-bottom: 1px solid rgba(255,255,255,0.08); cursor: grab;
-      }
-      .e14InsightHeader:active { cursor: grabbing; }
-      .e14InsightTitle { font-size: 14px; font-weight: 700; line-height: 1.3; color: #fff; flex: 1; }
-      .e14InsightClose {
-        width: 24px; height: 24px; border-radius: 6px; border: none;
-        background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.7);
-        font-size: 16px; cursor: pointer;
-        display: flex; align-items: center; justify-content: center;
-        transition: background 0.15s ease;
-      }
-      .e14InsightClose:hover { background: rgba(255,255,255,0.20); color: #fff; }
-      .e14InsightBody { padding: 16px; }
-      .e14InsightSection { margin-bottom: 16px; }
-      .e14InsightSection:last-child { margin-bottom: 0; }
-      .e14InsightSectionTitle {
-        font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.5);
-        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
-      }
-      .e14InsightText { font-size: 12px; font-weight: 500; line-height: 1.55; color: rgba(255,255,255,0.88); white-space: pre-wrap; }
-      .e14InsightLoading { text-align: center; padding: 32px 16px; color: rgba(255,255,255,0.6); font-size: 12px; }
-      .e14InsightDot {
-        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-        background: rgba(255,255,255,0.5); margin: 0 2px;
-        animation: e14DotPulse 1.2s ease-in-out infinite;
-      }
-      .e14InsightDot:nth-child(2) { animation-delay: 0.2s; }
-      .e14InsightDot:nth-child(3) { animation-delay: 0.4s; }
-      .e14InsightSource { font-size: 10px; color: rgba(255,255,255,0.35); text-align: right; margin-top: 12px; font-style: italic; }
-      @keyframes e14DotPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+      /* Dividers now use the shared .deskDivider styles from desk-insight.css.
+         .e14Divider / .e14DividerText still apply for any page-specific rules.
+         The old .e14InsightPopup / .e14ExplainBtn / .e14InsightSection /
+         .e14InsightDot / @keyframes e14DotPulse CSS was removed — all handled
+         by static/desk-insight.css now.                                      */
 
       .e14Outcomes {
         display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
@@ -496,50 +435,50 @@
 
       <div class="results hidden" id="results">
 
-        <div class="e14Divider" data-explain="entry_state"><span class="e14DividerText">Entry State</span></div>
+        <div class="deskDivider e14Divider" data-insight="entry_state"><span class="deskDividerText e14DividerText">Entry State</span></div>
         <div id="entryCards" class="e14Grid"></div>
 
-        <div class="e14Divider" id="regimeMatchDivider" data-explain="regime_match" style="display:none;"><span class="e14DividerText">Regime Match Quality</span></div>
+        <div class="deskDivider e14Divider" id="regimeMatchDivider" data-insight="regime_match" style="display:none;"><span class="deskDividerText e14DividerText">Regime Match Quality</span></div>
         <div id="regimeMatchPanel" class="e14Grid" style="display:none;"></div>
 
-        <div class="e14Divider" data-explain="outcome_distribution">
-          <span class="e14DividerText">
+        <div class="deskDivider e14Divider" data-insight="outcome_distribution">
+          <span class="deskDividerText e14DividerText">
             Outcome Distribution
             <span id="fillModelBadge" class="muted" style="margin-left:8px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;display:none;"></span>
           </span>
         </div>
         <div id="outcomePanel" class="e14Outcomes"></div>
 
-        <div class="e14Divider" id="midDividerLabel" data-explain="outcome_mid" style="display:none;">
-          <span class="e14DividerText">
+        <div class="deskDivider e14Divider" id="midDividerLabel" data-insight="outcome_mid" style="display:none;">
+          <span class="deskDividerText e14DividerText">
             Legacy Mid-Fill Distribution
             <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;margin-left:6px;">(for calibration — shows what the numbers looked like before NBBO fills)</span>
           </span>
         </div>
         <div id="outcomePanelMid" class="e14Outcomes" style="display:none;"></div>
 
-        <div class="e14Divider" id="adjustedDividerLabel" data-explain="outcome_adjusted" style="display:none;"><span class="e14DividerText">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after Phase 2 conditioning)</span></span></div>
+        <div class="deskDivider e14Divider" id="adjustedDividerLabel" data-insight="outcome_adjusted" style="display:none;"><span class="deskDividerText e14DividerText">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after Phase 2 conditioning)</span></span></div>
         <div id="conditioningSummary" class="e14ConditioningSummary" style="display:none;"></div>
         <div id="adjustedOutcomePanel" class="e14Outcomes" style="display:none;"></div>
 
-        <div class="e14Divider" id="modifiersDividerLabel" data-explain="modifiers" style="display:none;"><span class="e14DividerText">Conditioning Modifiers</span></div>
+        <div class="deskDivider e14Divider" id="modifiersDividerLabel" data-insight="modifiers" style="display:none;"><span class="deskDividerText e14DividerText">Conditioning Modifiers</span></div>
         <div id="modifiersPanel" class="e14Grid" style="display:none;"></div>
 
-        <div class="e14Divider" data-explain="mtm_timeline"><span class="e14DividerText">MTM Timeline (P10 / P50 / P90)</span></div>
+        <div class="deskDivider e14Divider" data-insight="mtm_timeline"><span class="deskDividerText e14DividerText">MTM Timeline (P10 / P50 / P90)</span></div>
         <div class="e14ChartWrap">
           <canvas id="mtmChart" height="260"></canvas>
         </div>
 
-        <div class="e14Divider" id="sizingDivider" data-explain="position_sizing" style="display:none;"><span class="e14DividerText">Position Sizing</span></div>
+        <div class="deskDivider e14Divider" id="sizingDivider" data-insight="position_sizing" style="display:none;"><span class="deskDividerText e14DividerText">Position Sizing</span></div>
         <div id="sizingPanel" class="e14Grid" style="display:none;"></div>
 
-        <div class="e14Divider" id="greeksDivider" data-explain="greeks_attribution" style="display:none;"><span class="e14DividerText">P&amp;L Attribution (Greeks)</span></div>
+        <div class="deskDivider e14Divider" id="greeksDivider" data-insight="greeks_attribution" style="display:none;"><span class="deskDividerText e14DividerText">P&amp;L Attribution (Greeks)</span></div>
         <div id="greeksPanel" style="display:none;"></div>
 
-        <div class="e14Divider" data-explain="exit_optimization"><span class="e14DividerText">Exit-Rule Optimization</span></div>
+        <div class="deskDivider e14Divider" data-insight="exit_optimization"><span class="deskDividerText e14DividerText">Exit-Rule Optimization</span></div>
         <div id="exitPanel"></div>
 
-        <div class="e14Divider" id="sliderDividerLabel" data-explain="exit_sensitivity" style="display:none;"><span class="e14DividerText">Exit-Rule Sensitivity</span></div>
+        <div class="deskDivider e14Divider" id="sliderDividerLabel" data-insight="exit_sensitivity" style="display:none;"><span class="deskDividerText e14DividerText">Exit-Rule Sensitivity</span></div>
         <div id="sliderPanel" class="e14ExitCard" style="display:none;">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <div>
@@ -558,13 +497,13 @@
           </div>
         </div>
 
-        <div class="e14Divider" data-explain="conditioning_notes"><span class="e14DividerText">Conditioning Notes</span></div>
+        <div class="deskDivider e14Divider" data-insight="conditioning_notes"><span class="deskDividerText e14DividerText">Conditioning Notes</span></div>
         <div id="notesList" class="e14NoteList"></div>
 
-        <div class="e14Divider" data-explain="matched_analogues"><span class="e14DividerText">Matched Analogues</span></div>
+        <div class="deskDivider e14Divider" data-insight="matched_analogues"><span class="deskDividerText e14DividerText">Matched Analogues</span></div>
         <div id="analoguesTableWrap"></div>
 
-        <div class="e14Divider" data-explain="actions"><span class="e14DividerText">Actions</span></div>
+        <div class="deskDivider e14Divider" data-insight="actions"><span class="deskDividerText e14DividerText">Actions</span></div>
         <div class="e14ExitCard">
           <div style="display:flex;gap:10px;flex-wrap:wrap;">
             <button type="button" id="journalBtn" class="primaryButton">Save to Trade Log</button>
@@ -573,7 +512,7 @@
           <div id="actionStatus" class="e14ExitDelta" style="margin-top:10px;">&nbsp;</div>
         </div>
 
-        <div class="e14Divider" data-explain="post_trade_review"><span class="e14DividerText">Post-Trade Review</span></div>
+        <div class="deskDivider e14Divider" data-insight="post_trade_review"><span class="deskDividerText e14DividerText">Post-Trade Review</span></div>
         <div class="e14ExitCard">
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
             <label class="controlLabel" for="reviewTradeId" style="margin:0;">Trade ID</label>
@@ -586,22 +525,11 @@
       </div>
     </main>
 
-    <div class="e14InsightPopup" id="e14InsightPopup" role="dialog" aria-labelledby="e14InsightTitle">
-      <div class="e14InsightHeader" id="e14InsightHeader">
-        <span class="e14InsightTitle" id="e14InsightTitle">Desk Insight</span>
-        <button class="e14InsightClose" id="e14InsightClose" type="button" aria-label="Close">&times;</button>
-      </div>
-      <div class="e14InsightBody" id="e14InsightBody">
-        <div class="e14InsightLoading">
-          <span class="e14InsightDot"></span><span class="e14InsightDot"></span><span class="e14InsightDot"></span>
-          <br>Generating desk insight…
-        </div>
-      </div>
-    </div>
-
+    <link rel="stylesheet" href="/static/desk-insight.css?v=1" />
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
     <script src="/static/raven-chat.js?v=3"></script>
-    <script src="/static/ic-scenario.js?v=13"></script>
+    <script src="/static/desk-insight.js?v=1"></script>
+    <script src="/static/ic-scenario.js?v=14"></script>
   </body>
 </html>
