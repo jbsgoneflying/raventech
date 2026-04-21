@@ -4440,13 +4440,24 @@ document.addEventListener("DOMContentLoaded", () => {
   const submitBtn = $("submit");
   const sourceChip = $("e1EventSourceChip");
 
+  // Human-friendly labels for each source class.
+  const _SOURCE_LABELS = {
+    user_override:    "Override",
+    orats_cores:      "ORATS",
+    benzinga:         "Benzinga",
+    cadence_estimate: "Estimated",
+    unknown:          "",
+  };
+
   function setSourceChip(source) {
     if (!sourceChip) return;
     const s = String(source || "unknown").toLowerCase();
     sourceChip.className = `e1SourceChip e1SourceChip--${s}`;
-    sourceChip.setAttribute("data-source", s.replace(/_/g, " "));
-    sourceChip.textContent = s.replace(/_/g, " ");
-    sourceChip.title = `Earnings-date source: ${s}`;
+    const label = _SOURCE_LABELS[s] ?? s.replace(/_/g, " ");
+    sourceChip.textContent = label;
+    sourceChip.title = label
+      ? `Earnings-date source: ${label.toLowerCase()}`
+      : "";
   }
   setSourceChip("unknown");
 

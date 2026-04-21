@@ -5,22 +5,24 @@
 /* ----- Form: required earnings-date + timing ---------------- */
 
 .e1ReqEventGroup {
-  min-width: 280px;
+  min-width: 0;
 }
 
 .e1EventRow {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .e1EventRow .controlInput[type="date"] {
-  max-width: 160px;
+  width: 150px;
+  flex: 0 0 auto;
 }
 
 .e1EventRow .controlSelect {
-  min-width: 180px;
+  width: 210px;
+  flex: 0 0 auto;
 }
 
 .e1Req {
@@ -34,46 +36,59 @@
 .e1SourceChip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 5px;
+  padding: 4px 10px;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.35px;
   text-transform: uppercase;
   line-height: 1;
   color: var(--text-muted, #9aa0a6);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   white-space: nowrap;
+  flex: 0 0 auto;
+  height: 22px;
+  align-self: center;
+}
+
+.e1SourceChip:empty {
+  display: none;
 }
 
 .e1SourceChip::before {
-  content: attr(data-source);
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+  opacity: 0.85;
 }
 
 .e1SourceChip--user_override {
-  color: #3cd4a9;
-  border-color: rgba(60, 212, 169, 0.35);
-  background: rgba(60, 212, 169, 0.08);
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.35);
+  background: rgba(22, 163, 74, 0.08);
 }
 
 .e1SourceChip--orats_cores {
-  color: #7db6ff;
-  border-color: rgba(125, 182, 255, 0.35);
-  background: rgba(125, 182, 255, 0.08);
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.08);
 }
 
 .e1SourceChip--benzinga {
-  color: #f3a847;
-  border-color: rgba(243, 168, 71, 0.35);
-  background: rgba(243, 168, 71, 0.08);
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.35);
+  background: rgba(217, 119, 6, 0.08);
 }
 
 .e1SourceChip--cadence_estimate {
-  color: #c77dff;
-  border-color: rgba(199, 125, 255, 0.35);
-  background: rgba(199, 125, 255, 0.08);
+  color: #9333ea;
+  border-color: rgba(147, 51, 234, 0.35);
+  background: rgba(147, 51, 234, 0.08);
 }
 
 .e1SourceChip--unknown {
