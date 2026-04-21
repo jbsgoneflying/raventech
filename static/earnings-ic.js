@@ -339,6 +339,7 @@
     try {
       const data = await postJson('/api/earnings-ic/scenario', body);
       state.scenario = data;
+      _explainCache = Object.create(null);
       renderScenario(data);
       setStatus('runStatus', 'Done.');
       show('results');
@@ -580,7 +581,20 @@
     if (state.mtmChart) { state.mtmChart.destroy(); state.mtmChart = null; }
     if (!timeline.length || typeof Chart === 'undefined') return;
     const ctx = $('mtmChart').getContext('2d');
-    const labels = timeline.map(p => `D${p.day}`);
+    // Backend (_build_mtm_timeline) emits rows sorted entry→expiry with a
+    // `dte` field (days-to-expiry). Convert to "business day since entry"
+    // for the desk-friendly axis. Fallbacks: explicit `day`, then index.
+    const maxDte = (() => {
+      for (const p of timeline) {
+        if (Number.isFinite(p && p.dte)) return Number(p.dte);
+      }
+      return null;
+    })();
+    const labels = timeline.map((p, i) => {
+      if (p && Number.isFinite(p.day)) return `D${p.day}`;
+      if (maxDte !== null && Number.isFinite(p && p.dte)) return `D${maxDte - Number(p.dte)}`;
+      return `D${i}`;
+    });
     const p10 = timeline.map(p => p.p10);
     const p50 = timeline.map(p => p.p50);
     const p90 = timeline.map(p => p.p90);
