@@ -50,6 +50,57 @@ from backend.technicals import fetch_live_price_context_optional
 router = APIRouter()
 
 
+# ---------------------------------------------------------------------------
+# Shared regime resolver (v2)
+# ---------------------------------------------------------------------------
+
+def _current_regime_for_tracker(*, store: Any, flags: Any) -> tuple:
+    """Return ``(current_regime, current_vol, source)`` for the tracker.
+
+    v2: prefers MI v2's ``regime_snapshot()`` (same source the /api/spx-ic
+    scan uses), so a trade opened + tracked back-to-back sees the same
+    regime label. Falls back to the legacy Engine 5 snapshot when MI v2
+    is disabled or not yet calibrated, so desks that haven't migrated
+    to MI v2 keep working.
+    """
+    current_regime: Optional[Dict[str, Any]] = None
+    current_vol: Optional[str] = None
+
+    if bool(getattr(flags, "ENABLE_MI_V2", False)):
+        try:
+            from backend.market_intel import regime_snapshot as _mi_snap
+            _mi = _mi_snap()
+            if _mi is not None:
+                _label = str(getattr(_mi, "label", "") or "") or None
+                _probs = getattr(_mi, "probabilities", None) or {}
+                try:
+                    _score = float(_probs.get(_label) or 0.0) * 100.0 if _label else None
+                except Exception:
+                    _score = None
+                current_regime = {"score": _score, "bucket": _label, "source": "mi_v2"}
+                current_vol = getattr(_mi, "vol_state", None) or None
+                return current_regime, current_vol, "mi_v2"
+        except Exception:
+            pass
+
+    try:
+        from backend.engine5_snapshot import select_best_snapshot
+        e5 = select_best_snapshot(
+            store,
+            max_age_days=getattr(flags, "ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS", 7),
+            snapshot_ttl=getattr(flags, "ENGINE5_SNAPSHOT_TTL_S", 86400),
+        )
+        if e5:
+            rdata = e5.get("data", {}).get("regime", {})
+            current_regime = {"score": rdata.get("score"), "bucket": rdata.get("label"), "source": "engine5"}
+            current_vol = rdata.get("vol_pressure_state")
+            return current_regime, current_vol, "engine5"
+    except Exception:
+        pass
+
+    return current_regime, current_vol, "unavailable"
+
+
 @router.get("/api/spx-ic")
 def spx_ic(
     underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),
@@ -112,19 +163,30 @@ def spx_ic(
             seasonality_mode=seasonality_mode,
         )
 
-        payload["schemaVersion"] = 2
+        payload["schemaVersion"] = 3
         payload["updatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
 
-        weeks_obj = payload.get("weeks") if isinstance(payload.get("weeks"), dict) else None
-        if weeks_obj is not None:
-            all_rows = weeks_obj.get("rows") if isinstance(weeks_obj.get("rows"), list) else []
+        # v2: paginate the flat `weeks` list emitted by the engine. The
+        # previous implementation targeted `payload["weeks"]` as a dict
+        # with a `.rows` child, which the engine never produced — the
+        # pagination block was dead.
+        weeks_list = payload.get("weeks") if isinstance(payload.get("weeks"), list) else None
+        if weeks_list is not None:
+            total = len(weeks_list)
             if weeks_limit <= 0:
-                weeks_obj["rows"] = []
-                weeks_obj["page"] = {"offset": int(weeks_offset), "limit": 0, "returned": 0, "total": int(weeks_obj.get("count") or len(all_rows))}
+                payload["weeks"] = []
+                payload["weeksPage"] = {
+                    "offset": int(weeks_offset), "limit": 0, "returned": 0, "total": total,
+                }
             else:
-                sl = all_rows[int(weeks_offset) : int(weeks_offset) + int(weeks_limit)]
-                weeks_obj["rows"] = sl
-                weeks_obj["page"] = {"offset": int(weeks_offset), "limit": int(weeks_limit), "returned": len(sl), "total": int(weeks_obj.get("count") or len(all_rows))}
+                sl = weeks_list[int(weeks_offset): int(weeks_offset) + int(weeks_limit)]
+                payload["weeks"] = sl
+                payload["weeksPage"] = {
+                    "offset": int(weeks_offset),
+                    "limit":  int(weeks_limit),
+                    "returned": len(sl),
+                    "total":  total,
+                }
 
         grid_obj = payload.get("riskGrid") if isinstance(payload.get("riskGrid"), dict) else None
         if grid_obj is not None:
@@ -147,6 +209,278 @@ def spx_ic(
     except Exception as e:
         LOG.exception("Unhandled failure (spx-ic)")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ---------------------------------------------------------------------------
+# v2: Wing Decision Console + exact-slider scoring
+# ---------------------------------------------------------------------------
+
+def _build_e2_command_deck_payload(
+    *,
+    underlying: str,
+    entry_day:  str,
+    seasonality_mode: str,
+    flags:      Any,
+    weights:    Any,
+) -> Dict[str, Any]:
+    """Compute the full Command Deck (scan -> MAE -> MC -> scored grid)."""
+    from backend.engine2 import (
+        build_wing_console,
+        compute_mae_distribution,
+        run_weekly_mc,
+    )
+
+    # --- Run the SPX IC engine (shares the scan cache when market closed).
+    scan_payload = compute_engine2_spx_ic(
+        client=get_client(),
+        benzinga_client=get_benzinga_client_optional(),
+        flags=flags,
+        underlying_preference=str(underlying or "SPX").upper(),
+        entry_day=str(entry_day or "mon").lower(),
+        seasonality_mode=str(seasonality_mode or "none").lower(),
+    )
+
+    # --- MAE distribution from the flat `weeks` list + cached OHLC.
+    weekly_pool: List[Dict[str, Any]] = list(scan_payload.get("weeks") or [])
+
+    mae_windows = [
+        {
+            "entry_date":  w.get("entryDate"),
+            "expiry_date": w.get("expiryDate"),
+            "entry_close": w.get("entryPx"),
+        }
+        for w in weekly_pool if w.get("entryDate") and w.get("expiryDate") and w.get("entryPx")
+    ]
+    # Build a bars_by_date map from the engine payload's OHLC cache. The engine
+    # already carries `ohlcByDate` when the new v2 scan runs; fall back to an
+    # empty dict when older snapshots land (MAE aggregator returns n=0 cleanly).
+    bars_by_date: Dict[str, Any] = {}
+    for key in ("ohlcByDate", "ohlc", "bars_by_date"):
+        candidate = scan_payload.get(key)
+        if isinstance(candidate, dict):
+            bars_by_date = candidate
+            break
+    mae_dist = compute_mae_distribution(windows=mae_windows, bars_by_date=bars_by_date)
+
+    # --- MC placements (mirror the wing-console grid).
+    from backend.engine2.wing_console import _parse_grid_floats
+    em_mults = _parse_grid_floats(getattr(flags, "E2_WING_EM_MULTS", None), fallback=[1.0, 1.25, 1.5, 2.0])
+    wing_pts = _parse_grid_floats(getattr(flags, "E2_WING_PTS", None),      fallback=[5.0, 10.0, 15.0])
+
+    current = (scan_payload.get("current") or {}).get("regime") or {}
+    regime_bucket_now = current.get("bucket") or current.get("label")
+    macro = scan_payload.get("macro") or {}
+    macro_bucket_now = (
+        (scan_payload.get("current") or {}).get("macro", {}) or {}
+    ).get("bucket") or macro.get("bucket")
+
+    expected_move = scan_payload.get("expectedMove") or {}
+    spot = (
+        float((scan_payload.get("current") or {}).get("stockPrice") or 0.0)
+        or float(expected_move.get("smartSpotPrice") or 0.0)
+        or float(expected_move.get("spotPrice") or 0.0)
+    )
+    em_pct_today = float(
+        expected_move.get("expectedMovePct")
+        or expected_move.get("oratsExpectedMovePct")
+        or 0.0
+    )
+    hold_days = int(expected_move.get("dte") or 5) or 5
+    as_of_date = str(scan_payload.get("asOfDate") or "")[:10]
+
+    mc_result = None
+    if bool(getattr(flags, "ENABLE_E2_MC", True)) and spot > 0 and em_pct_today > 0 and weekly_pool:
+        placement_pairs = [(float(em), float(wp)) for em in em_mults for wp in wing_pts]
+        mc_result = run_weekly_mc(
+            ticker=str(underlying).upper(),
+            as_of_date=as_of_date,
+            spot=spot, em_pct=em_pct_today, hold_days=hold_days,
+            weekly_pool=weekly_pool,
+            placements=placement_pairs,
+            n_sims=int(getattr(flags, "E2_MC_N_SIMS", 5000)),
+            min_pool=int(getattr(flags, "E2_MC_MIN_POOL", 20)),
+            seed=int(getattr(flags, "E2_MC_SEED", 1337)),
+            condition_on_regime=bool(getattr(flags, "E2_MC_CONDITION_ON_REGIME", True)),
+            condition_on_macro=bool(getattr(flags, "E2_MC_CONDITION_ON_MACRO", True)),
+            want_regime_bucket=regime_bucket_now,
+            want_macro_bucket=macro_bucket_now,
+            gbm_fallback=bool(getattr(flags, "E2_MC_GBM_FALLBACK", True)),
+            flags_fp=tuple(flags.cache_fingerprint() or ()),
+        )
+
+    console = build_wing_console(
+        underlying=str(underlying).upper(),
+        entry_day=str(entry_day).lower(),
+        as_of_date=as_of_date,
+        spx_payload=scan_payload,
+        mae=mae_dist,
+        mc_result=mc_result,
+        weights=weights,
+        em_mults=em_mults,
+        wing_pts=wing_pts,
+        flags=flags,
+    )
+
+    return {
+        "schemaVersion": 1,
+        "wingConsole":   console.to_dict(),
+        "mcResults":     (mc_result.to_dict() if mc_result else {}),
+        "maeDistribution": mae_dist.to_dict(),
+        "regime":        {"mi_v2": scan_payload.get("current", {}).get("regimeMiV2")},
+        "scan":          {
+            "expectedMove":  scan_payload.get("expectedMove"),
+            "oddsLikeNow":   scan_payload.get("oddsLikeNow"),
+            "underlying":    scan_payload.get("underlying"),
+            "current":       scan_payload.get("current"),
+            "asOfDate":      as_of_date,
+        },
+    }
+
+
+@router.post("/api/spx-ic/wing-console")
+def spx_ic_wing_console(body: Dict[str, Any] = Body(default_factory=dict)):
+    """v2: ranked placement grid + MC + MAE + MI v2 regime overlay.
+
+    Request body:
+    ```
+    {
+      "underlying":      "SPX" | "SPY" | "QQQ",
+      "entry_day":       "mon" | "tue" | "wed",
+      "seasonality_mode": "none" | "quarter" | "month" | "summer" | "opex",
+      "weights":         {"close": 0.25, "touch": 0.2, ...}        # optional
+    }
+    ```
+    """
+    f = get_flags()
+    if not bool(getattr(f, "ENABLE_E2_V2", False)):
+        raise HTTPException(status_code=404, detail="Engine 2 v2 disabled (ENABLE_E2_V2=0).")
+    if not f.ENABLE_ENGINE2_SPX_IC:
+        raise HTTPException(status_code=404, detail="Engine 2 disabled (ENABLE_ENGINE2_SPX_IC=0).")
+
+    underlying = str(body.get("underlying") or "SPX").strip().upper()
+    if underlying not in ("SPX", "SPY", "QQQ"):
+        raise HTTPException(status_code=400, detail="underlying must be SPX|SPY|QQQ")
+    entry_day = str(body.get("entry_day") or "mon").strip().lower()
+    if entry_day not in ("mon", "tue", "wed", "monday", "tuesday", "wednesday"):
+        raise HTTPException(status_code=400, detail="entry_day must be mon|tue|wed")
+    seasonality = str(body.get("seasonality_mode") or body.get("seasonalityMode") or "none").strip().lower()
+
+    # Weight overrides — merge into default flag-derived weights.
+    from backend.engine2 import WingConsoleWeights
+    weights = WingConsoleWeights.from_flags(f)
+    wopts = body.get("weights") or {}
+    if isinstance(wopts, dict):
+        for k_, v_ in wopts.items():
+            if hasattr(weights, k_):
+                try:
+                    setattr(weights, k_, float(v_))
+                except Exception:
+                    pass
+
+    try:
+        payload = _build_e2_command_deck_payload(
+            underlying=underlying,
+            entry_day=entry_day,
+            seasonality_mode=seasonality,
+            flags=f,
+            weights=weights,
+        )
+    except OratsError as e:
+        LOG.exception("ORATS failure (spx-ic wing-console)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("spx-ic wing-console failed")
+        raise HTTPException(status_code=500, detail=f"Wing Console failed: {type(e).__name__}: {e}") from e
+
+    payload["updatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+    payload["weightsUsed"] = weights.as_dict()
+    return payload
+
+
+@router.post("/api/spx-ic/wing-console/score-placement")
+def spx_ic_wing_console_score_placement(body: Dict[str, Any] = Body(...)):
+    """v2: exact score for an arbitrary (em_mult, wing_pts) point.
+
+    Used by the Command Deck slider. Requires a cached :class:`ScoringContext`
+    from a recent /api/spx-ic/wing-console call for the same
+    (underlying, entry_day, as_of_date); cold-start path rebuilds the
+    context by running the full Wing Console once.
+    """
+    f = get_flags()
+    if not bool(getattr(f, "ENABLE_E2_V2", False)):
+        raise HTTPException(status_code=404, detail="Engine 2 v2 disabled (ENABLE_E2_V2=0).")
+    if not f.ENABLE_ENGINE2_SPX_IC:
+        raise HTTPException(status_code=404, detail="Engine 2 disabled (ENABLE_ENGINE2_SPX_IC=0).")
+
+    underlying = str(body.get("underlying") or "SPX").strip().upper()
+    entry_day = str(body.get("entry_day") or "mon").strip().lower()
+    as_of_date = str(body.get("as_of_date") or "")[:10] or None
+    try:
+        em_mult = float(body.get("em_mult"))
+        wing_pts = float(body.get("wing_pts"))
+    except (TypeError, ValueError) as _e:
+        raise HTTPException(status_code=400, detail="em_mult and wing_pts must be numeric") from _e
+    if not (0.25 <= em_mult <= 3.0):
+        raise HTTPException(status_code=400, detail="em_mult out of range [0.25, 3.0]")
+    if not (0.5 <= wing_pts <= 100.0):
+        raise HTTPException(status_code=400, detail="wing_pts out of range [0.5, 100.0]")
+
+    from backend.engine2 import (
+        WingConsoleWeights, get_scoring_context, score_single_placement,
+    )
+
+    weights = WingConsoleWeights.from_flags(f)
+    wopts = body.get("weights") or {}
+    if isinstance(wopts, dict):
+        for k_, v_ in wopts.items():
+            if hasattr(weights, k_):
+                try:
+                    setattr(weights, k_, float(v_))
+                except Exception:
+                    pass
+
+    refresh = bool(body.get("refresh"))
+    ctx = None if refresh else get_scoring_context(underlying, entry_day, as_of_date or "")
+    source = "cached_context"
+
+    if ctx is None:
+        # Cold start: build the full Command Deck once; it publishes the context.
+        try:
+            _build_e2_command_deck_payload(
+                underlying=underlying, entry_day=entry_day,
+                seasonality_mode=str(body.get("seasonality_mode") or "none"),
+                flags=f, weights=weights,
+            )
+            ctx = get_scoring_context(underlying, entry_day, as_of_date or "")
+            # In cold start the as_of_date was unknown to the caller;
+            # fall back to the most recent ctx by re-querying with
+            # today's ISO if provided.
+            if ctx is None and not as_of_date:
+                today_iso = dt.date.today().isoformat()
+                ctx = get_scoring_context(underlying, entry_day, today_iso)
+            source = "rebuilt_context"
+        except OratsError as _oe:
+            LOG.exception("ORATS failure (score-placement cold start)")
+            raise HTTPException(status_code=502, detail=str(_oe)) from _oe
+        except Exception as _e:
+            LOG.exception("score-placement cold start failed")
+            raise HTTPException(status_code=500, detail=f"Cold start failed: {type(_e).__name__}: {_e}") from _e
+
+    if ctx is None:
+        raise HTTPException(status_code=500, detail="Unable to build SPX scoring context.")
+
+    placement = score_single_placement(
+        context=ctx, em_mult=em_mult, wing_pts=wing_pts,
+        weights_override=weights,
+    )
+    return {
+        "underlying":    underlying,
+        "entry_day":     entry_day,
+        "as_of_date":    ctx.as_of_date,
+        "placement":     placement.to_dict(),
+        "context_source": source,
+        "weights_used":  weights.as_dict(),
+    }
 
 
 def _build_levels_response(
@@ -446,18 +780,7 @@ def spx_ic_trades_list():
     px_ctx = fetch_live_price_context_optional(client=get_client(), ticker="SPX")
     current_spot = float(px_ctx.get("price", 0)) if px_ctx else 0.0
 
-    current_regime = None
-    current_vol = None
-    try:
-        from backend.engine5_snapshot import select_best_snapshot
-        e5 = select_best_snapshot(store, max_age_days=f.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
-                                  snapshot_ttl=f.ENGINE5_SNAPSHOT_TTL_S)
-        if e5:
-            rdata = e5.get("data", {}).get("regime", {})
-            current_regime = {"score": rdata.get("score"), "bucket": rdata.get("label")}
-            current_vol = rdata.get("vol_pressure_state")
-    except Exception:
-        pass
+    current_regime, current_vol, _regime_source = _current_regime_for_tracker(store=store, flags=f)
 
     enriched = []
     for t in trades:
@@ -498,18 +821,7 @@ def spx_ic_trade_checkin(trade_id: str, body: Dict[str, Any] = Body(default={}))
     if current_spot <= 0:
         raise HTTPException(status_code=502, detail="Could not fetch current spot price")
 
-    current_regime = None
-    current_vol = None
-    try:
-        from backend.engine5_snapshot import select_best_snapshot
-        e5 = select_best_snapshot(store, max_age_days=f.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
-                                  snapshot_ttl=f.ENGINE5_SNAPSHOT_TTL_S)
-        if e5:
-            rdata = e5.get("data", {}).get("regime", {})
-            current_regime = {"score": rdata.get("score"), "bucket": rdata.get("label")}
-            current_vol = rdata.get("vol_pressure_state")
-    except Exception:
-        pass
+    current_regime, current_vol, _regime_source = _current_regime_for_tracker(store=store, flags=f)
 
     tracking = compute_trade_tracking(
         trade=trade,
@@ -589,15 +901,13 @@ def spx_ic_trade_close(trade_id: str, body: Dict[str, Any] = Body(default={})):
         except Exception:
             pass
     if "regimeAtExit" not in body:
-        try:
-            from backend.engine5_snapshot import select_best_snapshot
-            e5 = select_best_snapshot(store, max_age_days=f.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
-                                      snapshot_ttl=f.ENGINE5_SNAPSHOT_TTL_S)
-            if e5:
-                rdata = e5.get("data", {}).get("regime", {})
-                body["regimeAtExit"] = {"label": rdata.get("label"), "score": rdata.get("score")}
-        except Exception:
-            pass
+        _r_at_exit, _, _src = _current_regime_for_tracker(store=store, flags=f)
+        if _r_at_exit:
+            body["regimeAtExit"] = {
+                "label":  _r_at_exit.get("bucket"),
+                "score":  _r_at_exit.get("score"),
+                "source": _src,
+            }
 
     trade = close_trade(trade_id, close_data=body, store=store, flags=f)
     if trade is None:

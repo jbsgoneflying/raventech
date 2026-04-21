@@ -237,12 +237,32 @@ def compute_engine2_spx_ic(
     def add_count(name: str, delta: int = 1) -> None:
         telemetry["counts"][name] = int(telemetry["counts"].get(name, 0)) + int(delta)
 
-    # Desk-locked config (Engine 2): simplify to the weekly IC workflow you trade.
-    # - 2y lookback (~104 weekly observations per entry weekday)
-    # - widths fixed to 1.0/1.5/2.0 × EM (short distance)
+    # v2: desk defaults preserved, but `years` / `widths` query params are
+    # now respected when provided (previously silently overwritten to 2y
+    # + [1.0, 1.5, 2.0]).  Defaults still give today's scan the same
+    # shape so the desk's muscle memory stays intact.
+    #
+    # - 2y lookback (~104 weekly observations per entry weekday) — default
+    # - widths 1.0/1.5/2.0 × EM (short distance)                  — default
     # - wings: $5 only (legacy) or multi-width when ENGINE2_MULTI_WING is enabled
-    yrs = 2
-    widths_use = [1.0, 1.5, 2.0]
+    try:
+        yrs_req = int(years) if years is not None else 0
+    except Exception:
+        yrs_req = 0
+    yrs = yrs_req if (yrs_req and 1 <= yrs_req <= 10) else 2
+    widths_use: List[float] = [1.0, 1.5, 2.0]
+    if widths:
+        try:
+            # Accept list[float] (native call-site) or comma-separated str.
+            if isinstance(widths, (list, tuple)):
+                _parsed = [float(x) for x in widths]
+            else:
+                _parsed = [float(x.strip()) for x in str(widths).split(",") if x.strip()]
+            _parsed = [w for w in _parsed if 0.1 <= w <= 5.0]
+            if _parsed:
+                widths_use = sorted(set(_parsed))
+        except Exception:
+            widths_use = [1.0, 1.5, 2.0]
     em_mults = list(widths_use)
     if flags.ENGINE2_MULTI_WING:
         _raw_wp = [p.strip() for p in str(flags.ENGINE2_WING_WIDTH_PTS).split(",") if p.strip()]
@@ -1808,7 +1828,63 @@ def compute_engine2_spx_ic(
         int(telemetry["counts"].get("orats.cores_rows", 0)),
     )
 
-    return {
+    # v2: overlay MI v2 regime probabilities so the Command Deck + the
+    # tracker share a single source of truth. Best effort; graceful
+    # fallback when MI v2 is disabled or not yet calibrated. Mirrors the
+    # earnings_logic pattern at backend/earnings_logic.py:1735-1753.
+    regime_mi_v2: Optional[Dict[str, Any]] = None
+    try:
+        if bool(getattr(flags, "ENABLE_MI_V2", False)):
+            from backend.market_intel import regime_snapshot as _mi_regime_snapshot
+            _mi = _mi_regime_snapshot()
+            if _mi is not None:
+                _label = str(getattr(_mi, "label", "") or "") or None
+                _probs = getattr(_mi, "probabilities", None) or {}
+                regime_mi_v2 = {
+                    "label":         _label,
+                    "probabilities": dict(_probs) if isinstance(_probs, dict) else {},
+                    "vol_state":     getattr(_mi, "vol_state", None),
+                    "source":        getattr(_mi, "source", "v2_hmm"),
+                }
+    except Exception as _mi_err:
+        LOG.debug("engine2: MI v2 overlay skipped: %s", _mi_err)
+
+    # v2: expose the weekly pool for Monte Carlo consumers. Each row
+    # carries the signed close-to-close return + the bucket tags the
+    # MC conditioning uses. daily_returns populated when we have per-day
+    # bars on the hold window (used by the bootstrap path sampler).
+    weeks_out: List[Dict[str, Any]] = []
+    for r in week_rows:
+        ed_h  = r.get("entryDate") or r.get("entry_date") or r.get("weekStart")
+        xp_h  = r.get("expiryDate") or r.get("expiry_date") or r.get("weekEnd")
+        epx   = r.get("entryPx") or r.get("entry_close")
+        xpx   = r.get("expPx") or r.get("expiry_close") or r.get("exitPx")
+        sm    = r.get("signedMovePct") or r.get("signed_move_pct") or r.get("returnPct")
+        if sm is None and epx and xpx and float(epx) > 0:
+            try:
+                sm = (float(xpx) - float(epx)) / float(epx) * 100.0
+            except Exception:
+                sm = None
+        row = {
+            "entryDate":      ed_h,
+            "expiryDate":     xp_h,
+            "entryPx":        epx,
+            "expiryPx":       xpx,
+            "signedMovePct":  (None if sm is None else round(float(sm), 4)),
+            "regimeBucket":   r.get("bucket") or r.get("regimeBucket"),
+            "macroBucket":    r.get("mb") or r.get("macroBucket"),
+            "season":         r.get("seasonality") or r.get("season"),
+            "em1sigmaPct":    r.get("em1sigmaPct"),
+            "dte":            r.get("dte"),
+        }
+        # Use mc_simulator-friendly keys so run_weekly_mc can bootstrap
+        # without a translation layer.
+        row["regime_bucket"] = row["regimeBucket"]
+        row["macro_bucket"] = row["macroBucket"]
+        row["signed_move_pct"] = row["signedMovePct"]
+        weeks_out.append(row)
+
+    out: Dict[str, Any] = {
         "enabled": bool(flags.ENABLE_ENGINE2_SPX_IC),
         "asOfDate": _fmt_date(now),
         "params": {
@@ -1822,7 +1898,21 @@ def compute_engine2_spx_ic(
             "multiWing": bool(flags.ENGINE2_MULTI_WING),
         },
         "underlying": {"symbol": underlying, "isProxy": bool(is_proxy), "notes": proxy_notes},
-        "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
+        # Preserve the engine's existing `current` keys (regime, macro, vwap)
+        # while stashing the MI v2 HMM reading under `current.regimeMiV2`.
+        "current": {
+            "regime": regime_now,
+            "macro": macro_now,
+            "vwap": vwap_level,
+            "regimeMiV2": regime_mi_v2,
+        },
+        # `regime` top-level mirrors `current.regime` + MI v2 for any
+        # consumer that treats regime as a first-class field (parity with
+        # /api/breach's `regime.mi_v2` shape).
+        "regime": {
+            **(regime_now or {}),
+            "mi_v2": regime_mi_v2,
+        },
         "liveContext": live_context,
         "expectedMove": expected_move,
         "strikeTargets": strike_targets,
@@ -1846,4 +1936,19 @@ def compute_engine2_spx_ic(
         "technicals": technicals,
         "telemetry": telemetry,
         "notes": proxy_notes,
+        # v2: historical weekly pool used by the Wing Console + MC.
+        "weeks": weeks_out,
     }
+
+    # v2: strip legacy desk-consensus verdict fields from the primary
+    # /api/spx-ic response when E2_EMIT_DESK_CONSENSUS is off. The advisor
+    # endpoint still re-computes them internally for the LLM prompt.
+    # `emPreference` is preserved regardless — it's a lean-toward ranking
+    # (not a TRADE/PASS verdict) and is useful even in Command Deck mode.
+    if bool(getattr(flags, "ENABLE_E2_V2", False)) and not bool(
+        getattr(flags, "E2_EMIT_DESK_CONSENSUS", False)
+    ):
+        out.pop("deskConsensus", None)
+        out.pop("recSimple", None)
+
+    return out

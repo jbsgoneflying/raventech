@@ -1813,22 +1813,33 @@ function render(payload) {
     }).join("");
   }
 
-  // Width comparison from scan payload (if multi-wing enabled)
-  var wc = payload?.widthComparison;
-  if (Array.isArray(wc) && wc.length > 1) {
+  // v2: advisor is always-on post-scan, not gated on multi-wing.
+  // Width-comparison panel still renders when the engine returns a
+  // multi-wing grid, but the button sits independently so the desk
+  // can narrate any scan.
+  try {
     var advisorSec = $("e2AdvisorSection");
     var advisorEl = $("e2AdvisorContent");
     if (advisorSec && advisorEl) {
       advisorSec.classList.remove("hidden");
-      advisorEl.innerHTML = '<div class="taPanel"><div class="taHeader"><div class="taHeaderRow">' +
+      advisorEl.innerHTML =
+        '<div class="taPanel"><div class="taHeader"><div class="taHeaderRow">' +
         '<span class="taHeaderTitle">AI Trade Advisor</span>' +
         '<span class="taHeaderActions"><button id="e2RunAdvisorBtn" class="primaryButton" type="button" style="font-size:11px;padding:6px 16px">Run Advisor</button></span>' +
+        '</div><div class="taMuted" style="font-size:12px;margin-top:4px">' +
+        'On-demand narrative layer over the Wing Decision Console + scan. One click = one LLM call.' +
         '</div></div></div>';
-      renderWidthComparison(wc);
+      var _wc = Array.isArray(payload?.widthComparison) ? payload.widthComparison : [];
+      if (_wc.length > 0 && typeof renderWidthComparison === "function") {
+        try { renderWidthComparison(_wc); } catch (_e) { /* ignore */ }
+      }
       var advBtn = $("e2RunAdvisorBtn");
       if (advBtn) advBtn.addEventListener("click", function () { _runAdvisor(); });
     }
-  }
+  } catch (_e) { console.warn("e2 advisor panel:", _e); }
+
+  // v2: Wing Decision Console + MI v2 + source chip + orphan drilldowns.
+  try { renderE2CommandDeck(payload); } catch (err) { console.warn("e2 command deck:", err); }
 
   // Load active trades
   _loadActiveTrades();
@@ -1840,14 +1851,395 @@ function render(payload) {
   }
 }
 
+// ==========================================================================
+// v2 Command Deck — Wing Console, MI v2 regime, source chip, orphan dividers
+// ==========================================================================
+
+const _E2CommandDeckState = {
+  underlying: "SPX",
+  entry_day: "mon",
+  as_of_date: "",
+  lastDeck: null,
+  selectedIndex: 0,
+};
+
+const _E2_SOURCE_LABELS = {
+  desk_default:  "Desk default",
+  user_override: "Override",
+  unknown:       "",
+};
+
+function _setE2SourceChip(source) {
+  const chip = document.getElementById("e2EventSourceChip");
+  if (!chip) return;
+  const s = String(source || "unknown").toLowerCase();
+  chip.className = `e1SourceChip e1SourceChip--${s === "user_override" ? "user_override" : (s === "desk_default" ? "orats_cores" : "unknown")}`;
+  const label = _E2_SOURCE_LABELS[s] ?? "";
+  chip.textContent = label;
+  chip.title = label ? `Entry-day source: ${label.toLowerCase()}` : "";
+}
+
+function _scoreColorE2(score) {
+  if (score >= 75) return "e2MetricGood";
+  if (score >= 55) return "e2MetricMed";
+  return "e2MetricRisky";
+}
+
+function _fmtPctE2(x, digits = 1) {
+  if (x === null || x === undefined) return "—";
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(digits)}%`;
+}
+
+function renderE2CommandDeck(payload) {
+  try { _renderMiV2Regime(payload); } catch (_e) { /* ignore */ }
+  try { _renderEntryState(payload); } catch (_e) { /* ignore */ }
+  try { _renderMacroProximity(payload); } catch (_e) { /* ignore */ }
+  // Wing Console is its own fetch — the scan payload doesn't carry it.
+  _fetchAndRenderWingConsole(payload);
+}
+
+function _renderMiV2Regime(payload) {
+  const body = document.getElementById("e2RegimeMiV2Body");
+  const sec  = document.getElementById("e2RegimeMiV2Section");
+  if (!body || !sec) return;
+  const r = (payload && payload.current && payload.current.regimeMiV2) || null;
+  if (!r) {
+    sec.classList.add("hidden");
+    body.innerHTML = "";
+    return;
+  }
+  sec.classList.remove("hidden");
+  const probs = r.probabilities || {};
+  const bars = Object.entries(probs).map(([label, p]) => {
+    const pct = Math.max(0, Math.min(1, Number(p) || 0));
+    return (
+      `<div class="e2RegimeMiV2">` +
+        `<span style="min-width:110px">${escapeHtml(String(label))}</span>` +
+        `<span class="e2RegimeMiV2Bar" style="width:${Math.max(24, Math.round(pct * 180))}px">` +
+          `<span class="e2RegimeMiV2Fill" style="width:${(pct * 100).toFixed(0)}%"></span>` +
+        `</span>` +
+        `<span>${(pct * 100).toFixed(1)}%</span>` +
+      `</div>`
+    );
+  }).join("");
+  body.innerHTML = (
+    `<div class="taPanel" style="padding:16px"><div class="taHeader" style="margin-bottom:8px"><div class="taHeaderRow">` +
+      `<span class="taHeaderTitle">${escapeHtml(String(r.label || "—"))} <span class="taMuted" style="font-size:11px">vol_state: ${escapeHtml(String(r.vol_state || "—"))} · source: ${escapeHtml(String(r.source || "—"))}</span></span>` +
+    `</div></div>` +
+    bars +
+    `</div>`
+  );
+}
+
+function _renderEntryState(payload) {
+  const body = document.getElementById("e2EntryStateBody");
+  const sec  = document.getElementById("e2EntryStateSection");
+  if (!body || !sec) return;
+  const em = (payload && payload.expectedMove) || {};
+  const current = (payload && payload.current) || {};
+  const regime = current.regime || {};
+  sec.classList.remove("hidden");
+  body.innerHTML = (
+    `<div class="e15Grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:8px">` +
+      `<div class="e15Card"><div class="e15CardLabel">Spot</div><div class="e15CardValue">${escapeHtml(String(current.stockPrice || em.smartSpotPrice || em.spotPrice || "—"))}</div></div>` +
+      `<div class="e15Card"><div class="e15CardLabel">1σ EM%</div><div class="e15CardValue">${_fmtPctE2(em.expectedMovePct || em.oratsExpectedMovePct, 2)}</div></div>` +
+      `<div class="e15Card"><div class="e15CardLabel">Expiry</div><div class="e15CardValue">${escapeHtml(String(em.expiry || "—"))}</div></div>` +
+      `<div class="e15Card"><div class="e15CardLabel">Regime (E2)</div><div class="e15CardValue">${escapeHtml(String(regime.label || regime.bucket || "—"))}</div></div>` +
+      `<div class="e15Card"><div class="e15CardLabel">DTE</div><div class="e15CardValue">${escapeHtml(String(em.dte || "—"))}</div></div>` +
+    `</div>`
+  );
+}
+
+function _renderMacroProximity(payload) {
+  const body = document.getElementById("e2MacroProximityBody");
+  const sec  = document.getElementById("e2MacroProximitySection");
+  if (!body || !sec) return;
+  const macro = (payload && payload.current && payload.current.macro) || (payload && payload.macro) || null;
+  if (!macro) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+  body.innerHTML = (
+    `<div class="taPanel" style="padding:12px 16px"><div class="taMuted" style="font-size:12px">` +
+    `Macro multiplier: <strong>${escapeHtml(String(macro.multiplier || "—"))}</strong> · bucket: <strong>${escapeHtml(String(macro.bucket || "—"))}</strong>` +
+    `</div></div>`
+  );
+}
+
+async function _fetchAndRenderWingConsole(payload) {
+  const section = document.getElementById("e2WingConsoleSection");
+  const host = document.getElementById("e2WingConsole");
+  if (!section || !host) return;
+  section.classList.remove("hidden");
+  host.innerHTML = `<div class="e2ConsoleWarnings">Scoring wing placements…</div>`;
+
+  const under = (document.querySelector(".underlyingToggle .isActive")?.id || "").replace("e2Underlying", "") || "SPX";
+  const entryDay = document.getElementById("entryDay")?.value || "mon";
+  const seasonality = document.getElementById("seasonalityMode")?.value || "none";
+
+  _E2CommandDeckState.underlying = String(under).toUpperCase();
+  _E2CommandDeckState.entry_day = String(entryDay).toLowerCase();
+  _E2CommandDeckState.as_of_date = (payload && payload.asOfDate) || "";
+
+  try {
+    const resp = await fetch("/api/spx-ic/wing-console", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        underlying: _E2CommandDeckState.underlying,
+        entry_day: _E2CommandDeckState.entry_day,
+        seasonality_mode: seasonality,
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`wing-console ${resp.status}: ${text}`);
+    }
+    const deck = await resp.json();
+    _E2CommandDeckState.lastDeck = deck;
+    _paintE2WingConsole(host, deck);
+    _renderMaeDistribution(deck);
+    _renderMcReading(deck);
+  } catch (err) {
+    host.innerHTML = `<div class="e2ConsoleWarnings">Wing Console unavailable: ${escapeHtml(String(err?.message || err))}</div>`;
+  }
+}
+
+function _paintE2WingConsole(host, deck) {
+  const wc = deck && deck.wingConsole;
+  if (!wc) { host.innerHTML = `<div class="e2ConsoleWarnings">No wing console payload.</div>`; return; }
+  const placements = Array.isArray(wc.placements) ? wc.placements : [];
+  if (!placements.length) {
+    host.innerHTML = `<div class="e2ConsoleWarnings">${escapeHtml((wc.warnings || ["No placements returned."]).join(" · "))}</div>`;
+    return;
+  }
+  const top = placements.slice(0, 8);
+  const subtitle = [
+    `Ticker <strong>${escapeHtml(String(wc.underlying))}</strong>`,
+    `Entry <strong>${escapeHtml(String(wc.entry_day))}</strong>`,
+    `Spot <strong>${wc.spot != null ? Number(wc.spot).toFixed(2) : "—"}</strong>`,
+    `1σ EM <strong>${_fmtPctE2(wc.em_pct, 2)}</strong>`,
+    `Regime <strong>${escapeHtml(String(wc.regime_label || "—"))}</strong>${wc.regime_mi_v2 && wc.regime_mi_v2.label ? ` · HMM <strong>${escapeHtml(String(wc.regime_mi_v2.label))}</strong>` : ""}`,
+    `MC <strong>${(deck.mcResults && deck.mcResults.n_sims) || 0}</strong> sims${deck.mcResults && deck.mcResults.conditioning_used ? ` · ${escapeHtml(String(deck.mcResults.conditioning_used))}` : ""}`,
+  ].map((s) => `<span>${s}</span>`).join("");
+  const warningsHtml = Array.isArray(wc.warnings) && wc.warnings.length
+    ? `<div class="e2ConsoleWarnings">${wc.warnings.map(escapeHtml).join(" · ")}</div>` : "";
+
+  const rows = top.map((p, i) => {
+    const scoreClass = _scoreColorE2(Number(p.composite_score || 0));
+    const maeClass  = (p.mae_p95_vs_wing || 0) >= 0.9 ? "e2MetricRisky" : ((p.mae_p95_vs_wing || 0) >= 0.5 ? "e2MetricMed" : "e2MetricGood");
+    const closeClass = (p.breach_close_prob || 0) >= 0.2 ? "e2MetricRisky" : ((p.breach_close_prob || 0) >= 0.1 ? "e2MetricMed" : "e2MetricGood");
+    const touchClass = (p.touch_intraweek_prob || 0) >= 0.3 ? "e2MetricRisky" : ((p.touch_intraweek_prob || 0) >= 0.15 ? "e2MetricMed" : "e2MetricGood");
+    return `
+      <tr class="e2PlacementRow ${i === 0 ? "e2PlacementRow--top" : ""}" data-index="${i}">
+        <td class="e2RankCell">${i + 1}${i === 0 ? '<span class="e2StarTop">★</span>' : ""}</td>
+        <td>${Number(p.em_mult).toFixed(2)}</td>
+        <td>${Number(p.wing_pts).toFixed(0)}</td>
+        <td>${Number(p.short_put_strike).toFixed(0)} / ${Number(p.short_call_strike).toFixed(0)}</td>
+        <td>$${Number(p.credit_dollars).toFixed(0)}</td>
+        <td class="${closeClass}">${_fmtPctE2((p.breach_close_prob || 0) * 100)}</td>
+        <td class="${touchClass}">${_fmtPctE2((p.touch_intraweek_prob || 0) * 100)}</td>
+        <td class="${maeClass}">${_fmtPctE2((p.mae_p95_vs_wing || 0) * 100)}</td>
+        <td>${_fmtPctE2(p.theta_capture_pct)}</td>
+        <td class="e2ScoreCell ${scoreClass}">${Number(p.composite_score).toFixed(1)}</td>
+        <td>${escapeHtml(String(p.confidence || "—"))}</td>
+      </tr>`;
+  }).join("");
+
+  // Slider defaults from top placement.
+  const topP = top[0] || { em_mult: 1.25, wing_pts: 10 };
+
+  host.innerHTML = `
+    <div class="e2Console">
+      <div class="e2ConsoleHeader">
+        <div>
+          <h3 class="e2ConsoleTitle">Ranked weekly-IC placements</h3>
+          <div class="e2ConsoleSubtitle">${subtitle}</div>
+        </div>
+      </div>
+      ${warningsHtml}
+      <table class="e2PlacementTable"><thead><tr>
+        <th>#</th><th>EM×</th><th>Wings (pts)</th>
+        <th>P short / C short</th>
+        <th>Credit ($)</th>
+        <th>Brch close</th><th>Touch intraweek</th>
+        <th>MAE p95 (% wing)</th>
+        <th>Theta cap</th>
+        <th>Score</th>
+        <th>Conf.</th>
+      </tr></thead>
+      <tbody id="e2PlacementRows">${rows}</tbody></table>
+
+      <div class="e2Tuner">
+        <div class="e2TunerField">
+          <label for="e2TunerEm">EM multiple <span id="e2TunerEmValue" class="e2TunerValue">${Number(topP.em_mult).toFixed(2)}</span></label>
+          <input id="e2TunerEm" type="range" min="0.75" max="2.5" step="0.05" value="${Number(topP.em_mult).toFixed(2)}" />
+        </div>
+        <div class="e2TunerField">
+          <label for="e2TunerWp">Wing width (pts) <span id="e2TunerWpValue" class="e2TunerValue">${Number(topP.wing_pts).toFixed(0)}</span></label>
+          <input id="e2TunerWp" type="range" min="2" max="30" step="1" value="${Number(topP.wing_pts).toFixed(0)}" />
+        </div>
+        <div class="e2TunerScoreBox">
+          <div>Custom placement score: <strong id="e2TunerScore">—</strong></div>
+          <div style="font-size:11px;color:var(--muted,#9aa0a6)" id="e2TunerScoreNote">snap to nearest grid</div>
+        </div>
+      </div>
+
+      <div class="e2ConsoleActions">
+        <button type="button" id="e2BuildTradeBtn" class="e2ConsoleActions--primary">Use Selected Placement</button>
+        <button type="button" id="e2ExportBtn">Export JSON</button>
+      </div>
+    </div>
+  `;
+
+  _wireE2Tuner(deck);
+  _wireE2DeckActions(deck);
+}
+
+function _wireE2Tuner(deck) {
+  const emEl = document.getElementById("e2TunerEm");
+  const wpEl = document.getElementById("e2TunerWp");
+  const emV = document.getElementById("e2TunerEmValue");
+  const wpV = document.getElementById("e2TunerWpValue");
+  const scoreEl = document.getElementById("e2TunerScore");
+  const noteEl = document.getElementById("e2TunerScoreNote");
+  if (!emEl || !wpEl) return;
+
+  const placements = Array.isArray(deck?.wingConsole?.placements) ? deck.wingConsole.placements : [];
+  let seq = 0;
+  let debounceTimer = null;
+  const DEBOUNCE_MS = 220;
+
+  function nearest(em, wp) {
+    let best = null, bestDist = Infinity;
+    for (const p of placements) {
+      const d = Math.pow(p.em_mult - em, 2) + Math.pow((p.wing_pts - wp) / 5, 2);
+      if (d < bestDist) { best = p; bestDist = d; }
+    }
+    return best;
+  }
+
+  function paint(p, tag) {
+    if (!p || !scoreEl) return;
+    scoreEl.textContent = Number(p.composite_score).toFixed(1);
+    scoreEl.className = _scoreColorE2(Number(p.composite_score));
+    if (noteEl) {
+      noteEl.textContent = `${tag} · brch ${_fmtPctE2((p.breach_close_prob || 0) * 100)} · touch ${_fmtPctE2((p.touch_intraweek_prob || 0) * 100)} · credit $${Number(p.credit_dollars || 0).toFixed(0)}`;
+    }
+  }
+
+  async function fetchExact(em, wp) {
+    const mySeq = ++seq;
+    try {
+      const resp = await fetch("/api/spx-ic/wing-console/score-placement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          underlying: _E2CommandDeckState.underlying,
+          entry_day: _E2CommandDeckState.entry_day,
+          as_of_date: _E2CommandDeckState.as_of_date,
+          em_mult: em, wing_pts: wp,
+        }),
+      });
+      if (!resp.ok) return;
+      const body = await resp.json();
+      if (mySeq !== seq) return;
+      paint(body.placement, "exact");
+    } catch { /* ignore */ }
+  }
+
+  function recompute() {
+    const em = Number(emEl.value);
+    const wp = Number(wpEl.value);
+    if (emV) emV.textContent = em.toFixed(2);
+    if (wpV) wpV.textContent = wp.toFixed(0);
+    const near = nearest(em, wp);
+    if (near) paint(near, `grid ~ EM ${Number(near.em_mult).toFixed(2)} / ${Number(near.wing_pts).toFixed(0)}pt`);
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => fetchExact(em, wp), DEBOUNCE_MS);
+  }
+  emEl.addEventListener("input", recompute);
+  wpEl.addEventListener("input", recompute);
+  recompute();
+}
+
+function _wireE2DeckActions(deck) {
+  const exportBtn = document.getElementById("e2ExportBtn");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(deck, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `spx-wing-console-${(deck.wingConsole || {}).underlying || "SPX"}-${(deck.wingConsole || {}).as_of_date || "now"}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+  }
+}
+
+function _renderMaeDistribution(deck) {
+  const body = document.getElementById("e2MaeDistributionBody");
+  const sec  = document.getElementById("e2MaeDistributionSection");
+  if (!body || !sec) return;
+  const m = deck && deck.maeDistribution;
+  if (!m || !m.n) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+  body.innerHTML = (
+    `<div class="taPanel" style="padding:12px 16px">` +
+      `<div class="taMuted" style="font-size:12px;margin-bottom:8px">` +
+      `n=<strong>${m.n}</strong> weeks · source: <strong>${escapeHtml(String(m.source || "—"))}</strong>` +
+      `</div>` +
+      `<div class="e15Grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(120px, 1fr));gap:8px">` +
+        `<div class="e15Card"><div class="e15CardLabel">p50</div><div class="e15CardValue">${_fmtPctE2(m.p50, 2)}</div></div>` +
+        `<div class="e15Card"><div class="e15CardLabel">p75</div><div class="e15CardValue">${_fmtPctE2(m.p75, 2)}</div></div>` +
+        `<div class="e15Card"><div class="e15CardLabel">p90</div><div class="e15CardValue">${_fmtPctE2(m.p90, 2)}</div></div>` +
+        `<div class="e15Card"><div class="e15CardLabel">p95</div><div class="e15CardValue">${_fmtPctE2(m.p95, 2)}</div></div>` +
+        `<div class="e15Card"><div class="e15CardLabel">max</div><div class="e15CardValue">${_fmtPctE2(m.max, 2)}</div></div>` +
+      `</div>` +
+    `</div>`
+  );
+}
+
+function _renderMcReading(deck) {
+  const body = document.getElementById("e2McReadingBody");
+  const sec  = document.getElementById("e2McReadingSection");
+  if (!body || !sec) return;
+  const mc = deck && deck.mcResults;
+  if (!mc || !mc.n_sims) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+  body.innerHTML = (
+    `<div class="taPanel" style="padding:12px 16px">` +
+      `<div class="taMuted" style="font-size:12px;margin-bottom:6px">` +
+      `n_sims: <strong>${mc.n_sims}</strong> · mode: <strong>${escapeHtml(String(mc.mode))}</strong> · ` +
+      `conditioning: <strong>${escapeHtml(String(mc.conditioning_used))}</strong> · ` +
+      `pool used/total: <strong>${mc.pool_size_used}/${mc.pool_size_total}</strong>` +
+      `</div>` +
+      (Array.isArray(mc.notes) && mc.notes.length ? `<div class="taMuted" style="font-size:11px">${mc.notes.map(escapeHtml).join(" · ")}</div>` : "") +
+    `</div>`
+  );
+}
+
 async function run() {
   const status = $("status");
   const entryDay = $("entryDay")?.value || "mon";
   const seasonalityMode = $("seasonalityMode")?.value || "none";
-  // Desk-locked params
+  // v2: defaults preserved; year + widths flow through to the engine now
+  // (the engine layer respects them when provided).
   const years = "2";
-  const widths = "1.0,1.5,2.0";
+  const widths = "1.0,1.25,1.5,2.0";
   const weeksLimit = "0";
+
+  // Entry-day source chip: "desk_default" when using a documented entry
+  // day (Mon/Tue/Wed); "user_override" when an env override has shifted
+  // the allowed set. The chip is a visual parity cue for the desk —
+  // today the engine always gates on ENGINE2_ENTRY_DAYS so any non-default
+  // flips the chip.
+  try {
+    const cfgAllowed = ["mon", "tue", "wed"];
+    const ed = String(entryDay || "").toLowerCase();
+    _setE2SourceChip(cfgAllowed.includes(ed) ? "desk_default" : "user_override");
+  } catch { _setE2SourceChip("unknown"); }
 
   const qs = new URLSearchParams({
     underlying: String(engine2UnderlyingState.symbol || "SPX"),

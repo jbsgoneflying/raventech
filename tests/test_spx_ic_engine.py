@@ -333,13 +333,16 @@ def test_engine2_width_comparison_2d_em_x_wing(monkeypatch):
         ENGINE2_MULTI_WING=True,
         ENGINE2_WING_WIDTH_PTS="5,10,15",
     )
+    # v2: query param `widths` now flows through; previously the engine
+    # silently overwrote it. Pass the full desk grid explicitly so the
+    # test covers the 3×3 expansion.
     out = compute_engine2_spx_ic(
         client=c,
         benzinga_client=None,
         flags=flags,
         entry_day="mon",
         years=1,
-        widths=[1.0],
+        widths=[1.0, 1.5, 2.0],
         risk_target_breach_pct=25.0,
         seasonality_mode="none",
         today=dt.date(2025, 2, 3),

@@ -1,0 +1,265 @@
+/* =============================================================
+   Engine 2 v2 — SPX IC Command Deck
+   Parallel to engine1-v2.css: ranked placement grid + sliders +
+   source chip + always-on advisor panel.
+   ============================================================= */
+
+/* ----- Command Deck top form (reuses E1 v2 chip styles) --- */
+
+.e2CommandRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 14px;
+  border-radius: var(--radius-card, 12px);
+  background: var(--surfaceSolid, var(--surface, #121418));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  margin-bottom: 14px;
+}
+
+.e2CommandRow .e2Field {
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+
+.e2CommandRow #e2EventSourceChip {
+  align-self: center;
+  margin-top: 20px;
+}
+
+.e2CommandRow .primaryButton {
+  flex: 0 0 auto;
+  min-width: 130px;
+}
+
+.e2AdvancedDetails {
+  padding: 12px 16px;
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.10));
+  border-radius: var(--radius-card, 12px);
+  margin-bottom: 16px;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+}
+
+.e2AdvancedDetails > summary {
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--muted, #9aa0a6);
+  padding: 4px 0;
+  list-style: none;
+}
+
+.e2AdvancedDetails > summary::-webkit-details-marker {
+  display: none;
+}
+
+.e2AdvancedDetails > summary::after {
+  content: "▸";
+  float: right;
+  transition: transform 120ms ease;
+}
+
+.e2AdvancedDetails[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+/* ----- Wing Decision Console (ranked placements) ---------- */
+
+.e2Console {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--surface-1, var(--surfaceSolid, #121418));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 14px;
+}
+
+.e2ConsoleHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.e2ConsoleTitle {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.e2ConsoleSubtitle {
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.e2ConsoleSubtitle strong {
+  color: var(--text-primary, #e6e6e6);
+  font-weight: 600;
+}
+
+.e2PlacementTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.e2PlacementTable thead th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--muted, #9aa0a6);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.e2PlacementTable tbody td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-primary, #e6e6e6);
+  font-variant-numeric: tabular-nums;
+}
+
+.e2PlacementRow {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.e2PlacementRow:hover { background: rgba(255, 255, 255, 0.03); }
+.e2PlacementRow--selected {
+  background: rgba(125, 182, 255, 0.08);
+  outline: 1px solid rgba(125, 182, 255, 0.35);
+  outline-offset: -1px;
+}
+.e2PlacementRow--top { background: rgba(60, 212, 169, 0.05); }
+
+.e2RankCell { font-weight: 700; text-align: center; width: 32px; }
+.e2StarTop { color: #ffd24a; margin-left: 4px; }
+.e2ScoreCell { font-weight: 700; color: #3cd4a9; }
+.e2ScoreCell--med { color: #f3a847; }
+.e2ScoreCell--low { color: #ff7a7a; }
+.e2MetricGood  { color: #3cd4a9; }
+.e2MetricMed   { color: #f3a847; }
+.e2MetricRisky { color: #ff7a7a; }
+
+/* ----- Slider tuner --------------------------------------- */
+
+.e2Tuner {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.e2TunerField { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.e2TunerField label { color: var(--muted, #9aa0a6); text-transform: uppercase; letter-spacing: 0.4px; font-size: 10px; font-weight: 600; }
+.e2TunerField input[type="range"] { width: 100%; }
+.e2TunerValue { font-weight: 700; color: var(--text-primary, #e6e6e6); font-variant-numeric: tabular-nums; }
+
+.e2TunerScoreBox {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+}
+
+.e2TunerScoreBox strong {
+  font-size: 18px;
+  color: #3cd4a9;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----- Command Deck actions ------------------------------- */
+
+.e2ConsoleActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+}
+
+.e2ConsoleActions button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-2, #1a1d24);
+  color: var(--text-primary, #e6e6e6);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.e2ConsoleActions button:hover:not(:disabled) {
+  background: rgba(125, 182, 255, 0.08);
+  border-color: rgba(125, 182, 255, 0.4);
+}
+
+.e2ConsoleActions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.e2ConsoleActions .e2ConsoleActions--primary {
+  background: rgba(60, 212, 169, 0.12);
+  border-color: rgba(60, 212, 169, 0.45);
+  color: #3cd4a9;
+}
+
+.e2ConsoleActions .e2ConsoleActions--primary:hover:not(:disabled) {
+  background: rgba(60, 212, 169, 0.2);
+}
+
+.e2ConsoleWarnings {
+  font-size: 11px;
+  color: #f3a847;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(243, 168, 71, 0.08);
+  border: 1px solid rgba(243, 168, 71, 0.2);
+}
+
+.e2AdvisorNarrative {
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  color: var(--text-primary, #e6e6e6);
+  line-height: 1.5;
+}
+
+/* MI v2 regime probability bar (compact chip). */
+.e2RegimeMiV2 {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted, #9aa0a6);
+}
+
+.e2RegimeMiV2 .e2RegimeMiV2Bar {
+  height: 10px;
+  min-width: 24px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  display: inline-block;
+  position: relative;
+}
+
+.e2RegimeMiV2 .e2RegimeMiV2Fill {
+  height: 100%;
+  background: #3cd4a9;
+}

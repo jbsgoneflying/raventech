@@ -146,6 +146,15 @@ class FeatureFlags:
     ENGINE4_APLUS_THRESHOLD: int = 75            # A+ grade threshold
 
     # Engine 2 policy knobs (risk-only; env-driven; safe defaults)
+    # NOTE (v2): these three flags are retained for backwards compatibility
+    # with env deployments but are NOT consumed by the v2 engine:
+    #   - ENGINE2_ENTRY_DAYS is documented but the `entry_day` query param
+    #     is the source of truth.
+    #   - ENGINE2_EM_MULTS is superseded by E2_WING_EM_MULTS (v2 Wing
+    #     Console grid). The scan still uses the hard desk-lock
+    #     [1.0, 1.5, 2.0] unless the query ?widths= is passed.
+    #   - ENGINE2_LOOKBACK_YEARS_DEFAULT is superseded by the query
+    #     ?years= (defaults to 2 in v2).
     ENGINE2_ENTRY_DAYS: str = "mon,tue,wed"
     ENGINE2_EM_MULTS: str = "0.7,0.8,0.9,1.0,1.1,1.2"
     ENGINE2_WING_WIDTH_PTS: str = "5,10,15,20,25"
@@ -153,7 +162,9 @@ class FeatureFlags:
     # Otherwise VWAP is marked unavailable (no proxy fallback).
     ENGINE2_REQUIRE_ORATS_DAILY_VWAP: bool = False
 
-    ENGINE2_MAX_WEEKS_RETURN: int = 120  # payload cap for recent weeks drilldown
+    # v2: the router `weeks_limit` query param is the live pagination knob;
+    # ENGINE2_MAX_WEEKS_RETURN remains as a compile-time ceiling (no active use).
+    ENGINE2_MAX_WEEKS_RETURN: int = 120
     ENGINE2_LOOKBACK_YEARS_DEFAULT: int = 3
 
     ENGINE2_POLICY_MAX_BREACH_PCT: float = 25.0
@@ -190,6 +201,43 @@ class FeatureFlags:
     ENGINE2_MACRO_BASE_JOBLESS_CLAIMS: float = 0.08
     ENGINE2_MACRO_BASE_TREASURY_AUCTION: float = 0.05
     ENGINE2_MACRO_BASE_OTHER: float = 0.05
+
+    # --- Engine 2 v2: SPX IC Command Deck ---
+    # Kill-switch. When False the new Wing Console endpoints 404 and the
+    # frontend reverts to the legacy scan UX. Default ON.
+    ENABLE_E2_V2: bool = True
+
+    # Legacy flag parity: E2_EMIT_DESK_CONSENSUS controls whether the
+    # public /api/spx-ic response body carries the legacy TRADE /
+    # LEAN_PASS / PASS verdict strings. Advisor endpoint re-computes
+    # internally either way.
+    E2_EMIT_DESK_CONSENSUS: bool = False
+
+    # Wing Console grid (comma-separated floats).
+    E2_WING_EM_MULTS: str = "1.0,1.25,1.5,2.0"
+    E2_WING_PTS:      str = "5,10,15"
+
+    # Composite-score weights (renormalised at scoring time so the
+    # desk can tune one knob without rescaling neighbours).
+    E2_WING_SCORE_WEIGHT_CLOSE:  float = 0.25
+    E2_WING_SCORE_WEIGHT_TOUCH:  float = 0.20
+    E2_WING_SCORE_WEIGHT_MAE:    float = 0.25
+    E2_WING_SCORE_WEIGHT_THETA:  float = 0.15
+    E2_WING_SCORE_WEIGHT_CREDIT: float = 0.15
+
+    # Score-normalisation targets.
+    E2_WING_MAX_TOLERABLE_MAE_PCT: float = 80.0
+    E2_WING_TARGET_THETA_PCT:      float = 60.0
+    E2_WING_TARGET_ROC_PCT:        float = 12.0
+
+    # Monte Carlo (always on in v2; flag acts as a kill-switch).
+    ENABLE_E2_MC: bool = True
+    E2_MC_N_SIMS: int = 5000
+    E2_MC_MIN_POOL: int = 20
+    E2_MC_SEED: int = 1337
+    E2_MC_CONDITION_ON_REGIME: bool = True
+    E2_MC_CONDITION_ON_MACRO: bool = True
+    E2_MC_GBM_FALLBACK: bool = True
 
     # --- Engine 1: Earnings IC Advisor (vol crush premium harvesting) ---
     E1_ADVISOR_ENABLED: bool = True
@@ -588,6 +636,27 @@ class FeatureFlags:
             ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT=_get_float("ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT", 10.0),
             ENGINE2_POLICY_MAX_MAE95_X_WING=_get_float("ENGINE2_POLICY_MAX_MAE95_X_WING", 1.0),
             ENGINE2_MULTI_WING=_get_bool("ENGINE2_MULTI_WING", True),
+
+            # Engine 2 v2 Command Deck
+            ENABLE_E2_V2=_get_bool("ENABLE_E2_V2", True),
+            E2_EMIT_DESK_CONSENSUS=_get_bool("E2_EMIT_DESK_CONSENSUS", False),
+            E2_WING_EM_MULTS=os.getenv("E2_WING_EM_MULTS", "1.0,1.25,1.5,2.0"),
+            E2_WING_PTS=os.getenv("E2_WING_PTS", "5,10,15"),
+            E2_WING_SCORE_WEIGHT_CLOSE=_get_float("E2_WING_SCORE_WEIGHT_CLOSE", 0.25),
+            E2_WING_SCORE_WEIGHT_TOUCH=_get_float("E2_WING_SCORE_WEIGHT_TOUCH", 0.20),
+            E2_WING_SCORE_WEIGHT_MAE=_get_float("E2_WING_SCORE_WEIGHT_MAE", 0.25),
+            E2_WING_SCORE_WEIGHT_THETA=_get_float("E2_WING_SCORE_WEIGHT_THETA", 0.15),
+            E2_WING_SCORE_WEIGHT_CREDIT=_get_float("E2_WING_SCORE_WEIGHT_CREDIT", 0.15),
+            E2_WING_MAX_TOLERABLE_MAE_PCT=_get_float("E2_WING_MAX_TOLERABLE_MAE_PCT", 80.0),
+            E2_WING_TARGET_THETA_PCT=_get_float("E2_WING_TARGET_THETA_PCT", 60.0),
+            E2_WING_TARGET_ROC_PCT=_get_float("E2_WING_TARGET_ROC_PCT", 12.0),
+            ENABLE_E2_MC=_get_bool("ENABLE_E2_MC", True),
+            E2_MC_N_SIMS=_get_int("E2_MC_N_SIMS", 5000),
+            E2_MC_MIN_POOL=_get_int("E2_MC_MIN_POOL", 20),
+            E2_MC_SEED=_get_int("E2_MC_SEED", 1337),
+            E2_MC_CONDITION_ON_REGIME=_get_bool("E2_MC_CONDITION_ON_REGIME", True),
+            E2_MC_CONDITION_ON_MACRO=_get_bool("E2_MC_CONDITION_ON_MACRO", True),
+            E2_MC_GBM_FALLBACK=_get_bool("E2_MC_GBM_FALLBACK", True),
             ENGINE2_ADVISOR_ENABLED=_get_bool("ENGINE2_ADVISOR_ENABLED", True),
             ENGINE2_ADVISOR_MODEL=os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.4"),
             ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
