@@ -131,6 +131,79 @@ Rules:
 _cache_lock = threading.Lock()
 _cache: TTLCache = TTLCache(maxsize=1024, ttl=10 * 60)
 
+# ---------------------------------------------------------------------------
+# In-process telemetry counters — exposed by /api/desk-insight/stats so the
+# desk can see cache hit rate, rate-limit pressure, and most-clicked cards
+# during content iteration. All counters are process-local (not shared
+# across gunicorn workers) — good enough for content feedback, not a
+# replacement for real APM.
+# ---------------------------------------------------------------------------
+
+_stats_lock = threading.Lock()
+_stats: Dict[str, Any] = {
+    "requests_total":       0,
+    "cache_hits":           0,
+    "llm_calls":            0,
+    "fallback_calls":       0,
+    "rate_limited":         0,
+    "llm_errors":           0,
+    "parse_errors":         0,
+    "missing_field_errors": 0,
+    "by_engine":            {},   # engine_id -> counter dict
+    "by_card":              {},   # "engine:slug" -> counter dict
+    "last_request_utc":     None,
+    "started_at_utc":       time.time(),
+}
+
+
+def _bump(kind: str, engine_id: str = "", card_type: str = "") -> None:
+    """Thread-safe counter increment with per-engine + per-card breakouts."""
+    with _stats_lock:
+        _stats[kind] = int(_stats.get(kind, 0)) + 1
+        if engine_id:
+            eng = _stats["by_engine"].setdefault(engine_id, {
+                "requests_total": 0, "cache_hits": 0, "llm_calls": 0,
+                "fallback_calls": 0, "rate_limited": 0,
+            })
+            eng[kind] = int(eng.get(kind, 0)) + 1
+            if card_type:
+                key = f"{engine_id}:{card_type}"
+                card = _stats["by_card"].setdefault(key, {
+                    "requests_total": 0, "cache_hits": 0, "llm_calls": 0,
+                    "fallback_calls": 0,
+                })
+                card[kind] = int(card.get(kind, 0)) + 1
+        _stats["last_request_utc"] = time.time()
+
+
+def get_stats_snapshot() -> Dict[str, Any]:
+    """Return a deep copy of the current counters for the stats endpoint."""
+    with _stats_lock:
+        import copy
+        snap = copy.deepcopy(_stats)
+    # Derived metrics.
+    total = snap["requests_total"]
+    snap["cache_hit_rate"]    = (snap["cache_hits"] / total) if total else 0.0
+    snap["llm_rate"]          = (snap["llm_calls"] / total) if total else 0.0
+    snap["fallback_rate"]     = (snap["fallback_calls"] / total) if total else 0.0
+    snap["rate_limit_rate"]   = (snap["rate_limited"] / total) if total else 0.0
+    snap["uptime_seconds"]    = int(time.time() - snap["started_at_utc"])
+    return snap
+
+
+def reset_stats() -> None:
+    """Test helper — zero the counters."""
+    with _stats_lock:
+        for k in list(_stats.keys()):
+            if k in ("by_engine", "by_card"):
+                _stats[k] = {}
+            elif k == "started_at_utc":
+                _stats[k] = time.time()
+            elif k == "last_request_utc":
+                _stats[k] = None
+            else:
+                _stats[k] = 0
+
 
 class _RateLimiter:
     """Token-bucket rate limiter keyed to a wall-clock 60s window."""
@@ -338,15 +411,20 @@ def generate_desk_insight(
     )
     asset_class = str(engine_meta.get("asset_class") or "multi-asset")
 
+    _bump("requests_total", engine_id, card_type)
+
     # Cache probe.
     ckey = _cache_key(engine_id, card_type, card_data, scenario_context)
     with _cache_lock:
         cached = _cache.get(ckey)
     if cached is not None:
+        _bump("cache_hits", engine_id, card_type)
         return cached
 
     # Rate-limit.
     if not _rate_limiter.acquire():
+        _bump("rate_limited", engine_id, card_type)
+        _bump("fallback_calls", engine_id, card_type)
         return _static_fallback(
             engine_id=engine_id,
             card_type=card_type,
@@ -358,6 +436,7 @@ def generate_desk_insight(
 
     client = _get_openai_client()
     if client is None:
+        _bump("fallback_calls", engine_id, card_type)
         return _static_fallback(
             engine_id=engine_id,
             card_type=card_type,
@@ -430,6 +509,8 @@ def generate_desk_insight(
             "desk_insight LLM failed engine=%s card=%s: %s",
             engine_id, card_type, reason,
         )
+        _bump("llm_errors", engine_id, card_type)
+        _bump("fallback_calls", engine_id, card_type)
         return _static_fallback(
             engine_id=engine_id,
             card_type=card_type,
@@ -445,6 +526,8 @@ def generate_desk_insight(
             "desk_insight parse fail engine=%s card=%s",
             engine_id, card_type,
         )
+        _bump("parse_errors", engine_id, card_type)
+        _bump("fallback_calls", engine_id, card_type)
         return _static_fallback(
             engine_id=engine_id,
             card_type=card_type,
@@ -481,6 +564,8 @@ def generate_desk_insight(
             "desk_insight missing fields engine=%s card=%s missing=%s",
             engine_id, card_type, ",".join(missing),
         )
+        _bump("missing_field_errors", engine_id, card_type)
+        _bump("fallback_calls", engine_id, card_type)
         return _static_fallback(
             engine_id=engine_id,
             card_type=card_type,
@@ -489,6 +574,8 @@ def generate_desk_insight(
             related_cards=canonical_related,
             reason=f"LLM output missing: {', '.join(missing)}",
         )
+
+    _bump("llm_calls", engine_id, card_type)
 
     result["_source"]    = "llm"
     result["_engine"]    = engine_id

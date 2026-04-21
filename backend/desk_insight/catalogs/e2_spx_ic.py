@@ -145,6 +145,55 @@ CATALOG = {
         ],
     },
 
+    "gamma_map": {
+        "title": "Dealer Gamma Map (SPX)",
+        "spec": (
+            "SPX price chart with live level overlays showing put/call "
+            "walls, open-interest clusters, and gamma concentration "
+            "near spot. Pulled from ORATS live strike-gamma + OI; "
+            "informational only — does not change backtest odds.\n"
+            "- Put wall: heaviest single-strike put OI zone; usually a "
+            "support magnet below spot.\n"
+            "- Call wall: heaviest single-strike call OI zone; a "
+            "ceiling magnet above spot.\n"
+            "- Gamma peaks: strikes where dealer gamma is maximized, "
+            "often pinning points into expiry.\n"
+            "- Gamma flip: the spot level where dealer net gamma "
+            "crosses zero — above = dampening regime, below = "
+            "amplifying regime.\n"
+            "Use these as an execution context overlay for intraday "
+            "entries and exits, not as a standalone signal."
+        ),
+        "related_cards": [
+            {"engine": "e2", "slug": "gex_heatmap", "label": "Weekly Gamma Heat-Map"},
+            {"engine": "e2", "slug": "regime_card", "label": "Regime"},
+            {"engine": "market-intel", "slug": "regime_card", "label": "Market Regime"},
+        ],
+    },
+
+    "gex_heatmap": {
+        "title": "Weekly Gamma Risk Heat-Map",
+        "spec": (
+            "Net dollar gamma (NET $GEX) by strike across upcoming "
+            "SPX expiries, rendered as a color heat-map. Warm cells = "
+            "positive net $GEX (dealer long gamma, dampening regime); "
+            "cool cells = negative net $GEX (dealer short gamma, "
+            "amplifying regime).\n"
+            "- Distance to downside / upside gamma-flip: how far spot "
+            "can move before the regime sign flips, expressed in "
+            "points and EM-multiples.\n"
+            "- Weekly stability chip: whether the overall GEX "
+            "structure is stable, drifting, or dislocating.\n"
+            "Treat pools as context for pinning vs acceleration zones, "
+            "not as a hard entry trigger."
+        ),
+        "related_cards": [
+            {"engine": "e2", "slug": "gamma_map", "label": "Dealer Gamma Map"},
+            {"engine": "e2", "slug": "regime_card", "label": "Regime"},
+            {"engine": "e2", "slug": "entry_state", "label": "Entry State"},
+        ],
+    },
+
     "trade_log": {
         "title": "Trade Log",
         "spec": (

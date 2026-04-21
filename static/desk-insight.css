@@ -267,3 +267,18 @@
 .deskInsightErrorBanner {
   color: #ff6b6b;
 }
+
+/* ------------------------------------------------------------------ */
+/* Legacy .tipBtn / .tipPanel suppression.                            */
+/*                                                                    */
+/* When a section now carries data-insight, the shared Desk Insight   */
+/* popup is authoritative — the old inline static-help tipWrap inside */
+/* that section's header is redundant, so we hide it. Pages that      */
+/* haven't been wired with data-insight yet keep their legacy helpers */
+/* intact, so this is a gradual, non-destructive migration.           */
+/* ------------------------------------------------------------------ */
+[data-insight] .tipWrap,
+[data-insight] .tipBtn,
+[data-insight] .tipPanel {
+  display: none !important;
+}

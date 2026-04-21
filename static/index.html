@@ -154,7 +154,7 @@
         </section>
 
         <section class="surface hidden" id="holdRiskSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="breach_stats">
             <h2 class="sectionTitle">
               Earnings Hold Risk
               <span class="tipWrap">
@@ -374,7 +374,7 @@
 
           <!-- Engine 1: Dealer Gamma Map (selected ticker) -->
           <div class="chartCard" id="e1GammaMapCard" style="margin-top:14px;">
-            <div class="sectionHeader" style="padding:0 0 10px 0;">
+            <div class="sectionHeader" style="padding:0 0 10px 0;" data-insight="ticker_dealer_gamma">
               <h3 class="sectionTitle" style="margin:0;">
                 Dealer Gamma Map (Live)
                 <span class="info" title="Single-name dealer gamma context for the selected ticker (live chain near spot). Informational only — does not change historical breach stats. Hover for level labels.">ⓘ</span>
@@ -399,7 +399,7 @@
 
           <!-- Engine 1: Weekly Gamma Risk Heat-Map (selected ticker) -->
           <div class="chartCard" id="e1GexHeatMapCard" style="margin-top:12px;">
-            <div class="sectionHeader" style="padding:0 0 10px 0;">
+            <div class="sectionHeader" style="padding:0 0 10px 0;" data-insight="ticker_dealer_gamma">
               <h3 class="sectionTitle" style="margin:0;">Weekly Gamma Risk Heat-Map</h3>
               <div class="tbInputs" style="justify-content:flex-end; gap:8px;">
                 <button id="e1GexViewComposite" class="chipToggle isOn" type="button" aria-pressed="true">Composite</button>
@@ -433,7 +433,7 @@
         <section class="surface hidden" id="technicalsSection"></section>
 
         <section class="surface hidden" id="eventRiskSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="event_risk">
             <h2 class="sectionTitle">
               Event Risk (Benzinga)
               <span class="tipWrap">
@@ -476,7 +476,7 @@
         </section>
 
         <section class="surface" id="skewWingsSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="skew_overlay">
             <h2 class="sectionTitle">Skew &amp; Wings</h2>
             <div class="sectionMeta muted" id="skewWingsMeta">—</div>
           </div>
@@ -583,7 +583,7 @@
         </section>
 
         <section class="surface hidden" id="mcSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="mc_earnings_risk">
             <h2 class="sectionTitle">
               Simulated Earnings Risk (MC)
               <span class="tipWrap">
@@ -634,7 +634,7 @@
         </section>
 
         <section class="surface">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="regime">
             <h2 class="sectionTitle">
               Regime Validation
               <span class="info" title="Regime at Event is computed as-of pricingDateUsed using trailing SPY realized vol, ticker IV30 percentile, and SPY 5D move percentile (no lookahead).">ⓘ</span>
@@ -649,7 +649,7 @@
         </section>
 
         <section class="surface">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="quarter_seasonality">
             <h2 class="sectionTitle">
               Quarter Seasonality
               <span class="tipWrap">
@@ -679,7 +679,7 @@
         <div class="sectionDivider" aria-hidden="true"></div>
 
         <section class="surface">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="earnings_events_table">
             <h2 class="sectionTitle">
               Earnings Events
               <span class="tipWrap">
@@ -773,7 +773,7 @@
       </div>
     </div>
 
-    <link rel="stylesheet" href="/static/desk-insight.css?v=1" />
+    <link rel="stylesheet" href="/static/desk-insight.css?v=2" />
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/ta_panel.js"></script>
     <script src="/static/zip_store.js"></script>
@@ -781,7 +781,7 @@
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js"></script>
     <script src="/static/raven-chat.js?v=3"></script>
-    <script src="/static/desk-insight.js?v=1"></script>
+    <script src="/static/desk-insight.js?v=2"></script>
     <script>
       // Auto-bind Raven Desk Insight for any .deskDivider[data-insight]
       // added to this page. Engine 1 keeps its existing e1Insight popup

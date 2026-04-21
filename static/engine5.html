@@ -884,7 +884,7 @@
 
         <!-- Vol Lead-Lag -->
         <section class="surface hidden" id="volLeadLagSection" style="margin-top:16px;">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="vol_leadlag">
             <h2 class="sectionTitle">
               Volatility Lead-Lag
               <span class="tipWrap">
@@ -922,7 +922,7 @@
 
         <!-- Global Summary -->
         <section class="surface" id="narrativeSection" style="margin-top:16px;">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="global_regime_score">
             <h2 class="sectionTitle">Global Signal Summary</h2>
             <div class="sectionMeta muted" id="narrativeMeta">—</div>
           </div>
@@ -931,7 +931,7 @@
 
         <!-- Index Biases -->
         <section class="surface" id="indexBiasSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="lead_lag_matrix">
             <h2 class="sectionTitle">
               Index Bias
               <span class="tipWrap">
@@ -950,7 +950,7 @@
 
         <!-- Sector Biases -->
         <section class="surface" id="sectorBiasSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="lead_lag_matrix">
             <h2 class="sectionTitle">
               Sector Biases
               <span class="tipWrap">
@@ -970,7 +970,7 @@
 
         <!-- Trade Ideas -->
         <section class="surface" id="ideasSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="weekly_ideas">
             <h2 class="sectionTitle">
               Weekly Trade Ideas
               <span class="tipWrap">
@@ -997,7 +997,7 @@
 
         <!-- Suppressions -->
         <section class="surface hidden" id="suppressionsSection">
-          <div class="sectionHeader">
+          <div class="sectionHeader" data-insight="global_regime_score">
             <h2 class="sectionTitle">Active Suppressions</h2>
           </div>
           <div id="suppressionList" class="suppressionList"></div>
@@ -1027,9 +1027,9 @@
       </div>
     </div>
 
-    <link rel="stylesheet" href="/static/desk-insight.css?v=1" />
+    <link rel="stylesheet" href="/static/desk-insight.css?v=2" />
     <meta name="raven-desk-engine" content="e5" />
-    <script src="/static/desk-insight.js?v=1"></script>
+    <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/engine5.js?v=2"></script>
     <script src="/static/nav.js"></script>

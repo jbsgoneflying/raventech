@@ -25,7 +25,7 @@
         <!-- Nav injected by nav.js -->
       </header>
 
-      <section class="calTopBar surface" aria-label="Calendar controls">
+      <section class="calTopBar surface" aria-label="Calendar controls" data-insight="calendar_grid">
         <div class="calTopBarRow">
           <div class="calNav">
             <button id="prevBtn" class="primaryButton" type="button" aria-label="Previous week">‹</button>
@@ -44,7 +44,7 @@
         </div>
       </section>
 
-      <section id="calendarScanSection" class="surface" aria-label="Calendar scan panel"></section>
+      <section id="calendarScanSection" class="surface" aria-label="Calendar scan panel" data-insight="condor_rank"></section>
 
       <section class="calGridWrap" aria-label="Calendar">
         <div id="calGrid" class="calGrid"></div>
@@ -173,9 +173,9 @@
       </div>
     </div>
 
-    <link rel="stylesheet" href="/static/desk-insight.css?v=1" />
+    <link rel="stylesheet" href="/static/desk-insight.css?v=2" />
     <meta name="raven-desk-engine" content="calendar" />
-    <script src="/static/desk-insight.js?v=1"></script>
+    <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/calendar.js?v=19"></script>
     <script src="/static/nav.js"></script>

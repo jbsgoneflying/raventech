@@ -343,19 +343,19 @@
 
         <div class="e9ActionBanner" id="e9ActionBanner" style="display:none;"></div>
 
-        <div class="e9Divider"><span>Signal Grid</span><button class="e9InsightBtn" id="e9SignalGridInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
+        <div class="e9Divider" data-insight="credit_stress_score"><span>Signal Grid</span><button class="e9InsightBtn" id="e9SignalGridInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
         <div class="e9SignalGrid" id="e9SignalGrid"></div>
 
-        <div class="e9Divider"><span>News Cycle — Credit Stress</span><button class="e9InsightBtn" id="e9NewsInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
+        <div class="e9Divider" data-insight="drift_detection"><span>News Cycle — Credit Stress</span><button class="e9InsightBtn" id="e9NewsInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
         <div id="e9NewsWrap" style="margin-bottom:18px;"></div>
 
-        <div class="e9Divider"><span>Forced Seller Map</span><button class="e9InsightBtn" id="e9ForcedInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
+        <div class="e9Divider" data-insight="drift_detection"><span>Forced Seller Map</span><button class="e9InsightBtn" id="e9ForcedInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
         <div id="e9ForcedWrap"></div>
 
-        <div class="e9Divider"><span>Tiered Watchlist</span><button class="e9InsightBtn" id="e9WatchInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
+        <div class="e9Divider" data-insight="hyg_lqd_panel"><span>Tiered Watchlist</span><button class="e9InsightBtn" id="e9WatchInsight" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
         <div id="e9WatchWrap"></div>
 
-        <div class="e9Divider"><span>Credit Spread History</span><button class="e9InsightBtn" id="e9ChartInsightBtn" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
+        <div class="e9Divider" data-insight="term_structure"><span>Credit Spread History</span><button class="e9InsightBtn" id="e9ChartInsightBtn" style="display:none;"><span class="ico">&#9432;</span> Explain</button></div>
         <div class="e9ChartWrap" id="e9ChartWrap">
           <canvas class="e9ChartCanvas" id="e9SpreadChart"></canvas>
         </div>
@@ -395,9 +395,9 @@
       </div>
     </div>
 
-    <link rel="stylesheet" href="/static/desk-insight.css?v=1" />
+    <link rel="stylesheet" href="/static/desk-insight.css?v=2" />
     <meta name="raven-desk-engine" content="e9" />
-    <script src="/static/desk-insight.js?v=1"></script>
+    <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/engine9.js?v=5"></script>
     <script src="/static/nav.js"></script>

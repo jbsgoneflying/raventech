@@ -18,6 +18,8 @@ from backend.desk_insight.core import (
     OUTPUT_KEYS,
     OUTPUT_LABELS,
     generate_desk_insight,
+    get_stats_snapshot,
+    reset_stats,
 )
 from backend.desk_insight.catalogs import (
     get_catalog,
@@ -33,6 +35,8 @@ __all__ = [
     "generate_desk_insight",
     "get_catalog",
     "get_engine_meta",
+    "get_stats_snapshot",
+    "reset_stats",
     "resolve_related_label",
     "supported_card_types",
     "supported_engines",

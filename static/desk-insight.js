@@ -387,13 +387,22 @@
 
   // ---- Info-button injector --------------------------------------
 
+  // Default selector matches ANY element with [data-insight] — works for
+  // our canonical .deskDivider as well as existing .sectionHeader /
+  // .eNDivider / .e9Divider / .e12Divider / .e13Divider elements that
+  // pages use for their own visual styling. We only wrap inner text in
+  // a .deskDividerText span if the element wasn't already a flex
+  // container (i.e. a pure .deskDivider); otherwise we just append the
+  // `i` button as the last child so it sits at the right edge.
   function injectButtonsFor(binding) {
-    const selector = binding.dividerSelector || ".deskDivider[data-insight]";
+    const selector = binding.dividerSelector || "[data-insight]";
     Array.prototype.forEach.call(
       document.querySelectorAll(selector),
       function (div) {
-        if (div.querySelector(".deskInsightBtn")) return;
-        if (!div.querySelector(".deskDividerText")) {
+        if (div.querySelector(":scope > .deskInsightBtn")) return;
+        if (div.getAttribute("data-desk-insight-bound") === "1") return;
+        const isPureDeskDivider = div.classList.contains("deskDivider");
+        if (isPureDeskDivider && !div.querySelector(".deskDividerText")) {
           const wrap = document.createElement("span");
           wrap.className = "deskDividerText";
           while (div.firstChild) wrap.appendChild(div.firstChild);
@@ -407,6 +416,7 @@
         btn.title = "Open desk insight";
         btn.textContent = "i";
         div.appendChild(btn);
+        div.setAttribute("data-desk-insight-bound", "1");
       }
     );
   }
@@ -414,7 +424,7 @@
   function onDocumentClick(ev) {
     const btn = ev.target && ev.target.closest && ev.target.closest(".deskInsightBtn");
     if (!btn) return;
-    const div = btn.closest(".deskDivider[data-insight]");
+    const div = btn.closest("[data-insight]");
     if (!div) return;
     ev.preventDefault();
     ev.stopPropagation();
@@ -455,7 +465,7 @@
 
       // Stamp engine onto every matching divider so cross-bound pages
       // know which engine each divider belongs to.
-      const selector = opts.dividerSelector || ".deskDivider[data-insight]";
+      const selector = opts.dividerSelector || "[data-insight]";
       Array.prototype.forEach.call(
         document.querySelectorAll(selector),
         function (d) {

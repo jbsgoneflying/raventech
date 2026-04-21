@@ -327,4 +327,54 @@ CATALOG = {
         ],
     },
 
+    "mc_earnings_risk": {
+        "title": "Simulated Earnings Risk (MC)",
+        "spec": (
+            "Empirical Monte Carlo simulation of the earnings gap at "
+            "open (close → open only; no intraday path modeled). Pulls "
+            "from the ticker's historical gap distribution, "
+            "resamples ENGINE1_MC_N_SIMS (5000 by default) paths, and "
+            "produces:\n"
+            "- Chance of breach: probability the gap finishes beyond "
+            "your short strikes.\n"
+            "- Expected loss at open: mean intrinsic loss across sims.\n"
+            "- CVaR95: average loss in the worst 5% of simulated gaps "
+            "— the tail the desk actually cares about.\n"
+            "- Wing optimization: suggested wing-width shift (if "
+            "MC_ENABLE_WING_OPTIMIZATION is on) that minimizes CVaR95 "
+            "within the MC_OPT_MAX_MULT_DELTA budget.\n"
+            "Treat this as 'open-gap tail risk' — the risk that blows "
+            "through short IC wings before you can manage intraday."
+        ),
+        "related_cards": [
+            {"engine": "e1", "slug": "breach_stats", "label": "Breach Statistics"},
+            {"engine": "e1", "slug": "em_breach_summary", "label": "EM Breach Summary"},
+            {"engine": "e1", "slug": "gap_vs_ctc", "label": "Gap vs Close-to-Close"},
+            {"engine": "e1", "slug": "event_risk", "label": "Event Risk"},
+        ],
+    },
+
+    "quarter_seasonality": {
+        "title": "Quarter Seasonality",
+        "spec": (
+            "Quarter-by-quarter breakdown of this ticker's earnings "
+            "behavior (Q1/Q2/Q3/Q4). Each quarter card shows:\n"
+            "- breach Δ: the breach-rate delta vs the ticker's overall "
+            "baseline (in percentage points).\n"
+            "- max realized / implied ratio: how wildly the move "
+            "overshot the EM on the worst quarter in the sample.\n"
+            "- sample size: N historical events in that quarter. "
+            "Quarters with N < 3 are marked low-confidence.\n"
+            "Use this as a simple calendar conditioning tool for "
+            "strike distance and sizing, not as a directional signal. "
+            "Tickers with strong Q1 or Q4 guidance cycles often show "
+            "the widest quarter-level dispersion."
+        ),
+        "related_cards": [
+            {"engine": "e1", "slug": "earnings_events_table", "label": "Earnings Events"},
+            {"engine": "e1", "slug": "em_breach_summary", "label": "EM Breach Summary"},
+            {"engine": "e1", "slug": "regime", "label": "Ticker Regime"},
+        ],
+    },
+
 }
