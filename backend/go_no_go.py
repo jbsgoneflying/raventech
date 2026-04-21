@@ -1059,12 +1059,25 @@ def compute_go_no_go(
     opt_code: Optional[str] = None
     opt_explain = ""
 
+    # E1 v2: gate the options-liquidity family. The 5 checks
+    # (SN_OPT_SPREAD_*, SN_OPT_OI_*, SN_OPT_VOL_*, band-coverage)
+    # were never reliable for the desk's universe; default OFF. Toggle
+    # ENABLE_E1_OPTIONS_LIQUIDITY_GATE=1 to re-enable.
+    _e1_flags = get_flags()
+    _options_gate_enabled = bool(getattr(_e1_flags, "ENABLE_E1_OPTIONS_LIQUIDITY_GATE", False))
+    if not _options_gate_enabled:
+        opt_state, opt_code, opt_explain = (
+            "MISSING",
+            "SN_OPT_GATE_DISABLED",
+            "Options-liquidity gate disabled by ENABLE_E1_OPTIONS_LIQUIDITY_GATE=0 (options chain data unreliable for the desk's universe).",
+        )
+
     # Try to find option chain data - ORATS data may lag by 1 day
     # So we try today, then yesterday, then a few days back
     today_et = _now_et_date()
     trade_dates_to_try = [today_et - dt.timedelta(days=d) for d in range(5)]
     
-    if trade_date:
+    if _options_gate_enabled and trade_date:
         # Also try the asOfDate from payload if provided
         try:
             payload_date = dt.date.fromisoformat(str(trade_date)[:10])
@@ -1224,8 +1237,10 @@ def compute_go_no_go(
                             )
                         else:
                             opt_state, opt_code, opt_explain = "PASS", None, "Options liquidity looks sufficient in delta band."
-    else:
+    elif _options_gate_enabled:
+        # Gate is enabled but no trade_date available → legacy MISSING.
         opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Missing trade date for options chain."
+    # else: gate disabled — keep the SN_OPT_GATE_DISABLED state set above.
 
     # Always record options-side outcome for debug (especially important when underlying liquidity is missing).
     try:

@@ -158,9 +158,25 @@ front_layer_lock = threading.Lock()
 # Cache-key helpers
 # ---------------------------------------------------------------------------
 
-def breach_cache_key(ticker: str, n: int, years: int, k: float, flags_fp: tuple | None = None) -> tuple:
+def breach_cache_key(
+    ticker: str,
+    n: int,
+    years: int,
+    k: float,
+    flags_fp: tuple | None = None,
+    *,
+    event_date: str | None = None,
+    event_timing: str | None = None,
+) -> tuple:
+    """Cache key for /api/breach — now includes the (optional) manual earnings
+    date + timing so stale nextEvent no longer survives cache hits.
+    ``event_date``/``event_timing`` default to empty strings when omitted to
+    keep legacy callers compatible.
+    """
     fp = flags_fp if flags_fp is not None else get_flags().cache_fingerprint()
-    return (ticker.strip().upper(), int(n), int(years), float(k), fp)
+    ed = (event_date or "").strip()[:10]
+    et = (event_timing or "").strip().upper()
+    return (ticker.strip().upper(), int(n), int(years), float(k), fp, ed, et)
 
 
 def spx_ic_cache_key(params: dict, flags_fp: tuple) -> tuple:

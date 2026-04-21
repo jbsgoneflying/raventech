@@ -772,6 +772,382 @@ function renderEngine1DecisionPanel(payload) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Engine 1 v2 — Wing Decision Console (primary card)
+// ---------------------------------------------------------------------------
+
+const _e1WingConsoleState = {
+  ticker: "",
+  event_date: "",
+  event_timing: "",
+  lastConsole: null,
+  selectedIndex: 0,
+};
+
+function refreshE1SourceChip(nextEvent) {
+  const ctrls = window.__ravenE1Controls;
+  if (!ctrls || !ctrls.setSourceChip) return;
+  const src = String(nextEvent?.override_source || nextEvent?.source || "unknown")
+    .toLowerCase();
+  // Allowed set; anything else -> "unknown"
+  const allowed = new Set([
+    "user_override", "orats_cores", "benzinga", "cadence_estimate", "unknown",
+  ]);
+  ctrls.setSourceChip(allowed.has(src) ? src : "unknown");
+
+  // Pre-fill date/timing if empty and backend resolved one.
+  try {
+    if (ctrls.mcDate && !ctrls.mcDate.value && nextEvent?.earnDateNext) {
+      ctrls.mcDate.value = String(nextEvent.earnDateNext).slice(0, 10);
+    }
+    if (ctrls.mcTiming && !ctrls.mcTiming.value && nextEvent?.timingPlanned) {
+      const tp = String(nextEvent.timingPlanned || "").toUpperCase();
+      if (["AMC", "BMO"].includes(tp)) ctrls.mcTiming.value = tp;
+    }
+    ctrls.refreshSubmitEnabled?.();
+  } catch { /* ignore */ }
+}
+
+function _fmtPct(x, digits = 1) {
+  if (x === null || x === undefined) return "—";
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(digits)}%`;
+}
+
+function _scoreColor(score) {
+  if (score >= 75) return "e1MetricGood";
+  if (score >= 55) return "e1MetricMed";
+  return "e1MetricRisky";
+}
+
+function _metricColorLowerBetter(x, goodMax, badMin) {
+  if (x === null || x === undefined) return "";
+  const v = Number(x);
+  if (!Number.isFinite(v)) return "";
+  if (v <= goodMax) return "e1MetricGood";
+  if (v >= badMin) return "e1MetricRisky";
+  return "e1MetricMed";
+}
+
+function renderWingConsole(payload) {
+  const host = $("e1WingConsole");
+  const section = $("e1WingConsoleSection");
+  if (!host || !section) return;
+
+  section.classList.remove("hidden");
+  host.innerHTML =
+    `<div class="e1ConsoleWarnings">Scoring wing placements…</div>`;
+
+  const ticker = String(payload?.ticker || "").toUpperCase();
+  const ne = payload?.nextEvent || {};
+  const eventDate = String(ne.earnDateNext || $("mcEventDate")?.value || "")
+    .slice(0, 10);
+  const eventTiming = String(ne.timingPlanned || $("mcEventTiming")?.value || "")
+    .toUpperCase();
+
+  _e1WingConsoleState.ticker = ticker;
+  _e1WingConsoleState.event_date = eventDate;
+  _e1WingConsoleState.event_timing = eventTiming;
+
+  if (!ticker || !eventDate || !["AMC", "BMO"].includes(eventTiming)) {
+    host.innerHTML =
+      `<div class="e1ConsoleWarnings">Fill in ticker + earnings date + timing, then Calculate.</div>`;
+    return;
+  }
+
+  fetch("/api/breach/wing-console", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ticker, event_date: eventDate, event_timing: eventTiming,
+    }),
+  })
+    .then(async (resp) => {
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`wing-console ${resp.status}: ${txt}`);
+      }
+      return resp.json();
+    })
+    .then((console_) => {
+      _e1WingConsoleState.lastConsole = console_;
+      _e1WingConsoleState.selectedIndex = 0;
+      _paintWingConsole(host, console_);
+    })
+    .catch((err) => {
+      host.innerHTML =
+        `<div class="e1ConsoleWarnings">Wing Console unavailable: ${
+          String(err?.message || err)
+            .replace(/</g, "&lt;")
+        }</div>`;
+    });
+}
+
+function _paintWingConsole(host, data) {
+  const placements = Array.isArray(data?.placements) ? data.placements : [];
+  const weights = data?.weights_used || {};
+  const mae = data?.mae || {};
+  const theta = data?.theta || {};
+  const topN = placements.slice(0, 7);
+
+  const spot = Number(data?.spot);
+  const im = Number(data?.implied_move_pct);
+  const regime = data?.regime_label ? String(data.regime_label) : "—";
+  const regimeP = data?.regime_prob;
+  const maeN = Number(mae?.n || 0);
+
+  const subtitleBits = [
+    `<span><strong>${data.ticker}</strong></span>`,
+    `<span>Earnings <strong>${data.event_date}</strong> (${data.event_timing})</span>`,
+    `<span>Spot <strong>${Number.isFinite(spot) ? spot.toFixed(2) : "—"}</strong></span>`,
+    `<span>Implied move <strong>${Number.isFinite(im) ? im.toFixed(2) : "—"}%</strong></span>`,
+    `<span>Regime <strong>${regime}${
+      regimeP !== null && regimeP !== undefined ? ` ${(Number(regimeP) * 100).toFixed(0)}%` : ""
+    }</strong></span>`,
+    `<span>MAE pool <strong>n=${maeN}</strong> ${mae?.source ? `(${mae.source})` : ""}</span>`,
+  ].join("");
+
+  const weightsRow = Object.entries(weights)
+    .filter(([k]) => !["max_tolerable_mae_pct", "target_theta_pct", "target_credit_mult"].includes(k))
+    .map(([k, v]) => `<span title="weight"><strong>${k}</strong> ${Number(v).toFixed(2)}</span>`)
+    .join(" · ");
+
+  const rowsHtml = topN.map((p, i) => _renderPlacementRow(p, i, i === 0)).join("");
+
+  const warningsHtml = Array.isArray(data?.warnings) && data.warnings.length
+    ? `<div class="e1ConsoleWarnings">${data.warnings.map(_escape).join(" · ")}</div>`
+    : "";
+
+  host.innerHTML = `
+    <div class="e1Console">
+      <div class="e1ConsoleHeader">
+        <div>
+          <h3 class="e1ConsoleTitle">Ranked wing placements</h3>
+          <div class="e1ConsoleSubtitle">${subtitleBits}</div>
+        </div>
+        <div class="e1ConsoleSubtitle" style="font-size:10px;opacity:.8">
+          Weights → ${weightsRow}
+        </div>
+      </div>
+
+      ${warningsHtml}
+
+      <table class="e1PlacementTable" aria-label="Ranked wing placements">
+        <thead>
+          <tr>
+            <th>#</th><th>EM ×</th><th>Wings (pts)</th>
+            <th>P short / C short</th>
+            <th>Credit ($)</th>
+            <th>Brch gap</th><th>Brch CTC</th>
+            <th>MAE p95 (% wing)</th>
+            <th>Theta cap</th>
+            <th>Score</th>
+            <th>Conf.</th>
+          </tr>
+        </thead>
+        <tbody id="e1PlacementRows">
+          ${rowsHtml}
+        </tbody>
+      </table>
+
+      ${_renderTunerAndActions(data)}
+    </div>
+  `;
+
+  const rowsEl = host.querySelector("#e1PlacementRows");
+  if (rowsEl) {
+    rowsEl.querySelectorAll(".e1PlacementRow").forEach((row) => {
+      row.addEventListener("click", () => {
+        const idx = Number(row.getAttribute("data-index") || 0);
+        _e1WingConsoleState.selectedIndex = idx;
+        rowsEl.querySelectorAll(".e1PlacementRow").forEach((r) => {
+          r.classList.remove("e1PlacementRow--selected");
+        });
+        row.classList.add("e1PlacementRow--selected");
+      });
+    });
+  }
+
+  _wireTuner(data);
+  _wireWingActions(data);
+}
+
+function _renderPlacementRow(p, i, isTop) {
+  const scoreClass = _scoreColor(Number(p.composite_score));
+  const maeClass = _metricColorLowerBetter(p.mae_p95_pct, 40, 90);
+  const gapClass = _metricColorLowerBetter((p.breach_gap_prob || 0) * 100, 15, 35);
+  const ctcClass = _metricColorLowerBetter((p.breach_ctc_prob || 0) * 100, 20, 40);
+  const star = isTop ? '<span class="e1StarTop">★</span>' : "";
+  return `
+    <tr class="e1PlacementRow ${isTop ? "e1PlacementRow--top" : ""}"
+        data-index="${i}">
+      <td class="e1RankCell">${i + 1}${star}</td>
+      <td>${Number(p.em_mult).toFixed(2)}</td>
+      <td>${Number(p.wing_pts).toFixed(1)}</td>
+      <td>${Number(p.short_put_strike).toFixed(2)} / ${Number(p.short_call_strike).toFixed(2)}</td>
+      <td>$${Number(p.credit_dollars).toFixed(0)}</td>
+      <td class="${gapClass}">${_fmtPct((p.breach_gap_prob || 0) * 100)}</td>
+      <td class="${ctcClass}">${_fmtPct((p.breach_ctc_prob || 0) * 100)}</td>
+      <td class="${maeClass}">${_fmtPct(p.mae_p95_pct)}</td>
+      <td>${_fmtPct(p.theta_capture_pct)}</td>
+      <td class="e1ScoreCell ${scoreClass}">${Number(p.composite_score).toFixed(1)}</td>
+      <td>${String(p.confidence || "—")}</td>
+    </tr>
+  `;
+}
+
+function _renderTunerAndActions(data) {
+  const g = data?.grid || {};
+  const emVals = Array.isArray(g.em_mults) ? g.em_mults : [1.0, 1.25, 1.5, 1.75, 2.0];
+  const wpVals = Array.isArray(g.wing_pts) ? g.wing_pts : [5, 7.5, 10];
+  const emMin = Math.min(...emVals);
+  const emMax = Math.max(...emVals);
+  const wpMin = Math.min(...wpVals);
+  const wpMax = Math.max(...wpVals);
+
+  const top = (data?.placements || [])[0] || {};
+  const emDefault = Number(top.em_mult || 1.5);
+  const wpDefault = Number(top.wing_pts || 7.5);
+
+  return `
+    <div class="e1Tuner">
+      <div class="e1TunerField">
+        <label for="e1TunerEm">EM multiple <span id="e1TunerEmValue" class="e1TunerValue">${emDefault.toFixed(2)}</span></label>
+        <input id="e1TunerEm" type="range" min="${emMin}" max="${emMax}" step="0.05" value="${emDefault}" />
+      </div>
+      <div class="e1TunerField">
+        <label for="e1TunerWp">Wing width (pts) <span id="e1TunerWpValue" class="e1TunerValue">${wpDefault.toFixed(1)}</span></label>
+        <input id="e1TunerWp" type="range" min="${wpMin}" max="${wpMax}" step="0.5" value="${wpDefault}" />
+      </div>
+      <div class="e1TunerScoreBox">
+        <div>Custom placement score: <strong id="e1TunerScore">—</strong></div>
+        <div style="font-size:11px;color:var(--text-muted,#9aa0a6)" id="e1TunerScoreNote">snap to nearest grid</div>
+      </div>
+    </div>
+
+    <div class="e1ConsoleActions">
+      <button type="button" id="e1BuildTradeBtn" class="e1ConsoleActions--primary">Build Trade from selected</button>
+      <button type="button" id="e1AdvisorBtn">Run LLM Advisor Narrative</button>
+      <button type="button" id="e1ExportBtn">Export JSON</button>
+    </div>
+
+    <div id="e1AdvisorNarrative" class="e1AdvisorNarrative" style="display:none"></div>
+  `;
+}
+
+function _nearestPlacement(placements, em, wp) {
+  if (!Array.isArray(placements) || !placements.length) return null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const p of placements) {
+    const d = Math.pow(p.em_mult - em, 2) + Math.pow((p.wing_pts - wp) / 2.5, 2);
+    if (d < bestDist) {
+      best = p;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+function _wireTuner(data) {
+  const emEl = $("e1TunerEm");
+  const wpEl = $("e1TunerWp");
+  const emV  = $("e1TunerEmValue");
+  const wpV  = $("e1TunerWpValue");
+  const scoreEl = $("e1TunerScore");
+  const noteEl  = $("e1TunerScoreNote");
+
+  function recompute() {
+    const em = Number(emEl.value);
+    const wp = Number(wpEl.value);
+    emV.textContent = em.toFixed(2);
+    wpV.textContent = wp.toFixed(1);
+    const near = _nearestPlacement(data.placements || [], em, wp);
+    if (near) {
+      scoreEl.textContent = Number(near.composite_score).toFixed(1);
+      scoreEl.className = _scoreColor(Number(near.composite_score));
+      noteEl.textContent = `snap → EM ${near.em_mult.toFixed(2)} / wings ${near.wing_pts.toFixed(1)}pts`;
+    }
+  }
+  if (emEl) emEl.addEventListener("input", recompute);
+  if (wpEl) wpEl.addEventListener("input", recompute);
+  recompute();
+}
+
+function _wireWingActions(data) {
+  const buildBtn = $("e1BuildTradeBtn");
+  const advBtn   = $("e1AdvisorBtn");
+  const expBtn   = $("e1ExportBtn");
+  const narrativeEl = $("e1AdvisorNarrative");
+
+  if (buildBtn) {
+    buildBtn.addEventListener("click", () => {
+      const idx = _e1WingConsoleState.selectedIndex || 0;
+      const p = (data.placements || [])[idx];
+      if (!p) return;
+      try {
+        if (window.runCalculation && typeof window.runCalculation === "function") {
+          // Prefer passing through the trade-builder params the existing
+          // pipeline already handles.
+          window.runCalculation({
+            wing_width: p.wing_pts,
+            symmetry: "symmetric",
+            mode: "equal_delta",
+          });
+        }
+      } catch { /* ignore */ }
+      buildBtn.textContent = `Building ${p.em_mult.toFixed(2)}× / ${p.wing_pts.toFixed(1)}pts…`;
+      setTimeout(() => { buildBtn.textContent = "Build Trade from selected"; }, 2000);
+    });
+  }
+
+  if (advBtn) {
+    advBtn.addEventListener("click", async () => {
+      if (!narrativeEl) return;
+      narrativeEl.style.display = "block";
+      narrativeEl.textContent = "Requesting narrative…";
+      try {
+        const resp = await fetch("/api/breach/advisor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker: _e1WingConsoleState.ticker,
+            event_date: _e1WingConsoleState.event_date,
+            event_timing: _e1WingConsoleState.event_timing,
+          }),
+        });
+        if (!resp.ok) throw new Error(`advisor ${resp.status}`);
+        const body = await resp.json();
+        const narrative = body?.analysis || body?.advisor || body?.narrative || JSON.stringify(body).slice(0, 1200);
+        narrativeEl.textContent = "";
+        narrativeEl.innerHTML = `<strong>LLM Advisor</strong><br/>${_escape(String(narrative)).replace(/\n/g, "<br/>")}`;
+      } catch (err) {
+        narrativeEl.textContent = `Advisor unavailable: ${String(err?.message || err)}`;
+      }
+    });
+  }
+
+  if (expBtn) {
+    expBtn.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `wing-console-${data.ticker}-${data.event_date}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+  }
+}
+
+function _escape(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 // --- Earnings Playbook Cards (Live Data dropdown) ---
 // Populates the 4 playbook cards from goNoGo.checks data.
 function renderPlaybookCards(go) {
@@ -1607,7 +1983,10 @@ let earningsExpanded = false;
 let bufferModePref = null; // "symmetric" | "asymmetric" | null (auto)
 let showAdvancedCols = false;
 let tradeBuilderExpanded = false;
-let mcEnabledPref = false;
+// E1 v2: MC is always on server-side; mcEnabledPref retained as true-const for
+// any legacy render branches that check it. The ?mc=1 query param is still
+// accepted by the backend but ignored (kill-switch moved to backend flag).
+let mcEnabledPref = true;
 let mcEventOverride = { date: null, timing: "AUTO" };
 
 const tradeBuilderState = {
@@ -2058,7 +2437,7 @@ function renderMonteCarlo(payload) {
     const bits = [rt, dc].filter(Boolean).join(", ");
     if (bits) notes.push(`Next event meta: ${bits}.`);
   }
-  if (!hasAnyMc) notes.push("MC unavailable: server did not return monteCarlo output. Ensure MC toggle is on and backend supports mc=1.");
+  if (!hasAnyMc) notes.push("MC output not returned. The backend kill-switch may be disabled (ENABLE_MONTE_CARLO_EARNINGS).");
   if (note) note.textContent = notes.length ? notes.join(" ") : "Simulates close→open earnings gap only (no intraday path).";
 
   if (!hasMc) {
@@ -2608,6 +2987,10 @@ function render(payload) {
   // Scan-first decision header (instrument panel style)
   try { renderEngine1DecisionPanel(payload); } catch { /* ignore */ }
 
+  // E1 v2: Wing Decision Console (primary card) + source chip refresh.
+  try { renderWingConsole(payload); } catch (err) { console.warn("wing console render failed:", err); }
+  try { refreshE1SourceChip(payload?.nextEvent || null); } catch { /* ignore */ }
+
   const rg = payload.regime || {};
   const asOf = $("regimeAsOf");
   if (asOf) asOf.textContent = rg.asOfDate ? `Latest ORATS EOD: ${rg.asOfDate}` : "—";
@@ -2721,8 +3104,10 @@ function render(payload) {
     call.textContent = calls.length ? `Call: ${calls.join(" | ")}` : "Call: —";
   }
 
-  // Earnings Playbook cards (Live Data dropdown)
-  try { renderPlaybookCards(payload?.goNoGo || null); } catch (e) { /* ignore */ }
+  // Earnings Playbook cards — hidden from the primary view in E1 v2. The
+  // cards were mostly options-liquidity noise; kept as a collapsible
+  // drill-down below the Wing Console when present in the DOM.
+  // try { renderPlaybookCards(payload?.goNoGo || null); } catch (e) { /* ignore */ }
 
   renderOiClustersCard("market", mg);
   renderOiClustersCard("ticker", tgd);
@@ -2754,8 +3139,11 @@ function render(payload) {
   }
 
   renderQuarterCards(payload.quarters);
-  const a = $("actionSummary");
-  if (a) a.textContent = buildActionSummary(payload.quarters);
+  // E1 v2: #actionSummary retired from the primary view — was a stubby
+  // copy-paste of quarter-summary text. Wing Console owns the "what to do"
+  // surface now.
+  const _a_retired = $("actionSummary");
+  if (_a_retired) _a_retired.textContent = "";
 
   renderBufferTarget(payload);
   renderEventRisk(payload);
@@ -2779,7 +3167,10 @@ function render(payload) {
   renderEarningsTable(payload.events || []);
 
   // ── Earnings IC Advisor (Vol Crush) ──
-  try { _renderE1AdvisorSection(payload); } catch (e) { console.warn("E1 advisor render:", e); }
+  // E1 v2: advisor is now on-demand via the Wing Console "Run LLM Advisor
+  // Narrative" button; the auto-rendered advisor section is hidden.
+  // try { _renderE1AdvisorSection(payload); } catch (e) { console.warn("E1 advisor render:", e); }
+  try { const _adv = $("e1AdvisorSection"); if (_adv) _adv.classList.add("hidden"); } catch { /* ignore */ }
   try { _loadE1TradeJournal(); } catch (e) { console.warn("E1 journal load:", e); }
 }
 
@@ -3747,20 +4138,25 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Build URL
+    // E1 v2: earnings date + timing are REQUIRED before scan.
+    const mcDateEl = $("mcEventDate");
+    const mcTimingEl = $("mcEventTiming");
+    const evDate = mcDateEl?.value || "";
+    const evTiming = String(mcTimingEl?.value || "").toUpperCase();
+    if (!evDate || !["AMC", "BMO"].includes(evTiming)) {
+      setStatus("Enter the earnings date + timing (BMO / AMC) before running.", true);
+      return;
+    }
+
+    // Build URL — event_date + event_timing are canonical; keep mc_event_* for one-release compat.
     let url = `/api/breach?ticker=${encodeURIComponent(t)}&n=20&years=5&k=${encodeURIComponent(k)}`;
+    url += `&event_date=${encodeURIComponent(evDate)}&event_timing=${encodeURIComponent(evTiming)}`;
+    // MC conditioning defaults on (MC always runs server-side; flags just shape the pool).
+    url += `&mc_cond_regime=1&mc_cond_quarter=1`;
     if (extraParams && typeof extraParams === "object") {
       for (const [kk, vv] of Object.entries(extraParams)) {
         if (vv === null || vv === undefined) continue;
         url += `&${encodeURIComponent(kk)}=${encodeURIComponent(String(vv))}`;
-      }
-    }
-    if (mcEnabledPref) {
-      // Default-on conditioning for trader relevance; backend will still fail-safe if pools are too small.
-      url += `&mc=1&mc_cond_regime=1&mc_cond_quarter=1`;
-      if (mcEventOverride?.date) url += `&mc_event_date=${encodeURIComponent(String(mcEventOverride.date))}`;
-      if (mcEventOverride?.timing && String(mcEventOverride.timing).toUpperCase() !== "AUTO") {
-        url += `&mc_event_timing=${encodeURIComponent(String(mcEventOverride.timing).toUpperCase())}`;
       }
     }
 
@@ -3984,43 +4380,48 @@ document.addEventListener("DOMContentLoaded", () => {
 
   syncTradeBuilderControls();
 
-  const mcToggle = $("mcToggle");
-  const mcGroup = $("mcOverrideGroup");
+  // E1 v2: required earnings-date + timing. Calculate is enabled only once
+  // both fields are filled. Editing either flips override_source to
+  // user_override (source chip reflects this on next calculation).
   const mcDate = $("mcEventDate");
   const mcTiming = $("mcEventTiming");
-  if (mcToggle) {
-    mcToggle.addEventListener("change", async () => {
-      mcEnabledPref = !!mcToggle.checked;
-      if (mcGroup) mcGroup.classList.toggle("hidden", !mcEnabledPref);
-      if (!lastPayload) return;
-      if (isBusy) return;
-      await runCalculation();
-    });
-  }
+  const submitBtn = $("submit");
+  const sourceChip = $("e1EventSourceChip");
 
-  // Apply mc=1 from querystring without triggering a compute until we decide to autorun.
-  if (mcToggle && (qsMc === "1" || qsMc === "true" || qsMc === "yes" || qsMc === "on")) {
-    mcEnabledPref = true;
-    mcToggle.checked = true;
-    if (mcGroup) mcGroup.classList.toggle("hidden", false);
+  function setSourceChip(source) {
+    if (!sourceChip) return;
+    const s = String(source || "unknown").toLowerCase();
+    sourceChip.className = `e1SourceChip e1SourceChip--${s}`;
+    sourceChip.setAttribute("data-source", s.replace(/_/g, " "));
+    sourceChip.textContent = s.replace(/_/g, " ");
+    sourceChip.title = `Earnings-date source: ${s}`;
   }
+  setSourceChip("unknown");
+
+  function refreshSubmitEnabled() {
+    const ok = !!(mcDate?.value) &&
+      ["AMC", "BMO"].includes(String(mcTiming?.value || "").toUpperCase());
+    if (submitBtn) submitBtn.disabled = !ok;
+  }
+  refreshSubmitEnabled();
 
   if (mcDate) {
-    mcDate.addEventListener("change", async () => {
+    mcDate.addEventListener("change", () => {
       mcEventOverride.date = mcDate.value || null;
-      if (!mcEnabledPref) return;
-      if (!lastPayload || isBusy) return;
-      await runCalculation();
+      setSourceChip("user_override");
+      refreshSubmitEnabled();
     });
   }
   if (mcTiming) {
-    mcTiming.addEventListener("change", async () => {
+    mcTiming.addEventListener("change", () => {
       mcEventOverride.timing = mcTiming.value || "AUTO";
-      if (!mcEnabledPref) return;
-      if (!lastPayload || isBusy) return;
-      await runCalculation();
+      setSourceChip("user_override");
+      refreshSubmitEnabled();
     });
   }
+
+  // Expose for renderNextEvent hooks below (see renderNextEvent v2).
+  window.__ravenE1Controls = { mcDate, mcTiming, sourceChip, setSourceChip, refreshSubmitEnabled };
 
   initTooltips();
   try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }

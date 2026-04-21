@@ -7,19 +7,131 @@ from __future__ import annotations
 
 ENGINE_META = {
     "id":          "e1",
-    "name":        "Engine 1 — Earnings Hold Risk / Breach Simulator",
+    "name":        "Engine 1 v2 — Wing Decision Console",
     "description": (
-        "Single-name earnings iron-condor staging engine. Runs Monte-Carlo "
-        "+ empirical breach stats against N historical earnings events, "
-        "combines with VRP (volatility risk premium), entry-quality score, "
-        "regime / dealer-gamma gating, and event risk to emit a go/no-go "
-        "verdict for today's premium-sale candidate."
+        "Single-name earnings iron-condor wing console. The desk is "
+        "assumed to be taking the trade; E1 v2 tells them WHERE to "
+        "place wings for maximum theta capture without breach-gap, "
+        "breach-CTC, or White-Knuckle (MAE) risk forcing an early "
+        "exit. Scores a 15-point (EM multiple × wing width) grid "
+        "deterministically from historical breach + MAE + IV-crush "
+        "patterns. MC runs per placement; MI v2 provides the "
+        "canonical regime. Earnings date + timing are required."
     ),
     "asset_class": "single-name equities — earnings cycle",
 }
 
 
 CATALOG = {
+
+    "wing_console": {
+        "title": "Wing Decision Console",
+        "spec": (
+            "Primary card on the /breach page. Scores a 15-point grid "
+            "(5 EM-multiples × 3 wing-widths) of candidate symmetric "
+            "iron-condor placements and ranks them by a deterministic "
+            "composite score (0-100).\n"
+            "The five scoring dimensions are:\n"
+            "- breach_gap_prob: historical gap-breach rate at that EM "
+            "multiple (daily OHLC, close→open earnings gap).\n"
+            "- breach_ctc_prob: historical close-to-close breach rate.\n"
+            "- mae_p95: 95th-pct Max Adverse Excursion across the "
+            "hold window as % of wing width — the White-Knuckle proxy.\n"
+            "- theta_capture: expected % of entry credit retained by "
+            "the planned exit, from the ticker's IV-crush pattern.\n"
+            "- credit_est: estimated entry credit in points.\n"
+            "Default weights: gap 30% / ctc 20% / MAE 25% / theta 15% / "
+            "credit 10%. Desk-tunable via E1_WING_SCORE_WEIGHT_*.\n"
+            "Replaces the legacy TRADE / LEAN_PASS / PASS verdict: "
+            "instead of asking 'should I trade?', it answers 'given "
+            "we're trading, where do the wings go?'"
+        ),
+        "related_cards": [
+            {"engine": "e1", "slug": "placement_score", "label": "Placement Scorecard"},
+            {"engine": "e1", "slug": "mae_distribution", "label": "MAE (White-Knuckle) Pool"},
+            {"engine": "e1", "slug": "theta_capture", "label": "Theta Capture Estimate"},
+            {"engine": "e1", "slug": "breach_stats", "label": "Breach Statistics"},
+            {"engine": "e1", "slug": "mc_earnings_risk", "label": "MC Earnings Risk (per-placement)"},
+        ],
+    },
+
+    "placement_score": {
+        "title": "Placement Scorecard",
+        "spec": (
+            "Row-level drill-down of one candidate wing placement. Each "
+            "row shows:\n"
+            "- em_mult × wing_pts: distance past the implied move and "
+            "wing width (in points).\n"
+            "- short/long put + call strikes: absolute prices given "
+            "the current spot + EM.\n"
+            "- breach_gap_prob / breach_ctc_prob: the two empirical "
+            "breach probabilities.\n"
+            "- mae_p95_pct: MAE as % of wing-width at this placement; "
+            "> 100% means 'historically hit max loss at this placement'.\n"
+            "- theta_capture_pct: expected kept-credit fraction if held.\n"
+            "- credit_est: per-contract credit (in points; × 100 = $).\n"
+            "- composite_score (0-100): weighted roll-up. The rank-1 "
+            "row is the scoring engine's best guess; the desk can then "
+            "pull the sliders to explore alternatives."
+        ),
+        "related_cards": [
+            {"engine": "e1", "slug": "wing_console", "label": "Wing Decision Console"},
+            {"engine": "e1", "slug": "mae_distribution", "label": "MAE Pool"},
+            {"engine": "e1", "slug": "theta_capture", "label": "Theta Capture"},
+        ],
+    },
+
+    "mae_distribution": {
+        "title": "MAE (White-Knuckle) Pool",
+        "spec": (
+            "Max Adverse Excursion distribution across the historical "
+            "earnings event pool. For each past event we compute "
+            "max(|high - entry|, |entry - low|) across the 1–2 trading "
+            "day hold window from daily OHLC bars. The pool is "
+            "aggregated into p50 / p75 / p90 / p95 percentiles in % "
+            "price-move terms.\n"
+            "At scoring time, mae_p95 is converted into 'distance past "
+            "the short strike' and then 'fraction of wing width', which "
+            "is what the composite penalty term uses.\n"
+            "Source tags:\n"
+            "- daily_ohlc_proxy: all events carried high + low (best).\n"
+            "- open_close_fallback: many events missing high/low; the "
+            "pool conservatively under-estimates true intraday MAE.\n"
+            "- mixed_proxy: partial coverage.\n"
+            "High mae_p95 + tight wings = historically forced into "
+            "panic-close territory. That's the signal the desk needs."
+        ),
+        "related_cards": [
+            {"engine": "e1", "slug": "wing_console", "label": "Wing Decision Console"},
+            {"engine": "e1", "slug": "placement_score", "label": "Placement Scorecard"},
+            {"engine": "e1", "slug": "gap_vs_ctc", "label": "Gap vs Close-to-Close"},
+        ],
+    },
+
+    "theta_capture": {
+        "title": "Theta Capture Estimate",
+        "spec": (
+            "Expected fraction of entry credit retained at a planned "
+            "post-event exit. Built from the ticker's historical "
+            "realized / implied move ratio:\n"
+            "- decay_richness = clamp(1 - mean(|signed| / EM), 0.10, "
+            "0.95) — how over-priced was the pre-event premium on "
+            "average.\n"
+            "- survival_rate(em_multiple) — % of past events where "
+            "|signed_move| ≤ em_mult × EM; this placement would have "
+            "survived the event unbreached.\n"
+            "- capture_pct ≈ survival × (0.30 + 0.65 × richness).\n"
+            "Think of capture_pct as 'what the desk would historically "
+            "have walked away with'. Above 60% is a rich setup; below "
+            "40% is thin and argues for wider wings or skipping.\n"
+            "Drives the theta term of the composite score."
+        ),
+        "related_cards": [
+            {"engine": "e1", "slug": "wing_console", "label": "Wing Decision Console"},
+            {"engine": "e1", "slug": "vrp_analysis", "label": "VRP Analysis"},
+            {"engine": "e1", "slug": "placement_score", "label": "Placement Scorecard"},
+        ],
+    },
 
     "breach_stats": {
         "title": "Breach Statistics",
@@ -126,17 +238,17 @@ CATALOG = {
     },
 
     "desk_consensus": {
-        "title": "Desk Consensus",
+        "title": "Desk Consensus (legacy)",
         "spec": (
-            "The aggregate verdict from combining VRP, entry quality, "
-            "regime, gap risk, and event risk into a single "
-            "Favorable/Neutral/Fade label with a short rationale. Serves "
-            "as the TL;DR for the trader scanning the page.\n"
-            "- Favorable: multiple tailwinds, no headwinds → ready to "
-            "build a structure.\n"
-            "- Neutral: mixed signals → do the work on wings and size.\n"
-            "- Fade: structural headwinds (IV too cheap, regime wrong, "
-            "event risk high) → preferred action is to pass."
+            "Legacy aggregate verdict from combining VRP, entry "
+            "quality, regime, gap risk, and event risk into a single "
+            "Favorable/Neutral/Fade label. In E1 v2 this card is "
+            "hidden from the primary view and kept only as a "
+            "drill-down — the desk's actual decision is driven by the "
+            "Wing Decision Console, which is deterministic and "
+            "cacheable. `compute_e1_desk_consensus` still ships the "
+            "field for the LLM Advisor narrative; the frontend no "
+            "longer renders it above-the-fold."
         ),
         "related_cards": [
             {"engine": "e1", "slug": "entry_quality", "label": "Entry Quality"},
@@ -189,12 +301,18 @@ CATALOG = {
         "spec": (
             "The upcoming earnings event this engine is staged against.\n"
             "- earnDateNext: projected next earnings date.\n"
-            "- timingPlanned: BMO/AMC (from ORATS snapshot or inferred).\n"
+            "- timingPlanned: BMO/AMC (from user override > ORATS "
+            "snapshot > Benzinga > cadence estimate).\n"
+            "- override_source: 'user_override' | 'orats_cores' | "
+            "'benzinga' | 'cadence_estimate' — the canonical source "
+            "chip shown next to the date in the UI.\n"
             "- pricingExpiry: the Friday-expiry chain the EM-math uses.\n"
-            "- confidence: HIGH (confirmed timing) / MED (inferred) / "
-            "LOW (guessed from cadence).\n"
-            "Any LOW confidence flag means the desk should manually "
-            "verify the date before journalizing a trade."
+            "- confidence: HIGH (confirmed) / MED (inferred) / LOW "
+            "(guessed from cadence).\n"
+            "In E1 v2 the desk is required to confirm or enter the "
+            "date + timing before Calculate can run — a user override "
+            "always flips override_source to user_override with "
+            "HIGH confidence."
         ),
         "related_cards": [
             {"engine": "e1",  "slug": "earnings_events_table", "label": "Historical Events"},
@@ -206,18 +324,23 @@ CATALOG = {
     "go_no_go": {
         "title": "Go / No-Go Checklist",
         "spec": (
-            "Hard-gate checklist the desk runs before a single-name "
-            "earnings IC. Each leg is PASS / BLOCK / WARN:\n"
-            "- IV Rank + z-score: liquid IV, cheap enough to pay "
-            "edge?\n"
-            "- Earnings sample size: ≥ GO_MIN_EARNINGS_N events?\n"
-            "- Tail sample: enough breach events to estimate p90?\n"
-            "- Correlation / beta: not dominated by index moves?\n"
-            "- Option liquidity: OI, volume, spreads, quote coverage in "
-            "the short-strike delta band?\n"
-            "- RV jump control: no pre-event vol acceleration?\n"
-            "- Forced flow: macro events colliding with the hold?\n"
-            "A single BLOCK = skip the trade."
+            "Hard-gate checklist run before a single-name earnings IC. "
+            "Each leg is PASS / BLOCK / WARN / MISSING.\n"
+            "In E1 v2 the options-liquidity family "
+            "(SN_OPT_SPREAD_*, SN_OPT_OI_*, SN_OPT_VOL_*, band-coverage "
+            "checks) is gated OFF by default — it reports MISSING with "
+            "note 'SN_OPT_GATE_DISABLED'. The underlying $-volume gate "
+            "(SN_LIQ_UNDERLYING_TOO_LOW) and the legal/reg denylist "
+            "(SN_LEGAL_REG) remain active.\n"
+            "Legs still evaluated:\n"
+            "- Earnings sample size: ≥ GO_MIN_EARNINGS_N events.\n"
+            "- Tail sample: enough breach events to estimate p90.\n"
+            "- Underlying avg $-vol (SN_LIQ_UNDERLYING_TOO_LOW).\n"
+            "- Legal / reg denylist + keyword trigger.\n"
+            "- RV jump control, forced-flow windows.\n"
+            "Re-enable options-liquidity checks with "
+            "ENABLE_E1_OPTIONS_LIQUIDITY_GATE=1 if the desk's data feed "
+            "gets reliable coverage of the delta band."
         ),
         "related_cards": [
             {"engine": "e1", "slug": "desk_consensus", "label": "Desk Consensus"},

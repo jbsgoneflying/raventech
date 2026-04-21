@@ -8,6 +8,7 @@
     <meta name="description" content="Raven-Tech.co — Engine 1: Earnings hold risk with Monte Carlo simulation." />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <link rel="stylesheet" href="/static/engine1-v2.css?v=1" />
   </head>
   <body>
     <main class="container" role="main">
@@ -73,58 +74,35 @@
 
           <div class="controlSpacer"></div>
 
-          <div class="controlGroup">
-            <label class="controlLabel" for="mcToggle">
-              Simulated Risk (MC)
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Monte Carlo help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Simulated Risk (MC)</div>
-                  <div class="tipBody">
-                    <p>Monte Carlo simulates the <b>earnings gap at open</b> by bootstrapping historical earnings shocks (no intraday path).</p>
-                    <ul>
-                      <li><b>What it’s for</b>: a trader-friendly “how bad can the open gap be?” view (probability + tail loss).</li>
-                      <li><b>Desk view</b>: use it to sanity-check wing distances and avoid over-sizing into names with heavy gap tails.</li>
-                    </ul>
-                  </div>
-                </div>
-              </span>
-            </label>
-            <label class="toggleRow">
-              <input id="mcToggle" type="checkbox" />
-              <span class="toggleText">Enable</span>
-            </label>
-          </div>
-
-          <div class="controlGroup hidden" id="mcOverrideGroup">
+          <div class="controlGroup e1ReqEventGroup" id="e1EventGroup">
             <label class="controlLabel" for="mcEventDate">
-              Next earnings (override)
+              Earnings date <span class="e1Req" aria-hidden="true">*</span>
               <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Next earnings override help" aria-expanded="false">i</button>
+                <button class="tipBtn" type="button" aria-label="Earnings date help" aria-expanded="false">i</button>
                 <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Next earnings override</div>
+                  <div class="tipTitle">Earnings date (required)</div>
                   <div class="tipBody">
-                    <p>Use this only when the next earnings date/timing can’t be pulled reliably.</p>
+                    <p>Engine 1 v2 requires the next earnings date + timing before scoring wing placements. We pre-fill from the best available source and show a chip indicating provenance.</p>
                     <ul>
-                      <li><b>Date</b>: the scheduled earnings date.</li>
-                      <li><b>Timing</b>: BMO (before open) vs AMC (after close). Auto tries to infer it.</li>
-                      <li><b>Desk view</b>: MC stays anchored to the latest ORATS EOD snapshot; this just fixes the event window selection.</li>
+                      <li><b>Source chip</b>: <code>user_override</code> &gt; <code>orats_cores</code> &gt; <code>benzinga</code> &gt; <code>cadence_estimate</code>.</li>
+                      <li><b>Override</b>: edit either field to lock in your manual entry (chip flips to <code>user_override</code>).</li>
                     </ul>
                   </div>
                 </div>
               </span>
             </label>
-            <div class="mcOverrideRow">
-              <input id="mcEventDate" class="controlInput" type="date" />
-              <select id="mcEventTiming" class="controlSelect">
-                <option value="AUTO" selected>Auto</option>
-                <option value="AMC">AMC</option>
-                <option value="BMO">BMO</option>
+            <div class="e1EventRow">
+              <input id="mcEventDate" class="controlInput" type="date" required aria-required="true" />
+              <select id="mcEventTiming" class="controlSelect" required aria-required="true">
+                <option value="" selected disabled>Timing…</option>
+                <option value="AMC">AMC (After-Market Close)</option>
+                <option value="BMO">BMO (Before-Market Open)</option>
               </select>
+              <span id="e1EventSourceChip" class="e1SourceChip e1SourceChip--unknown" title="Source of the earnings date"></span>
             </div>
           </div>
 
-          <button id="submit" type="submit" class="primaryButton">
+          <button id="submit" type="submit" class="primaryButton" disabled>
             <span class="btnSpinner" aria-hidden="true"></span>
             <span class="btnLabel">Calculate</span>
           </button>
@@ -134,6 +112,15 @@
       </section>
 
       <section id="results" class="results hidden" aria-label="Results">
+
+        <!-- Engine 1 v2 — Wing Decision Console (primary card) -->
+        <section class="surface hidden" id="e1WingConsoleSection" aria-label="Wing Decision Console">
+          <div class="sectionHeader" data-insight="wing_console">
+            <h2 class="sectionTitle">Wing Decision Console</h2>
+          </div>
+          <div id="e1WingConsole"></div>
+        </section>
+
         <section class="surface hidden" id="e1DecisionSection" aria-label="Decision header"></section>
         <!-- Summary merged into Risk Check (Decision Header) -->
 

@@ -1,0 +1,353 @@
+/* =============================================================
+   Engine 1 v2 — Wing Decision Console
+   ============================================================= */
+
+/* ----- Form: required earnings-date + timing ---------------- */
+
+.e1ReqEventGroup {
+  min-width: 280px;
+}
+
+.e1EventRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.e1EventRow .controlInput[type="date"] {
+  max-width: 160px;
+}
+
+.e1EventRow .controlSelect {
+  min-width: 180px;
+}
+
+.e1Req {
+  color: var(--color-danger, #ff5c5c);
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+/* Source chip ------------------------------------------------- */
+
+.e1SourceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--text-muted, #9aa0a6);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+.e1SourceChip::before {
+  content: attr(data-source);
+}
+
+.e1SourceChip--user_override {
+  color: #3cd4a9;
+  border-color: rgba(60, 212, 169, 0.35);
+  background: rgba(60, 212, 169, 0.08);
+}
+
+.e1SourceChip--orats_cores {
+  color: #7db6ff;
+  border-color: rgba(125, 182, 255, 0.35);
+  background: rgba(125, 182, 255, 0.08);
+}
+
+.e1SourceChip--benzinga {
+  color: #f3a847;
+  border-color: rgba(243, 168, 71, 0.35);
+  background: rgba(243, 168, 71, 0.08);
+}
+
+.e1SourceChip--cadence_estimate {
+  color: #c77dff;
+  border-color: rgba(199, 125, 255, 0.35);
+  background: rgba(199, 125, 255, 0.08);
+}
+
+.e1SourceChip--unknown {
+  color: var(--text-muted, #9aa0a6);
+}
+
+/* ----- Wing Decision Console panel -------------------------- */
+
+.e1Console {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--surface-1, #121418);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+.e1ConsoleHeader {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 12px;
+}
+
+.e1ConsoleTitle {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  margin: 0;
+}
+
+.e1ConsoleSubtitle {
+  font-size: 12px;
+  color: var(--text-muted, #9aa0a6);
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.e1ConsoleSubtitle strong {
+  color: var(--text-primary, #e6e6e6);
+  font-weight: 600;
+}
+
+/* Placement table ---------------------------------------------*/
+
+.e1PlacementTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.e1PlacementTable thead th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--text-muted, #9aa0a6);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.e1PlacementTable tbody td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-primary, #e6e6e6);
+  font-variant-numeric: tabular-nums;
+}
+
+.e1PlacementRow {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.e1PlacementRow:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.e1PlacementRow--selected {
+  background: rgba(125, 182, 255, 0.08);
+  outline: 1px solid rgba(125, 182, 255, 0.35);
+  outline-offset: -1px;
+}
+
+.e1PlacementRow--top {
+  background: rgba(60, 212, 169, 0.05);
+}
+
+.e1RankCell {
+  font-weight: 700;
+  text-align: center;
+  width: 32px;
+}
+
+.e1StarTop {
+  color: #ffd24a;
+  margin-left: 4px;
+}
+
+.e1ScoreCell {
+  font-weight: 700;
+  color: #3cd4a9;
+}
+
+.e1ScoreCell--med {
+  color: #f3a847;
+}
+
+.e1ScoreCell--low {
+  color: #ff7a7a;
+}
+
+.e1MetricGood  { color: #3cd4a9; }
+.e1MetricMed   { color: #f3a847; }
+.e1MetricRisky { color: #ff7a7a; }
+
+/* Hand-tune sliders ------------------------------------------ */
+
+.e1Tuner {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.e1TunerField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.e1TunerField label {
+  color: var(--text-muted, #9aa0a6);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.e1TunerField input[type="range"] {
+  width: 100%;
+}
+
+.e1TunerValue {
+  font-weight: 700;
+  color: var(--text-primary, #e6e6e6);
+  font-variant-numeric: tabular-nums;
+}
+
+.e1TunerScoreBox {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+}
+
+.e1TunerScoreBox strong {
+  font-size: 18px;
+  color: #3cd4a9;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Action row --------------------------------------------------*/
+
+.e1ConsoleActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+}
+
+.e1ConsoleActions button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-2, #1a1d24);
+  color: var(--text-primary, #e6e6e6);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.e1ConsoleActions button:hover:not(:disabled) {
+  background: rgba(125, 182, 255, 0.08);
+  border-color: rgba(125, 182, 255, 0.4);
+}
+
+.e1ConsoleActions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.e1ConsoleActions .e1ConsoleActions--primary {
+  background: rgba(60, 212, 169, 0.12);
+  border-color: rgba(60, 212, 169, 0.45);
+  color: #3cd4a9;
+}
+
+.e1ConsoleActions .e1ConsoleActions--primary:hover:not(:disabled) {
+  background: rgba(60, 212, 169, 0.2);
+}
+
+/* Warnings ---------------------------------------------------*/
+
+.e1ConsoleWarnings {
+  font-size: 11px;
+  color: #f3a847;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(243, 168, 71, 0.08);
+  border: 1px solid rgba(243, 168, 71, 0.2);
+}
+
+/* Advisor narrative pane ------------------------------------- */
+
+.e1AdvisorNarrative {
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  color: var(--text-primary, #e6e6e6);
+  line-height: 1.5;
+}
+
+/* Hide the old MC toggle area if it lingers in DOM cache ----- */
+
+#mcToggle,
+#mcOverrideGroup {
+  display: none !important;
+}
+
+/* Collapsed drill-down sections ------------------------------ */
+
+details.e1Drilldown {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: var(--surface-1, #121418);
+  margin-bottom: 10px;
+}
+
+details.e1Drilldown > summary {
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 0;
+  list-style: none;
+}
+
+details.e1Drilldown > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.e1Drilldown > summary::after {
+  content: "▸";
+  float: right;
+  transition: transform 120ms ease;
+  color: var(--text-muted, #9aa0a6);
+}
+
+details.e1Drilldown[open] > summary::after {
+  transform: rotate(90deg);
+}

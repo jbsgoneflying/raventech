@@ -1704,6 +1704,26 @@ def compute_breach_stats(
         regime = future_regime.result()
         current = future_current.result()
 
+    # E1 v2: overlay MI v2 canonical regime if enabled (degrades gracefully).
+    if bool(getattr(flags, "ENABLE_MI_V2", False)):
+        try:
+            from backend.market_intel import regime_snapshot as _mi_regime_snapshot
+            _mi = _mi_regime_snapshot()
+            if _mi is not None:
+                _label = str(getattr(_mi, "label", "") or "") or None
+                _probs = getattr(_mi, "probabilities", None) or {}
+                if _label:
+                    regime = dict(regime or {})
+                    regime["label"] = _label
+                    regime["mi_v2"] = {
+                        "label":         _label,
+                        "probabilities": dict(_probs) if isinstance(_probs, dict) else {},
+                        "vol_state":     getattr(_mi, "vol_state", None),
+                        "source":        getattr(_mi, "source", "v2_hmm"),
+                    }
+        except Exception as _mi_err:
+            LOG.debug("E1: MI v2 regime overlay skipped: %s", _mi_err)
+
     try:
         cq_date = _parse_date(str(current.get("asOfDate") or "")[:10])
         current_quarter_key = _quarter_key(cq_date)
@@ -1897,6 +1917,24 @@ def compute_breach_stats(
             },
             "notes": [f"Hold risk computation failed: {type(e).__name__}: {e}"],
         }
+
+    # ---------------------------------------------------------------------
+    # ENGINE 1 v2: MAE distribution (White-Knuckle proxy). Computed once
+    # here so /api/breach/wing-console can consume the pool without
+    # re-fetching dailies.
+    # ---------------------------------------------------------------------
+    try:
+        from backend.engine1.mae_proxy import compute_mae_distribution as _mae_dist
+        _hold_days = int(getattr(flags, "E1_MAE_HOLD_DAYS", 2) or 2)
+        _mae = _mae_dist(
+            hold_risk_events=_hold_risk_events or [],
+            dailies_cache=_dailies_cache or {},
+            hold_days=_hold_days,
+        )
+        out["e1WingMAE"] = _mae.to_dict()
+    except Exception as _mae_err:
+        LOG.debug("e1WingMAE computation failed for %s: %s", t, _mae_err)
+        out["e1WingMAE"] = {"n": 0, "notes": [f"mae_proxy_failed: {type(_mae_err).__name__}"]}
 
     # --- Market dealer gamma context (live, informational; index-level only) ---
     # Never affects historical earnings stats, seasonality, or regime training.
@@ -2424,6 +2462,19 @@ def compute_breach_stats(
         except Exception as e:
             next_event["notes"].append(f"nextEvent calculation failed: {type(e).__name__}: {e}")
         finally:
+            # E1 v2: canonical override_source chip for the UI.
+            # Maps legacy `source` values to one of the four documented classes.
+            _source_to_override = {
+                "manual_override": "user_override",
+                "orats_snapshot":  "orats_cores",
+                "orats_hist":      "orats_cores",
+                "benzinga":        "benzinga",
+                "estimate":        "cadence_estimate",
+            }
+            _legacy_src = next_event.get("source")
+            next_event["override_source"] = _source_to_override.get(
+                _legacy_src, _legacy_src or "unknown"
+            )
             # Always return nextEvent (even if partially populated) so UI/MC can explain failures.
             out["nextEvent"] = next_event
 

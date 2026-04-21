@@ -607,6 +607,55 @@ def run_monte_carlo(
     return out
 
 
+def run_monte_carlo_for_placement(
+    *,
+    ticker: str,
+    params: Dict[str, Any],
+    flags: FeatureFlags,
+    current: Dict[str, Any],
+    next_event: Dict[str, Any],
+    regime: Dict[str, Any],
+    events: List[Dict[str, Any]],
+    placement: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Engine 1 v2 — run MC for one explicit wing placement.
+
+    ``placement`` must carry ``short_put_strike``, ``long_put_strike``,
+    ``short_call_strike``, ``long_call_strike``. We funnel this through
+    :func:`run_monte_carlo` by constructing a synthetic trade-builder
+    dict so the existing structure-key cache is re-used (cache is
+    keyed on strikes — so each unique placement only simulates once).
+
+    Returns the standard MC output shape (breachProb, expectedLoss,
+    cvar95, pool diagnostics, ...). The caller (wing_console) picks
+    out ``breachProb.either`` for the "breach_gap_prob_mc" signal.
+    """
+    ps = _to_float(placement.get("short_put_strike") or placement.get("putShort"))
+    pl = _to_float(placement.get("long_put_strike") or placement.get("putLong"))
+    cs = _to_float(placement.get("short_call_strike") or placement.get("callShort"))
+    cl = _to_float(placement.get("long_call_strike") or placement.get("callLong"))
+    if None in (ps, pl, cs, cl):
+        return {"nSims": 0, "notes": ["Placement strikes missing."]}
+
+    synthetic_tb = {
+        "put":  {"shortStrike": ps, "longStrike": pl},
+        "call": {"shortStrike": cs, "longStrike": cl},
+        "totalCredit": _to_float(placement.get("credit_est")),
+    }
+
+    return run_monte_carlo(
+        ticker=ticker,
+        params=params,
+        flags=flags,
+        current=current,
+        next_event=next_event,
+        regime=regime,
+        wing_recommendation={},   # unused when trade_builder carries strikes
+        events=events,
+        trade_builder=synthetic_tb,
+    )
+
+
 def optimize_wings_risk_only(
     *,
     ticker: str,

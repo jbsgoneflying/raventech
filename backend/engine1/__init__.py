@@ -1,0 +1,54 @@
+"""Engine 1 v2 — Wing Decision Console.
+
+Transforms the legacy "should I take this trade?" verdict machine into a
+"where do I place my wings?" decision console. The desk is assumed to be
+taking the trade; this engine tells them HOW to position for maximum
+theta capture without breach-gap, breach-CTC, or White-Knuckle (MAE)
+risk forcing an early exit.
+
+Public entry points:
+
+- :func:`score_placements` — fit a grid of (EM-multiple, wing-width)
+  candidates, return ranked :class:`PlacementScore` objects plus the
+  scoring context used.
+- :func:`build_wing_console` — full pipeline: given a breach-stats
+  payload + (ticker, event_date, event_timing), produce a
+  :class:`WingConsolePayload` ready for the frontend / LLM advisor.
+
+The scoring math is deterministic, cacheable, and auditable. The LLM
+advisor (``POST /api/breach/advisor``) can still ride on top as an
+on-demand narrative layer — this engine is the source of truth.
+"""
+from __future__ import annotations
+
+from backend.engine1.mae_proxy import (
+    MAEDistribution,
+    compute_mae_distribution,
+    mae_percentile_to_credit_pct,
+)
+from backend.engine1.theta_capture import (
+    ThetaCaptureReading,
+    estimate_theta_capture,
+)
+from backend.engine1.wing_console import (
+    DEFAULT_WEIGHTS,
+    PlacementScore,
+    WingConsolePayload,
+    WingConsoleWeights,
+    build_wing_console,
+    score_placements,
+)
+
+__all__ = [
+    "DEFAULT_WEIGHTS",
+    "MAEDistribution",
+    "PlacementScore",
+    "ThetaCaptureReading",
+    "WingConsolePayload",
+    "WingConsoleWeights",
+    "build_wing_console",
+    "compute_mae_distribution",
+    "estimate_theta_capture",
+    "mae_percentile_to_credit_pct",
+    "score_placements",
+]

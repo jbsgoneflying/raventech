@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -16,8 +16,6 @@ from backend.deps import (
     breach_cache,
     breach_cache_key,
     breach_cache_lock,
-    engine1_elig_cache,
-    engine1_elig_cache_lock,
     get_benzinga_client_optional,
     get_client,
     get_client_optional,
@@ -46,13 +44,15 @@ def breach(
     wing_width: float | None = Query(None, gt=0.0),
     dte_target: int | None = Query(None, ge=1, le=60),
     exp: str | None = Query(None, description="trade builder expiration (YYYY-MM-DD)"),
-    mc: bool | None = Query(None, description="enable Monte Carlo earnings gap risk outputs (additive)"),
+    mc: bool | None = Query(None, description="deprecated: accepted-but-ignored in E1 v2; MC is always on"),
     mc_opt: bool | None = Query(None, description="enable Monte Carlo wing optimization (risk-only)"),
     mc_stability: bool | None = Query(None, description="enable bootstrap stability + asymmetry caps (additive)"),
     mc_cond_quarter: bool | None = Query(None, description="MC conditioning: quarter"),
     mc_cond_regime: bool | None = Query(None, description="MC conditioning: regime"),
-    mc_event_date: str | None = Query(None, description="manual next earnings date override (YYYY-MM-DD)"),
-    mc_event_timing: str | None = Query(None, description="manual next earnings timing override (AMC|BMO)"),
+    mc_event_date: str | None = Query(None, description="[alias] deprecated: use event_date"),
+    mc_event_timing: str | None = Query(None, description="[alias] deprecated: use event_timing"),
+    event_date: str | None = Query(None, description="REQUIRED (E1 v2) — next earnings date (YYYY-MM-DD)"),
+    event_timing: str | None = Query(None, description="REQUIRED (E1 v2) — next earnings timing (AMC|BMO)"),
 ):
     try:
         trade_builder_inputs = {
@@ -66,10 +66,29 @@ def breach(
         }
         has_trade_builder_params = any(v is not None for v in trade_builder_inputs.values())
 
+        # Event date/timing: prefer new top-level params; accept legacy mc_event_* as aliases.
+        event_date_eff = (event_date or mc_event_date or "").strip() or None
+        event_timing_eff = (event_timing or mc_event_timing or "").strip().upper() or None
+        if event_timing_eff and event_timing_eff not in ("AMC", "BMO"):
+            raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
+        if event_date_eff:
+            try:
+                dt.date.fromisoformat(event_date_eff[:10])
+            except ValueError as _e:
+                raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
+
         base_flags = get_flags()
+        if getattr(base_flags, "E1_REQUIRE_EVENT_DATE", False) and bool(getattr(base_flags, "ENABLE_E1_V2", False)):
+            if not event_date_eff or not event_timing_eff:
+                raise HTTPException(
+                    status_code=400,
+                    detail="event_date + event_timing (AMC|BMO) are required. Pass ?event_date=YYYY-MM-DD&event_timing=AMC|BMO.",
+                )
         overrides = {}
-        if mc is not None:
-            overrides["ENABLE_MONTE_CARLO_EARNINGS"] = bool(mc)
+        # v2: mc query param is accepted-but-ignored; MC is always on under
+        # ENABLE_MONTE_CARLO_EARNINGS (kill-switch, default True).
+        # if mc is not None:  # intentionally no-op in v2
+        #     overrides["ENABLE_MONTE_CARLO_EARNINGS"] = bool(mc)
         if mc_opt is not None:
             overrides["MC_ENABLE_WING_OPTIMIZATION"] = bool(mc_opt)
         if mc_stability is not None:
@@ -86,7 +105,10 @@ def breach(
         # `current` on cache hits for non-MC). Skip cache whenever MC is on or trade-builder params are set.
         skip_breach_cache = bool(enable_mc or has_trade_builder_params)
 
-        key = breach_cache_key(ticker, n, years, k, effective_flags.cache_fingerprint())
+        key = breach_cache_key(
+            ticker, n, years, k, effective_flags.cache_fingerprint(),
+            event_date=event_date_eff, event_timing=event_timing_eff,
+        )
         if not skip_breach_cache:
             with breach_cache_lock:
                 cached = breach_cache.get(key)
@@ -115,7 +137,7 @@ def breach(
             k=k,
             trade_builder_inputs=(trade_builder_inputs if has_trade_builder_params else None),
             flags_override=effective_flags,
-            next_event_override={"date": mc_event_date, "timing": mc_event_timing},
+            next_event_override={"date": event_date_eff, "timing": event_timing_eff},
             benzinga_client=get_benzinga_client_optional(),
         )
 
@@ -163,12 +185,146 @@ def breach(
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
+# ---------------------------------------------------------------------------
+# Engine 1 v2 — Wing Decision Console
+# ---------------------------------------------------------------------------
+@router.post("/api/breach/wing-console")
+async def e1_wing_console(request: Request):
+    """Engine 1 v2 — ranked wing-placement console.
+
+    Body:
+        {
+            "ticker":        "NVDA",
+            "event_date":    "2026-05-28",          # required
+            "event_timing":  "AMC",                 # required (AMC|BMO)
+            "n":             20,                    # optional lookback events
+            "years":         5,                     # optional lookback years
+            "weights":       {...},                 # optional weight overrides
+            "em_mults":      [...],                 # optional grid override
+            "wing_pts":      [...]                  # optional grid override
+        }
+
+    Returns a :class:`WingConsolePayload`-shaped dict with ranked
+    placements + weights_used + mae + theta + regime context.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    ticker = str(body.get("ticker", "")).strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    f = get_flags()
+    if not bool(getattr(f, "ENABLE_E1_V2", False)):
+        raise HTTPException(
+            status_code=404,
+            detail="Engine 1 v2 is disabled (ENABLE_E1_V2=0).",
+        )
+
+    event_date_eff = str(body.get("event_date") or body.get("mc_event_date") or "").strip() or None
+    event_timing_eff = str(body.get("event_timing") or body.get("mc_event_timing") or "").strip().upper() or None
+    if not event_date_eff or not event_timing_eff:
+        raise HTTPException(
+            status_code=400,
+            detail="event_date + event_timing (AMC|BMO) are required.",
+        )
+    if event_timing_eff not in ("AMC", "BMO"):
+        raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
+    try:
+        dt.date.fromisoformat(event_date_eff[:10])
+    except ValueError as _e:
+        raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
+
+    n_lookback = int(body.get("n") or 20)
+    years_lookback = int(body.get("years") or 5)
+
+    weights_override = body.get("weights") or {}
+    em_mults_override = body.get("em_mults") or None
+    wing_pts_override = body.get("wing_pts") or None
+
+    from backend.engine1 import (
+        WingConsoleWeights, build_wing_console,
+    )
+    from backend.engine1.mae_proxy import MAEDistribution
+
+    weights = WingConsoleWeights.from_flags(f)
+    if isinstance(weights_override, dict):
+        for k_, v_ in weights_override.items():
+            if hasattr(weights, k_):
+                try:
+                    setattr(weights, k_, float(v_))
+                except Exception:
+                    pass
+
+    try:
+        client = get_client()
+        benzinga_client = get_benzinga_client_optional()
+
+        payload = compute_breach_stats(
+            client=client,
+            ticker=ticker,
+            n=max(1, min(50, n_lookback)),
+            years=max(1, min(10, years_lookback)),
+            k=1.0,
+            flags_override=f,
+            next_event_override={"date": event_date_eff, "timing": event_timing_eff},
+            benzinga_client=benzinga_client,
+        )
+
+        mae_raw = payload.get("e1WingMAE") or {}
+        mae_dist: Optional[MAEDistribution] = None
+        if isinstance(mae_raw, dict) and int(mae_raw.get("n") or 0) > 0:
+            # Rehydrate a minimal MAEDistribution from the serialized form.
+            mae_dist = MAEDistribution(
+                n=int(mae_raw.get("n") or 0),
+                p50=float(mae_raw.get("p50") or 0.0),
+                p75=float(mae_raw.get("p75") or 0.0),
+                p90=float(mae_raw.get("p90") or 0.0),
+                p95=float(mae_raw.get("p95") or 0.0),
+                max=float(mae_raw.get("max") or 0.0),
+                source=str(mae_raw.get("source") or "daily_ohlc_proxy"),
+                notes=list(mae_raw.get("notes") or []),
+                hold_days=int(mae_raw.get("hold_days") or 2),
+            )
+
+        console = build_wing_console(
+            ticker=ticker,
+            event_date=event_date_eff,
+            event_timing=event_timing_eff,
+            payload=payload,
+            mae_distribution=mae_dist,
+            weights=weights,
+            em_mults=em_mults_override,
+            wing_pts=wing_pts_override,
+            flags=f,
+        )
+        return console.to_dict()
+
+    except HTTPException:
+        raise
+    except BreachInputError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except OratsError as e:
+        LOG.exception("ORATS failure (wing-console)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Wing console failed")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
 @router.get("/api/breach-compare")
 def breach_compare(
     tickers: str = Query(..., description="Comma-separated list of tickers (max 10)"),
     k: float = Query(1.0, gt=0.0, description="Breach multiple (1.0, 1.5, 2.0)"),
     n: int = Query(10, ge=1, le=50, description="Number of earnings events to analyze"),
     years: int = Query(3, ge=1, le=10, description="Lookback years"),
+    # E1 v2: accepted for parity with /api/breach; batch compare uses
+    # per-ticker auto-discovery so these only apply when all tickers
+    # share the same earnings event (rare). Not enforced as required.
+    event_date: str | None = Query(None, description="Optional shared earnings date (YYYY-MM-DD)"),
+    event_timing: str | None = Query(None, description="Optional shared earnings timing (AMC|BMO)"),
 ):
     """
     Compare and rank multiple tickers for earnings plays.
@@ -198,6 +354,20 @@ def breach_compare(
         benzinga_client = get_benzinga_client_optional()
         base_flags = get_flags()
 
+        event_timing_norm = (event_timing or "").strip().upper() or None
+        if event_timing_norm and event_timing_norm not in ("AMC", "BMO"):
+            raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
+        event_date_norm = (event_date or "").strip() or None
+        if event_date_norm:
+            try:
+                dt.date.fromisoformat(event_date_norm[:10])
+            except ValueError as _e:
+                raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
+        shared_override = (
+            {"date": event_date_norm, "timing": event_timing_norm}
+            if event_date_norm else None
+        )
+
         payloads: list[tuple[str, dict]] = []
         errors: list[dict] = []
 
@@ -219,6 +389,7 @@ def breach_compare(
                 k=k,
                 trade_builder_inputs=None,
                 flags_override=base_flags,
+                next_event_override=shared_override,
                 benzinga_client=benzinga_client,
             )
             try:
@@ -504,8 +675,26 @@ async def e1_advisor(request: Request):
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker is required")
 
+    # E1 v2: accept event_date / event_timing with mc_event_* aliases.
+    event_date_eff = str(body.get("event_date") or body.get("mc_event_date") or "").strip() or None
+    event_timing_eff = str(body.get("event_timing") or body.get("mc_event_timing") or "").strip().upper() or None
+    if event_timing_eff and event_timing_eff not in ("AMC", "BMO"):
+        raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
+    if event_date_eff:
+        try:
+            dt.date.fromisoformat(event_date_eff[:10])
+        except ValueError as _e:
+            raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
+
+    f = get_flags()
+    if getattr(f, "E1_REQUIRE_EVENT_DATE", False) and bool(getattr(f, "ENABLE_E1_V2", False)):
+        if not event_date_eff or not event_timing_eff:
+            raise HTTPException(
+                status_code=400,
+                detail="event_date + event_timing (AMC|BMO) are required by Engine 1 v2.",
+            )
+
     try:
-        f = get_flags()
         client = get_client()
         benzinga_client = get_benzinga_client_optional()
 
@@ -516,6 +705,10 @@ async def e1_advisor(request: Request):
             years=int(body.get("years", 5)),
             k=1.0,
             flags_override=f,
+            next_event_override=(
+                {"date": event_date_eff, "timing": event_timing_eff}
+                if event_date_eff else None
+            ),
             benzinga_client=benzinga_client,
         )
 

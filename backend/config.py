@@ -105,7 +105,7 @@ class FeatureFlags:
     BENZINGA_EVENT_RISK_MC_WING_BUMP_MAX_PCT: float = 15.0  # max +% bump to wing distances in MC (risk-only)
 
     # --- Monte Carlo (default OFF; additive only) ---
-    ENABLE_MONTE_CARLO_EARNINGS: bool = False
+    ENABLE_MONTE_CARLO_EARNINGS: bool = True   # v2: MC always on; flag is now a kill-switch only
     MC_ENABLE_CONDITION_ON_QUARTER: bool = False
     MC_ENABLE_CONDITION_ON_REGIME: bool = False
     MC_ENABLE_CONDITION_ON_TRADE_GATE: bool = False
@@ -483,6 +483,24 @@ class FeatureFlags:
     MI_REDIS_MODEL_KEY: str = "market_intel:model:v1"
     MI_REDIS_MODEL_TTL_S: int = 7 * 86400          # 7 days
 
+    # --- Engine 1 v2 — Wing Decision Console ---
+    ENABLE_E1_V2: bool = True                          # kill-switch (default on)
+    ENABLE_E1_OPTIONS_LIQUIDITY_GATE: bool = False     # OFF: options chain data unreliable for the desk's universe
+    E1_REQUIRE_EVENT_DATE: bool = True                 # 400 on /api/breach when event_date missing
+    E1_WING_EM_MULTS: str = "1.0,1.25,1.5,1.75,2.0"
+    E1_WING_PTS: str = "5,7.5,10"
+    # Composite-score weights
+    E1_WING_SCORE_WEIGHT_GAP:    float = 0.30
+    E1_WING_SCORE_WEIGHT_CTC:    float = 0.20
+    E1_WING_SCORE_WEIGHT_MAE:    float = 0.25
+    E1_WING_SCORE_WEIGHT_THETA:  float = 0.15
+    E1_WING_SCORE_WEIGHT_CREDIT: float = 0.10
+    # Score-normalization targets (desk-tunable posture)
+    E1_WING_MAX_TOLERABLE_MAE_PCT: float = 60.0    # MAE % of wing above which "white-knuckle"
+    E1_WING_TARGET_THETA_PCT:      float = 50.0
+    E1_WING_TARGET_CREDIT_MULT:    float = 1.5
+    E1_MAE_HOLD_DAYS: int = 2
+
     # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
     LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
     LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
@@ -509,7 +527,7 @@ class FeatureFlags:
             BENZINGA_EVENT_RISK_REGIME_TAIL_BUMP_MAX_PCT=_get_float("BENZINGA_EVENT_RISK_REGIME_TAIL_BUMP_MAX_PCT", 20.0),
             BENZINGA_EVENT_RISK_MC_WING_BUMP_MAX_PCT=_get_float("BENZINGA_EVENT_RISK_MC_WING_BUMP_MAX_PCT", 15.0),
 
-            ENABLE_MONTE_CARLO_EARNINGS=_get_bool("ENABLE_MONTE_CARLO_EARNINGS", False),
+            ENABLE_MONTE_CARLO_EARNINGS=_get_bool("ENABLE_MONTE_CARLO_EARNINGS", True),
             MC_ENABLE_CONDITION_ON_QUARTER=_get_bool("MC_ENABLE_CONDITION_ON_QUARTER", False),
             MC_ENABLE_CONDITION_ON_REGIME=_get_bool("MC_ENABLE_CONDITION_ON_REGIME", False),
             MC_ENABLE_CONDITION_ON_TRADE_GATE=_get_bool("MC_ENABLE_CONDITION_ON_TRADE_GATE", False),
@@ -837,6 +855,22 @@ class FeatureFlags:
             DESK_INSIGHT_RATE_LIMIT_PER_MIN=_get_int("DESK_INSIGHT_RATE_LIMIT_PER_MIN", 60),
 
             ENABLE_MI_V2=_get_bool("ENABLE_MI_V2", True),
+
+            # Engine 1 v2 — Wing Decision Console
+            ENABLE_E1_V2=_get_bool("ENABLE_E1_V2", True),
+            ENABLE_E1_OPTIONS_LIQUIDITY_GATE=_get_bool("ENABLE_E1_OPTIONS_LIQUIDITY_GATE", False),
+            E1_REQUIRE_EVENT_DATE=_get_bool("E1_REQUIRE_EVENT_DATE", True),
+            E1_WING_EM_MULTS=os.getenv("E1_WING_EM_MULTS", "1.0,1.25,1.5,1.75,2.0"),
+            E1_WING_PTS=os.getenv("E1_WING_PTS", "5,7.5,10"),
+            E1_WING_SCORE_WEIGHT_GAP=_get_float("E1_WING_SCORE_WEIGHT_GAP", 0.30),
+            E1_WING_SCORE_WEIGHT_CTC=_get_float("E1_WING_SCORE_WEIGHT_CTC", 0.20),
+            E1_WING_SCORE_WEIGHT_MAE=_get_float("E1_WING_SCORE_WEIGHT_MAE", 0.25),
+            E1_WING_SCORE_WEIGHT_THETA=_get_float("E1_WING_SCORE_WEIGHT_THETA", 0.15),
+            E1_WING_SCORE_WEIGHT_CREDIT=_get_float("E1_WING_SCORE_WEIGHT_CREDIT", 0.10),
+            E1_WING_MAX_TOLERABLE_MAE_PCT=_get_float("E1_WING_MAX_TOLERABLE_MAE_PCT", 60.0),
+            E1_WING_TARGET_THETA_PCT=_get_float("E1_WING_TARGET_THETA_PCT", 50.0),
+            E1_WING_TARGET_CREDIT_MULT=_get_float("E1_WING_TARGET_CREDIT_MULT", 1.5),
+            E1_MAE_HOLD_DAYS=_get_int("E1_MAE_HOLD_DAYS", 2),
             MI_HMM_STATE_COUNT=_get_int("MI_HMM_STATE_COUNT", 3),
             MI_HMM_LOOKBACK_DAYS=_get_int("MI_HMM_LOOKBACK_DAYS", 1260),
             MI_FACTOR_STALE_DAYS=_get_int("MI_FACTOR_STALE_DAYS", 1),
