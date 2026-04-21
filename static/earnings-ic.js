@@ -887,6 +887,370 @@
   }
 
   // ------------------------------------------------------------------
+  // LLM "What is this card?" desk tooltips
+  // ------------------------------------------------------------------
+  // Mirrors the E14 pattern in static/ic-scenario.js:
+  //   1. extractCardData(slug, payload) → small JSON slice for the LLM
+  //   2. buildScenarioContext()         → high-level context (request + entry)
+  //   3. POST /api/earnings-ic/explain-card
+  //   4. Render into the e15InsightPopup with the standard 5 sections
+  // Per-divider info buttons are auto-injected after each scenario render
+  // (since several E15 dividers start display:none).
+
+  function extractCardData(slug, payload) {
+    if (!payload) return {};
+    switch (slug) {
+      case 'e1_summary_strip':
+        return payload.engine1Summary || {};
+      case 'entry_state':
+        return {
+          entryState: payload.entryState || {},
+          plannedExit: payload.plannedExit || {},
+          eventsUsed: payload.eventsUsed,
+          eventsConsidered: payload.eventsConsidered,
+          fillModel: payload.fillModel || null,
+          creditRichness: payload.creditRichness || null,
+        };
+      case 'planned_exit_timing':
+        return {
+          plannedExit: payload.plannedExit || {},
+          request: {
+            entryDate: (payload.request || {}).entry_date,
+            expiry: (payload.request || {}).expiry,
+            earningsDate: (payload.request || {}).earnings_date,
+            earningsTiming: (payload.request || {}).earnings_timing,
+          },
+        };
+      case 'outcome_distribution_empirical':
+        return {
+          distribution: payload.outcomeDistribution || {},
+          ci: payload.outcomeDistributionCI || null,
+          fillModel: payload.fillModel || null,
+          eventsUsed: payload.eventsUsed,
+        };
+      case 'adjusted_distribution':
+        return {
+          empirical: payload.outcomeDistribution || {},
+          adjusted: payload.adjustedOutcomeDistribution || {},
+          summary: payload.conditioningSummary || null,
+        };
+      case 'conditioning_summary':
+        return payload.conditioningSummary || {};
+      case 'conditioning_modifiers':
+        return payload.conditioningModifiers || {};
+      case 'mtm_timeline': {
+        // Keep payload compact: send first / mid / last percentile rows.
+        var tl = payload.mtmTimeline || [];
+        if (tl.length <= 5) return { timeline: tl, plannedExit: payload.plannedExit || {} };
+        var mid = Math.floor(tl.length / 2);
+        return {
+          timeline: [tl[0], tl[mid], tl[tl.length - 1]],
+          nSteps: tl.length,
+          plannedExit: payload.plannedExit || {},
+        };
+      }
+      case 'expected_value':
+        return {
+          expectedValue: payload.expectedValue || {},
+          ci: (payload.outcomeDistributionCI || {}).fullCollect || null,
+          eventsUsed: payload.eventsUsed,
+        };
+      case 'exit_rules_card': {
+        var opt = payload.exitRulesOptimization || {};
+        return {
+          recommendedProfitTarget: opt.recommendedProfitTarget,
+          recommendedStopLoss: opt.recommendedStopLoss,
+          recommendedTimeStopDays: opt.recommendedTimeStopDays,
+          deltaFromDefault: opt.deltaFromDefault || null,
+          gridSize: (opt.grid || []).length,
+          plannedHoldBizDays: (payload.plannedExit || {}).holdBizDays,
+        };
+      }
+      case 'matched_events': {
+        var rows = payload.matchedEvents || [];
+        return {
+          total: rows.length,
+          sample: rows.slice(0, 12).map(function (r) {
+            return {
+              earnDate: r.earnDate, anncTod: r.anncTod,
+              outcome: r.outcome, exitDay: r.exitDay,
+              pnlPct: r.pnlPct, mae: r.mae, breached: r.breached,
+              impliedMovePct: r.impliedMovePct,
+              realizedMovePct: r.realizedMovePct,
+            };
+          }),
+        };
+      }
+      case 'dropped_events': {
+        var drops = payload.droppedEvents || [];
+        return {
+          total: drops.length,
+          matched: (payload.matchedEvents || []).length,
+          sample: drops.slice(0, 10).map(function (d) {
+            return { earnDate: d.earnDate || d.date, reason: d.reason };
+          }),
+        };
+      }
+      case 'notes_caveats':
+        return { notes: payload.notes || [], dataQuality: payload.dataQuality || null };
+      case 'actions_panel':
+        return {
+          hasJournal: true,
+          hasAdvisor: true,
+          hasReconcile: true,
+          note: 'Buttons trigger /journal, /advisor, /reconcile against this scenario.',
+        };
+      case 'credit_richness':
+        return payload.creditRichness || {};
+      case 'vrp_crush_verdict': {
+        var e1 = payload.engine1Summary || {};
+        return {
+          vrpScore: e1.vrpScore,
+          ivElevation: e1.ivElevation,
+          plannedExit: payload.plannedExit || {},
+        };
+      }
+      default:
+        return {};
+    }
+  }
+
+  function buildScenarioContext() {
+    if (!state.scenario) {
+      return { note: 'No scenario has been run yet — explain generically.' };
+    }
+    var sc = state.scenario || {};
+    var es = sc.entryState || {};
+    var req = sc.request || {};
+    return {
+      ticker: req.ticker,
+      entryDate: req.entry_date,
+      expiry: req.expiry,
+      earningsDate: req.earnings_date,
+      earningsTiming: req.earnings_timing,
+      plannedExitDate: req.planned_exit_date,
+      shortPut: req.short_put, longPut: req.long_put,
+      shortCall: req.short_call, longCall: req.long_call,
+      creditReceived: req.credit_received,
+      profitTargetPct: req.profit_target_pct,
+      stopLossPct: req.stop_loss_pct,
+      userSpot: es.userSpot,
+      userEmPct: es.userEmPct,
+      eventsUsed: sc.eventsUsed,
+      eventsConsidered: sc.eventsConsidered,
+      fillModelMode: (sc.fillModel || {}).mode || null,
+    };
+  }
+
+  var _explainCache = Object.create(null);
+  var _lastActiveBtn = null;
+
+  function openInsightPopup(title, anchor) {
+    var pop = $('e15InsightPopup');
+    var titleEl = $('e15InsightTitle');
+    var bodyEl = $('e15InsightBody');
+    if (!pop || !titleEl || !bodyEl) return null;
+    titleEl.textContent = title || 'Desk Insight';
+    bodyEl.innerHTML =
+      '<div class="e15InsightLoading">' +
+      '<span class="e15InsightDot"></span><span class="e15InsightDot"></span><span class="e15InsightDot"></span>' +
+      '<br>Generating desk insight…</div>';
+
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var pw = 460, ph = Math.min(560, Math.floor(vh * 0.82));
+    var r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+    var left, top;
+    if (r) {
+      left = Math.max(12, Math.min(vw - pw - 12, r.right + 12));
+      top  = Math.max(12, Math.min(vh - ph - 12, r.top));
+    } else {
+      left = Math.max(12, Math.floor(vw / 2 - pw / 2));
+      top  = Math.max(12, Math.floor(vh / 4));
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+    pop.style.display = 'block';
+    return pop;
+  }
+
+  function closeInsightPopup() {
+    var pop = $('e15InsightPopup');
+    if (pop) pop.style.display = 'none';
+    if (_lastActiveBtn) {
+      _lastActiveBtn.setAttribute('aria-expanded', 'false');
+      _lastActiveBtn = null;
+    }
+  }
+
+  function renderInsight(bodyEl, data) {
+    if (!bodyEl) return;
+    if (!data) {
+      bodyEl.innerHTML = '<div class="e15InsightLoading">No insight data.</div>';
+      return;
+    }
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    var SECTIONS = [
+      ['what_this_shows', 'What This Shows'],
+      ['how_to_read_it',  'How To Read It'],
+      ['how_to_use_it',   'How To Use It'],
+      ['watch_for',       'Watch For'],
+      ['desk_takeaway',   'Desk Takeaway'],
+    ];
+    var html = '';
+    if (data._fallback_reason) {
+      html +=
+        '<div style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.28);' +
+        'border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ffb347;">' +
+        'Spec fallback · ' + esc(data._fallback_reason) +
+        '</div>';
+    }
+    SECTIONS.forEach(function (pair) {
+      var key = pair[0], label = pair[1];
+      var v = data[key];
+      if (!v) return;
+      var accent = (key === 'desk_takeaway')
+        ? ' style="color:#34c759;font-weight:600;"' : '';
+      html +=
+        '<div class="e15InsightSection">' +
+          '<div class="e15InsightSectionTitle">' + esc(label) + '</div>' +
+          '<div class="e15InsightText"' + accent + '>' + esc(v) + '</div>' +
+        '</div>';
+    });
+    var srcBits = [];
+    if (data._source) srcBits.push(data._source);
+    if (data._meta && data._meta.model) srcBits.push(data._meta.model);
+    if (srcBits.length) {
+      html += '<div class="e15InsightSource">Source: ' + esc(srcBits.join(' · ')) + '</div>';
+    }
+    bodyEl.innerHTML = html || '<div class="e15InsightLoading">No insight content returned.</div>';
+  }
+
+  function explainCard(slug, anchor) {
+    var titles = {
+      e1_summary_strip: 'Engine 1 Summary',
+      entry_state: 'Entry State',
+      planned_exit_timing: 'Planned Exit Timing',
+      outcome_distribution_empirical: 'Outcome Distribution (Empirical)',
+      adjusted_distribution: 'Adjusted Distribution',
+      conditioning_summary: 'Conditioning Summary',
+      conditioning_modifiers: 'Conditioning Modifiers',
+      mtm_timeline: 'MTM Timeline',
+      expected_value: 'Expected Value',
+      exit_rules_card: 'Exit Rules (Planned Hold)',
+      matched_events: 'Matched Events',
+      dropped_events: 'Dropped Events',
+      notes_caveats: 'Notes & Caveats',
+      actions_panel: 'Actions',
+      credit_richness: 'Credit Richness',
+      vrp_crush_verdict: 'VRP / Vol Crush Verdict',
+    };
+    openInsightPopup(titles[slug] || 'Desk Insight', anchor);
+    var bodyEl = $('e15InsightBody');
+
+    var cardData = extractCardData(slug, state.scenario);
+    var scenarioContext = buildScenarioContext();
+
+    var ckey;
+    try { ckey = slug + '|' + JSON.stringify(cardData).slice(0, 2000); }
+    catch (e) { ckey = slug + '|' + Date.now(); }
+    if (_explainCache[ckey]) { renderInsight(bodyEl, _explainCache[ckey]); return; }
+
+    fetch('/api/earnings-ic/explain-card', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cardType: slug,
+        cardData: cardData,
+        scenarioContext: scenarioContext,
+      }),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
+      })
+      .then(function (resp) {
+        if (!resp.ok) {
+          var detail = (resp.body && (resp.body.detail || resp.body.error)) || ('HTTP ' + resp.status);
+          bodyEl.innerHTML =
+            '<div class="e15InsightLoading" style="color:#ff6b6b;">Failed to load explanation: ' +
+            String(detail).replace(/[<>&]/g, '') + '</div>';
+          return;
+        }
+        _explainCache[ckey] = resp.body;
+        renderInsight(bodyEl, resp.body);
+      })
+      .catch(function (e) {
+        bodyEl.innerHTML =
+          '<div class="e15InsightLoading" style="color:#ff6b6b;">Network error: ' +
+          String(e && e.message || e).replace(/[<>&]/g, '') + '</div>';
+      });
+  }
+
+  function injectExplainButtons() {
+    var dividers = document.querySelectorAll('.e15Divider[data-explain]');
+    dividers.forEach(function (div) {
+      if (div.querySelector('.e15ExplainBtn')) return;
+      if (!div.querySelector('.e15DividerText')) {
+        var txt = document.createElement('span');
+        txt.className = 'e15DividerText';
+        while (div.firstChild) txt.appendChild(div.firstChild);
+        div.appendChild(txt);
+      }
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'e15ExplainBtn';
+      btn.setAttribute('aria-label', 'Explain this card');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.title = 'What is this card? Click for a desk-level LLM explanation.';
+      btn.textContent = 'i';
+      div.appendChild(btn);
+    });
+  }
+
+  function onExplainBtnClick(ev) {
+    var btn = ev.target && ev.target.closest && ev.target.closest('.e15ExplainBtn');
+    if (!btn) return;
+    var div = btn.closest('.e15Divider[data-explain]');
+    if (!div) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    var pop = $('e15InsightPopup');
+    var alreadyOpenOnThis = (_lastActiveBtn === btn) && pop && pop.style.display === 'block';
+    if (alreadyOpenOnThis) { closeInsightPopup(); return; }
+
+    if (_lastActiveBtn) _lastActiveBtn.setAttribute('aria-expanded', 'false');
+    _lastActiveBtn = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    var slug = div.getAttribute('data-explain');
+    explainCard(slug, btn);
+  }
+
+  function wireInsightPopup() {
+    var pop = $('e15InsightPopup');
+    var header = $('e15InsightHeader');
+    var closeBtn = $('e15InsightClose');
+    if (!pop) return;
+
+    if (closeBtn) closeBtn.addEventListener('click', closeInsightPopup);
+    if (typeof window.initDrag === 'function' && header) {
+      try { window.initDrag(pop, header, { closeSelector: '#e15InsightClose' }); }
+      catch (e) { /* ignore */ }
+    }
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && pop.style.display === 'block') closeInsightPopup();
+    });
+    document.addEventListener('mousedown', function (ev) {
+      if (pop.style.display !== 'block') return;
+      var t = ev.target;
+      if (t && t.closest && (t.closest('#e15InsightPopup') || t.closest('.e15ExplainBtn'))) return;
+      closeInsightPopup();
+    });
+  }
+
+  // ------------------------------------------------------------------
   // Init
   // ------------------------------------------------------------------
   function init() {
@@ -896,6 +1260,10 @@
     $('advisorBtn').addEventListener('click', doAdvisor);
     $('reconcileBtn').addEventListener('click', doReconcile);
     $('backfillBtn').addEventListener('click', doBackfill);
+
+    injectExplainButtons();
+    wireInsightPopup();
+    document.addEventListener('click', onExplainBtnClick);
 
     // Check feature flag
     getJson('/api/earnings-ic/health').then(h => {

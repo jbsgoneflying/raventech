@@ -34,6 +34,64 @@
         display: flex; align-items: center; gap: 8px;
       }
       .e15Divider > .e15DividerText { flex: 1 1 auto; min-width: 0; }
+      .e15ExplainBtn {
+        flex: 0 0 auto;
+        width: 20px; height: 20px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        color: var(--muted); font-size: 11px; font-weight: 800;
+        line-height: 18px; padding: 0; cursor: pointer;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      .e15ExplainBtn:hover { color: var(--blue); border-color: var(--blue); background: rgba(0,122,255,0.08); }
+      .e15ExplainBtn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+      .e15ExplainBtn[aria-expanded="true"] { color: var(--blue); border-color: var(--blue); background: rgba(0,122,255,0.12); }
+
+      /* ── LLM "What is this card?" desk-insight popup (mirrors E14) ── */
+      .e15InsightPopup {
+        position: fixed; z-index: 10000; width: 460px; max-height: 82vh;
+        overflow-y: auto; border-radius: 16px;
+        background: rgba(28,28,30,0.98);
+        backdrop-filter: blur(40px) saturate(180%);
+        -webkit-backdrop-filter: blur(40px) saturate(180%);
+        box-shadow: 0 20px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08) inset;
+        user-select: none; transition: opacity 0.15s ease;
+        color: #fff; display: none;
+      }
+      .e15InsightPopup.isDragging { cursor: grabbing; transition: none; }
+      .e15InsightHeader {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 14px 16px; background: rgba(255,255,255,0.06);
+        border-bottom: 1px solid rgba(255,255,255,0.08); cursor: grab;
+      }
+      .e15InsightHeader:active { cursor: grabbing; }
+      .e15InsightTitle { font-size: 14px; font-weight: 700; line-height: 1.3; color: #fff; flex: 1; }
+      .e15InsightClose {
+        width: 24px; height: 24px; border-radius: 6px; border: none;
+        background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.7);
+        font-size: 16px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s ease;
+      }
+      .e15InsightClose:hover { background: rgba(255,255,255,0.20); color: #fff; }
+      .e15InsightBody { padding: 16px; }
+      .e15InsightSection { margin-bottom: 16px; }
+      .e15InsightSection:last-child { margin-bottom: 0; }
+      .e15InsightSectionTitle {
+        font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.5);
+        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+      }
+      .e15InsightText { font-size: 12px; font-weight: 500; line-height: 1.55; color: rgba(255,255,255,0.88); white-space: pre-wrap; }
+      .e15InsightLoading { text-align: center; padding: 32px 16px; color: rgba(255,255,255,0.6); font-size: 12px; }
+      .e15InsightDot {
+        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+        background: rgba(255,255,255,0.5); margin: 0 2px;
+        animation: e15DotPulse 1.2s ease-in-out infinite;
+      }
+      .e15InsightDot:nth-child(2) { animation-delay: 0.2s; }
+      .e15InsightDot:nth-child(3) { animation-delay: 0.4s; }
+      .e15InsightSource { font-size: 10px; color: rgba(255,255,255,0.35); text-align: right; margin-top: 12px; font-style: italic; }
+      @keyframes e15DotPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
 
       .e15Form { background: var(--surfaceSolid); border: 1px solid var(--border);
         border-radius: var(--radius-card); padding: 18px; margin-bottom: 18px; }
@@ -263,37 +321,37 @@
         <div id="plannedExitCaveat" class="e15Caveat"></div>
         <div id="plannedExitCards" class="e15Grid"></div>
 
-        <div class="e15Divider" data-explain="planned_exit_outcome"><span class="e15DividerText">Outcome Distribution</span></div>
+        <div class="e15Divider" data-explain="outcome_distribution_empirical"><span class="e15DividerText">Outcome Distribution</span></div>
         <div id="outcomePanel" class="e15Outcomes"></div>
 
-        <div class="e15Divider" id="adjustedDividerLabel" data-explain="conditioning_summary" style="display:none;"><span class="e15DividerText">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after earnings conditioning)</span></span></div>
+        <div class="e15Divider" id="adjustedDividerLabel" data-explain="adjusted_distribution" style="display:none;"><span class="e15DividerText">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after earnings conditioning)</span></span></div>
         <div id="conditioningSummary" class="e15Caveat" style="display:none;"></div>
         <div id="adjustedOutcomePanel" class="e15Outcomes" style="display:none;"></div>
 
-        <div class="e15Divider" id="modifiersDivider" data-explain="conditioning_summary" style="display:none;"><span class="e15DividerText">Conditioning Modifiers</span></div>
+        <div class="e15Divider" id="modifiersDivider" data-explain="conditioning_modifiers" style="display:none;"><span class="e15DividerText">Conditioning Modifiers</span></div>
         <div id="modifiersPanel" class="e15Grid" style="display:none;"></div>
 
-        <div class="e15Divider" data-explain="planned_exit_outcome"><span class="e15DividerText">MTM Timeline (P10 / P50 / P90)</span></div>
+        <div class="e15Divider" data-explain="mtm_timeline"><span class="e15DividerText">MTM Timeline (P10 / P50 / P90)</span></div>
         <div style="background:var(--surfaceSolid);border:1px solid var(--border);border-radius:var(--radius-card);padding:12px;">
           <canvas id="mtmChart" height="220"></canvas>
         </div>
 
-        <div class="e15Divider" data-explain="vrp_crush_verdict"><span class="e15DividerText">Expected Value</span></div>
+        <div class="e15Divider" data-explain="expected_value"><span class="e15DividerText">Expected Value</span></div>
         <div id="evPanel" class="e15Grid"></div>
 
         <div class="e15Divider" data-explain="exit_rules_card"><span class="e15DividerText">Exit Rules (Planned Hold)</span></div>
         <div id="exitRulesPanel" class="e15Grid"></div>
 
-        <div class="e15Divider"><span class="e15DividerText">Matched Events</span></div>
+        <div class="e15Divider" data-explain="matched_events"><span class="e15DividerText">Matched Events</span></div>
         <div id="matchedEventsWrap"></div>
 
-        <div class="e15Divider" id="droppedDivider" style="display:none;"><span class="e15DividerText">Dropped Events</span></div>
+        <div class="e15Divider" id="droppedDivider" data-explain="dropped_events" style="display:none;"><span class="e15DividerText">Dropped Events</span></div>
         <div id="droppedEventsWrap" style="display:none;"></div>
 
-        <div class="e15Divider"><span class="e15DividerText">Notes &amp; Caveats</span></div>
+        <div class="e15Divider" data-explain="notes_caveats"><span class="e15DividerText">Notes &amp; Caveats</span></div>
         <ul id="notesList" class="e15NoteList"></ul>
 
-        <div class="e15Divider"><span class="e15DividerText">Actions</span></div>
+        <div class="e15Divider" data-explain="actions_panel"><span class="e15DividerText">Actions</span></div>
         <div class="e15Card">
           <div style="display:flex;gap:10px;flex-wrap:wrap;">
             <button type="button" id="journalBtn" class="primaryButton">Log to Journal</button>
@@ -307,8 +365,21 @@
 
     </main>
 
+    <div class="e15InsightPopup" id="e15InsightPopup" role="dialog" aria-labelledby="e15InsightTitle">
+      <div class="e15InsightHeader" id="e15InsightHeader">
+        <span class="e15InsightTitle" id="e15InsightTitle">Desk Insight</span>
+        <button class="e15InsightClose" id="e15InsightClose" type="button" aria-label="Close">&times;</button>
+      </div>
+      <div class="e15InsightBody" id="e15InsightBody">
+        <div class="e15InsightLoading">
+          <span class="e15InsightDot"></span><span class="e15InsightDot"></span><span class="e15InsightDot"></span>
+          <br>Generating desk insight…
+        </div>
+      </div>
+    </div>
+
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
-    <script src="/static/earnings-ic.js?v=1"></script>
+    <script src="/static/earnings-ic.js?v=2"></script>
   </body>
 </html>
