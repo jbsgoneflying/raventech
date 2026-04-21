@@ -376,9 +376,7 @@ def _summarize_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return {}
     current = e1.get("current") or {}
     vrp = e1.get("vrpAnalysis") or {}
-    dc = e1.get("deskConsensus") or {}
     em_breach = e1.get("emBreachSummary") or {}
-    next_event = e1.get("nextEvent") or {}
     expected_move = e1.get("expectedMove") or {}
     strike_targets = e1.get("strikeTargets") or {}
     regime = e1.get("regime") or {}
@@ -418,8 +416,11 @@ def _summarize_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "asOfDate": current.get("asOfDate"),
         "vrpScore": vrp.get("vrpScore"),
         "ivElevation": vrp.get("ivElevation"),
-        "deskConsensus": dc.get("consensus") or dc.get("verdict"),
-        "deskConsensusScore": dc.get("score"),
+        # deskConsensus intentionally omitted: E15 runs assume the desk has
+        # already committed to the trade, so E1's GO/LEAN_PASS/PASS verdict
+        # is suppressed to keep the advisor focused on fidelity rather than
+        # re-litigating the entry decision. Raw numerics (vrpScore,
+        # ivElevation, emBreach*) remain the analytical substrate.
         "historyN": len(e1.get("events") or []),
         "eventsUsed": summary.get("events_used"),
         "eventsFound": summary.get("events_found"),
@@ -452,12 +453,12 @@ def _summarize_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             "basedOnEmPct": strike_targets.get("basedOnEmPct"),
             "basedOnSpot": strike_targets.get("basedOnSpot"),
         } if strike_targets else None,
-        # --- Next event (with Friday-expiry fallback) ---
-        "anncTod": next_event.get("anncTod") or next_event.get("timing") or next_event.get("timingPlanned"),
-        "nextEventDate": next_event.get("earnDate") or next_event.get("date") or next_event.get("earnDateNext"),
-        "nextEventPricingExpiry": next_event.get("pricingExpiry"),
-        "nextEventSource": next_event.get("source"),
-        "nextEventConfidence": next_event.get("confidence"),
+        # --- Next event ---
+        # Authoritative earnings date + AMC/BMO timing come from the desk's
+        # EarningsIcRequest (scenario.request.earningsDate / earningsTiming)
+        # and are NOT re-echoed from E1's nextEvent here. Historically those
+        # E1 fields diverged from what the desk entered (stale ORATS / BZ
+        # calendars) and confused the advisor; the request is now sole truth.
         # --- Regime / event risk chips ---
         "regimeLabel": regime.get("label"),
         "regimeTailMultiplier": regime.get("tailMultiplier"),

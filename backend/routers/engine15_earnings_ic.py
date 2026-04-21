@@ -778,8 +778,12 @@ def earnings_ic_reconcile(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         LOG.warning("reconcile: live chain fetch failed: %s", e)
         errors["liveChain"] = f"{type(e).__name__}: {e}"
 
-    # E1 desk consensus is cheap and deterministic — include for context.
+    # E1 desk consensus is INTENTIONALLY not surfaced here — by the time
+    # E15 is running, the desk has committed to the trade, so an E1 up/down
+    # verdict is not a reconcile input. We keep engine1Summary lookup for
+    # any future numeric-only needs but no longer expose a consensus field.
     e1_summary = scenario.get("engine1Summary") or {}
+    _ = e1_summary  # retained for future readers; no consensus re-export
 
     # Build a compact reconciliation view.
     user_credit = float(req_fields.get("credit_received") or 0.0)
@@ -815,7 +819,6 @@ def earnings_ic_reconcile(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     return {
         "reconcile": {
             "creditChip": credit_chip,
-            "engine1Consensus": e1_summary.get("deskConsensus"),
             "notes": scenario.get("notes") or [],
         },
         "scenario": scenario,

@@ -63,11 +63,20 @@ def _compact_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return {}
     current = e1.get("current") or {}
     vrp = e1.get("vrpAnalysis") or {}
-    dc = e1.get("deskConsensus") or {}
     em_breach = e1.get("emBreachSummary") or {}
-    next_event = e1.get("nextEvent") or {}
     eq = e1.get("entryQuality") or {}
     regime = e1.get("regime") or {}
+    # NOTE: E1's ``deskConsensus`` (GO / LEAN_PASS / PASS / ...) and its
+    # ``nextEvent.earnDate`` / ``anncTod`` are INTENTIONALLY omitted here.
+    # By the time Engine 15 runs, the desk has committed to the trade and
+    # has supplied authoritative ``earningsDate`` / ``earningsTiming`` via
+    # ``scenario.request`` — which the advisor already sees. Re-surfacing
+    # E1's verdict would pull the LLM back into a GO/PASS vote it no longer
+    # needs to make; re-surfacing E1's next-event date introduces a second,
+    # potentially stale source of truth and confuses the AMC/BMO framing.
+    # The raw numerics that *drove* the consensus (vrpScore, ivElevation,
+    # emBreachPct, entryQualityScore, regime) remain available below so
+    # the advisor keeps every analytical input it needs.
     return {
         "vrpScore": vrp.get("vrpScore"),
         "meanRatio": vrp.get("meanRatio"),
@@ -77,11 +86,6 @@ def _compact_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "confidence": vrp.get("confidence"),
         "emPct": current.get("impliedMovePct"),
         "stockPrice": current.get("stockPrice"),
-        "anncTod": next_event.get("anncTod") or next_event.get("timing"),
-        "nextEventDate": next_event.get("earnDate") or next_event.get("date"),
-        "deskConsensus": dc.get("verdict") or dc.get("consensus"),
-        "deskConsensusScore": dc.get("score"),
-        "deskConsensusReasons": (dc.get("reasons") or [])[:4],
         "emBreachPct": em_breach.get("breachRatePct") or em_breach.get("breachPct"),
         "emBreachN": em_breach.get("n"),
         "entryQualityScore": eq.get("entryQuality") or eq.get("score"),
@@ -149,8 +153,11 @@ def _fallback_shell(
     """Deterministic structured fallback when the LLM is unavailable.
 
     Populates the required envelope from the replay payload so the UI
-    always renders something useful (verdict mirrors Engine 1's deskConsensus
-    where available, otherwise a conservative "HOLD").
+    always renders something useful. Verdict is derived purely from the
+    Engine 15 replay numerics (meanPnlPct + full/early/breach/stop shares)
+    — E1's deskConsensus is intentionally ignored here because the desk
+    has already committed to the trade by the time E15 is invoked.
+    Defaults to "HOLD" when the sample is thin.
     """
     ev = scenario.get("expectedValue") or {}
     outcome = scenario.get("outcomeDistribution") or {}

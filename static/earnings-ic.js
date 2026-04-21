@@ -133,7 +133,9 @@
     // fall back to reading the raw payload inline.
     const current = e1.current || {};
     const vrp = e1.vrpAnalysis || {};
-    const dc = e1.deskConsensus || {};
+    // NOTE: E1's deskConsensus is intentionally NOT surfaced on the E15
+    // scan card — an E15 workflow assumes the desk is committing to the
+    // trade, so a GO/LEAN_PASS/PASS up-vote isn't a decision input here.
     const next = e1.nextEvent || {};
     const em = e1.expectedMove || {};
     const st = e1.strikeTargets || {};
@@ -153,12 +155,14 @@
     const strike15x = (s.strikeTargets && s.strikeTargets.bluePct) != null ? s.strikeTargets.bluePct : st.bluePct;
     const strike2x = (s.strikeTargets && s.strikeTargets.redPct) != null ? s.strikeTargets.redPct : st.redPct;
     const strikeEmSource = (s.strikeTargets && s.strikeTargets.emSource) || st.emSource;
-    const nextDate = s.nextEventDate || next.earnDate || next.earnDateNext || next.date;
-    const nextTiming = s.anncTod || next.timing || next.timingPlanned || next.anncTod;
-    const pricingExpiry = s.nextEventPricingExpiry || next.pricingExpiry;
-    const nextSource = s.nextEventSource || next.source;
-    const deskVerdict = s.deskConsensus || dc.consensus || dc.verdict;
-    const deskScore = s.deskConsensusScore != null ? s.deskConsensusScore : dc.score;
+    // Next-event fields are only read from the raw engine1 payload now —
+    // engine1Summary no longer re-surfaces them because the authoritative
+    // earnings date + AMC/BMO timing live in the Step 2 form (desk input).
+    // The scan card shows E1's suggestion as a prefill hint only.
+    const nextDate = next.earnDate || next.earnDateNext || next.date;
+    const nextTiming = next.timing || next.timingPlanned || next.anncTod;
+    const pricingExpiry = next.pricingExpiry;
+    const nextSource = next.source;
     const breach1x = s.emBreachRate1xPct;
     const breach15x = s.emBreachRate15xPct;
     const breach2x = s.emBreachRate2xPct;
@@ -190,11 +194,12 @@
       vrpScore != null ? Number(vrpScore).toFixed(2) : '—',
       ivElev != null ? `IV elev: ${fmtPct(ivElev, 1)}` : regimeCaption || ''));
 
-    // 3. Next Event — date + pricing expiry
+    // 3. Next Event — E1 suggestion; the desk's form entry below is authoritative
     const nextCaption = [nextTiming || '—',
       pricingExpiry ? `Exp: ${String(pricingExpiry).slice(0,10)}` : '',
-      nextSrcCaption].filter(Boolean).join(' · ');
-    cards.appendChild(card('Next Event', nextDate || '—', nextCaption));
+      nextSrcCaption,
+      'E1 suggestion — desk overrides in Step 2'].filter(Boolean).join(' · ');
+    cards.appendChild(card('Next Event (E1)', nextDate || '—', nextCaption));
 
     // 4. Straddle EM ($ and %, expiry, source)
     const straddleCaption = [
@@ -214,9 +219,15 @@
     const strikeCaption = `1× / 1.5× / 2× EM wing distance${strikeEmSource ? ' · ' + strikeEmSource : ''}`;
     cards.appendChild(card('Strike Targets', strikeCardVal, strikeCaption));
 
-    // 7. Desk Consensus
-    cards.appendChild(card('Desk Consensus', deskVerdict || '—',
-      deskScore != null ? `Score ${Number(deskScore).toFixed(2)}` : (regimeCaption || '')));
+    // 7. Regime / Event Risk chip (replaces the old Desk Consensus tile —
+    // an E15 run assumes the desk has committed, so E1's up/down vote is
+    // not surfaced here. We show regime context instead.)
+    const regimeCardVal = regimeLabel || '—';
+    const regimeCardCap = [
+      regimeTail != null ? `Tail ${Number(regimeTail).toFixed(2)}x` : '',
+      eventRiskLabel ? `Risk ${eventRiskLabel}` : '',
+    ].filter(Boolean).join(' · ') || '—';
+    cards.appendChild(card('Regime / Risk', regimeCardVal, regimeCardCap));
 
     // 8. EM Breach (multi-row)
     const breachVal = (breach1x != null || breach15x != null || breach2x != null)
