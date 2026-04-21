@@ -159,6 +159,81 @@ class WingConsolePayload:
 _console_cache: TTLCache = TTLCache(maxsize=2048, ttl=10 * 60)
 _console_cache_lock = threading.Lock()
 
+# Scoring-context cache for the "exact slider" flow. Keyed on
+# (ticker, event_date, event_timing). Holds the event pool + spot + implied
+# move + mae distribution + theta reading + weights so score-placement calls
+# don't have to re-run compute_breach_stats for every slider tick.
+_scoring_ctx_cache: TTLCache = TTLCache(maxsize=2048, ttl=10 * 60)
+_scoring_ctx_lock = threading.Lock()
+
+
+@dataclass
+class ScoringContext:
+    """Snapshot of the inputs `_score_placement` needs, cached per
+    (ticker, event_date, event_timing) so the slider can re-score new
+    (em_mult, wing_pts) combinations without re-fetching ORATS data."""
+
+    ticker:              str = ""
+    event_date:          str = ""
+    event_timing:        str = ""
+    spot:                float = 0.0
+    implied_move_pct:    float = 0.0
+    events:              List[Dict[str, Any]] = field(default_factory=list)
+    mae:                 Optional[MAEDistribution] = None
+    theta:               Optional[ThetaCaptureReading] = None
+    median_credit_pts:   Optional[float] = None
+    weights:             WingConsoleWeights = field(default_factory=WingConsoleWeights)
+
+
+def _scoring_ctx_key(ticker: str, event_date: str, event_timing: str) -> str:
+    return f"{ticker.upper()}|{event_date}|{event_timing.upper()}"
+
+
+def store_scoring_context(ctx: ScoringContext) -> None:
+    """Publish a :class:`ScoringContext` under the canonical triple key."""
+    k = _scoring_ctx_key(ctx.ticker, ctx.event_date, ctx.event_timing)
+    with _scoring_ctx_lock:
+        _scoring_ctx_cache[k] = ctx
+
+
+def get_scoring_context(
+    ticker: str, event_date: str, event_timing: str,
+) -> Optional[ScoringContext]:
+    """Return the cached context, or ``None`` if it expired / was never set."""
+    k = _scoring_ctx_key(ticker, event_date, event_timing)
+    with _scoring_ctx_lock:
+        return _scoring_ctx_cache.get(k)
+
+
+def score_single_placement(
+    *,
+    context: ScoringContext,
+    em_mult: float,
+    wing_pts: float,
+    symmetry: str = "symmetric",
+    weights_override: Optional[WingConsoleWeights] = None,
+) -> PlacementScore:
+    """Score one exact placement against a cached context.
+
+    This is the engine behind the frontend's hand-tune slider: the user
+    drags EM-mult / wing-width, we compute a real composite (not a
+    nearest-neighbor interp) against the ticker's own event pool.
+    """
+    w = weights_override or context.weights or DEFAULT_WEIGHTS
+    theta = context.theta or ThetaCaptureReading()
+    return _score_placement(
+        em_mult=float(em_mult),
+        wing_pts=float(wing_pts),
+        symmetry=str(symmetry),
+        spot=float(context.spot),
+        implied_move_pct=float(context.implied_move_pct),
+        events=context.events,
+        mae=context.mae,
+        theta_reading=theta,
+        weights=w,
+        median_credit_pts=context.median_credit_pts,
+    )
+
 
 def _cache_key(
     *,
@@ -539,6 +614,20 @@ def build_wing_console(
             wing_pts=wing_pts,
             median_credit_pts=median_credit_pts,
         )
+        # Publish the scoring context so /api/breach/wing-console/score-placement
+        # can re-use it without hitting ORATS again for every slider tick.
+        store_scoring_context(ScoringContext(
+            ticker=ticker.upper(),
+            event_date=event_date,
+            event_timing=event_timing.upper(),
+            spot=float(spot),
+            implied_move_pct=float(implied_move_pct),
+            events=list(events or []),
+            mae=mae_distribution,
+            theta=theta_reading,
+            median_credit_pts=median_credit_pts,
+            weights=w,
+        ))
 
     grid_sig = hashlib.sha256(
         json.dumps({

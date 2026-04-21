@@ -314,6 +314,169 @@ async def e1_wing_console(request: Request):
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
+# ---------------------------------------------------------------------------
+# Engine 1 v2 — score-placement (exact slider)
+# ---------------------------------------------------------------------------
+@router.post("/api/breach/wing-console/score-placement")
+async def e1_score_placement(request: Request):
+    """Engine 1 v2 — exact single-placement score for the hand-tune slider.
+
+    Body:
+        {
+            "ticker":        "NVDA",
+            "event_date":    "2026-05-28",    # required
+            "event_timing":  "AMC",           # required
+            "em_mult":       1.37,            # required (> 0, <= 3)
+            "wing_pts":      6.5,             # required (> 0)
+            "symmetry":      "symmetric",     # optional (only symmetric today)
+            "weights":       {...},           # optional weight overrides
+            "refresh":       false            # optional — force cache miss
+        }
+
+    Requires a prior call to ``POST /api/breach/wing-console`` for the
+    same (ticker, event_date, event_timing) within the last 10 minutes so
+    the scoring context is cached. If the context expired, we run a
+    just-enough breach-stats pass to rebuild it — at the cost of the usual
+    ORATS round trip.
+
+    Returns a single :class:`PlacementScore` dict plus provenance.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    ticker = str(body.get("ticker", "")).strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    f = get_flags()
+    if not bool(getattr(f, "ENABLE_E1_V2", False)):
+        raise HTTPException(
+            status_code=404,
+            detail="Engine 1 v2 is disabled (ENABLE_E1_V2=0).",
+        )
+
+    event_date_eff = str(body.get("event_date") or "").strip() or None
+    event_timing_eff = str(body.get("event_timing") or "").strip().upper() or None
+    if not event_date_eff or not event_timing_eff:
+        raise HTTPException(
+            status_code=400,
+            detail="event_date + event_timing (AMC|BMO) are required.",
+        )
+    if event_timing_eff not in ("AMC", "BMO"):
+        raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
+    try:
+        dt.date.fromisoformat(event_date_eff[:10])
+    except ValueError as _e:
+        raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
+
+    try:
+        em_mult = float(body.get("em_mult"))
+        wing_pts = float(body.get("wing_pts"))
+    except (TypeError, ValueError) as _e:
+        raise HTTPException(status_code=400, detail="em_mult and wing_pts must be numeric") from _e
+
+    if not (0.25 <= em_mult <= 3.0):
+        raise HTTPException(status_code=400, detail="em_mult out of range [0.25, 3.0]")
+    if not (1.0 <= wing_pts <= 50.0):
+        raise HTTPException(status_code=400, detail="wing_pts out of range [1.0, 50.0]")
+
+    symmetry = str(body.get("symmetry") or "symmetric")
+    refresh = bool(body.get("refresh"))
+
+    from backend.engine1 import (
+        WingConsoleWeights, get_scoring_context, score_single_placement,
+    )
+
+    weights_override: Optional[WingConsoleWeights] = None
+    raw_weights = body.get("weights") or {}
+    if isinstance(raw_weights, dict) and raw_weights:
+        weights_override = WingConsoleWeights.from_flags(f)
+        for k_, v_ in raw_weights.items():
+            if hasattr(weights_override, k_):
+                try:
+                    setattr(weights_override, k_, float(v_))
+                except Exception:
+                    pass
+
+    ctx = None if refresh else get_scoring_context(ticker, event_date_eff, event_timing_eff)
+    source = "cached_context"
+
+    if ctx is None:
+        # Cold start: rebuild the context by running a full wing-console pass.
+        # The build_wing_console call populates the scoring-context cache as
+        # a side effect, after which we can score the arbitrary placement.
+        try:
+            client = get_client()
+            benzinga_client = get_benzinga_client_optional()
+            payload = compute_breach_stats(
+                client=client, ticker=ticker, n=20, years=5, k=1.0,
+                flags_override=f,
+                next_event_override={"date": event_date_eff, "timing": event_timing_eff},
+                benzinga_client=benzinga_client,
+            )
+            from backend.engine1.mae_proxy import MAEDistribution as _MD
+            from backend.engine1 import build_wing_console
+            mae_raw = payload.get("e1WingMAE") or {}
+            mae_dist: Optional[_MD] = None
+            if isinstance(mae_raw, dict) and int(mae_raw.get("n") or 0) > 0:
+                mae_dist = _MD(
+                    n=int(mae_raw.get("n") or 0),
+                    p50=float(mae_raw.get("p50") or 0.0),
+                    p75=float(mae_raw.get("p75") or 0.0),
+                    p90=float(mae_raw.get("p90") or 0.0),
+                    p95=float(mae_raw.get("p95") or 0.0),
+                    max=float(mae_raw.get("max") or 0.0),
+                    source=str(mae_raw.get("source") or "daily_ohlc_proxy"),
+                    notes=list(mae_raw.get("notes") or []),
+                    hold_days=int(mae_raw.get("hold_days") or 2),
+                )
+            build_wing_console(
+                ticker=ticker, event_date=event_date_eff, event_timing=event_timing_eff,
+                payload=payload, mae_distribution=mae_dist,
+                weights=weights_override or WingConsoleWeights.from_flags(f),
+                flags=f,
+            )
+            ctx = get_scoring_context(ticker, event_date_eff, event_timing_eff)
+            source = "rebuilt_context"
+        except HTTPException:
+            raise
+        except BreachInputError as _bie:
+            raise HTTPException(status_code=400, detail=str(_bie)) from _bie
+        except OratsError as _oe:
+            LOG.exception("ORATS failure (score-placement cold start)")
+            raise HTTPException(status_code=502, detail=str(_oe)) from _oe
+        except Exception as _e:
+            LOG.exception("score-placement cold start failed")
+            raise HTTPException(status_code=500, detail="Internal error") from _e
+
+    if ctx is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to build scoring context (no event pool available).",
+        )
+
+    try:
+        placement = score_single_placement(
+            context=ctx, em_mult=em_mult, wing_pts=wing_pts,
+            symmetry=symmetry, weights_override=weights_override,
+        )
+    except Exception as _e:
+        LOG.exception("score_single_placement failed")
+        raise HTTPException(status_code=500, detail="Scoring failed") from _e
+
+    return {
+        "ticker":       ticker,
+        "event_date":   event_date_eff,
+        "event_timing": event_timing_eff,
+        "placement":    placement.to_dict(),
+        "context_source": source,
+        "weights_used": (weights_override or ctx.weights).as_dict(),
+        "context_ages_ok": True,
+    }
+
+
 @router.get("/api/breach-compare")
 def breach_compare(
     tickers: str = Query(..., description="Comma-separated list of tickers (max 10)"),
@@ -450,10 +613,11 @@ def breach_compare(
                     gap_vs_ctc=payload.get("gapVsCtc"),
                     event_risk=payload.get("eventRisk"),
                 )
-                payload["deskConsensus"] = dc
-
                 emp = compute_em_preference(em_breach, vrp.get("vrpScore"), eq.get("entryQuality"))
-                payload["emPreference"] = emp
+                # E1 v2: only attach verdict-emitting fields when the flag is on.
+                if bool(getattr(base_flags, "E1_EMIT_DESK_CONSENSUS", False)):
+                    payload["deskConsensus"] = dc
+                    payload["emPreference"] = emp
             except Exception as e:
                 LOG.warning(f"VRP enrichment failed for {ticker}: {e}")
 

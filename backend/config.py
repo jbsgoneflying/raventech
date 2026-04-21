@@ -487,6 +487,10 @@ class FeatureFlags:
     ENABLE_E1_V2: bool = True                          # kill-switch (default on)
     ENABLE_E1_OPTIONS_LIQUIDITY_GATE: bool = False     # OFF: options chain data unreliable for the desk's universe
     E1_REQUIRE_EVENT_DATE: bool = True                 # 400 on /api/breach when event_date missing
+    # v2: drop legacy TRADE / LEAN_PASS / PASS / FADE desk-consensus verdict
+    # from /api/breach + /api/breach-compare response bodies. The advisor
+    # endpoint still re-computes the consensus internally for the LLM prompt.
+    E1_EMIT_DESK_CONSENSUS: bool = False
     E1_WING_EM_MULTS: str = "1.0,1.25,1.5,1.75,2.0"
     E1_WING_PTS: str = "5,7.5,10"
     # Composite-score weights
@@ -871,6 +875,7 @@ class FeatureFlags:
             E1_WING_TARGET_THETA_PCT=_get_float("E1_WING_TARGET_THETA_PCT", 50.0),
             E1_WING_TARGET_CREDIT_MULT=_get_float("E1_WING_TARGET_CREDIT_MULT", 1.5),
             E1_MAE_HOLD_DAYS=_get_int("E1_MAE_HOLD_DAYS", 2),
+            E1_EMIT_DESK_CONSENSUS=_get_bool("E1_EMIT_DESK_CONSENSUS", False),
             MI_HMM_STATE_COUNT=_get_int("MI_HMM_STATE_COUNT", 3),
             MI_HMM_LOOKBACK_DAYS=_get_int("MI_HMM_LOOKBACK_DAYS", 1260),
             MI_FACTOR_STALE_DAYS=_get_int("MI_FACTOR_STALE_DAYS", 1),

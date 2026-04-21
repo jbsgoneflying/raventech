@@ -125,8 +125,14 @@ def classify_timing(annc_tod: Any) -> str:
 @dataclass(frozen=True)
 class DailyBar:
     tradeDate: str
-    open: Optional[float]
-    clsPx: Optional[float]
+    open:    Optional[float]
+    clsPx:   Optional[float]
+    # E1 v2: high / low propagated from EODHD so the Wing Console MAE proxy
+    # can compute true intraday max / min excursion per event (daily bar
+    # aggregation of the intraday tape). Fall back to None when upstream
+    # (ORATS hist_dailies with legacy field set) didn't carry them.
+    high:    Optional[float] = None
+    low:     Optional[float] = None
 
 
 def _first_row(rows: list[dict]) -> Optional[dict]:
@@ -154,20 +160,29 @@ def _fetch_dailies_range(
     if end < start:
         return {}
 
-    # Primary path: EODHD via PriceService
+    # Primary path: EODHD via PriceService. Propagate high + low so
+    # backend.engine1.mae_proxy can compute true intraday max / min
+    # excursion per event (not just open / close).
     from backend.price_service import get_price_service
     ps = get_price_service()
     if ps is not None:
         bars = ps.fetch_daily_bars(ticker, start, end)
         out: Dict[str, DailyBar] = {}
         for b in bars:
-            out[b.trade_date] = DailyBar(tradeDate=b.trade_date, open=b.open, clsPx=b.close)
+            out[b.trade_date] = DailyBar(
+                tradeDate=b.trade_date,
+                open=b.open,
+                clsPx=b.close,
+                high=getattr(b, "high", None),
+                low=getattr(b, "low", None),
+            )
         return out
 
-    # Fallback: ORATS hist_dailies
+    # Fallback: ORATS hist_dailies. ORATS carries hiPx / loPx on standard
+    # plans — request them and pass through when present.
     try:
         td = f"{_fmt_date(start)},{_fmt_date(end)}"
-        fields = "ticker,tradeDate,open,opPx,clsPx,close"
+        fields = "ticker,tradeDate,open,opPx,hiPx,loPx,high,low,clsPx,close"
         resp = client.hist_dailies(ticker=ticker, trade_date=td, fields=fields)
         rows = resp.rows or []
     except Exception:
@@ -182,7 +197,9 @@ def _fetch_dailies_range(
             continue
         o = _to_float(r.get("open") or r.get("opPx") or r.get("op_px"))
         c = _to_float(r.get("clsPx") or r.get("close") or r.get("cls_px"))
-        out2[td0] = DailyBar(tradeDate=td0, open=o, clsPx=c)
+        h = _to_float(r.get("hiPx") or r.get("high") or r.get("hi_px"))
+        lo = _to_float(r.get("loPx") or r.get("low") or r.get("lo_px"))
+        out2[td0] = DailyBar(tradeDate=td0, open=o, clsPx=c, high=h, low=lo)
     return out2
 
 
@@ -531,13 +548,22 @@ def fetch_daily_bar(client: OratsClient, ticker: str, trade_date: str) -> Option
             bars = ps.fetch_daily_bars(ticker, d, d)
             if bars:
                 b = bars[0]
-                return DailyBar(tradeDate=b.trade_date, open=b.open, clsPx=b.close)
+                return DailyBar(
+                    tradeDate=b.trade_date,
+                    open=b.open,
+                    clsPx=b.close,
+                    high=getattr(b, "high", None),
+                    low=getattr(b, "low", None),
+                )
         except Exception:
             pass
 
-    # Fallback: ORATS hist_dailies
+    # Fallback: ORATS hist_dailies (include hi/lo for MAE proxy)
     try:
-        resp = client.hist_dailies(ticker=ticker, trade_date=trade_date, fields="ticker,tradeDate,clsPx,open")
+        resp = client.hist_dailies(
+            ticker=ticker, trade_date=trade_date,
+            fields="ticker,tradeDate,clsPx,open,hiPx,loPx,high,low",
+        )
         row = _first_row(resp.rows)
         if not row:
             return None
@@ -545,6 +571,8 @@ def fetch_daily_bar(client: OratsClient, ticker: str, trade_date: str) -> Option
             tradeDate=str(row.get("tradeDate") or row.get("trade_date") or trade_date)[:10],
             open=_to_float(row.get("open")),
             clsPx=_to_float(row.get("clsPx") or row.get("close") or row.get("cls_px")),
+            high=_to_float(row.get("hiPx") or row.get("high") or row.get("hi_px")),
+            low=_to_float(row.get("loPx") or row.get("low") or row.get("lo_px")),
         )
     except Exception:
         return None
@@ -2667,6 +2695,18 @@ def compute_breach_stats(
     except Exception as e:
         LOG.debug("E1 VRP engine failed for %s: %s", t, e)
         out["vrpAnalysis"] = {"vrpScore": None, "notes": [f"VRP engine unavailable: {type(e).__name__}"]}
+
+    # E1 v2: strip verdict-emitting fields from the primary /api/breach
+    # payload when the desk-consensus flag is off. The LLM advisor still
+    # re-computes them internally from the neutral quant fields that stay
+    # (vrpAnalysis, e1WidthComparison, e1EntryQuality, e1EmBreachSummary,
+    # goNoGo). The old TRADE / LEAN_PASS / PASS / FADE verdict strings no
+    # longer ride along in /api/breach responses.
+    if bool(getattr(flags, "ENABLE_E1_V2", False)) and not bool(
+        getattr(flags, "E1_EMIT_DESK_CONSENSUS", False)
+    ):
+        out.pop("e1DeskConsensus", None)
+        out.pop("e1EmPreference", None)
 
     return out
 

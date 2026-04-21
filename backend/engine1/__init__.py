@@ -33,22 +33,30 @@ from backend.engine1.theta_capture import (
 from backend.engine1.wing_console import (
     DEFAULT_WEIGHTS,
     PlacementScore,
+    ScoringContext,
     WingConsolePayload,
     WingConsoleWeights,
     build_wing_console,
+    get_scoring_context,
     score_placements,
+    score_single_placement,
+    store_scoring_context,
 )
 
 __all__ = [
     "DEFAULT_WEIGHTS",
     "MAEDistribution",
     "PlacementScore",
+    "ScoringContext",
     "ThetaCaptureReading",
     "WingConsolePayload",
     "WingConsoleWeights",
     "build_wing_console",
     "compute_mae_distribution",
     "estimate_theta_capture",
+    "get_scoring_context",
     "mae_percentile_to_credit_pct",
     "score_placements",
+    "score_single_placement",
+    "store_scoring_context",
 ]

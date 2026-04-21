@@ -1058,17 +1058,69 @@ function _wireTuner(data) {
   const scoreEl = $("e1TunerScore");
   const noteEl  = $("e1TunerScoreNote");
 
+  // Debounced exact-score fetch. Optimistic-render the nearest-grid score
+  // immediately for instant feedback, then replace with the server's exact
+  // value once it lands. This turns a 15-point grid into a continuous
+  // scoring surface without a JS math mirror.
+  let _scorePlacementSeq = 0;
+  let _scoreDebounceTimer = null;
+  const _DEBOUNCE_MS = 220;
+  let _lastExactPlacement = null;
+
+  function _paintPlacement(p, tag) {
+    if (!p) return;
+    scoreEl.textContent = Number(p.composite_score).toFixed(1);
+    scoreEl.className = _scoreColor(Number(p.composite_score));
+    const bits = [
+      `${tag}`,
+      `brch_gap ${_fmtPct((p.breach_gap_prob || 0) * 100)}`,
+      `theta ${_fmtPct(p.theta_capture_pct)}`,
+      `credit $${Number(p.credit_dollars || 0).toFixed(0)}`,
+    ];
+    noteEl.textContent = bits.join(" · ");
+  }
+
+  function _fetchExact(em, wp) {
+    const seq = ++_scorePlacementSeq;
+    fetch("/api/breach/wing-console/score-placement", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker: _e1WingConsoleState.ticker,
+        event_date: _e1WingConsoleState.event_date,
+        event_timing: _e1WingConsoleState.event_timing,
+        em_mult: em, wing_pts: wp,
+      }),
+    })
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((body) => {
+        if (seq !== _scorePlacementSeq) return;  // stale
+        _lastExactPlacement = body.placement || null;
+        _paintPlacement(_lastExactPlacement, "exact");
+      })
+      .catch((err) => {
+        if (seq !== _scorePlacementSeq) return;
+        // Fall back to nearest-neighbor (the optimistic render below already
+        // painted it, so here we just add a note).
+        const base = noteEl.textContent || "";
+        noteEl.textContent = `${base} · exact scoring unavailable`;
+        console.warn("score-placement:", err);
+      });
+  }
+
   function recompute() {
     const em = Number(emEl.value);
     const wp = Number(wpEl.value);
     emV.textContent = em.toFixed(2);
     wpV.textContent = wp.toFixed(1);
+
+    // Optimistic: nearest-neighbor from the already-scored grid.
     const near = _nearestPlacement(data.placements || [], em, wp);
-    if (near) {
-      scoreEl.textContent = Number(near.composite_score).toFixed(1);
-      scoreEl.className = _scoreColor(Number(near.composite_score));
-      noteEl.textContent = `snap → EM ${near.em_mult.toFixed(2)} / wings ${near.wing_pts.toFixed(1)}pts`;
-    }
+    if (near) _paintPlacement(near, `grid ~ EM ${near.em_mult.toFixed(2)} / ${near.wing_pts.toFixed(1)}pts`);
+
+    // Exact: debounced server round-trip.
+    if (_scoreDebounceTimer) clearTimeout(_scoreDebounceTimer);
+    _scoreDebounceTimer = setTimeout(() => _fetchExact(em, wp), _DEBOUNCE_MS);
   }
   if (emEl) emEl.addEventListener("input", recompute);
   if (wpEl) wpEl.addEventListener("input", recompute);
