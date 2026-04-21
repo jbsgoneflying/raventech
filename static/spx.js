@@ -2092,6 +2092,22 @@ function _paintE2WingConsole(host, deck) {
     </div>
   `;
 
+  // Wire per-row click -> update selectedIndex + visual highlight so
+  // "Use Selected Placement" knows which placement the desk picked.
+  const rowsEl = host.querySelector("#e2PlacementRows");
+  if (rowsEl) {
+    rowsEl.querySelectorAll(".e2PlacementRow").forEach((row) => {
+      row.addEventListener("click", () => {
+        const idx = Number(row.getAttribute("data-index") || 0);
+        _E2CommandDeckState.selectedIndex = idx;
+        rowsEl.querySelectorAll(".e2PlacementRow").forEach((r) => {
+          r.classList.remove("e2PlacementRow--selected");
+        });
+        row.classList.add("e2PlacementRow--selected");
+      });
+    });
+  }
+
   _wireE2Tuner(deck);
   _wireE2DeckActions(deck);
 }
@@ -2176,6 +2192,148 @@ function _wireE2DeckActions(deck) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
   }
+  // v2: Wire "Use Selected Placement" -> Adjust & Log modal.
+  const buildBtn = document.getElementById("e2BuildTradeBtn");
+  if (buildBtn) {
+    buildBtn.addEventListener("click", () => {
+      const idx = _E2CommandDeckState.selectedIndex || 0;
+      const wc = (deck && deck.wingConsole) || {};
+      const p = (wc.placements || [])[idx];
+      if (!p) return;
+      const withRank = Object.assign({}, p, { _rank: idx });
+      try {
+        _showE2AdjustModal(deck, withRank);
+      } catch (err) {
+        console.warn("E2 adjust modal failed", err);
+      }
+    });
+  }
+}
+
+// --- v2: Adjust & Log modal for E2 SPX IC placements ---
+// Parallel to E1's _showE1AdjustModalFromPlacement. Takes the deck +
+// selected placement, pops an editable form so the desk can tune
+// em_mult / wing_pts / strikes / entry_credit / entry_day + notes
+// before the trade is persisted via POST /api/spx-ic/trade.
+function _showE2AdjustModal(deck, placement) {
+  const wc = (deck && deck.wingConsole) || {};
+  const underlying = String(wc.underlying || "SPX").toUpperCase();
+  const entryDay = String(wc.entry_day || "mon").toLowerCase();
+
+  const defEm = Number(placement.em_mult || 1.25);
+  const defWp = Number(placement.wing_pts || 10);
+  const defCredit = Number(placement.credit_dollars || 0) / 100.0;
+  const defSP = placement.short_put_strike != null ? placement.short_put_strike : "";
+  const defSC = placement.short_call_strike != null ? placement.short_call_strike : "";
+
+  const overlay = document.createElement("div");
+  overlay.id = "e2AdjustOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center";
+  overlay.innerHTML = '<div style="background:var(--bg,#121418);color:var(--text,#e6e6e6);border-radius:12px;padding:24px;width:460px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">'
+    + '<h3 style="margin:0 0 6px">Adjust &amp; Log Trade — ' + escapeHtml(underlying) + '</h3>'
+    + '<div style="font-size:11px;opacity:.6;margin-bottom:14px">'
+    + 'Seeded from Wing Console · rank ' + ((placement._rank || 0) + 1)
+    + ' · composite ' + Number(placement.composite_score || 0).toFixed(1)
+    + ' · ' + escapeHtml(placement.confidence || "—") + ' confidence'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">'
+    + _e2AdjField("EM Multiple", "e2AdjEm", defEm.toFixed(2), "number", "0.5", "3.0", "0.05")
+    + _e2AdjField("Wing Width (pts)", "e2AdjWp", defWp.toFixed(0), "number", "2", "30", "0.5")
+    + _e2AdjField("Entry Credit ($)", "e2AdjCredit", defCredit.toFixed(2), "number", "0", "9999", "0.01")
+    + _e2AdjField("Short Put Strike", "e2AdjSP", defSP, "number", "", "", "1")
+    + _e2AdjField("Short Call Strike", "e2AdjSC", defSC, "number", "", "", "1")
+    + _e2AdjField("Entry Day", "e2AdjEntryDay", entryDay, "select", "", "", "", ["mon", "tue", "wed"])
+    + '</div>'
+    + '<div style="margin-top:12px"><label style="font-size:12px;opacity:.7">Notes (optional)</label>'
+    + '<textarea id="e2AdjNotes" rows="2" style="width:100%;font-size:12px;padding:6px;border-radius:6px;border:1px solid var(--border,rgba(255,255,255,.12));background:var(--surface-2,#1a1d24);color:inherit;margin-top:4px" placeholder="Fill price, wing-width rationale, anything worth pinning to the journal…"></textarea></div>'
+    + '<div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">'
+    + '<button id="e2AdjCancelBtn" style="padding:8px 20px;font-size:12px;border-radius:6px;border:1px solid var(--border,rgba(255,255,255,.12));background:none;color:inherit;cursor:pointer">Cancel</button>'
+    + '<button id="e2AdjSubmitBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;font-weight:600">Log Trade as Open</button>'
+    + '</div></div>';
+
+  document.body.appendChild(overlay);
+  document.getElementById("e2AdjCancelBtn").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+  document.getElementById("e2AdjSubmitBtn").addEventListener("click", async () => {
+    const emVal = parseFloat(document.getElementById("e2AdjEm").value) || defEm;
+    const wpVal = parseFloat(document.getElementById("e2AdjWp").value) || defWp;
+    const creditVal = parseFloat(document.getElementById("e2AdjCredit").value) || 0;
+    const spVal = parseFloat(document.getElementById("e2AdjSP").value) || null;
+    const scVal = parseFloat(document.getElementById("e2AdjSC").value) || null;
+    const edVal = document.getElementById("e2AdjEntryDay").value || entryDay;
+    const notes = (document.getElementById("e2AdjNotes").value || "").trim();
+
+    const body = {
+      source: "wing_console",
+      underlying: underlying,
+      entryDay: edVal,
+      entry: {
+        emMultiple: emVal,
+        wingWidth: wpVal,
+        entryCredit: creditVal,
+        shortPutStrike: spVal,
+        shortCallStrike: scVal,
+        longPutStrike:  spVal ? spVal - wpVal : null,
+        longCallStrike: scVal ? scVal + wpVal : null,
+        spotAtEntry:    wc.spot,
+        emPctAtEntry:   wc.em_pct,
+        holdDays:       5,
+      },
+      entryContext: {
+        regimeBucket: wc.regime_bucket,
+        regimeLabel:  wc.regime_label,
+        miV2Label:    (wc.regime_mi_v2 || {}).label,
+        macroBucket:  wc.macro_bucket,
+        breachCloseProb:     placement.breach_close_prob,
+        touchIntraweekProb:  placement.touch_intraweek_prob,
+        maeP95VsWing:        placement.mae_p95_vs_wing,
+      },
+      wingConsole: {
+        rank:           placement._rank,
+        compositeScore: placement.composite_score,
+        confidence:     placement.confidence,
+        nMcSims:        placement.n_mc_sims,
+      },
+      note: notes || "Logged from E2 Wing Console.",
+    };
+
+    try {
+      const resp = await fetch("/api/spx-ic/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error("HTTP " + resp.status + ": " + txt.slice(0, 200));
+      }
+      const result = await resp.json();
+      overlay.remove();
+      alert("Trade logged as open: " + underlying + " · " + emVal + "× EM · " + wpVal + "pt wings\nTrade ID: " + (result.tradeId || result.trade_id || "ok"));
+      if (typeof _loadActiveTrades === "function") _loadActiveTrades();
+    } catch (e) {
+      alert("Failed to log trade: " + e.message);
+    }
+  });
+}
+
+function _e2AdjField(label, id, defVal, type, min, max, step, options) {
+  let html = '<div><label for="' + id + '" style="font-size:11px;opacity:.7;display:block;margin-bottom:3px">' + label + '</label>';
+  if (type === "select" && options) {
+    html += '<select id="' + id + '" style="width:100%;padding:6px;font-size:12px;border-radius:6px;border:1px solid var(--border,rgba(255,255,255,.12));background:var(--surface-2,#1a1d24);color:inherit">';
+    for (const opt of options) {
+      const sel = opt === defVal ? " selected" : "";
+      html += '<option value="' + opt + '"' + sel + '>' + opt + '</option>';
+    }
+    html += '</select>';
+  } else {
+    html += '<input id="' + id + '" type="' + (type || "text") + '" value="' + (defVal != null ? String(defVal) : "") + '"'
+      + (min ? ' min="' + min + '"' : '') + (max ? ' max="' + max + '"' : '') + (step ? ' step="' + step + '"' : '')
+      + ' style="width:100%;padding:6px;font-size:12px;border-radius:6px;border:1px solid var(--border,rgba(255,255,255,.12));background:var(--surface-2,#1a1d24);color:inherit">';
+  }
+  html += '</div>';
+  return html;
 }
 
 function _renderMaeDistribution(deck) {

@@ -998,6 +998,163 @@ def e1_list_trades():
     return {"trades": list_active_trades()}
 
 
+@router.post("/api/breach/trade/{trade_id}/live-review")
+async def e1_trade_live_review(trade_id: str, request: Request):
+    """v2: Live open-trade review.
+
+    The existing /checkin endpoint is earnings-specific (requires
+    postEarningsOpen to compute gap / breach). Before earnings comes
+    out, the desk still wants a hold/cut recommendation from the LLM
+    reading *current* conditions: spot vs shorts, days remaining,
+    IV drift, regime changes. This endpoint provides that.
+
+    Returns a narrative verdict (HOLD / ADJUST / CUT) + reasoning so
+    the desk can see "waiting through the white-knuckle is worth
+    it" vs "sell now while you still can" kind of guidance in-flight.
+
+    Body (optional):
+      { "currentSpot": 180.5,        # override for backtest / paper
+        "currentVix":  16.2,         # override
+        "notes":       "user note" }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    from backend.e1_earnings_trades import get_trade, add_checkin
+
+    trade = get_trade(trade_id)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    ticker = trade.get("ticker") or ""
+    entry = trade.get("entry") or {}
+    entry_ctx = trade.get("entryContext") or {}
+    short_put = float(entry.get("shortPutStrike") or 0)
+    short_call = float(entry.get("shortCallStrike") or 0)
+    long_put = float(entry.get("longPutStrike") or 0)
+    long_call = float(entry.get("longCallStrike") or 0)
+    entry_credit = float(entry.get("entryCredit") or 0)
+    spot_at_entry = float(entry.get("spotAtEntry") or body.get("spotAtEntry") or 0)
+    earn_date = str(entry.get("earningsDate") or "")[:10]
+    timing = str(entry.get("earningsTiming") or "").upper()
+
+    # Pull current spot + VIX (best-effort).
+    current_spot = float(body.get("currentSpot") or 0)
+    current_vix = body.get("currentVix")
+    if current_spot <= 0:
+        try:
+            from backend.deps import get_client_optional
+            from backend.technicals import fetch_live_price_context_optional
+            orats = get_client_optional()
+            if orats and ticker:
+                px = fetch_live_price_context_optional(client=orats, ticker=ticker)
+                current_spot = float((px or {}).get("price") or 0)
+        except Exception:
+            current_spot = 0.0
+    if current_vix is None:
+        try:
+            from backend.deps import get_client_optional
+            orats = get_client_optional()
+            if orats and ticker:
+                resp = orats.live_summaries(ticker=ticker)
+                rows = resp.rows or []
+                if rows:
+                    current_vix = rows[0].get("iv30dMean") or rows[0].get("ivMean")
+        except Exception:
+            current_vix = None
+
+    # Derive rough status chips (pre-LLM so the response is useful even
+    # when the LLM is rate-limited or unavailable).
+    put_dist_pct = None
+    call_dist_pct = None
+    nearest_short_pct = None
+    if current_spot > 0 and short_put > 0:
+        put_dist_pct = round((current_spot - short_put) / current_spot * 100.0, 2)
+    if current_spot > 0 and short_call > 0:
+        call_dist_pct = round((short_call - current_spot) / current_spot * 100.0, 2)
+    dists = [d for d in (put_dist_pct, call_dist_pct) if d is not None]
+    if dists:
+        nearest_short_pct = min(dists)
+
+    status_chip = "unknown"
+    if nearest_short_pct is not None:
+        if nearest_short_pct < 0:
+            status_chip = "breached"
+        elif nearest_short_pct < 0.5:
+            status_chip = "short_strike_challenged"
+        elif nearest_short_pct < 1.5:
+            status_chip = "caution"
+        else:
+            status_chip = "on_track"
+
+    # Days remaining until earnings.
+    import datetime as _dt
+    days_to_earnings = None
+    if earn_date:
+        try:
+            ed = _dt.date.fromisoformat(earn_date)
+            days_to_earnings = (ed - _dt.date.today()).days
+        except Exception:
+            days_to_earnings = None
+
+    # LLM narrative (best-effort; deterministic shell otherwise).
+    llm = None
+    try:
+        from backend.e1_earnings_advisor import _get_openai_client, _parse_llm_json
+        client = _get_openai_client()
+        if client and current_spot > 0:
+            prompt = (
+                f"Live open-trade review for {ticker} short iron condor. "
+                f"Entry: put wings {long_put}/{short_put}, call wings "
+                f"{short_call}/{long_call}, credit ${entry_credit:.2f}, "
+                f"spot at entry ${spot_at_entry:.2f}. "
+                f"Earnings {earn_date or 'unknown'} {timing or ''}, "
+                f"{days_to_earnings if days_to_earnings is not None else '?'} days away. "
+                f"Current spot: ${current_spot:.2f}. Nearest short-strike distance: "
+                f"{nearest_short_pct if nearest_short_pct is not None else '?'}%. "
+                f"Current VIX proxy: {current_vix}. "
+                f"Status chip: {status_chip}. "
+                "Give the desk a verdict: HOLD (wait through white-knuckle; historically worth it), "
+                "ADJUST (roll the challenged short out/down), or CUT (sell now before it gets worse). "
+                "Return JSON with keys: verdict (HOLD|ADJUST|CUT), confidence (0-1), "
+                "narrative (2-3 sentences), keyPoints (list of 2-4 bullets), "
+                "riskFactors (list of 1-3 bullets), deskNote (one sentence)."
+            )
+            resp = client.chat.completions.create(
+                model="gpt-5.4",
+                messages=[
+                    {"role": "system", "content": "You are a vol-crush desk analyst reviewing an OPEN earnings iron condor. Be concise, decisive, and cite the numbers."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.25, max_completion_tokens=500, timeout=25,
+                response_format={"type": "json_object"},
+            )
+            llm = _parse_llm_json(resp.choices[0].message.content.strip())
+    except Exception:
+        llm = None
+
+    review_record = {
+        "type": "live_review",
+        "statusChip": status_chip,
+        "currentSpot": current_spot,
+        "currentVix": current_vix,
+        "daysToEarnings": days_to_earnings,
+        "putDistPct": put_dist_pct,
+        "callDistPct": call_dist_pct,
+        "nearestShortPct": nearest_short_pct,
+        "llmAssessment": llm,
+        "userNotes": body.get("notes"),
+    }
+    try:
+        add_checkin(trade_id, review_record)
+    except Exception:
+        pass
+
+    return {"tradeId": trade_id, "review": review_record}
+
+
 @router.post("/api/breach/trade/{trade_id}/checkin")
 async def e1_trade_checkin(trade_id: str, request: Request):
     """Post-earnings check-in: capture realized move, gap, and breach status."""

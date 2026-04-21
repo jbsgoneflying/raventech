@@ -222,10 +222,27 @@
 
         '<div class="e14ConsoleActions">' +
           '<button type="button" id="e14SimPickBtn" class="e14ConsoleActions--primary">Simulate This Pick</button>' +
+          '<button type="button" id="e14LogTradeBtn">Log Trade as Open</button>' +
           '<button type="button" id="e14RunAdvisorBtn">Run Advisor</button>' +
           '<button type="button" id="e14ExportBtn">Export JSON</button>' +
         "</div>" +
       "</div>";
+
+    // Row-click selection so the Log / Simulate buttons know which
+    // placement the desk actually clicked (default = top rank).
+    var rowsEl = host.querySelector(".e14PlacementTable tbody");
+    if (rowsEl) {
+      rowsEl.querySelectorAll(".e14PlacementRow").forEach(function (row) {
+        row.addEventListener("click", function () {
+          var idx = Number(row.getAttribute("data-index") || 0);
+          State.selectedIndex = idx;
+          rowsEl.querySelectorAll(".e14PlacementRow").forEach(function (r) {
+            r.classList.remove("e14PlacementRow--selected");
+          });
+          row.classList.add("e14PlacementRow--selected");
+        });
+      });
+    }
 
     wireTuner(deck);
     wireDeckActions(deck);
@@ -324,6 +341,153 @@
 
     var advBtn = $("e14RunAdvisorBtn");
     if (advBtn) advBtn.addEventListener("click", runAdvisor);
+
+    var logBtn = $("e14LogTradeBtn");
+    if (logBtn) logBtn.addEventListener("click", function () { showLogModal(deck); });
+  }
+
+  // -------------------------------------------------------------
+  // Adjust & Log modal (v2 parallel to E1/E2 adjust-log flows)
+  // -------------------------------------------------------------
+
+  function showLogModal(deck) {
+    var wc = (deck && deck.wingConsole) || {};
+    var placements = wc.placements || [];
+    var idx = State.selectedIndex || 0;
+    var p = placements[idx];
+    if (!p) {
+      alert("No placement selected.");
+      return;
+    }
+
+    var entry = wc.entry_date || State.entryDate;
+    var expiry = wc.expiry_date || State.expiryDate;
+    var defCredit = Number(p.credit_dollars || 0) / 100.0;
+    var defSP = p.short_put_strike != null ? p.short_put_strike : "";
+    var defLP = p.long_put_strike  != null ? p.long_put_strike  : "";
+    var defSC = p.short_call_strike != null ? p.short_call_strike : "";
+    var defLC = p.long_call_strike  != null ? p.long_call_strike  : "";
+
+    var overlay = document.createElement("div");
+    overlay.id = "e14LogOverlay";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center";
+    overlay.innerHTML = '<div style="background:var(--bg,#121418);color:var(--text,#e6e6e6);border-radius:12px;padding:24px;width:480px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">' +
+      '<h3 style="margin:0 0 6px">Adjust &amp; Log Trade — SPX</h3>' +
+      '<div style="font-size:11px;opacity:.6;margin-bottom:14px">' +
+        'Seeded from Wing Console · rank ' + (idx + 1) +
+        ' · composite ' + Number(p.composite_score || 0).toFixed(1) +
+        ' · ' + esc(p.confidence || "—") + ' confidence' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">' +
+        _field("Entry Date",      "e14LogEntry",  entry,  "date") +
+        _field("Expiry",          "e14LogExpiry", expiry, "date") +
+        _field("Long Put",        "e14LogLP",     defLP,  "number", "", "", "0.5") +
+        _field("Short Put",       "e14LogSP",     defSP,  "number", "", "", "0.5") +
+        _field("Short Call",      "e14LogSC",     defSC,  "number", "", "", "0.5") +
+        _field("Long Call",       "e14LogLC",     defLC,  "number", "", "", "0.5") +
+        _field("Entry Credit ($)","e14LogCredit", defCredit.toFixed(2), "number", "0", "9999", "0.01") +
+      '</div>' +
+      '<div style="margin-top:12px"><label style="font-size:12px;opacity:.7">Notes (optional)</label>' +
+      '<textarea id="e14LogNotes" rows="2" style="width:100%;font-size:12px;padding:6px;border-radius:6px;border:1px solid var(--border,rgba(255,255,255,.12));background:var(--surface-2,#1a1d24);color:inherit;margin-top:4px" placeholder="Fill price, rationale, anything worth pinning to the journal…"></textarea></div>' +
+      '<div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">' +
+        '<button id="e14LogCancel" style="padding:8px 20px;font-size:12px;border-radius:6px;border:1px solid var(--border,rgba(255,255,255,.12));background:none;color:inherit;cursor:pointer">Cancel</button>' +
+        '<button id="e14LogSubmit" class="e14ConsoleActions--primary" style="padding:8px 20px;font-size:12px;font-weight:600;border-radius:6px;border:1px solid rgba(60,212,169,0.45);background:rgba(60,212,169,0.12);color:#3cd4a9;cursor:pointer">Log Trade as Open</button>' +
+      '</div></div>';
+
+    document.body.appendChild(overlay);
+    $("e14LogCancel").addEventListener("click", function () { overlay.remove(); });
+    overlay.addEventListener("click", function (ev) {
+      if (ev.target === overlay) overlay.remove();
+    });
+
+    $("e14LogSubmit").addEventListener("click", async function () {
+      var entryVal = $("e14LogEntry").value || entry;
+      var expVal   = $("e14LogExpiry").value || expiry;
+      var lp = parseFloat($("e14LogLP").value) || null;
+      var sp = parseFloat($("e14LogSP").value) || null;
+      var sc = parseFloat($("e14LogSC").value) || null;
+      var lc = parseFloat($("e14LogLC").value) || null;
+      var creditVal = parseFloat($("e14LogCredit").value) || 0;
+      var notes = ($("e14LogNotes").value || "").trim();
+
+      if (!(lp && sp && sc && lc)) {
+        alert("All four strikes (long put / short put / short call / long call) are required.");
+        return;
+      }
+      if (!(lp < sp && sp < sc && sc < lc)) {
+        alert("Strikes must satisfy: longPut < shortPut < shortCall < longCall.");
+        return;
+      }
+      if (creditVal <= 0) {
+        alert("Entry credit must be positive.");
+        return;
+      }
+
+      // Re-run the scenario with the adjusted strikes/credit so the
+      // journal carries a full replay context. Then journal the trade.
+      var scenarioBody = {
+        underlying: "SPX",
+        entryDate: entryVal,
+        expiry:    expVal,
+        longPut:   lp,
+        shortPut:  sp,
+        shortCall: sc,
+        longCall:  lc,
+        creditReceived: creditVal,
+        seasonMode: "none",
+        wingConsoleCacheKey: (deck && deck.wingConsole && deck.wingConsole.cache_key) || null,
+        placementRank:       idx,
+        sourceChip:          (State.selectedIndex !== 0 ? "user_override" : "desk_default"),
+      };
+
+      try {
+        // Run the scenario (re-prices the adjusted wings so the journal
+        // entry has the full distribution + sizing + greeks).
+        var simResp = await fetch("/api/ic-scenario", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(scenarioBody),
+        });
+        if (!simResp.ok) {
+          var t1 = await simResp.text();
+          throw new Error("scenario " + simResp.status + ": " + t1.slice(0, 200));
+        }
+        var scenario = await simResp.json();
+
+        // Journal the trade with the just-computed scenario attached.
+        // The endpoint expects `request` (original form submission) +
+        // `scenario` (full /api/ic-scenario payload); extra keys are
+        // preserved verbatim on the trade record for later review.
+        var journalResp = await fetch("/api/ic-scenario/journal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request:         scenarioBody,
+            scenario:        scenario,
+            note:            notes || "Logged from E14 Wing Console.",
+          }),
+        });
+        if (!journalResp.ok) {
+          var t2 = await journalResp.text();
+          throw new Error("journal " + journalResp.status + ": " + t2.slice(0, 200));
+        }
+        var journalResult = await journalResp.json();
+        overlay.remove();
+        alert("Trade logged as open.\nTrade ID: " + (journalResult.tradeId || journalResult.trade_id || "ok"));
+        if (typeof loadActiveTrades === "function") loadActiveTrades();
+      } catch (err) {
+        alert("Failed to log trade: " + (err && err.message ? err.message : String(err)));
+      }
+    });
+  }
+
+  function _field(label, id, defVal, type, min, max, step) {
+    var html = '<div><label for="' + id + '" style="font-size:11px;opacity:.7;display:block;margin-bottom:3px">' + label + '</label>';
+    html += '<input id="' + id + '" type="' + (type || "text") + '" value="' + (defVal != null ? esc(defVal) : "") + '"' +
+      (min ? ' min="' + min + '"' : '') + (max ? ' max="' + max + '"' : '') + (step ? ' step="' + step + '"' : '') +
+      ' style="width:100%;padding:6px;font-size:12px;border-radius:6px;border:1px solid var(--border,rgba(255,255,255,.12));background:var(--surface-2,#1a1d24);color:inherit">';
+    html += '</div>';
+    return html;
   }
 
   function simulateTopPick() {
@@ -531,6 +695,7 @@
   function boot() {
     // Initial render.
     fetchAndPaintWingConsole();
+    loadActiveTrades();
 
     // Re-run when entry / expiry change (desk tweaks the window).
     var debounceTimer = null;
@@ -542,6 +707,147 @@
       var el = $(id);
       if (el) el.addEventListener("change", schedule);
     });
+  }
+
+  // -------------------------------------------------------------
+  // Active Trades — lists E14-source open positions from E2 store.
+  // -------------------------------------------------------------
+
+  async function loadActiveTrades() {
+    var sec = $("e14ActiveTradesSection");
+    var host = $("e14ActiveTradesBody");
+    if (!sec || !host) return;
+    try {
+      var resp = await fetch("/api/spx-ic/trades");
+      if (!resp.ok) {
+        sec.style.display = "none";
+        return;
+      }
+      var data = await resp.json();
+      var all = data.trades || [];
+      // Filter to E14-source trades (logged from this page).
+      var trades = all.filter(function (t) { return t.source === "engine14"; });
+      if (!trades.length) {
+        sec.style.display = "none";
+        return;
+      }
+      sec.style.display = "";
+      host.innerHTML = trades.map(renderTradeCard).join("");
+      wireTradeCards();
+    } catch (err) {
+      // Silent fail; section stays hidden.
+    }
+  }
+
+  function renderTradeCard(t) {
+    var entry = t.entry || {};
+    var tracking = t.tracking || {};
+    var status = tracking.deterministicStatus || "on_track";
+    var lastCheckin = (t.checkIns || []).slice(-1)[0];
+    var narrative = "";
+    if (lastCheckin) {
+      if (lastCheckin.headline) narrative = esc(lastCheckin.headline);
+      if (lastCheckin.recommendation) narrative += '<div style="opacity:.8;margin-top:4px">' + esc(lastCheckin.recommendation) + '</div>';
+    }
+    var statusColor = "#7db6ff";
+    if (status === "exit") statusColor = "#ff7a7a";
+    else if (status === "adjust") statusColor = "#f3a847";
+    else if (status === "on_track") statusColor = "#3cd4a9";
+
+    return '' +
+      '<div style="padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.05)">' +
+        '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">' +
+          '<strong style="font-size:13px">' + esc(entry.underlying || "SPX") + ' IC · ' + esc(String(entry.wingWidth || "—")) + 'pt wings</strong>' +
+          '<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#0a84ff;color:#fff;font-weight:600">E14</span>' +
+          '<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:' + statusColor + '22;color:' + statusColor + ';text-transform:uppercase;letter-spacing:0.4px">' + esc(status) + '</span>' +
+          '<span class="muted" style="font-size:11px">Logged ' + esc(String(t.loggedAt || "").slice(0, 16).replace("T", " ")) + '</span>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;font-size:11px;margin-bottom:8px">' +
+          '<div><span class="muted">Short Put</span> <strong>' + esc(String(entry.shortPutStrike || "—")) + '</strong></div>' +
+          '<div><span class="muted">Short Call</span> <strong>' + esc(String(entry.shortCallStrike || "—")) + '</strong></div>' +
+          '<div><span class="muted">Credit</span> <strong>$' + esc(String(entry.entryCredit || "—")) + '</strong></div>' +
+          '<div><span class="muted">Spot</span> <strong>' + (tracking.currentSpot ? Number(tracking.currentSpot).toFixed(2) : "—") + '</strong></div>' +
+          '<div><span class="muted">DTE</span> <strong>' + (tracking.dte != null ? tracking.dte : "—") + '</strong></div>' +
+          '<div><span class="muted">Put / Call dist</span> <strong>' + (tracking.distPutPct != null ? tracking.distPutPct + '%' : '—') + ' / ' + (tracking.distCallPct != null ? tracking.distCallPct + '%' : '—') + '</strong></div>' +
+        '</div>' +
+        '<div id="e14ReviewPanel-' + esc(t.tradeId) + '" class="e14ReviewPanel" style="display:' + (narrative ? '' : 'none') + ';padding:8px 10px;border-radius:6px;background:rgba(125,182,255,0.06);border:1px solid rgba(125,182,255,0.2);font-size:11px;margin-bottom:8px">' + narrative + '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="e14ReviewBtn e14ConsoleActions--primary" data-trade-id="' + esc(t.tradeId) + '" style="padding:4px 12px;font-size:11px;border-radius:6px;border:1px solid rgba(125,182,255,0.45);background:rgba(125,182,255,0.12);color:#7db6ff;cursor:pointer;font-weight:600">Run Live Check-In</button>' +
+          '<button class="e14CloseBtn" data-trade-id="' + esc(t.tradeId) + '" style="padding:4px 12px;font-size:11px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:none;color:inherit;cursor:pointer">Close Trade</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function wireTradeCards() {
+    document.querySelectorAll(".e14ReviewBtn").forEach(function (btn) {
+      btn.addEventListener("click", function () { runReview(btn.dataset.tradeId); });
+    });
+    document.querySelectorAll(".e14CloseBtn").forEach(function (btn) {
+      btn.addEventListener("click", function () { closeTrade(btn.dataset.tradeId); });
+    });
+  }
+
+  async function runReview(tradeId) {
+    var panel = document.getElementById("e14ReviewPanel-" + tradeId);
+    if (!panel) return;
+    panel.style.display = "";
+    panel.innerHTML = '<div class="muted">Running check-in…</div>';
+    try {
+      // Reuse E2's checkin endpoint — E14 trades live in the same store
+      // (via backend.engine2_trades.log_trade), so tracking + analysis
+      // resolve cleanly for both sources.
+      var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/checkin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (!resp.ok) {
+        var txt = await resp.text();
+        throw new Error("HTTP " + resp.status + ": " + txt.slice(0, 200));
+      }
+      var body = await resp.json();
+      paintReview(panel, body);
+    } catch (err) {
+      panel.innerHTML = '<div style="color:#ff7a7a">Check-in failed: ' +
+        esc(err && err.message ? err.message : String(err)) + "</div>";
+    }
+  }
+
+  function paintReview(panel, body) {
+    var a = (body && body.analysis) || {};
+    var tr = (body && body.tracking) || {};
+    var status = a.status || tr.deterministicStatus || "—";
+    var color = "#7db6ff";
+    if (status === "exit") color = "#ff7a7a";
+    else if (status === "adjust") color = "#f3a847";
+    else if (status === "on_track") color = "#3cd4a9";
+
+    panel.innerHTML = '' +
+      '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">' +
+        '<strong style="color:' + color + ';font-size:13px;text-transform:uppercase">' + esc(status) + '</strong>' +
+        '<span class="muted">Spot $' + (body.currentSpot != null ? Number(body.currentSpot).toFixed(2) : "—") + '</span>' +
+      '</div>' +
+      (a.headline ? '<div style="font-weight:600;margin-bottom:4px">' + esc(a.headline) + '</div>' : '') +
+      (a.recommendation ? '<div style="margin-bottom:4px">' + esc(a.recommendation) + '</div>' : '') +
+      (a.spotAnalysis ? '<div class="muted">' + esc(a.spotAnalysis) + '</div>' : '') +
+      (a.regimeDrift ? '<div class="muted" style="margin-top:4px">Regime: ' + esc(a.regimeDrift) + '</div>' : '') +
+      (a.adjustmentIfNeeded ? '<div style="margin-top:4px;padding:6px 8px;border-left:3px solid #f3a847;background:rgba(243,168,71,0.08)">' + esc(a.adjustmentIfNeeded) + '</div>' : '') +
+      (a.deskNote ? '<div class="muted" style="margin-top:6px"><em>Desk note:</em> ' + esc(a.deskNote) + '</div>' : '');
+  }
+
+  async function closeTrade(tradeId) {
+    if (!confirm("Close trade " + tradeId + "?")) return;
+    try {
+      var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ closeReason: "manual" }),
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      loadActiveTrades();
+    } catch (err) {
+      alert("Close failed: " + (err && err.message ? err.message : String(err)));
+    }
   }
 
   if (document.readyState === "loading") {

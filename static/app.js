@@ -1162,19 +1162,17 @@ function _wireWingActions(data) {
       const idx = _e1WingConsoleState.selectedIndex || 0;
       const p = (data.placements || [])[idx];
       if (!p) return;
+      // Stamp rank onto the placement so the modal can record provenance.
+      const withRank = Object.assign({}, p, { _rank: idx });
+      // v2: open the Adjust & Log modal seeded from the Wing Console
+      // placement so the desk can tweak em/wings/credit/strikes + notes
+      // before the trade is logged as open (available to the live-
+      // review LLM afterwards).
       try {
-        if (window.runCalculation && typeof window.runCalculation === "function") {
-          // Prefer passing through the trade-builder params the existing
-          // pipeline already handles.
-          window.runCalculation({
-            wing_width: p.wing_pts,
-            symmetry: "symmetric",
-            mode: "equal_delta",
-          });
-        }
-      } catch { /* ignore */ }
-      buildBtn.textContent = `Building ${p.em_mult.toFixed(2)}× / ${p.wing_pts.toFixed(1)}pts…`;
-      setTimeout(() => { buildBtn.textContent = "Build Trade from selected"; }, 2000);
+        _showE1AdjustModalFromPlacement(lastPayload, withRank);
+      } catch (err) {
+        console.warn("adjust modal failed", err);
+      }
     });
   }
 
@@ -3885,6 +3883,121 @@ function _showE1AdjustModal(payload, advisorData) {
   });
 }
 
+// --- v2: Adjust & Log modal seeded from a Wing Console placement ---
+// Called by `e1BuildTradeBtn` on the Wing Decision Console. Builds the
+// same modal shape as _showE1AdjustModal but pre-fills the numeric fields
+// from the placement's strikes / credit / em_mult / wing_pts / MC-derived
+// confidence tag, and records `source: "wing_console"` + the placement
+// rank + composite score in the POST body so the live-review LLM has
+// full provenance for every logged trade.
+function _showE1AdjustModalFromPlacement(payload, placement) {
+  var cur = payload?.current || {};
+  var ticker = payload?.ticker || "";
+  var timing = (cur.earningsTiming || "AMC").toUpperCase();
+  var earnDate = cur.earningsDate || cur.earnDateNext || "";
+
+  var defEm     = Number(placement.em_mult || 2.0);
+  var defWing   = Number(placement.wing_pts || 5);
+  var defCredit = Number(placement.credit_dollars || 0) / 100.0;
+  // Strikes come from the placement's absolute_strike fields when the
+  // scorer computed them; fall back to blank so the desk enters them.
+  var defSP = placement.short_put_strike != null ? placement.short_put_strike : "";
+  var defSC = placement.short_call_strike != null ? placement.short_call_strike : "";
+
+  var overlay = document.createElement("div");
+  overlay.id = "e1AdjustOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center";
+  overlay.innerHTML = '<div style="background:var(--bg,#fff);border-radius:12px;padding:24px;width:460px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    + '<h3 style="margin:0 0 6px">Adjust &amp; Log Trade — ' + escapeHtml(ticker) + '</h3>'
+    + '<div style="font-size:11px;opacity:.6;margin-bottom:14px">'
+    + 'Seeded from Wing Console · rank ' + ((placement._rank || 0) + 1)
+    + ' · composite ' + Number(placement.composite_score || 0).toFixed(1)
+    + ' · ' + (placement.confidence || "—") + ' confidence'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">'
+    + _adjField("EM Multiple", "e1AdjEm", defEm, "number", "0.5", "3.0", "0.05")
+    + _adjField("Wing Width ($)", "e1AdjWing", defWing, "number", "1", "25", "0.5")
+    + _adjField("Entry Credit ($)", "e1AdjCredit", defCredit.toFixed(2), "number", "0", "999", "0.01")
+    + _adjField("Short Put Strike", "e1AdjSP", defSP, "number", "", "", "0.5")
+    + _adjField("Short Call Strike", "e1AdjSC", defSC, "number", "", "", "0.5")
+    + _adjField("Timing", "e1AdjTiming", timing, "select", "", "", "", ["AMC", "BMO"])
+    + _adjField("Earnings Date", "e1AdjDate", earnDate, "date")
+    + '</div>'
+    + '<div style="margin-top:12px"><label style="font-size:12px;opacity:.7">Notes (optional)</label>'
+    + '<textarea id="e1AdjNotes" rows="2" style="width:100%;font-size:12px;padding:6px;border-radius:6px;border:1px solid var(--border,#ddd);margin-top:4px" placeholder="Fill price delta, desk rationale, anything worth pinning to the journal…"></textarea></div>'
+    + '<div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">'
+    + '<button id="e1AdjCancelBtn" style="padding:8px 20px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer">Cancel</button>'
+    + '<button id="e1AdjSubmitBtn" class="primaryButton" style="padding:8px 20px;font-size:12px;font-weight:600">Log Trade as Open</button>'
+    + '</div></div>';
+
+  document.body.appendChild(overlay);
+  $("e1AdjCancelBtn").addEventListener("click", function () { overlay.remove(); });
+  overlay.addEventListener("click", function (ev) { if (ev.target === overlay) overlay.remove(); });
+
+  $("e1AdjSubmitBtn").addEventListener("click", async function () {
+    var emVal = parseFloat($("e1AdjEm").value) || defEm;
+    var wingVal = parseFloat($("e1AdjWing").value) || defWing;
+    var creditVal = parseFloat($("e1AdjCredit").value) || 0;
+    var spVal = parseFloat($("e1AdjSP").value) || null;
+    var scVal = parseFloat($("e1AdjSC").value) || null;
+    var timingVal = $("e1AdjTiming").value || timing;
+    var dateVal = $("e1AdjDate").value || earnDate;
+    var notes = ($("e1AdjNotes").value || "").trim();
+
+    var body = {
+      source: "wing_console",
+      ticker: ticker,
+      entry: {
+        emMultiple: emVal,
+        wingWidth: wingVal,
+        entryCredit: creditVal,
+        shortPutStrike: spVal,
+        shortCallStrike: scVal,
+        longPutStrike: spVal ? spVal - wingVal : null,
+        longCallStrike: scVal ? scVal + wingVal : null,
+        spotAtEntry: (payload?.current || {}).stockPrice || null,
+        impliedMovePct: (payload?.current || {}).impliedMovePct || null,
+        earningsDate: dateVal,
+        earningsTiming: timingVal,
+        entryWindow: timingVal === "AMC" ? "3:00 PM EST on earnings day" : "3:00 PM EST day before earnings",
+        exitTarget: "Next morning open or mid-day vol bleed",
+      },
+      entryContext: {
+        vrpScore: (payload?.vrpAnalysis || {}).vrpScore,
+        breachPct: placement.breach_close_prob != null ? Number(placement.breach_close_prob) * 100.0 : null,
+        earningsTiming: timingVal,
+        regimeBucket: (payload?.regime || {}).regimeBucket || (payload?.regime || {}).bucket,
+        miV2Label: (payload?.regime || {}).mi_v2 ? (payload.regime.mi_v2 || {}).label : null,
+      },
+      wingConsole: {
+        rank: (placement._rank != null ? placement._rank : null),
+        compositeScore: placement.composite_score,
+        confidence: placement.confidence,
+        nMcSims: placement.n_mc_sims,
+        nEvents: placement.n_events || placement.n_analogues,
+      },
+      advisorVerdict: { verdict: null, source: "wing_console" },
+      adjustmentNote: notes || "Logged from E1 Wing Console.",
+    };
+
+    try {
+      var resp = await fetch("/api/breach/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      var result = await resp.json();
+      overlay.remove();
+      alert("Trade logged as open: " + ticker + " · " + emVal + "× EM · $" + wingVal + " wings\nTrade ID: " + result.tradeId);
+      if (typeof _loadE1ActiveTrades === "function") _loadE1ActiveTrades();
+      if (typeof _loadE1TradeJournal === "function") _loadE1TradeJournal();
+    } catch (e) {
+      alert("Failed to log trade: " + e.message);
+    }
+  });
+}
+
 function _adjField(label, id, defVal, type, min, max, step, options) {
   var html = '<div><label for="' + id + '" style="font-size:11px;opacity:.7;display:block;margin-bottom:3px">' + label + '</label>';
   if (type === "select" && options) {
@@ -3951,8 +4064,12 @@ async function _loadE1ActiveTrades() {
       if (entry.entryWindow) html += '<div style="font-size:11px;opacity:.5;margin-bottom:4px">Entry: ' + entry.entryWindow + '</div>';
       if (entry.exitTarget) html += '<div style="font-size:11px;opacity:.5;margin-bottom:8px">Exit: ' + entry.exitTarget + '</div>';
 
+      // v2: live-review placeholder (populated on-demand by _runE1LiveReview).
+      html += '<div class="e1ReviewPanel" id="e1ReviewPanel-' + t.tradeId + '" style="display:none;margin:8px 0;padding:10px;border-radius:8px;background:rgba(125,182,255,0.06);border:1px solid rgba(125,182,255,0.2);font-size:12px;line-height:1.4"></div>';
+
       // Action buttons
       html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+      html += '<button class="e1ReviewTradeBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid rgba(125,182,255,0.45);background:rgba(125,182,255,0.12);color:#7db6ff;cursor:pointer;font-weight:600">Run Live Review</button>';
       html += '<button class="e1CloseTradeBtn primaryButton" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;font-weight:600">Close Trade</button>';
       html += '<button class="e1CloseWinBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #16a34a;background:#16a34a18;color:#16a34a;cursor:pointer;font-weight:600">Close as Win</button>';
       html += '<button class="e1CloseLossBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #dc2626;background:#dc262618;color:#dc2626;cursor:pointer;font-weight:600">Close as Loss</button>';
@@ -3988,6 +4105,67 @@ function _wireE1CloseButtons() {
   document.querySelectorAll(".e1CloseExpBtn").forEach(function (btn) {
     btn.addEventListener("click", function () { _quickCloseE1Trade(btn.dataset.tradeId, "expired"); });
   });
+  document.querySelectorAll(".e1ReviewTradeBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () { _runE1LiveReview(btn.dataset.tradeId); });
+  });
+}
+
+// v2: Live review of an open E1 trade against current market conditions.
+// Calls the new /api/breach/trade/{id}/live-review endpoint which runs
+// an LLM narration keyed on: current spot vs strikes, days-to-earnings,
+// VIX drift, regime label. Response is painted inline under the trade
+// row so the desk can triage open positions without leaving the page.
+async function _runE1LiveReview(tradeId) {
+  var panel = document.getElementById("e1ReviewPanel-" + tradeId);
+  if (!panel) return;
+  panel.style.display = "";
+  panel.innerHTML = '<div style="opacity:.7">Reviewing…</div>';
+  try {
+    var resp = await fetch("/api/breach/trade/" + tradeId + "/live-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var body = await resp.json();
+    _paintE1LiveReview(panel, body);
+  } catch (err) {
+    panel.innerHTML = '<div style="color:#dc2626">Live review failed: ' + escapeHtml(String(err.message || err)) + '</div>';
+  }
+}
+
+function _paintE1LiveReview(panel, body) {
+  var r = (body && body.review) || {};
+  var llm = r.llmAssessment || {};
+  var verdict = String(llm.verdict || "—").toUpperCase();
+  var verdictColor = "#7db6ff";
+  if (verdict === "HOLD") verdictColor = "#3cd4a9";
+  else if (verdict === "ADJUST") verdictColor = "#f3a847";
+  else if (verdict === "CUT") verdictColor = "#ff7a7a";
+
+  var chipColor = "#7db6ff";
+  if (r.statusChip === "breached") chipColor = "#ff7a7a";
+  else if (r.statusChip === "short_strike_challenged") chipColor = "#f3a847";
+  else if (r.statusChip === "on_track") chipColor = "#3cd4a9";
+
+  var header = '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">' +
+    '<strong style="color:' + verdictColor + ';font-size:14px">' + verdict + '</strong>' +
+    '<span style="padding:2px 8px;border-radius:4px;background:' + chipColor + '22;color:' + chipColor + ';font-size:10px;text-transform:uppercase;letter-spacing:0.4px">' + escapeHtml(r.statusChip || "—") + '</span>' +
+    '<span style="opacity:.6">Spot $' + (r.currentSpot != null ? Number(r.currentSpot).toFixed(2) : "—") + '</span>' +
+    '<span style="opacity:.6">Nearest short: ' + (r.nearestShortPct != null ? Number(r.nearestShortPct).toFixed(2) + "%" : "—") + '</span>' +
+    '<span style="opacity:.6">' + (r.daysToEarnings != null ? r.daysToEarnings + "d to earnings" : "") + '</span>' +
+    '</div>';
+
+  var narrative = llm.narrative ? '<div style="margin-bottom:6px">' + escapeHtml(llm.narrative) + '</div>' : '';
+  var keyPts = Array.isArray(llm.keyPoints) && llm.keyPoints.length
+    ? '<ul style="margin:4px 0 0 18px">' + llm.keyPoints.map(function (k) { return '<li>' + escapeHtml(k) + '</li>'; }).join("") + '</ul>'
+    : '';
+  var risks = Array.isArray(llm.riskFactors) && llm.riskFactors.length
+    ? '<div style="margin-top:6px"><strong>Risks</strong><ul style="margin:4px 0 0 18px">' + llm.riskFactors.map(function (k) { return '<li>' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
+    : '';
+  var deskNote = llm.deskNote ? '<div style="margin-top:6px;opacity:.8"><em>Desk note:</em> ' + escapeHtml(llm.deskNote) + '</div>' : '';
+
+  panel.innerHTML = header + narrative + keyPts + risks + deskNote;
 }
 
 async function _quickCloseE1Trade(tradeId, outcome) {

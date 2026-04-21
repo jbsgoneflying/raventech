@@ -396,6 +396,16 @@
         <div id="e14AdvisorBody"></div>
       </section>
 
+      <!-- v2 Active Trades: open positions logged from the Wing Console,
+           each with a "Run Check-In" button that narrates the hold/cut
+           recommendation against current market conditions. -->
+      <section class="surface" id="e14ActiveTradesSection" aria-label="Active Trades" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="actions">
+          <span class="deskDividerText e14DividerText">Active Trades (Open Positions)</span>
+        </div>
+        <div id="e14ActiveTradesBody"></div>
+      </section>
+
       <form id="icForm" class="e14Form" aria-label="Engine 14 Controls">
         <div class="e14FormGrid">
           <div class="e14FieldGroup">
@@ -574,6 +584,6 @@
     <script src="/static/raven-chat.js?v=3"></script>
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ic-scenario.js?v=15"></script>
-    <script src="/static/engine14-v2.js?v=1"></script>
+    <script src="/static/engine14-v2.js?v=2"></script>
   </body>
 </html>

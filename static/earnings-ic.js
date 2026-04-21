@@ -54,8 +54,20 @@
     b.style.display = msg ? '' : 'none';
   }
   function setStatus(elId, text) { $(elId).textContent = text; }
-  function show(id) { $(id).classList.remove('hidden'); $(id).style.display = ''; }
-  function hide(id) { $(id).classList.add('hidden'); }
+  // Defensive no-op when the id doesn't exist (v2 collapsed some legacy
+  // sections into always-visible top-row elements; callers that still
+  // reference the retired ids should not crash the scan).
+  function show(id) {
+    const el = $(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.style.display = '';
+  }
+  function hide(id) {
+    const el = $(id);
+    if (!el) return;
+    el.classList.add('hidden');
+  }
 
   async function postJson(url, body, extraHeaders) {
     const headers = { 'Content-Type': 'application/json' };
@@ -320,9 +332,9 @@
       covBox.style.display = '';
     }
 
-    // Pre-fill Step 2 form
+    // Pre-fill Step 2 form. v2 collapsed scenarioForm into commandDeckForm
+    // which is always visible, so only e1Summary needs an explicit show().
     show('e1Summary');
-    show('scenarioForm');
     prefillScenarioForm(data);
   }
 
