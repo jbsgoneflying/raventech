@@ -1858,8 +1858,13 @@ def compute_engine2_spx_ic(
         ed_h  = r.get("entryDate") or r.get("entry_date") or r.get("weekStart")
         xp_h  = r.get("expiryDate") or r.get("expiry_date") or r.get("weekEnd")
         epx   = r.get("entryPx") or r.get("entry_close")
-        xpx   = r.get("expPx") or r.get("expiry_close") or r.get("exitPx")
-        sm    = r.get("signedMovePct") or r.get("signed_move_pct") or r.get("returnPct")
+        xpx   = r.get("expiryPx") or r.get("expPx") or r.get("expiry_close") or r.get("exitPx")
+        # Source of truth in the engine payload is `retPct` (signed % close-
+        # to-close return).  Fall back to deriving it from entry/expiry
+        # prices if retPct is missing.
+        sm = r.get("retPct")
+        if sm is None:
+            sm = r.get("signedMovePct") or r.get("signed_move_pct") or r.get("returnPct")
         if sm is None and epx and xpx and float(epx) > 0:
             try:
                 sm = (float(xpx) - float(epx)) / float(epx) * 100.0
@@ -1871,9 +1876,9 @@ def compute_engine2_spx_ic(
             "entryPx":        epx,
             "expiryPx":       xpx,
             "signedMovePct":  (None if sm is None else round(float(sm), 4)),
-            "regimeBucket":   r.get("bucket") or r.get("regimeBucket"),
-            "macroBucket":    r.get("mb") or r.get("macroBucket"),
-            "season":         r.get("seasonality") or r.get("season"),
+            "regimeBucket":   r.get("regimeBucket") or r.get("bucket"),
+            "macroBucket":    r.get("macroBucket") or r.get("mb"),
+            "season":         r.get("seasonBucket") or r.get("seasonality") or r.get("season"),
             "em1sigmaPct":    r.get("em1sigmaPct"),
             "dte":            r.get("dte"),
         }
