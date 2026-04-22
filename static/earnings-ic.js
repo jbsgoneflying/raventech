@@ -962,6 +962,8 @@
       wrap.appendChild(el('div', 'e15SectionSubtle', 'No analogue events.'));
       return;
     }
+    const tableWrap = el('div', 'e15TableWrap');
+    const tableScroll = el('div', 'e15TableScroll');
     const table = el('table', 'e15Table');
     const thead = el('thead');
     const trh = el('tr');
@@ -992,7 +994,9 @@
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    wrap.appendChild(table);
+    tableScroll.appendChild(table);
+    tableWrap.appendChild(tableScroll);
+    wrap.appendChild(tableWrap);
   }
 
   function renderDroppedEvents(d) {
@@ -1007,6 +1011,8 @@
     }
     divider.style.display = '';
     wrap.style.display = '';
+    const tableWrap = el('div', 'e15TableWrap');
+    const tableScroll = el('div', 'e15TableScroll');
     const table = el('table', 'e15Table');
     const thead = el('thead');
     const trh = el('tr');
@@ -1021,7 +1027,9 @@
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    wrap.appendChild(table);
+    tableScroll.appendChild(table);
+    tableWrap.appendChild(tableScroll);
+    wrap.appendChild(tableWrap);
   }
 
   function renderNotes(d) {
