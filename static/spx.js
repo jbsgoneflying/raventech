@@ -1980,6 +1980,10 @@ async function _fetchAndRenderWingConsole(payload) {
   _E2CommandDeckState.underlying = String(under).toUpperCase();
   _E2CommandDeckState.entry_day = String(entryDay).toLowerCase();
   _E2CommandDeckState.as_of_date = (payload && payload.asOfDate) || "";
+  // Stash the Friday weekly expiry from the scan's expectedMove so the
+  // "Simulate in E14" handoff can pass unambiguous dates.
+  _E2CommandDeckState.expiry_date = ((payload || {}).expectedMove || {}).expiry || "";
+  _E2CommandDeckState.lastPayload = payload;
 
   try {
     const resp = await fetch("/api/spx-ic/wing-console", {
@@ -2086,7 +2090,8 @@ function _paintE2WingConsole(host, deck) {
       </div>
 
       <div class="e2ConsoleActions">
-        <button type="button" id="e2BuildTradeBtn" class="e2ConsoleActions--primary">Use Selected Placement</button>
+        <button type="button" id="e2BuildTradeBtn" class="e2ConsoleActions--primary">Use Selected Placement (Log Trade)</button>
+        <button type="button" id="e2SimE14Btn">Simulate in E14</button>
         <button type="button" id="e2ExportBtn">Export JSON</button>
       </div>
     </div>
@@ -2192,6 +2197,45 @@ function _wireE2DeckActions(deck) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
   }
+  // v2: Wire "Simulate in E14" -> open /ic-scenario with the selected
+  // placement pre-filled. E14 replays the specific 4-strike structure
+  // against its analogue pool for realized-path outcomes.
+  const simBtn = document.getElementById("e2SimE14Btn");
+  if (simBtn) {
+    simBtn.addEventListener("click", () => {
+      const idx = _E2CommandDeckState.selectedIndex || 0;
+      const wc = (deck && deck.wingConsole) || {};
+      const p = (wc.placements || [])[idx];
+      if (!p) return;
+      // E2's entry is "this trading day" and expiry is the Friday weekly
+      // already computed on the scan side. Pull both from state so the
+      // URL carries unambiguous dates E14 can drop straight into its
+      // scenario form.
+      const entryDate = _E2CommandDeckState.as_of_date || (wc.as_of_date || "");
+      const expiry = _E2CommandDeckState.expiry_date ||
+        ((_E2CommandDeckState.lastPayload || {}).expectedMove || {}).expiry || "";
+      if (!entryDate || !expiry) {
+        alert("E14 handoff needs entry + expiry dates from the scan. Click Run first, then try again.");
+        return;
+      }
+      const qs = new URLSearchParams({
+        src:        "e2",
+        entry_date: String(entryDate).slice(0, 10),
+        expiry:     String(expiry).slice(0, 10),
+        short_put:  String(p.short_put_strike || ""),
+        long_put:   String(p.long_put_strike || ""),
+        short_call: String(p.short_call_strike || ""),
+        long_call:  String(p.long_call_strike || ""),
+        credit:     String(((p.credit_dollars || 0) / 100.0).toFixed(2)),
+        em_mult:    String(p.em_mult || ""),
+        wing_pts:   String(p.wing_pts || ""),
+        rank:       String(idx),
+        composite:  String(p.composite_score || ""),
+      });
+      window.open(`/ic-scenario?${qs.toString()}`, "_blank", "noopener,noreferrer");
+    });
+  }
+
   // v2: Wire "Use Selected Placement" -> Adjust & Log modal.
   const buildBtn = document.getElementById("e2BuildTradeBtn");
   if (buildBtn) {

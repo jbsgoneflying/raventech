@@ -71,6 +71,22 @@
     return d.toISOString().slice(0, 10);
   }
 
+  function businessDaysBetween(isoStart, isoEnd) {
+    try {
+      var a = new Date(isoStart + "T00:00:00");
+      var b = new Date(isoEnd + "T00:00:00");
+      if (b <= a) return 0;
+      var n = 0;
+      var d = new Date(a);
+      while (d < b) {
+        d.setDate(d.getDate() + 1);
+        var day = d.getDay();
+        if (day !== 0 && day !== 6) n++;
+      }
+      return n;
+    } catch (e) { return 0; }
+  }
+
   function setSourceChip(source) {
     var chip = $("e14EventSourceChip");
     if (!chip) return;
@@ -99,14 +115,42 @@
     if (!host) return;
     host.innerHTML = '<div class="e14ConsoleWarnings">Scoring wing placements…</div>';
 
+    // v2: Prefer the visible Scan Window inputs at the top of the page
+    // so the desk can see + override the dates at a glance. Fall back to
+    // the legacy manual form, then today+4biz days.
+    var scanEntryEl  = $("e14ScanEntryDate");
+    var scanExpiryEl = $("e14ScanExpiryDate");
     var entryEl  = $("entryDate");
     var expiryEl = $("expiry");
-    var entryDate = (entryEl && entryEl.value) || todayIso();
-    var expiryDate = (expiryEl && expiryEl.value) || addBusinessDays(entryDate, 4);
+    var entryDate = (scanEntryEl && scanEntryEl.value) ||
+                    (entryEl && entryEl.value) ||
+                    todayIso();
+    var expiryDate = (scanExpiryEl && scanExpiryEl.value) ||
+                     (expiryEl && expiryEl.value) ||
+                     addBusinessDays(entryDate, 4);
+
+    // Mirror back into both input surfaces so the manual form and the
+    // top scan row stay in sync regardless of which one the desk
+    // edited.
+    if (scanEntryEl && !scanEntryEl.value) scanEntryEl.value = entryDate;
+    if (scanExpiryEl && !scanExpiryEl.value) scanExpiryEl.value = expiryDate;
+    if (entryEl && !entryEl.value) entryEl.value = entryDate;
+    if (expiryEl && !expiryEl.value) expiryEl.value = expiryDate;
 
     State.entryDate  = entryDate;
     State.expiryDate = expiryDate;
     State.asOfDate   = todayIso();
+
+    // Update the prominent "Scan Window" subtitle so the desk always
+    // knows what window the Wing Console is scoring.
+    var lbl = $("e14ScanWindowLabel");
+    if (lbl) {
+      lbl.textContent =
+        "Scoring placements for entry " + entryDate +
+        " -> expiry " + expiryDate +
+        " (" + businessDaysBetween(entryDate, expiryDate) + " business days). " +
+        "Edit the dates to re-rank.";
+    }
 
     setSourceChip("desk_default");
 
@@ -693,20 +737,142 @@
   // ---------------------------------------------------------------
 
   function boot() {
-    // Initial render.
+    // v2: Honor URL-param handoff from upstream engines. The
+    // /ic-scenario page can be opened from E2's "Simulate in E14"
+    // button carrying entry_date, expiry, and a specific 4-strike
+    // structure (plus optional credit). When those params are
+    // present we pre-fill the manual scenario form + skip the
+    // Wing Console auto-run, then trigger Run Scenario so the
+    // desk lands directly on the replay drilldown.
+    var handoff = parseHandoffQuery();
+    if (handoff && handoff.valid) {
+      applyHandoffToForm(handoff);
+      showHandoffBanner(handoff);
+      // Auto-open the manual scenario details so the desk sees the
+      // pre-filled strikes + dates, then trigger submit.
+      expandManualForm();
+      triggerIcFormSubmit();
+      loadActiveTrades();
+      return;
+    }
+
+    // Default path: auto-run the Wing Console with today's date + 4
+    // business-day expiry, surface that window prominently, and let the
+    // desk override via the visible Scan Window inputs above the console.
     fetchAndPaintWingConsole();
     loadActiveTrades();
 
-    // Re-run when entry / expiry change (desk tweaks the window).
+    // Two input surfaces stay in sync (top Scan Window + legacy manual
+    // form). Editing either one mirrors to the other, then re-runs the
+    // Wing Console debounced 400ms.
     var debounceTimer = null;
     function schedule() {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(fetchAndPaintWingConsole, 400);
     }
-    ["entryDate", "expiry"].forEach(function (id) {
-      var el = $(id);
-      if (el) el.addEventListener("change", schedule);
+    function mirror(fromId, toId) {
+      var from = $(fromId);
+      var to = $(toId);
+      if (!from || !to) return;
+      from.addEventListener("change", function () {
+        if (from.value) to.value = from.value;
+        schedule();
+      });
+    }
+    mirror("e14ScanEntryDate", "entryDate");
+    mirror("e14ScanExpiryDate", "expiry");
+    mirror("entryDate", "e14ScanEntryDate");
+    mirror("expiry", "e14ScanExpiryDate");
+
+    var runBtn = $("e14ScanRunBtn");
+    if (runBtn) runBtn.addEventListener("click", function () {
+      fetchAndPaintWingConsole();
     });
+  }
+
+  // ---------------------------------------------------------------
+  // URL handoff (E2 -> E14 "Simulate in E14" button, etc.)
+  // ---------------------------------------------------------------
+
+  function parseHandoffQuery() {
+    try {
+      var q = new URLSearchParams(window.location.search);
+      var entry = (q.get("entry_date") || q.get("entryDate") || "").trim();
+      var exp   = (q.get("expiry") || q.get("expiryDate") || "").trim();
+      var sp    = parseFloat(q.get("short_put") || q.get("shortPut") || "");
+      var lp    = parseFloat(q.get("long_put")  || q.get("longPut")  || "");
+      var sc    = parseFloat(q.get("short_call") || q.get("shortCall") || "");
+      var lc    = parseFloat(q.get("long_call")  || q.get("longCall")  || "");
+      var credit = parseFloat(q.get("credit") || q.get("creditReceived") || "");
+      var src   = (q.get("src") || "").toLowerCase();
+      var rank  = q.get("rank");
+      var composite = q.get("composite");
+      var valid = Boolean(
+        entry && exp &&
+        Number.isFinite(sp) && Number.isFinite(lp) &&
+        Number.isFinite(sc) && Number.isFinite(lc) &&
+        lp < sp && sp < sc && sc < lc
+      );
+      return {
+        valid:      valid,
+        entryDate:  entry,
+        expiry:     exp,
+        shortPut:   sp,
+        longPut:    lp,
+        shortCall:  sc,
+        longCall:   lc,
+        credit:     Number.isFinite(credit) ? credit : 0,
+        src:        src,
+        rank:       rank,
+        composite:  composite,
+      };
+    } catch (e) {
+      return { valid: false };
+    }
+  }
+
+  function applyHandoffToForm(h) {
+    var assign = function (id, v) {
+      var el = $(id);
+      if (el && v != null && v !== "") el.value = v;
+    };
+    assign("entryDate", h.entryDate);
+    assign("expiry",    h.expiry);
+    assign("longPut",   h.longPut);
+    assign("shortPut",  h.shortPut);
+    assign("shortCall", h.shortCall);
+    assign("longCall",  h.longCall);
+    if (h.credit > 0) assign("creditReceived", h.credit.toFixed(2));
+  }
+
+  function showHandoffBanner(h) {
+    var banner = $("banner");
+    if (!banner) return;
+    var rankLabel = h.rank != null ? (" rank " + (parseInt(h.rank, 10) + 1)) : "";
+    var srcLabel = h.src === "e2" ? "E2 SPX IC Command Deck" : "upstream engine";
+    banner.textContent =
+      "Scenario from " + srcLabel + rankLabel + " handoff: entry " +
+      h.entryDate + ", expiry " + h.expiry + ", strikes " +
+      h.longPut + "/" + h.shortPut + " put  " +
+      h.shortCall + "/" + h.longCall + " call" +
+      (h.credit > 0 ? (" @ $" + h.credit.toFixed(2)) : "") +
+      (h.composite ? (" · composite " + Number(h.composite).toFixed(1)) : "");
+    banner.style.display = "";
+    banner.classList.remove("error");
+  }
+
+  function expandManualForm() {
+    var details = $("e14ManualScenarioDetails");
+    if (details) details.open = true;
+  }
+
+  function triggerIcFormSubmit() {
+    var form = $("icForm");
+    if (!form) return;
+    // Let ic-scenario.js's submit handler take over; that path
+    // already runs the scenario + renders the drilldown.
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   }
 
   // -------------------------------------------------------------

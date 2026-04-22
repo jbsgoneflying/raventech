@@ -90,15 +90,15 @@
 
 .e14ConsoleSubtitle {
   font-size: 12px;
-  color: var(--muted, #9aa0a6);
+  color: #c9cfd6;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
 .e14ConsoleSubtitle strong {
-  color: var(--text-primary, #e6e6e6);
-  font-weight: 600;
+  color: #f5f5f7;
+  font-weight: 700;
 }
 
 .e14PlacementTable {
@@ -112,18 +112,20 @@
 .e14PlacementTable thead th {
   text-align: left;
   padding: 8px 10px;
-  color: var(--muted, #9aa0a6);
+  color: #c9cfd6;
   text-transform: uppercase;
   font-size: 10px;
   letter-spacing: 0.5px;
-  font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-weight: 700;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .e14PlacementTable tbody td {
   padding: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  color: var(--text-primary, #e6e6e6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  /* v2 contrast bump — same reasoning as engine2-v2.css: pin row text
+     to near-white so data rows are not read as "disabled / greyed". */
+  color: #f5f5f7;
   font-variant-numeric: tabular-nums;
 }
 
@@ -132,13 +134,13 @@
   transition: background-color 120ms ease;
 }
 
-.e14PlacementRow:hover { background: rgba(255, 255, 255, 0.03); }
+.e14PlacementRow:hover { background: rgba(255, 255, 255, 0.06); }
 .e14PlacementRow--selected {
-  background: rgba(125, 182, 255, 0.08);
-  outline: 1px solid rgba(125, 182, 255, 0.35);
+  background: rgba(125, 182, 255, 0.16);
+  outline: 1px solid rgba(125, 182, 255, 0.55);
   outline-offset: -1px;
 }
-.e14PlacementRow--top { background: rgba(60, 212, 169, 0.05); }
+.e14PlacementRow--top { background: rgba(60, 212, 169, 0.10); }
 
 .e14RankCell { font-weight: 700; text-align: center; width: 32px; }
 .e14StarTop { color: #ffd24a; margin-left: 4px; }
@@ -161,16 +163,16 @@
 
 .e14TunerField { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
 .e14TunerField label {
-  color: var(--muted, #9aa0a6);
+  color: #c9cfd6;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .e14TunerField input[type="range"] { width: 100%; }
 .e14TunerValue {
   font-weight: 700;
-  color: var(--text-primary, #e6e6e6);
+  color: #f5f5f7;
   font-variant-numeric: tabular-nums;
 }
 
@@ -205,9 +207,9 @@
   border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: var(--surface-2, #1a1d24);
-  color: var(--text-primary, #e6e6e6);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #1a1d24;
+  color: #f5f5f7;
   cursor: pointer;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
@@ -245,14 +247,14 @@
   border: 1px solid rgba(60, 212, 169, 0.25);
   font-size: 12px;
   margin-bottom: 12px;
-  color: #e6e6e6;
+  color: #f5f5f7;
 }
 
 .e14AdvisorNarrative {
   padding-top: 12px;
   border-top: 1px dashed rgba(255, 255, 255, 0.08);
   font-size: 13px;
-  color: var(--text-primary, #e6e6e6);
+  color: #f5f5f7;
   line-height: 1.5;
 }
 
@@ -260,7 +262,7 @@
   display: inline-flex;
   gap: 6px;
   font-size: 11px;
-  color: var(--muted, #9aa0a6);
+  color: #c9cfd6;
 }
 
 .e14RegimeMiV2 .e14RegimeMiV2Bar {
