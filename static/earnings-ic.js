@@ -345,33 +345,84 @@
     const current = e1.current || {};
     const em = e1.expectedMove || {};
 
-    const earnDate = s.nextEventDate || next.earnDate || next.earnDateNext || next.date || '';
-    const timing = String(s.anncTod || next.timing || next.timingPlanned || next.anncTod || 'BMO').toUpperCase();
+    // v2: The form is the authority. E1's `nextEvent` is a *suggestion*
+    // used only to seed blank fields. The two desk-reported bugs that
+    // motivated this rewrite were:
+    //   (a) Clobbering manual date edits every time the desk clicked
+    //       Calculate (the old code unconditionally wrote to all date
+    //       inputs, so any fix got reset).
+    //   (b) Accepting E1's pricingExpiry even when it fell *before* the
+    //       computed entry date (stale / crossed-wire E1 payloads).
+    //
+    // Rules:
+    //   - Never overwrite a value the desk (or the deep-link URL) has
+    //     already set.
+    //   - When the form is blank, seed from E1.
+    //   - Derived expiry must be >= entry + 1 biz day — if E1's
+    //     suggestion fails that check, fall back to a 4-biz-day shift
+    //     from the earnings date.
+    const fmt = (v) => (v == null ? '' : String(v)).slice(0, 10);
+    const getVal = (id) => String($(id).value || '').trim();
+    const setIfBlank = (id, v) => {
+      if (!v) return;
+      if (!getVal(id)) $(id).value = v;
+    };
+
+    const formEarn = getVal('earningsDate');
+    const formTiming = String(getVal('earningsTiming') || '').toUpperCase();
+    const e1Earn = fmt(s.nextEventDate || next.earnDate || next.earnDateNext || next.date || '');
+    const e1Timing = String(s.anncTod || next.timing || next.timingPlanned || next.anncTod || 'BMO').toUpperCase();
+    const earnDate = formEarn || e1Earn;
+    const timing = (['BMO', 'AMC', 'UNK'].includes(formTiming))
+      ? formTiming
+      : (['BMO', 'AMC', 'UNK'].includes(e1Timing) ? e1Timing : 'BMO');
+
+    setIfBlank('earningsDate', e1Earn);
+    setIfBlank('earningsTiming', timing);
+
+    if (earnDate) {
+      const entry = timing === 'AMC' ? earnDate : shiftBizDays(earnDate, -1);
+      const plannedExit = timing === 'AMC' ? shiftBizDays(earnDate, 1) : earnDate;
+      setIfBlank('entryDate', entry);
+      setIfBlank('plannedExitDate', plannedExit);
+
+      // Expiry: prefer E1's straddle/pricing expiry IFF it's strictly
+      // after the entry date; else fall back to a 4-biz-day shift from
+      // the earnings date. Guarantees the backend's entry<expiry check
+      // passes for the auto-prefill path.
+      const currentExpiry = getVal('expiry');
+      if (!currentExpiry) {
+        const pricingExpiry = fmt(
+          s.nextEventPricingExpiry || s.straddleExpiry ||
+          next.pricingExpiry || em.expiry || ''
+        );
+        let expVal = pricingExpiry || shiftBizDays(earnDate, 4);
+        // If the E1-suggested expiry is <= entry (stale / crossed-wire
+        // E1 payload), replace with a safe default.
+        if (expVal && expVal <= entry) {
+          expVal = shiftBizDays(entry, 4);
+        }
+        $('expiry').value = expVal;
+      }
+    } else {
+      const pricingExpiry = fmt(
+        s.nextEventPricingExpiry || s.straddleExpiry ||
+        next.pricingExpiry || em.expiry || ''
+      );
+      setIfBlank('expiry', pricingExpiry);
+    }
+
+    // Strike + credit prefill — only seed blanks so the deep-link
+    // handoff (wc_key+rank) and manual adjustments survive a
+    // Calculate re-click. The backend's hydrate_from_wing_console
+    // will override these from the cached Wing Console placement
+    // when wc_key is present.
     const stock = (s.stockPrice != null ? s.stockPrice
       : (s.straddleSpotPrice != null ? s.straddleSpotPrice : current.stockPrice));
-    // Prefer delayed ORATS EM (strike-target basis on E1) then live ORATS,
-    // then straddle EM, so pre-market prefill always lands on a real number.
     const emPct = s.delayedEmPct != null ? s.delayedEmPct
       : s.oratsEmPct != null ? s.oratsEmPct
       : s.straddleEmPct != null ? s.straddleEmPct
       : (current.delayedImpliedMovePct || current.impliedMovePct || em.expectedMovePct || null);
-    // Prefer the upcoming Friday expiry E1 already computed.
-    const pricingExpiry = s.nextEventPricingExpiry || s.straddleExpiry || next.pricingExpiry || em.expiry || '';
-
-    $('earningsDate').value = earnDate;
-    $('earningsTiming').value = ['BMO', 'AMC', 'UNK'].includes(timing) ? timing : 'BMO';
-
-    if (earnDate) {
-      const entry = timing === 'AMC' ? earnDate : shiftBizDays(earnDate, -1);
-      const exit = timing === 'AMC' ? shiftBizDays(earnDate, 1) : earnDate;
-      $('entryDate').value = entry;
-      $('plannedExitDate').value = exit;
-      // Prefer E1's computed straddle expiry over a heuristic shift.
-      $('expiry').value = pricingExpiry ? String(pricingExpiry).slice(0, 10) : shiftBizDays(earnDate, 4);
-    } else if (pricingExpiry) {
-      // No earnings date — still anchor the expiry field so the form isn't empty.
-      $('expiry').value = String(pricingExpiry).slice(0, 10);
-    }
 
     const stockNum = stock != null ? Number(stock) : null;
     const emNum = emPct != null ? Number(emPct) : null;
@@ -383,12 +434,12 @@
       const longPut = snap(shortPut - Math.max(tickStep * 2, 2));
       const shortCall = snap(stockNum + 1.5 * emDollars);
       const longCall = snap(shortCall + Math.max(tickStep * 2, 2));
-      $('shortPut').value = shortPut;
-      $('longPut').value = longPut;
-      $('shortCall').value = shortCall;
-      $('longCall').value = longCall;
+      setIfBlank('shortPut', shortPut);
+      setIfBlank('longPut', longPut);
+      setIfBlank('shortCall', shortCall);
+      setIfBlank('longCall', longCall);
       const wing = Math.max(shortPut - longPut, longCall - shortCall, tickStep);
-      $('creditReceived').value = (wing * 0.2).toFixed(2);
+      setIfBlank('creditReceived', (wing * 0.2).toFixed(2));
     }
   }
 
@@ -443,6 +494,26 @@
     if (!(body.longPut < body.shortPut && body.shortPut < body.shortCall
           && body.shortCall < body.longCall)) {
       banner('Strikes must satisfy: longPut < shortPut < shortCall < longCall', 'error');
+      return null;
+    }
+    // v2: match the backend's expiry-after-entry rule client-side so the
+    // desk sees a clean actionable error instead of a generic 400 from
+    // /api/earnings-ic/scenario (which previously surfaced as the
+    // "Command Deck failed: expiry must be after entryDate" banner).
+    if (body.entryDate && body.expiry && body.expiry <= body.entryDate) {
+      banner(
+        'Expiry (' + body.expiry + ') must be AFTER Entry Date (' + body.entryDate + '). ' +
+        'Open the Advanced panel and fix the dates, then click Calculate again.',
+        'error'
+      );
+      return null;
+    }
+    if (body.plannedExitDate && body.entryDate && body.plannedExitDate < body.entryDate) {
+      banner(
+        'Planned Exit Date (' + body.plannedExitDate + ') is before Entry Date (' + body.entryDate + '). ' +
+        'Open the Advanced panel and fix the dates.',
+        'error'
+      );
       return null;
     }
     return body;
