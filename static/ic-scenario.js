@@ -803,6 +803,13 @@
           checkLiveChain: true,
         }),
       });
+      // Match the robustness pattern from runScenario: tolerate HTML
+      // gateway-timeout pages instead of letting resp.json() explode.
+      var ct = (resp.headers.get("content-type") || "");
+      if (!resp.ok || ct.indexOf("application/json") === -1) {
+        if (window.console) console.warn("[E14] reconcile non-JSON or !ok:", resp.status, ct);
+        return;
+      }
       var data = await resp.json();
       if (data && data.reconcile) {
         lastReconcile = data.reconcile;
@@ -860,9 +867,28 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      var data = await resp.json();
-      if (!resp.ok) {
-        var msg = data && data.detail ? data.detail : ("HTTP " + resp.status);
+      // Gateway timeouts (504) and Cloudflare origin timeouts (524) on a
+      // cold path come back as HTML error pages, not JSON. Read as text
+      // first so resp.json() can't throw mid-flow, then branch on status
+      // and content-type for a desk-readable message instead of
+      // "Unexpected token '<'…".
+      var raw = await resp.text();
+      var data = null;
+      var looksLikeJson = (resp.headers.get("content-type") || "").indexOf("application/json") !== -1;
+      if (looksLikeJson) {
+        try { data = JSON.parse(raw); } catch (_) { data = null; }
+      }
+      if (!resp.ok || data === null) {
+        var msg;
+        if (data && data.detail) {
+          msg = data.detail;
+        } else if (resp.status === 504 || resp.status === 524 || resp.status === 522) {
+          msg = "Server took too long to respond (cold cache). Give it a few seconds and retry — the next call will be fast.";
+        } else if (!looksLikeJson) {
+          msg = "Gateway returned an HTML error page (HTTP " + resp.status + "). The engine is likely warming up; retry in a few seconds.";
+        } else {
+          msg = "HTTP " + resp.status;
+        }
         setStatus("Failed: " + msg, "error");
         showBanner(msg, "red");
         return;
