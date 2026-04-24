@@ -4,23 +4,27 @@
 (function () {
   "use strict";
 
+  // E14 (ic-scenario) is the SPX IC scenario-replay sibling of E2's
+  // scanner; E15 (earnings-ic) is the earnings IC scenario-replay
+  // sibling of E1's breach engine. Rendered inset below their parent
+  // so the desk reads them as paired tools, not standalone engines.
   var NAV_ITEMS = [
     { href: "/",                label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
-    { href: "/breach",          label: "Engine 1",        desc: "Earnings hold risk with Monte Carlo" },
-    { href: "/spx",             label: "Engine 2",        desc: "SPX/SPY iron condor scanner" },
-    { href: "/lead-lag",        label: "Engine 3",        desc: "Global lead-lag regime intelligence" },
-    { href: "/red-dog",         label: "Engine 4",        desc: "Mean-reversion scanner (SP500 + NDX)" },
-    { href: "/ichimoku",        label: "Engine 5",        desc: "Trend-continuation scanner" },
-    { href: "/pairs",           label: "Engine 6",        desc: "Thematic relative value pairs scanner" },
-    { href: "/post-event",      label: "Engine 7",        desc: "Post-event trade extension evaluator" },
-    { href: "/credit-stress",   label: "Engine 8",        desc: "Credit stress drift detection" },
-    { href: "/calendar",        label: "Engine 9",        desc: "Mega-cap earnings dates and compare workflow" },
-    { href: "/compare",         label: "Engine 10",       desc: "Multi-ticker side-by-side" },
-    { href: "/news-risk",       label: "Engine 11",       desc: "Macro events and headline risk" },
-    { href: "/vix-fade",        label: "Engine 12",       desc: "VIX spike fade — vol dislocation engine" },
-    { href: "/gap-regime",      label: "Engine 13",       desc: "Gap regime scanner — post-gap SPX analysis" },
-    { href: "/ic-scenario",     label: "Engine 14",       desc: "IC scenario simulator — path-dependent outcome replay" },
-    { href: "/earnings-ic",     label: "Engine 15",       desc: "Earnings IC scenario — single-name planned-exit replay" },
+    { href: "/breach",          label: "Engine 1",  desc: "Earnings hold risk with Monte Carlo" },
+    { href: "/earnings-ic",     label: "Engine 1b", desc: "Earnings IC scenario replay",        sub: true },
+    { href: "/spx",             label: "Engine 2",  desc: "SPX/SPY iron condor scanner" },
+    { href: "/ic-scenario",     label: "Engine 2b", desc: "SPX/SPY IC scenario replay",         sub: true },
+    { href: "/lead-lag",        label: "Engine 3",  desc: "Global lead-lag regime intelligence" },
+    { href: "/red-dog",         label: "Engine 4",  desc: "Mean-reversion scanner (SP500 + NDX)" },
+    { href: "/ichimoku",        label: "Engine 5",  desc: "Trend-continuation scanner" },
+    { href: "/pairs",           label: "Engine 6",  desc: "Thematic relative value pairs scanner" },
+    { href: "/post-event",      label: "Engine 7",  desc: "Post-event trade extension evaluator" },
+    { href: "/credit-stress",   label: "Engine 8",  desc: "Credit stress drift detection" },
+    { href: "/calendar",        label: "Engine 9",  desc: "Mega-cap earnings dates and compare workflow" },
+    { href: "/compare",         label: "Engine 10", desc: "Multi-ticker side-by-side" },
+    { href: "/news-risk",       label: "Engine 11", desc: "Macro events and headline risk" },
+    { href: "/vix-fade",        label: "Engine 12", desc: "VIX spike fade — vol dislocation engine" },
+    { href: "/gap-regime",      label: "Engine 13", desc: "Gap regime scanner — post-gap SPX analysis" },
   ];
 
   /* Which nav item matches the current URL? */
@@ -30,8 +34,33 @@
     return p === href || p.startsWith(href + "/");
   }
 
+  /* Inject sub-engine styling once (keeps this change self-contained
+     in nav.js so styles.css doesn't need a cache-buster bump across
+     every page that loads the nav). */
+  function injectSubStyles() {
+    if (document.getElementById("navDrawerSubStyles")) return;
+    var s = document.createElement("style");
+    s.id = "navDrawerSubStyles";
+    s.textContent =
+      ".navDrawerLink--sub{" +
+        "margin-left:18px;padding-left:16px;" +
+        "border-left:2px solid rgba(52,199,89,0.22);" +
+        "border-top-left-radius:0;border-bottom-left-radius:0;" +
+      "}" +
+      ".navDrawerLink--sub .navDrawerLinkLabel{" +
+        "font-size:13px;font-weight:600;color:rgba(11,11,15,0.78);" +
+      "}" +
+      ".navDrawerLink--sub .navDrawerLinkDesc{font-size:10.5px;}" +
+      ".navDrawerLink--sub.navDrawerLink--active{" +
+        "border-left-color:rgba(52,199,89,0.55);" +
+      "}";
+    document.head.appendChild(s);
+  }
+
   /* Build the drawer once DOM is ready */
   function init() {
+    injectSubStyles();
+
     /* ── Hamburger button (injected into .appHeader) ── */
     var header = document.querySelector(".appHeader");
     if (!header) return;
@@ -71,7 +100,10 @@
     NAV_ITEMS.forEach(function (item) {
       var a = document.createElement("a");
       a.href = item.href;
-      a.className = "navDrawerLink" + (isActive(item.href) ? " navDrawerLink--active" : "");
+      var cls = "navDrawerLink";
+      if (item.sub) cls += " navDrawerLink--sub";
+      if (isActive(item.href)) cls += " navDrawerLink--active";
+      a.className = cls;
       a.innerHTML =
         '<span class="navDrawerLinkLabel">' + item.label + '</span>' +
         '<span class="navDrawerLinkDesc">' + item.desc + '</span>';
