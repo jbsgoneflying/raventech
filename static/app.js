@@ -3990,7 +3990,20 @@ function _showE1AdjustModalFromPlacement(payload, placement) {
       var result = await resp.json();
       overlay.remove();
       alert("Trade logged as open: " + ticker + " · " + emVal + "× EM · $" + wingVal + " wings\nTrade ID: " + result.tradeId);
-      if (typeof _loadE1ActiveTrades === "function") _loadE1ActiveTrades();
+      if (typeof _loadE1ActiveTrades === "function") {
+        // Reload, then scroll the newly-rendered trade into view. The
+        // Active Trades section lives above the Wing Console, so without
+        // an explicit scroll the desk stays parked at the console and
+        // thinks the trade vanished. Prefer the inline area (advisor
+        // ran) and fall back to the standalone section.
+        await _loadE1ActiveTrades();
+        var target = document.getElementById("e1ActiveTradesArea")
+                  || document.getElementById("e1ActiveTrades");
+        if (target) {
+          try { target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+          catch (_e) { target.scrollIntoView(); }
+        }
+      }
       if (typeof _loadE1TradeJournal === "function") _loadE1TradeJournal();
     } catch (e) {
       alert("Failed to log trade: " + e.message);
@@ -4031,6 +4044,7 @@ async function _loadE1ActiveTrades() {
     if (!trades.length) {
       if (sec) sec.classList.add("hidden");
       if (areaInAdvisor) areaInAdvisor.innerHTML = "";
+      if (el) el.innerHTML = "";
       return;
     }
 
@@ -4080,10 +4094,19 @@ async function _loadE1ActiveTrades() {
     }
     html += '</div>';
 
-    // Render in the inline area (inside advisor section)
-    if (areaInAdvisor) areaInAdvisor.innerHTML = html;
-    // Also update the standalone section
-    if (sec && el) { sec.classList.add("hidden"); }
+    // Render in BOTH the inline area (when the advisor panel is on
+    // screen) and the standalone section (the only target when the
+    // desk logs straight from the Wing Decision Console without
+    // running the advisor first — that was the bug: active trades
+    // silently loaded into a non-existent #e1ActiveTradesArea and
+    // the fallback section got hidden, so a logged trade vanished).
+    if (areaInAdvisor) {
+      areaInAdvisor.innerHTML = html;
+      if (sec) sec.classList.add("hidden");
+    } else if (sec && el) {
+      el.innerHTML = html;
+      sec.classList.remove("hidden");
+    }
 
     // Wire close buttons
     _wireE1CloseButtons();

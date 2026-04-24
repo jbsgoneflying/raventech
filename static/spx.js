@@ -2355,7 +2355,18 @@ function _showE2AdjustModal(deck, placement) {
       const result = await resp.json();
       overlay.remove();
       alert("Trade logged as open: " + underlying + " · " + emVal + "× EM · " + wpVal + "pt wings\nTrade ID: " + (result.tradeId || result.trade_id || "ok"));
-      if (typeof _loadActiveTrades === "function") _loadActiveTrades();
+      if (typeof _loadActiveTrades === "function") {
+        // Reload, then scroll the Active Trades section into view.
+        // The section lives above the Wing Console, so without an
+        // explicit scroll the desk sits parked at the console and
+        // thinks the trade vanished.
+        await _loadActiveTrades();
+        const target = document.getElementById("e2ActiveTrades");
+        if (target) {
+          try { target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+          catch (_e) { target.scrollIntoView(); }
+        }
+      }
     } catch (e) {
       alert("Failed to log trade: " + e.message);
     }
