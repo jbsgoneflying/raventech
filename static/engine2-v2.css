@@ -75,6 +75,13 @@
   background: var(--surface-1, #121418);
   border: 1px solid rgba(255, 255, 255, 0.06);
   margin-bottom: 14px;
+  /* Pin a light base color so descendants without an explicit color
+     (e.g. .e2ConsoleTitle, .e2TunerScoreBox label text) stay legible.
+     The console background is forced dark in both light and dark page
+     themes, so inherited body --text would render invisible in light
+     mode. Explicit overrides (muted chips, green score, etc.) below
+     still win via specificity. */
+  color: #f5f5f7;
 }
 
 .e2ConsoleHeader {
