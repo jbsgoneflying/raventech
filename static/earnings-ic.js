@@ -604,21 +604,12 @@
     );
   }
 
-  function renderWingConsoleMini(d) {
-    const divider = $('wingConsoleMiniDivider');
-    const panel = $('wingConsoleMiniPanel');
-    if (!panel || !divider) return;
-    const wc = d && d.wingConsoleMini;
-    if (!wc || !Array.isArray(wc.placements) || wc.placements.length === 0) {
-      divider.style.display = 'none';
-      panel.style.display = 'none';
-      panel.innerHTML = '';
-      return;
-    }
-    divider.style.display = '';
-    panel.style.display = 'grid';
+  // Paint the top-3 placements into the mini panel. Shared by the
+  // "scenario payload already had it" path and the cold-cache auto-warm
+  // fallback that hits /api/breach/wing-console directly.
+  function _paintWingConsoleMiniRows(panel, placements) {
     panel.innerHTML = '';
-    wc.placements.forEach(function (p, i) {
+    placements.slice(0, 3).forEach(function (p, i) {
       const row = el('div', 'e15WingMini' + (i === 0 ? ' e15WingMini--top' : ''));
       row.innerHTML = (
         `<div class="e15WingMiniRank">#${i + 1}${i === 0 ? ' ★' : ''}</div>` +
@@ -641,6 +632,94 @@
         doCalculate();
       });
     });
+  }
+
+  // Auto-warm fallback: the scenario payload came back with
+  // `wingConsoleMini: null`, which means E1's in-memory scoring-context
+  // cache was cold for this ticker/event (10-min TTL, wiped on every
+  // backend restart — so it's effectively "cold most of the time").
+  // Rather than silently hiding the panel (which makes E15 look broken
+  // to the desk right after a deploy), fire a /api/breach/wing-console
+  // POST to warm the context and paint the top-3 placements when it
+  // returns. This keeps E15 self-contained: no need to first visit
+  // /breach for the same ticker.
+  async function _warmWingConsoleMini(panel, ticker, eventDate, eventTiming) {
+    panel.innerHTML = (
+      `<div class="e15WingMiniWarming" style="` +
+        `grid-column:1/-1;padding:10px 14px;` +
+        `color:var(--muted);font-size:12px;line-height:1.5;">` +
+        `Warming Wing Console context for ${ticker}… ` +
+        `(first run on a ticker can take 20–60s; ` +
+        `subsequent runs are instant while cache is hot)` +
+      `</div>`
+    );
+    try {
+      const data = await postJson('/api/breach/wing-console', {
+        ticker: ticker,
+        event_date: eventDate,
+        event_timing: eventTiming,
+        n: 20,
+        years: 5,
+      });
+      const placements = (data && Array.isArray(data.placements))
+        ? data.placements : [];
+      if (!placements.length) {
+        panel.innerHTML = (
+          `<div style="grid-column:1/-1;padding:10px 14px;` +
+            `color:var(--muted);font-size:12px;">` +
+            `Wing Console has no placements for ${ticker} ` +
+            `(event pool too thin or cache miss).` +
+          `</div>`
+        );
+        return;
+      }
+      _paintWingConsoleMiniRows(panel, placements);
+    } catch (err) {
+      panel.innerHTML = (
+        `<div style="grid-column:1/-1;padding:10px 14px;` +
+          `color:#b91c1c;font-size:12px;line-height:1.5;">` +
+          `Wing Console warm-up failed: ${err && err.message ? err.message : err}. ` +
+          `Try opening E1 (/breach) for ${ticker} once, then re-run here.` +
+        `</div>`
+      );
+    }
+  }
+
+  function renderWingConsoleMini(d) {
+    const divider = $('wingConsoleMiniDivider');
+    const panel = $('wingConsoleMiniPanel');
+    if (!panel || !divider) return;
+    const wc = d && d.wingConsoleMini;
+    const hasPlacements =
+      wc && Array.isArray(wc.placements) && wc.placements.length > 0;
+
+    if (hasPlacements) {
+      divider.style.display = '';
+      panel.style.display = 'grid';
+      _paintWingConsoleMiniRows(panel, wc.placements);
+      return;
+    }
+
+    // Cold-cache fallback: scenario payload didn't carry a mini. Kick
+    // off a warm-up fetch using the scenario's ticker / earnings context
+    // so the desk doesn't see an empty gap where the Wing Console used
+    // to be. We only attempt this when we actually have the inputs to
+    // address the E1 endpoint; otherwise fall back to the silent-hide.
+    const req = (d && d.request) || {};
+    const ticker = String(req.ticker || ($('ticker') && $('ticker').value) || '').trim().toUpperCase();
+    const eventDate = String(req.earningsDate || req.earnings_date || ($('earningsDate') && $('earningsDate').value) || '').trim();
+    const eventTiming = String(req.earningsTiming || req.earnings_timing || ($('earningsTiming') && $('earningsTiming').value) || '').trim().toUpperCase();
+
+    if (!ticker || !eventDate || !['AMC', 'BMO'].includes(eventTiming)) {
+      divider.style.display = 'none';
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+      return;
+    }
+
+    divider.style.display = '';
+    panel.style.display = 'grid';
+    _warmWingConsoleMini(panel, ticker, eventDate, eventTiming);
   }
 
   function renderCrossCheck(d) {

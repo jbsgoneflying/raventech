@@ -242,7 +242,15 @@
         font-size: 12px; color: var(--text); margin-top: 10px; line-height: 1.5;
       }
 
-      /* ----- MTM chart panel -------------------------------- */
+      /* ----- MTM chart panel --------------------------------
+         The chart uses Chart.js with `maintainAspectRatio: false`,
+         so the <canvas> fills its parent container's height. If that
+         parent has no height constraint, Chart.js lets the canvas
+         grow to whatever document flow gives it — which in a vertical
+         column ends up being hundreds of pixels tall (the commit
+         that wrapped the canvas in .e15ChartPanel regressed this).
+         Pin an explicit canvas-wrap height so the P10/P50/P90 chart
+         reads as a compact timeline instead of a sprawling one. */
       .e15ChartPanel {
         background: var(--surfaceSolid);
         border: 1px solid var(--border);
@@ -250,6 +258,17 @@
         padding: 14px 16px 10px;
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
         margin-bottom: 12px;
+      }
+      .e15ChartCanvasWrap {
+        position: relative;
+        height: 260px;
+        width: 100%;
+      }
+      .e15ChartCanvasWrap > canvas {
+        /* Chart.js will set inline width/height via responsive
+           layout; force CSS to lock to the wrap's box so the
+           canvas can't grow past 260px. */
+        max-height: 260px !important;
       }
       .e15ChartCaption {
         font-size: 11px;
@@ -486,7 +505,9 @@
 
         <div class="deskDivider e15Divider" data-insight="mtm_timeline"><span class="deskDividerText e15DividerText">MTM Timeline (P10 / P50 / P90)</span></div>
         <div class="e15ChartPanel">
-          <canvas id="mtmChart" height="220"></canvas>
+          <div class="e15ChartCanvasWrap">
+            <canvas id="mtmChart"></canvas>
+          </div>
           <div class="e15ChartCaption">Mark-to-market P&amp;L across replayed analogue paths · P10 worst / P50 median / P90 best</div>
         </div>
 
@@ -523,6 +544,6 @@
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js?v=12"></script>
     <script src="/static/desk-insight.js?v=2"></script>
-    <script src="/static/earnings-ic.js?v=8"></script>
+    <script src="/static/earnings-ic.js?v=9"></script>
   </body>
 </html>
