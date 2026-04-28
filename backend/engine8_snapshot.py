@@ -158,7 +158,7 @@ def _call_llm_classify(
                 {"role": "user", "content": input_json},
             ],
             temperature=1,
-            max_completion_tokens=400,
+            max_completion_tokens=2500,
             timeout=15,
             response_format={"type": "json_object"},
         )

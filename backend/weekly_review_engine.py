@@ -201,7 +201,7 @@ def generate_weekly_review(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=1500,
+            max_completion_tokens=4000,
             timeout=60,
             response_format={"type": "json_object"},
         )

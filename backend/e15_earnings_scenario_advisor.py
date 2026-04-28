@@ -356,7 +356,7 @@ def generate_scenario_analysis(
                 {"role": "user", "content": context_str},
             ],
             temperature=1,
-            max_completion_tokens=1400,
+            max_completion_tokens=4000,
             timeout=45,
             response_format={"type": "json_object"},
         )

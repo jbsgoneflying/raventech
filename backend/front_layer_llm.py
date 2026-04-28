@@ -241,7 +241,7 @@ def generate_morning_brief(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=1500,
+            max_completion_tokens=4000,
             timeout=45,
             response_format={"type": "json_object"},
         )
@@ -477,7 +477,7 @@ def generate_asset_insight(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=800,
+            max_completion_tokens=3000,
             timeout=30,
             response_format={"type": "json_object"},
         )
@@ -1378,8 +1378,8 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
 }
 
 _CARD_TOKEN_LIMITS: Dict[str, int] = {
-    "e1_decision": 1200,
-    "e2_expected_move": 1200,
+    "e1_decision": 3000,
+    "e2_expected_move": 3000,
 }
 
 

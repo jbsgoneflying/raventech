@@ -498,7 +498,7 @@ def generate_desk_insight(
                 {"role": "user",   "content": user_str},
             ],
             temperature=1,
-            max_completion_tokens=1200,  # up from 700 — now 9 fields
+            max_completion_tokens=4000,  # gpt-5.5 reasoning needs headroom on top of 9-field output
             timeout=40,
             response_format={"type": "json_object"},
         )

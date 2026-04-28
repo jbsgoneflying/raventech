@@ -471,8 +471,8 @@ def generate_e1_post_mortem(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=800,
-            timeout=30,
+            max_completion_tokens=3000,
+            timeout=45,
             response_format={"type": "json_object"},
         )
 
@@ -692,8 +692,8 @@ def generate_live_review_v2(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=900,
-            timeout=30,
+            max_completion_tokens=3000,
+            timeout=45,
             response_format={"type": "json_object"},
         )
         content = response.choices[0].message.content.strip()

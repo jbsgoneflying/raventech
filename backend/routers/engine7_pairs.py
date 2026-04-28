@@ -289,7 +289,7 @@ def engine7_desk_view(body: dict):
                 {"role": "user", "content": payload},
             ],
             temperature=1,
-            max_completion_tokens=1200,
+            max_completion_tokens=4000,
             timeout=30,
             response_format={"type": "json_object"},
         )

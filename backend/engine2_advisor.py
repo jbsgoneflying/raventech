@@ -550,7 +550,7 @@ def generate_trade_analysis(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=1500,
+            max_completion_tokens=4000,
             timeout=45,
             response_format={"type": "json_object"},
         )
@@ -647,7 +647,7 @@ def generate_checkin_analysis(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=1000,
+            max_completion_tokens=3000,
             timeout=30,
             response_format={"type": "json_object"},
         )
@@ -740,7 +740,7 @@ def generate_post_mortem(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=800,
+            max_completion_tokens=3000,
             timeout=30,
             response_format={"type": "json_object"},
         )

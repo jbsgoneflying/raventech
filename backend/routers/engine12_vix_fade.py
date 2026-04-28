@@ -797,7 +797,7 @@ def engine12_explain(body: dict):
                 {"role": "user", "content": user_msg},
             ],
             temperature=1,
-            max_completion_tokens=1500,
+            max_completion_tokens=4000,
             response_format={"type": "json_object"},
         )
         text = (resp.choices[0].message.content or "").strip()
