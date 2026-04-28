@@ -745,22 +745,39 @@ def run_live_review(
         LOG.warning("e1_live_review: LLM v2 advisor failed: %s", e)
         llm_assessment = None
 
-    verdict = (llm_assessment or {}).get("verdict") or pre_verdict
-    confidence = (llm_assessment or {}).get("confidence")
-    if confidence is None:
+    # Treat a "skipReason" sentinel as a failed LLM (no narrative, no
+    # verdict override) — keeps the rule-based ladder authoritative while
+    # surfacing the reason for the desk via _llmDebug for fast triage.
+    llm_skipped = bool((llm_assessment or {}).get("_skipReason"))
+    if llm_skipped:
+        verdict = pre_verdict
         confidence = pre_conf
+        narrative_obj = {}
+    else:
+        verdict = (llm_assessment or {}).get("verdict") or pre_verdict
+        confidence = (llm_assessment or {}).get("confidence")
+        if confidence is None:
+            confidence = pre_conf
+        narrative_obj = llm_assessment or {}
 
     recommendation = {
         "verdict": str(verdict).upper(),
         "confidence": float(confidence) if confidence is not None else None,
-        "narrative": (llm_assessment or {}).get("narrative"),
-        "keyPoints": (llm_assessment or {}).get("keyPoints") or [],
-        "riskFactors": (llm_assessment or {}).get("riskFactors") or [],
-        "deskNote": (llm_assessment or {}).get("deskNote"),
+        "narrative": narrative_obj.get("narrative"),
+        "keyPoints": narrative_obj.get("keyPoints") or [],
+        "riskFactors": narrative_obj.get("riskFactors") or [],
+        "deskNote": narrative_obj.get("deskNote"),
         "preVerdict": pre_verdict,
         "preConfidence": pre_conf,
         "actionLadder": ladder,
     }
+    if llm_skipped:
+        recommendation["_llmDebug"] = {
+            "skipReason": (llm_assessment or {}).get("_skipReason"),
+            "missing": (llm_assessment or {}).get("_missing"),
+            "rawHead": (llm_assessment or {}).get("_rawHead"),
+            "error": (llm_assessment or {}).get("_error"),
+        }
 
     review = {
         # v1 fields preserved for back-compat

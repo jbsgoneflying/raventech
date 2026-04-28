@@ -613,11 +613,11 @@ def generate_live_review_v2(
     client = _get_openai_client()
     if client is None:
         LOG.info("E1 live review v2: OpenAI client unavailable — using rule-based fallback only")
-        return None
+        return {"_skipReason": "openai_client_unavailable"}
 
     if not _rate_limiter.acquire():
         LOG.info("E1 live review v2: rate-limited; skipping LLM call")
-        return None
+        return {"_skipReason": "rate_limited"}
 
     payload = {
         "phase": phase,
@@ -671,9 +671,17 @@ def generate_live_review_v2(
         )
         content = response.choices[0].message.content.strip()
         result = _parse_llm_json(content)
-        if result is None or not _LIVE_REVIEW_REQUIRED_KEYS.issubset(set(result.keys())):
-            LOG.warning("E1 live review v2: LLM response missing required keys; got %s", list((result or {}).keys()))
-            return None
+        if result is None:
+            LOG.warning("E1 live review v2: LLM returned unparseable JSON (raw=%r)", content[:200])
+            return {"_skipReason": "unparseable_json", "_rawHead": content[:200]}
+        missing = _LIVE_REVIEW_REQUIRED_KEYS - set(result.keys())
+        if missing:
+            LOG.warning("E1 live review v2: LLM response missing keys: %s", sorted(missing))
+            return {
+                "_skipReason": "missing_required_keys",
+                "_missing": sorted(missing),
+                "_partial": result,
+            }
         verdict = str(result.get("verdict") or "").upper()
         if verdict not in ("HOLD", "ADJUST", "CUT"):
             LOG.warning("E1 live review v2: LLM verdict %r invalid; coercing to pre-verdict", verdict)
@@ -691,4 +699,4 @@ def generate_live_review_v2(
         return result
     except Exception as e:
         LOG.warning("E1 live review v2 LLM call failed: %s: %s", type(e).__name__, e)
-        return None
+        return {"_skipReason": f"exception:{type(e).__name__}", "_error": str(e)[:300]}
