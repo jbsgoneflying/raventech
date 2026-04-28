@@ -630,13 +630,17 @@ def run_live_review(
 
     # --- Parallel evidence assembly ---
     layers: Dict[str, Any] = {}
+    # Per-layer timeouts tuned from a live KO probe (first cold pass on
+    # production timed out regime at 8s and analogues at 30s — both warm
+    # up under those budgets after the in-process cache is hot, but the
+    # first click of the day needs more headroom).
     layer_specs: List[Tuple[str, Any, float]] = [
-        ("regime", lambda: _layer_regime(fields), 8.0),
-        ("news", lambda: _layer_news(ticker, fields, phase), 8.0),
-        ("macro", lambda: _layer_macro(), 6.0),
-        ("analogues", lambda: _layer_analogues(ticker, fields), 30.0),
+        ("regime", lambda: _layer_regime(fields), 15.0),
+        ("news", lambda: _layer_news(ticker, fields, phase), 12.0),
+        ("macro", lambda: _layer_macro(), 8.0),
+        ("analogues", lambda: _layer_analogues(ticker, fields), 60.0),
         # Replay is the heavy one — give it a generous timeout per phase budget.
-        ("replay", lambda: _layer_replay(fields, current_spot), 75.0),
+        ("replay", lambda: _layer_replay(fields, current_spot), 90.0),
     ]
     with ThreadPoolExecutor(max_workers=5) as ex:
         futs = {name: ex.submit(fn) for (name, fn, _to) in layer_specs}
