@@ -235,7 +235,7 @@ def generate_gap_regime_analysis(
     if len(payload_str) > 25000:
         payload_str = payload_str[:25000]
 
-    model = str(getattr(f, "ENGINE13_ADVISOR_MODEL", "gpt-5.4") or "gpt-5.4").strip()
+    model = str(getattr(f, "ENGINE13_ADVISOR_MODEL", "gpt-5.5") or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(

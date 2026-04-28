@@ -217,7 +217,7 @@ def engine7_nightly_review(
 ):
     """Engine 7: Run the LLM nightly theme review pipeline.
 
-    Analyzes recent headlines with gpt-5.4 to identify emerging macro
+    Analyzes recent headlines with gpt-5.5 to identify emerging macro
     narratives not covered by the static theme list.  New themes are
     auto-promoted via a two-track system (immediate at 10%+ saturation,
     or after 2-of-3 consecutive nightly confirmations).
@@ -265,7 +265,7 @@ def engine7_dynamic_themes():
 
 @router.post("/api/engine7-pairs/desk-view")
 def engine7_desk_view(body: dict):
-    """Engine 7: Generate a GPT-5.4 senior quant desk view for a pair signal."""
+    """Engine 7: Generate a GPT-5.5 senior quant desk view for a pair signal."""
     signal = body.get("signal")
     if not signal:
         raise HTTPException(status_code=400, detail="Missing 'signal' in request body")
@@ -283,7 +283,7 @@ def engine7_desk_view(body: dict):
             payload = payload[:8000]
 
         resp = client.chat.completions.create(
-            model="gpt-5.4",
+            model="gpt-5.5",
             messages=[
                 {"role": "system", "content": _E7_DESK_VIEW_SYSTEM},
                 {"role": "user", "content": payload},
@@ -298,7 +298,7 @@ def engine7_desk_view(body: dict):
         if parsed is None:
             raise HTTPException(status_code=502, detail="LLM returned unparseable response")
 
-        parsed["_source"] = "gpt-5.4"
+        parsed["_source"] = "gpt-5.5"
         parsed["_pair"] = signal.get("pair_id", "")
         return parsed
 

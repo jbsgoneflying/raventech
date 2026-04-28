@@ -320,7 +320,7 @@ def stream_chat_response(
         yield 'data: {"error":"OpenAI client unavailable."}\n\n'
         return
 
-    model = str(getattr(f, "RAVEN_CHAT_MODEL", "gpt-5.4") or "gpt-5.4").strip()
+    model = str(getattr(f, "RAVEN_CHAT_MODEL", "gpt-5.5") or "gpt-5.5").strip()
     max_turns = getattr(f, "RAVEN_CHAT_MAX_TURNS", 30)
 
     user_messages = trim_conversation(messages, max_tokens=20000)

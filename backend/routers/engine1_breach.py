@@ -1166,7 +1166,7 @@ async def e1_trade_live_review(trade_id: str, request: Request):
                 "riskFactors (list of 1-3 bullets), deskNote (one sentence)."
             )
             resp = client.chat.completions.create(
-                model="gpt-5.4",
+                model="gpt-5.5",
                 messages=[
                     {"role": "system", "content": "You are a vol-crush desk analyst reviewing an OPEN earnings iron condor. Be concise, decisive, and cite the numbers."},
                     {"role": "user", "content": prompt},
@@ -1263,7 +1263,7 @@ async def e1_trade_checkin(trade_id: str, request: Request):
                 "for the VRP thesis on this name. Return JSON with keys: assessment, volCrushWorked (bool), lesson."
             )
             resp = client.chat.completions.create(
-                model="gpt-5.4",
+                model="gpt-5.5",
                 messages=[
                     {"role": "system", "content": "You are a vol-crush desk analyst reviewing a post-earnings outcome. Be concise."},
                     {"role": "user", "content": prompt},

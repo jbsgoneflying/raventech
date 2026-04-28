@@ -500,7 +500,7 @@ def annotate_themes_llm(
     date_str: str,
     *,
     store: Any = None,
-    model: str = "gpt-5.4",
+    model: str = "gpt-5.5",
     ttl_s: int = 7 * 86400,
 ) -> Optional[Dict[str, Any]]:
     """Optional LLM enrichment.  Replays from Redis when available.
@@ -616,7 +616,7 @@ def enhance_themes_with_llm(
     date_str: str,
     *,
     store: Any = None,
-    model: str = "gpt-5.4",
+    model: str = "gpt-5.5",
     ttl_s: int = 7 * 86400,
     activation_threshold: float = 0.3,
 ) -> "ThemeResult":

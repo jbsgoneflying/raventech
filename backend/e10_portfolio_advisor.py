@@ -585,7 +585,7 @@ def generate_portfolio_advisor(
     if len(payload_str) > 30000:
         payload_str = payload_str[:30000]
 
-    model = str(getattr(f, "E10_ADVISOR_MODEL", None) or f.E1_ADVISOR_MODEL or "gpt-5.4").strip()
+    model = str(getattr(f, "E10_ADVISOR_MODEL", None) or f.E1_ADVISOR_MODEL or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(

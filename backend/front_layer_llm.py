@@ -104,7 +104,7 @@ def _load_prompt(name: str) -> str:
 
 
 def _parse_llm_json(content: str) -> Optional[dict]:
-    """Parse LLM response with robust fallback for GPT-5.4 verbosity.
+    """Parse LLM response with robust fallback for GPT-5.5 verbosity.
 
     Handles:
     - Raw JSON
@@ -227,11 +227,11 @@ def generate_morning_brief(
         context["prior_days"] = [_sanitize_dms(d) for d in dms_history[:5]]
 
     payload_str = json.dumps(context, default=str)
-    # Truncate to fit token budget (GPT-5.4 400K context allows more data)
+    # Truncate to fit token budget (GPT-5.5 400K context allows more data)
     if len(payload_str) > 30000:
         payload_str = payload_str[:30000] + "..."
 
-    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.4").strip()
+    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(
@@ -343,7 +343,7 @@ def generate_weekly_roadmap(
     if len(payload_str) > 30000:
         payload_str = payload_str[:30000] + "..."
 
-    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.4").strip()
+    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(
@@ -467,7 +467,7 @@ def generate_asset_insight(
     }
 
     payload_str = json.dumps(context, default=str)
-    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.4").strip()
+    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(
@@ -1481,11 +1481,11 @@ def generate_card_insight(
 
     # E2 cards use the advisor-grade model for convergence
     _CARD_MODEL_OVERRIDES: Dict[str, str] = {
-        "e2_expected_move": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.4"),
-        "e2_regime": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.4"),
-        "e2_vol_pressure": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.4"),
+        "e2_expected_move": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.5"),
+        "e2_regime": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.5"),
+        "e2_vol_pressure": os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.5"),
     }
-    model = _CARD_MODEL_OVERRIDES.get(card_type, os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.4").strip())
+    model = _CARD_MODEL_OVERRIDES.get(card_type, os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.5").strip())
 
     try:
         response = client.chat.completions.create(

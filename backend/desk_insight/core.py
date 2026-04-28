@@ -2,7 +2,7 @@
 
 The single entry point that turns a (engine, card_type, card_data,
 scenario_context) tuple into a nine-section desk-friendly tooltip, grounded
-in an authoritative catalog spec and produced by gpt-5.4 (with a
+in an authoritative catalog spec and produced by gpt-5.5 (with a
 deterministic static fallback so the UI is never empty).
 
 The nine sections are the Raven canonical contract:
@@ -449,7 +449,7 @@ def generate_desk_insight(
     model = (
         os.getenv("DESK_INSIGHT_MODEL")
         or os.getenv("LLM_MODEL_NARRATIVE")
-        or "gpt-5.4"
+        or "gpt-5.5"
     ).strip()
 
     # Compose prompt.

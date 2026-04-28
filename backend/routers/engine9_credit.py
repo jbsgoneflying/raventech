@@ -576,7 +576,7 @@ def engine9_ticker_detail(ticker: str):
 
 @router.post("/api/engine9/desk-notes")
 def engine9_desk_notes(body: dict):
-    """LLM-powered credit desk morning brief (GPT-5.4)."""
+    """LLM-powered credit desk morning brief (GPT-5.5)."""
     import openai
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -616,7 +616,7 @@ Respond ONLY with valid JSON containing these fields:
     try:
         client = openai.OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-5.4",
+            model="gpt-5.5",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
@@ -683,7 +683,7 @@ Be direct, specific, and actionable. No hedging language. Speak like money is on
     try:
         client = openai.OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-5.4",
+            model="gpt-5.5",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
@@ -708,7 +708,7 @@ Be direct, specific, and actionable. No hedging language. Speak like money is on
 @router.post("/api/engine9/thesis-scan")
 def engine9_thesis_scan(body: dict):
     """
-    On-demand GPT-5.4 analysis: new risks, new instruments, scenario projection,
+    On-demand GPT-5.5 analysis: new risks, new instruments, scenario projection,
     non-obvious connections across all Engine 9 data.
     Also triggers LLM transcript analysis + news scoring if not cached.
     """
@@ -804,7 +804,7 @@ Where does liquidity break first?"""
     try:
         client = openai.OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-5.4",
+            model="gpt-5.5",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},

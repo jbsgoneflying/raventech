@@ -263,7 +263,7 @@ def generate_scenario_advisor(
     heuristic output.
     """
     f = flags or get_flags()
-    model = str(getattr(f, "E14_ADVISOR_MODEL", "") or "gpt-5.4").strip()
+    model = str(getattr(f, "E14_ADVISOR_MODEL", "") or "gpt-5.5").strip()
     scenario = dict(scenario_payload or {})
 
     if not scenario:

@@ -256,7 +256,7 @@ def analyze_transcript_llm(
         client = openai.OpenAI(api_key=api_key)
         trimmed = transcript_text[:15000]
         resp = client.chat.completions.create(
-            model="gpt-5.4",
+            model="gpt-5.5",
             messages=[
                 {"role": "system", "content": _TRANSCRIPT_ANALYSIS_SYSTEM},
                 {"role": "user", "content": f"Ticker: {ticker} | {year} Q{quarter}\n\n{trimmed}"},
@@ -874,7 +874,7 @@ def score_news_with_llm(headlines: List[dict], api_key: str) -> dict:
             for i, a in enumerate(headlines[:15])
         )
         resp = client.chat.completions.create(
-            model="gpt-5.4",
+            model="gpt-5.5",
             messages=[
                 {"role": "system", "content": (
                     "You are a credit research analyst. Rate each headline for relevance to "

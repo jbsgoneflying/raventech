@@ -344,7 +344,7 @@ def generate_e1_trade_analysis(
     if len(payload_str) > 30000:
         payload_str = payload_str[:30000]
 
-    model = str(f.E1_ADVISOR_MODEL or "gpt-5.4").strip()
+    model = str(f.E1_ADVISOR_MODEL or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(
@@ -441,7 +441,7 @@ def generate_e1_post_mortem(
     if len(payload_str) > 25000:
         payload_str = payload_str[:25000]
 
-    model = str(f.E1_ADVISOR_MODEL or "gpt-5.4").strip()
+    model = str(f.E1_ADVISOR_MODEL or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(
@@ -655,7 +655,7 @@ def generate_live_review_v2(
     # Match the rest of the E1 advisor stack: read from E1_ADVISOR_MODEL and
     # use temperature=0.3 (some gpt-5.x deployments reject temperature=0.0
     # with `unsupported_value`, which silently nukes the narrative).
-    model = str(getattr(f, "E1_ADVISOR_MODEL", None) or "gpt-5.4").strip()
+    model = str(getattr(f, "E1_ADVISOR_MODEL", None) or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(

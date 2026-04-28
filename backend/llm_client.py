@@ -86,7 +86,7 @@ def _load_prompt(name: str) -> str:
 
 
 def _parse_desk_brief_json(content: str) -> Optional[dict]:
-    """Parse LLM response with robust fallback for GPT-5.4 verbosity."""
+    """Parse LLM response with robust fallback for GPT-5.5 verbosity."""
     raw = content
     content = content.strip()
 
@@ -179,12 +179,12 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
     if client is None:
         return dict(_DESK_BRIEF_FALLBACK)
 
-    # Truncate context (GPT-5.4 400K context allows more data)
+    # Truncate context (GPT-5.5 400K context allows more data)
     payload_str = json.dumps(context, default=str)
     if len(payload_str) > 15000:
         payload_str = payload_str[:15000] + "..."
 
-    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.4").strip()
+    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-5.5").strip()
 
     # Try loading custom prompt; fall back to built-in
     system_prompt = _load_prompt("desk_brief.txt") or _DESK_BRIEF_SYSTEM_PROMPT
@@ -204,7 +204,7 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
 
         content = response.choices[0].message.content.strip()
 
-        # Robust JSON parsing (handles GPT-5.4 verbosity)
+        # Robust JSON parsing (handles GPT-5.5 verbosity)
         result = _parse_desk_brief_json(content)
         if result is None:
             return dict(_DESK_BRIEF_FALLBACK)

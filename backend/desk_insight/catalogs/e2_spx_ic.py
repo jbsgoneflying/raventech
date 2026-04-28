@@ -268,7 +268,7 @@ CATALOG = {
             "+ regime and proposes a shortlist of trade recommendations "
             "with GO / HOLD / PASS verdicts, confidence %, and key "
             "risks.\n"
-            "Model is pinned via ENGINE2_ADVISOR_MODEL (default gpt-5.4). "
+            "Model is pinned via ENGINE2_ADVISOR_MODEL (default gpt-5.5). "
             "Advisor output is advisory — it never overrides the policy "
             "gate; a BLOCK-cell still blocks regardless of the advisor's "
             "enthusiasm."

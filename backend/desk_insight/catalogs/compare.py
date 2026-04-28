@@ -63,7 +63,7 @@ CATALOG = {
         "title": "Portfolio Advisor",
         "spec": (
             "LLM portfolio-level advisor (E10_ADVISOR_MODEL, default "
-            "gpt-5.4) that reads the compare table and proposes a "
+            "gpt-5.5) that reads the compare table and proposes a "
             "diversified shortlist: 'of these 12 reporters, prefer "
             "these 4 — different sectors, staggered dates, "
             "non-correlated by 20d beta.'\n"

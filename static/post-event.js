@@ -284,7 +284,7 @@
       "min " + meta.min_events_per_scenario + " events/scenario";
   }
 
-  /* ── Row Playbook (per-scenario GPT-5.4 trade ticket) ────────────── */
+  /* ── Row Playbook (per-scenario GPT-5.5 trade ticket) ────────────── */
 
   function buildRowPlaybookPayload(scenario) {
     const e1 = (_lastPhaseAData || {}).engine1 || {};
@@ -331,7 +331,7 @@
     html += '<div class="rpHeader">';
     html += '<span class="pbActionBadge ' + verdictClass + '" style="font-size:13px; padding:5px 14px;">' + escHtml(verdict) + '</span>';
     html += '<span class="pbConfBadge ' + convClass + '" style="font-size:12px; margin-left:8px;">' + escHtml(conviction) + '</span>';
-    if (data._source) html += '<span class="rpSource">GPT-5.4 Trade Ticket</span>';
+    if (data._source) html += '<span class="rpSource">GPT-5.5 Trade Ticket</span>';
     html += '</div>';
 
     for (let i = 0; i < sections.length; i++) {
@@ -400,7 +400,7 @@
       return;
     }
 
-    detailTd.innerHTML = '<div class="rpLoading"><span class="rpDot"></span> Generating trade ticket with GPT-5.4\u2026</div>';
+    detailTd.innerHTML = '<div class="rpLoading"><span class="rpDot"></span> Generating trade ticket with GPT-5.5\u2026</div>';
 
     if (_rowPlaybookAbort) _rowPlaybookAbort.abort();
     _rowPlaybookAbort = new AbortController();
@@ -572,7 +572,7 @@
       });
   });
 
-  /* ── Desk Notes (GPT-5.4 LLM) ─────────────────────────────────────── */
+  /* ── Desk Notes (GPT-5.5 LLM) ─────────────────────────────────────── */
   const _deskNotesSections = [
     { key: "overall_thesis",   title: "Overall Thesis",      icon: "&#128202;" },
     { key: "iron_condor_view", title: "Iron Condor View",    icon: "&#9878;" },

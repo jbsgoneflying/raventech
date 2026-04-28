@@ -540,7 +540,7 @@ def generate_trade_analysis(
     if len(payload_str) > 30000:
         payload_str = payload_str[:30000]
 
-    model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.4").strip()
+    model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(
@@ -637,7 +637,7 @@ def generate_checkin_analysis(
     if len(payload_str) > 25000:
         payload_str = payload_str[:25000]
 
-    model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.4").strip()
+    model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(
@@ -730,7 +730,7 @@ def generate_post_mortem(
     if len(payload_str) > 25000:
         payload_str = payload_str[:25000]
 
-    model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.4").strip()
+    model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.5").strip()
 
     try:
         response = client.chat.completions.create(

@@ -117,7 +117,7 @@ def generate_weekly_review(
     *,
     week_end: Optional[dt.date] = None,
     store: Any = None,
-    model: str = "gpt-5.4",
+    model: str = "gpt-5.5",
 ) -> Dict[str, Any]:
     """Generate the weekly trade review via LLM.
 

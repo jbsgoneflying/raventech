@@ -174,7 +174,7 @@ class FeatureFlags:
     # Engine 2 AI Trade Advisor
     ENGINE2_MULTI_WING: bool = True
     ENGINE2_ADVISOR_ENABLED: bool = True
-    ENGINE2_ADVISOR_MODEL: str = "gpt-5.4"
+    ENGINE2_ADVISOR_MODEL: str = "gpt-5.5"
     ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
     ENGINE2_TRADE_TTL_S: int = 180 * 86400   # 180 days (survive full earnings cycle)
     ENGINE2_TRADE_MAX_INDEX: int = 200
@@ -241,7 +241,7 @@ class FeatureFlags:
 
     # --- Engine 1: Earnings IC Advisor (vol crush premium harvesting) ---
     E1_ADVISOR_ENABLED: bool = True
-    E1_ADVISOR_MODEL: str = "gpt-5.4"
+    E1_ADVISOR_MODEL: str = "gpt-5.5"
     E1_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
     E1_EM_MULTS: str = "1.0,1.5,2.0"
     E1_WING_WIDTH_PTS: str = "2.5,5,7.5,10"
@@ -250,7 +250,7 @@ class FeatureFlags:
 
     # --- Engine 10: Multi-Ticker Portfolio Advisor ---
     E10_ADVISOR_ENABLED: bool = True
-    E10_ADVISOR_MODEL: str = "gpt-5.4"
+    E10_ADVISOR_MODEL: str = "gpt-5.5"
     E10_ADVISOR_MAX_CALLS_PER_MINUTE: int = 3
 
     # --- Engine 1: GO / NO-GO decisioning (strict; additive UI) ---
@@ -376,7 +376,7 @@ class FeatureFlags:
     ENGINE8_CONTINUATION_PROB_MIN: float = 0.55        # Min probability for CONTINUE
     ENGINE8_REVERSION_PROB_MIN: float = 0.55           # Min probability for FADE
     ENGINE8_ENABLE_LLM_CLASSIFY: bool = True           # Use LLM for event classification
-    ENGINE8_LLM_MODEL_VERSION: str = "gpt-5.4"
+    ENGINE8_LLM_MODEL_VERSION: str = "gpt-5.5"
     ENGINE8_LOOKBACK_EVENTS: int = 40                  # Historical events to consider
     ENGINE8_MAX_CONTROLLED_LOSS_PCT: float = 50.0      # Max % of entry credit loss for "controlled_loss"
 
@@ -402,7 +402,7 @@ class FeatureFlags:
     # --- Engine 13: Gap Regime Scanner ---
     ENABLE_ENGINE13_GAP_REGIME: bool = True
     ENGINE13_CACHE_TTL_SCAN: int = 10 * 60              # 10 min scan cache
-    ENGINE13_ADVISOR_MODEL: str = "gpt-5.4"
+    ENGINE13_ADVISOR_MODEL: str = "gpt-5.5"
     ENGINE13_GAP_THRESHOLD_PCT: float = 1.5             # Min gap % for analogues
     ENGINE13_FRAGILITY_ENABLED: bool = True
     ENGINE13_FRAGILITY_W_OPTIONS: float = 0.30
@@ -505,7 +505,7 @@ class FeatureFlags:
     # New E14-native advisor (separate from E2's advisor which /reconcile
     # still calls for BC). Rate-limited per process.
     E14_ADVISOR_ENABLED: bool = True
-    E14_ADVISOR_MODEL: str = "gpt-5.4"
+    E14_ADVISOR_MODEL: str = "gpt-5.5"
     E14_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
 
     # --- Engine 15: Earnings IC Scenario Simulator ---
@@ -534,7 +534,7 @@ class FeatureFlags:
     ENGINE15_EM_MULTIPLE_TOL: float = 0.35             # sigma tol on short-strike placement
     ENGINE15_ENABLE_EM_MULTIPLE_FILTER: bool = False
     ENGINE15_ADVISOR_ENABLED: bool = True
-    ENGINE15_ADVISOR_MODEL: str = "gpt-5.4"
+    ENGINE15_ADVISOR_MODEL: str = "gpt-5.5"
 
     # --- Engine 15 v2 — Earnings Scenario Command Deck ---
     ENABLE_E15_V2: bool = True                         # kill-switch
@@ -572,14 +572,14 @@ class FeatureFlags:
 
     # --- Raven Chat (Senior Quant Advisor) ---
     ENABLE_RAVEN_CHAT: bool = True
-    RAVEN_CHAT_MODEL: str = "gpt-5.4"
+    RAVEN_CHAT_MODEL: str = "gpt-5.5"
     RAVEN_CHAT_MAX_TURNS: int = 30
     RAVEN_CHAT_RATE_LIMIT: int = 10               # per minute
     RAVEN_CHAT_MAX_CONTEXT_CHARS: int = 40000
 
     # --- Raven Desk Insight v2 (unified LLM tooltip pipeline) ---
     ENABLE_DESK_INSIGHT_V2: bool = True
-    DESK_INSIGHT_MODEL: str = "gpt-5.4"
+    DESK_INSIGHT_MODEL: str = "gpt-5.5"
     DESK_INSIGHT_RATE_LIMIT_PER_MIN: int = 60     # shared across all engines
 
     # --- Market Intelligence v2 (HMM regime + canonical service) ---
@@ -710,7 +710,7 @@ class FeatureFlags:
             E2_MC_CONDITION_ON_MACRO=_get_bool("E2_MC_CONDITION_ON_MACRO", True),
             E2_MC_GBM_FALLBACK=_get_bool("E2_MC_GBM_FALLBACK", True),
             ENGINE2_ADVISOR_ENABLED=_get_bool("ENGINE2_ADVISOR_ENABLED", True),
-            ENGINE2_ADVISOR_MODEL=os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.4"),
+            ENGINE2_ADVISOR_MODEL=os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.5"),
             ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
             ENGINE2_TRADE_TTL_S=_get_int("ENGINE2_TRADE_TTL_S", 180 * 86400),
             ENGINE2_TRADE_MAX_INDEX=_get_int("ENGINE2_TRADE_MAX_INDEX", 200),
@@ -735,11 +735,11 @@ class FeatureFlags:
             ENGINE2_MACRO_BASE_OTHER=_get_float("ENGINE2_MACRO_BASE_OTHER", 0.05),
 
             E10_ADVISOR_ENABLED=_get_bool("E10_ADVISOR_ENABLED", True),
-            E10_ADVISOR_MODEL=os.getenv("E10_ADVISOR_MODEL", "gpt-5.4"),
+            E10_ADVISOR_MODEL=os.getenv("E10_ADVISOR_MODEL", "gpt-5.5"),
             E10_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E10_ADVISOR_MAX_CALLS_PER_MINUTE", 3),
 
             E1_ADVISOR_ENABLED=_get_bool("E1_ADVISOR_ENABLED", True),
-            E1_ADVISOR_MODEL=os.getenv("E1_ADVISOR_MODEL", "gpt-5.4"),
+            E1_ADVISOR_MODEL=os.getenv("E1_ADVISOR_MODEL", "gpt-5.5"),
             E1_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E1_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
             E1_EM_MULTS=os.getenv("E1_EM_MULTS", "1.0,1.5,2.0"),
             E1_WING_WIDTH_PTS=os.getenv("E1_WING_WIDTH_PTS", "2.5,5,7.5,10"),
@@ -858,7 +858,7 @@ class FeatureFlags:
             # --- Engine 13 ---
             ENABLE_ENGINE13_GAP_REGIME=_get_bool("ENABLE_ENGINE13_GAP_REGIME", True),
             ENGINE13_CACHE_TTL_SCAN=_get_int("ENGINE13_CACHE_TTL_SCAN", 10 * 60),
-            ENGINE13_ADVISOR_MODEL=os.getenv("ENGINE13_ADVISOR_MODEL", "gpt-5.4"),
+            ENGINE13_ADVISOR_MODEL=os.getenv("ENGINE13_ADVISOR_MODEL", "gpt-5.5"),
             ENGINE13_GAP_THRESHOLD_PCT=_get_float("ENGINE13_GAP_THRESHOLD_PCT", 1.5),
             ENGINE13_FRAGILITY_ENABLED=_get_bool("ENGINE13_FRAGILITY_ENABLED", True),
             ENGINE13_FRAGILITY_W_OPTIONS=_get_float("ENGINE13_FRAGILITY_W_OPTIONS", 0.30),
@@ -925,7 +925,7 @@ class FeatureFlags:
             E14_MC_GBM_FALLBACK=_get_bool("E14_MC_GBM_FALLBACK", True),
             ENGINE14_HOLIDAY_CALENDAR=_get_bool("ENGINE14_HOLIDAY_CALENDAR", True),
             E14_ADVISOR_ENABLED=_get_bool("E14_ADVISOR_ENABLED", True),
-            E14_ADVISOR_MODEL=os.getenv("E14_ADVISOR_MODEL", "gpt-5.4"),
+            E14_ADVISOR_MODEL=os.getenv("E14_ADVISOR_MODEL", "gpt-5.5"),
             E14_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E14_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
             ENGINE14_PER_DTE_EXITS=_get_bool("ENGINE14_PER_DTE_EXITS", True),
             ENGINE14_ENABLE_SIZING=_get_bool("ENGINE14_ENABLE_SIZING", True),
@@ -959,7 +959,7 @@ class FeatureFlags:
             ENGINE15_GUIDANCE_RISK_ENABLED=_get_bool("ENGINE15_GUIDANCE_RISK_ENABLED", True),
             E15_EMIT_DESK_CONSENSUS=_get_bool("E15_EMIT_DESK_CONSENSUS", False),
             GUIDANCE_RISK_MAX_BUMP_PCT=_get_float("GUIDANCE_RISK_MAX_BUMP_PCT", 15.0),
-            ENGINE15_ADVISOR_MODEL=os.getenv("ENGINE15_ADVISOR_MODEL", os.getenv("E1_ADVISOR_MODEL", "gpt-5.4")),
+            ENGINE15_ADVISOR_MODEL=os.getenv("ENGINE15_ADVISOR_MODEL", os.getenv("E1_ADVISOR_MODEL", "gpt-5.5")),
 
             # --- Engine 8 ---
             ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),
@@ -986,7 +986,7 @@ class FeatureFlags:
             ENGINE8_CONTINUATION_PROB_MIN=_get_float("ENGINE8_CONTINUATION_PROB_MIN", 0.55),
             ENGINE8_REVERSION_PROB_MIN=_get_float("ENGINE8_REVERSION_PROB_MIN", 0.55),
             ENGINE8_ENABLE_LLM_CLASSIFY=_get_bool("ENGINE8_ENABLE_LLM_CLASSIFY", True),
-            ENGINE8_LLM_MODEL_VERSION=os.getenv("ENGINE8_LLM_MODEL_VERSION", "gpt-5.4"),
+            ENGINE8_LLM_MODEL_VERSION=os.getenv("ENGINE8_LLM_MODEL_VERSION", "gpt-5.5"),
             ENGINE8_LOOKBACK_EVENTS=_get_int("ENGINE8_LOOKBACK_EVENTS", 40),
             ENGINE8_MAX_CONTROLLED_LOSS_PCT=_get_float("ENGINE8_MAX_CONTROLLED_LOSS_PCT", 50.0),
 
@@ -1013,13 +1013,13 @@ class FeatureFlags:
             FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE=_get_int("FRONT_LAYER_LLM_MAX_CALLS_PER_MINUTE", 4),
 
             ENABLE_RAVEN_CHAT=_get_bool("ENABLE_RAVEN_CHAT", True),
-            RAVEN_CHAT_MODEL=os.getenv("RAVEN_CHAT_MODEL", "gpt-5.4"),
+            RAVEN_CHAT_MODEL=os.getenv("RAVEN_CHAT_MODEL", "gpt-5.5"),
             RAVEN_CHAT_MAX_TURNS=_get_int("RAVEN_CHAT_MAX_TURNS", 30),
             RAVEN_CHAT_RATE_LIMIT=_get_int("RAVEN_CHAT_RATE_LIMIT", 10),
             RAVEN_CHAT_MAX_CONTEXT_CHARS=_get_int("RAVEN_CHAT_MAX_CONTEXT_CHARS", 40000),
 
             ENABLE_DESK_INSIGHT_V2=_get_bool("ENABLE_DESK_INSIGHT_V2", True),
-            DESK_INSIGHT_MODEL=os.getenv("DESK_INSIGHT_MODEL", "gpt-5.4"),
+            DESK_INSIGHT_MODEL=os.getenv("DESK_INSIGHT_MODEL", "gpt-5.5"),
             DESK_INSIGHT_RATE_LIMIT_PER_MIN=_get_int("DESK_INSIGHT_RATE_LIMIT_PER_MIN", 60),
 
             ENABLE_MI_V2=_get_bool("ENABLE_MI_V2", True),

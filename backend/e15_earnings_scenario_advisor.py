@@ -285,7 +285,7 @@ def generate_scenario_analysis(
     alongside, which we fall back to).
     """
     f = flags or get_flags()
-    model = str(getattr(f, "ENGINE15_ADVISOR_MODEL", "") or "gpt-5.4").strip()
+    model = str(getattr(f, "ENGINE15_ADVISOR_MODEL", "") or "gpt-5.5").strip()
     scenario = dict(scenario_payload or {})
     # Prefer the compact summary the simulator stored; back off to a
     # freshly shaped compact from the raw E1 payload; finally an empty dict.
