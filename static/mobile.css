@@ -1,0 +1,296 @@
+/* ============================================================
+   Raven-Tech.co — Mobile Polish (≤640px / iPhone-class viewports)
+   -------------------------------------------------------------
+   This stylesheet is loaded LAST on every desk page so its rules
+   win over per-engine v2 CSS, wing-console.css, and desk-insight.css.
+
+   Scope: only @media (max-width: 640px) blocks. Desktop is untouched.
+
+   Why a single shared file (vs per-page <style> blocks):
+     * Consistent breakpoint and visual rhythm across all 7 visible
+       engines (MI, E1, E1b, E2, E2b, E7, E10) — desk runs them
+       interchangeably on iPhones in the field; UX has to feel
+       identical on every page.
+     * One place to bump cache + reason about hit-targets.
+
+   Audit findings that drove these rules (Apr 2026):
+     * .deskInsightPopup is JS-positioned with hard width: 500px →
+       overflows the right edge on a 390px viewport. CSS overrides
+       below force a bottom-sheet on phones.
+     * The Wing Decision Console placement tables (E1/E2/E14) have
+       6–8 numeric columns; they were rendering wider than the
+       viewport and clipping the right-most "BR" column the desk
+       relies on for breach gap. Wrapped in horizontal scroll.
+     * Action button rows (.eXConsoleActions) had three side-by-side
+       buttons that compressed below the 32px touch-target floor on
+       iPhone. Stacked + full-width on phones.
+     * Some stat-card grids (.metricGrid--regime / --skewWingsTop /
+       holdRiskGroupCards) only collapsed to 2 columns at 980px,
+       still cramped at 390px. Forced 1 column ≤640px.
+   ============================================================ */
+
+@media (max-width: 640px) {
+
+  /* ---- Page chrome ----------------------------------------------- */
+  /* Tighten the outer container padding so cards don't clip. The
+     desktop layout uses the page max-width: 1240px wrap; on phones
+     the body padding tends to be 16-18px which leaves only ~354px
+     of usable width. 12/12 lets us fit ~366px of content. */
+  body { font-size: 14px; }
+
+  /* ---- DeskInsight LLM popup → bottom-sheet ---------------------- */
+  /* JS sets explicit pixel left/top + width: 500px on the popup
+     element. Override every one of those with !important so the
+     popup snaps to a full-width sheet anchored near the bottom of
+     the screen, exactly like a native iOS modal. The desk can scroll
+     the body normally (the popup itself has overflow-y: auto). */
+  .deskInsightPopup {
+    left: 8px !important;
+    right: 8px !important;
+    top: auto !important;
+    bottom: max(8px, env(safe-area-inset-bottom, 8px)) !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 80vh !important;
+    border-radius: 16px !important;
+  }
+  .deskInsightHeader { padding: 12px 14px; }
+  .deskInsightHeaderText { min-width: 0; flex: 1 1 auto; }
+  .deskInsightTitle { font-size: 14px; }
+  .deskInsightSubtitle { font-size: 12px; }
+  .deskInsightBody { padding: 12px 14px; font-size: 14px; }
+  .deskInsightBreadcrumb { padding: 8px 14px; font-size: 11px; }
+  .deskInsightSectionTitle { font-size: 12px; }
+  .deskInsightText { font-size: 13px; line-height: 1.45; }
+  .deskInsightClose { min-width: 32px; min-height: 32px; }
+
+  /* The legacy per-page e1InsightPopup (still wired into a few
+     spots in static/index.html) has the same fixed-width problem.
+     Same bottom-sheet treatment. */
+  .e1InsightPopup {
+    left: 8px !important;
+    right: 8px !important;
+    top: auto !important;
+    bottom: max(8px, env(safe-area-inset-bottom, 8px)) !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 80vh !important;
+  }
+
+  /* ---- Wing Decision Console placement tables ------------------- */
+  /* These are 6-9 column numeric tables (#, EM x, WINGS, P SHORT/C
+     SHORT, CREDIT, BR GAP, MAE, SCORE). On a 390px viewport they
+     clip. Wrap in a horizontal scroll while keeping header sticky. */
+  .e1PlacementTable,
+  .e2PlacementTable,
+  .e14PlacementTable {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .e1PlacementTable thead,
+  .e2PlacementTable thead,
+  .e14PlacementTable thead,
+  .e1PlacementTable tbody,
+  .e2PlacementTable tbody,
+  .e14PlacementTable tbody {
+    display: table;
+    width: max-content;
+    min-width: 100%;
+  }
+  .e1PlacementTable thead th,
+  .e2PlacementTable thead th,
+  .e14PlacementTable thead th {
+    font-size: 9.5px;
+    padding: 8px 8px;
+    white-space: nowrap;
+  }
+  .e1PlacementTable tbody td,
+  .e2PlacementTable tbody td,
+  .e14PlacementTable tbody td {
+    font-size: 11px;
+    padding: 8px 8px;
+    white-space: nowrap;
+  }
+
+  /* ---- Wing Console title / subtitle ---------------------------- */
+  .e1ConsoleTitle,
+  .e2ConsoleTitle,
+  .e14ConsoleTitle { font-size: 14px; }
+  .e1ConsoleSubtitle,
+  .e2ConsoleSubtitle,
+  .e14ConsoleSubtitle {
+    font-size: 11px;
+    gap: 8px;
+    row-gap: 4px;
+  }
+  .e1Console,
+  .e2Console,
+  .e14Console { padding: 12px; }
+
+  /* ---- Wing Console action button row → stack ------------------- */
+  /* Three side-by-side buttons (Run Advisor, Build Trade, Adjust &
+     Log) compressed to <90px each on phones. Stack + 100% width so
+     each is a clean 44px+ touch target. */
+  .e1ConsoleActions,
+  .e2ConsoleActions,
+  .e14ConsoleActions {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .e1ConsoleActions button,
+  .e2ConsoleActions button,
+  .e14ConsoleActions button {
+    width: 100%;
+    padding: 11px 14px;
+    font-size: 13px;
+    min-height: 42px;
+  }
+
+  /* ---- Tuner score box / sliders -------------------------------- */
+  .e1Tuner,
+  .e2Tuner,
+  .e14Tuner { gap: 12px; }
+  .e1TunerScoreBox,
+  .e2TunerScoreBox,
+  .e14TunerScoreBox {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  .e1TunerScoreBox strong,
+  .e2TunerScoreBox strong,
+  .e14TunerScoreBox strong { font-size: 18px; }
+
+  /* ---- E15 / E1b layout ----------------------------------------- */
+  /* Stat-card grid + outcome-distribution panel. They use minmax
+     in the 190-200px range; on 390px viewports they collapse to
+     1-col automatically, but force it explicitly so a future tweak
+     to minmax doesn't accidentally yield a half-broken 2-col. */
+  .e15Grid,
+  .e15Outcomes { grid-template-columns: 1fr !important; }
+  /* MTM chart: 260px is fine but on phones a touch shorter feels
+     more proportional given the cards above it now stack. */
+  .e15ChartCanvasWrap { height: 220px !important; }
+  /* Tables in E15 (matched events / dropped events). */
+  .e15Table { font-size: 11px; }
+  .e15Table th,
+  .e15Table td { padding: 7px 8px; }
+  .e15TableScroll { max-height: 320px; }
+
+  /* ---- Engine 1 stat-card grids on the breach scan -------------- */
+  .metricGrid,
+  .metricGrid--regime,
+  .metricGrid--snapshot,
+  .metricGrid--skewWingsTop,
+  .holdRiskGroupCards {
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+  /* Hold-risk row: drop the kappa column inline, keep label+value */
+  .holdRiskRow { grid-template-columns: 1fr auto; }
+  .holdRiskRow .hrK { display: none; }
+
+  /* ---- Engine 1 active trades + journal rows -------------------- */
+  /* The action button strip in each active-trade row needs to flow
+     2-up so a thumb can hit them. Buttons inherit the trade card's
+     flex container; just bump min-height + readable font. */
+  .e1ReviewTradeBtn,
+  .e1CloseTradeBtn,
+  .e1CloseWinBtn,
+  .e1CloseLossBtn,
+  .e1CloseExpBtn {
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+    min-height: 38px;
+  }
+
+  /* ---- Engine 2 (SPX) trade tables ------------------------------ */
+  /* spx.js renders dataTable with min-width: 720px so it never
+     fits on phone. Keep the inline min-width but let the wrapper
+     be horizontally scrollable + smaller font. */
+  table.dataTable {
+    font-size: 11px;
+  }
+  table.dataTable th,
+  table.dataTable td { padding: 6px 8px; }
+
+  /* ---- Engine 7 (post-event) eval grid -------------------------- */
+  .evalGrid,
+  .statsGrid { grid-template-columns: 1fr !important; gap: 10px; }
+  .evalCardValue { font-size: 18px; }
+
+  /* ---- Engine 10 (compare) -------------------------------------- */
+  /* rankingsGrid is already a flex column. Tighten card padding +
+     allow rankCardHeader chips to wrap (already does) — just bump
+     touch-target on the per-row "view details" links. */
+  .rankCard { padding: 12px; }
+  .rankCardHeader { gap: 8px; }
+  .rankBadge { width: 28px; height: 28px; font-size: 12px; }
+
+  /* ---- Market Intelligence (MI) --------------------------------- */
+  /* MI already drops to 1 col at 900px; tighten card padding so
+     the dense regime + macro + correlation cards don't feel boxy
+     on phones. */
+  .miCard { padding: 14px 14px 12px; }
+  .miHero { padding: 18px 16px 14px; }
+
+  /* ---- Inline modals (Adjust, Close Trade, Live Review) --------- */
+  /* All inline modals already use max-width: 90vw; tighten padding
+     so the form fields fit. Targets the .primaryButton inside. */
+  .primaryButton { min-height: 40px; }
+
+  /* ---- Nav drawer toggle ---------------------------------------- */
+  /* Make sure the hamburger trigger is a full 44x44 touch target. */
+  .navDrawerToggle,
+  .deskInsightBtn { min-width: 36px; min-height: 36px; }
+
+  /* ---- Floating chat FAB ---------------------------------------- */
+  /* Move the Raven chat bubble up so it doesn't overlap the page's
+     own action buttons (Calculate, Run Advisor, etc) on phones. */
+  .rcFab {
+    bottom: max(76px, env(safe-area-inset-bottom, 76px)) !important;
+    right: 14px !important;
+  }
+
+  /* ---- Form / control bar --------------------------------------- */
+  /* Default existing 980px breakpoint already lets the form wrap;
+     on phones tighten gap so the wrap stays compact and the
+     "Calculate" button is full-width. */
+  .controlBarForm {
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .controlBarForm > * { flex: 1 1 100%; }
+  .controlBarForm #runBtn,
+  .controlBarForm button[type="submit"] {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  /* ---- Tooltip popups (legacy .tipBubble) ----------------------- */
+  /* The "i" tip bubble needs the same don't-overflow treatment. */
+  .tipBubble,
+  .tipPopover {
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  /* ---- Nav tooltips (header) ------------------------------------ */
+  /* These are fine size-wise; just guard against clipping on the
+     left edge when triggered from the leftmost nav button. */
+  .navTooltip {
+    max-width: calc(100vw - 24px) !important;
+    min-width: 0 !important;
+  }
+}
+
+/* ============================================================
+   iPhone Pro Max / large phones (641px–820px)
+   Mostly tablet-class, but disambiguate a few stubborn edges.
+   ============================================================ */
+@media (min-width: 641px) and (max-width: 820px) {
+  .deskInsightPopup {
+    width: calc(100vw - 32px) !important;
+    max-width: 520px !important;
+  }
+}

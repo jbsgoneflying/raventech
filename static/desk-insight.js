@@ -128,7 +128,16 @@
     document.body.appendChild(pop);
 
     $("deskInsightClose").addEventListener("click", closePopup);
-    if (typeof global.initDrag === "function") {
+    // initDrag adds touchstart with preventDefault() and writes inline
+    // left/top, which fights the bottom-sheet CSS we apply on phones
+    // (mobile.css ≤640px) and turns the header into a dead zone for
+    // touch scroll. Keep drag for desktop / tablet only — on phones
+    // the popup is anchored full-width and there's no need to move
+    // it around.
+    var isMobile = (typeof global.matchMedia === "function")
+      ? global.matchMedia("(max-width: 640px)").matches
+      : (global.innerWidth || 9999) <= 640;
+    if (!isMobile && typeof global.initDrag === "function") {
       try { global.initDrag(pop, $("deskInsightHeader"), { closeSelector: "#deskInsightClose" }); }
       catch (e) { /* ignore */ }
     }
