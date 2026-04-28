@@ -4094,18 +4094,22 @@ async function _loadE1ActiveTrades() {
     }
     html += '</div>';
 
-    // Render in BOTH the inline area (when the advisor panel is on
-    // screen) and the standalone section (the only target when the
-    // desk logs straight from the Wing Decision Console without
-    // running the advisor first — that was the bug: active trades
-    // silently loaded into a non-existent #e1ActiveTradesArea and
-    // the fallback section got hidden, so a logged trade vanished).
-    if (areaInAdvisor) {
-      areaInAdvisor.innerHTML = html;
-      if (sec) sec.classList.add("hidden");
-    } else if (sec && el) {
+    // ALWAYS render into the standalone section so the desk has a
+    // consistent place to find their open book — regardless of whether
+    // the Wing Console has rendered or not. We also MIRROR into the
+    // inline #e1ActiveTradesArea when it exists (created by the Wing
+    // Console), so the desk gets immediate feedback right after a log
+    // without scrolling. Earlier behaviour was either-or, which hid
+    // the standalone section whenever the Wing Console was on screen
+    // and made open trades impossible to find on a fresh page open
+    // (e.g. coming back the next morning to check on an overnight
+    // position before BMO earnings).
+    if (sec && el) {
       el.innerHTML = html;
       sec.classList.remove("hidden");
+    }
+    if (areaInAdvisor) {
+      areaInAdvisor.innerHTML = html;
     }
 
     // Wire close buttons
@@ -4405,6 +4409,19 @@ document.addEventListener("DOMContentLoaded", () => {
     ticker.value = ticker.value.toUpperCase();
     setTickerLogo(ticker.value);
   });
+
+  // Surface the desk's open book + trade journal immediately on page
+  // mount, before any breach calculation runs. The desk arrives at
+  // /breach pre-market expecting to see overnight positions (e.g. a
+  // BMO check-in on a trade logged the previous afternoon); previously
+  // the active-trades section only loaded as a side-effect of the
+  // Wing Console rendering, so a fresh page open with no calc yet
+  // looked like the open trade had vanished. Both calls are safe
+  // no-ops when the desk has nothing logged.
+  try { if (typeof _loadE1ActiveTrades === "function") _loadE1ActiveTrades(); }
+  catch (e) { console.warn("E1 active-trades autoload:", e); }
+  try { if (typeof _loadE1TradeJournal === "function") _loadE1TradeJournal(); }
+  catch (e) { console.warn("E1 trade-journal autoload:", e); }
 
   async function runCalculation(extraParams = null) {
     setStatus("");
