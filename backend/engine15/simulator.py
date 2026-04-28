@@ -1238,3 +1238,185 @@ def run_earnings_scenario(
                        "e1DeskConsensus", "e1EmPreference"):
                 e1.pop(_k, None)
     return response
+
+
+# ---------------------------------------------------------------------------
+# Live Review v2 helper — run the analogue replay against an OPEN trade
+# ---------------------------------------------------------------------------
+
+def _next_friday(from_date: dt.date) -> dt.date:
+    """Return the next Friday on/after `from_date`."""
+    d = from_date
+    while d.weekday() != 4:
+        d = d + dt.timedelta(days=1)
+    return d
+
+
+def _coerce_open_trade_to_request(
+    fields: Dict[str, Any], *, current_spot: float
+) -> EarningsIcRequest:
+    """Build an ``EarningsIcRequest`` from the desk's open-trade record.
+
+    Best-effort: fills in expiry / entry_date / planned_exit_date when the
+    trade record didn't capture them (older logs from before those fields
+    were added). The replay then runs from "today" with the desk's strikes
+    and credit, which is the from-now view the Live Review wants.
+    """
+    today = dt.date.today()
+    earnings_date = str(fields.get("earningsDate") or today.isoformat())[:10]
+    timing = str(fields.get("earningsTiming") or "UNK").upper()
+
+    # Expiry: prefer what the trade captured, else next Friday on/after earnings.
+    try:
+        expiry = str(fields.get("expiry") or "")[:10]
+        if expiry:
+            dt.date.fromisoformat(expiry)  # validate
+        else:
+            raise ValueError
+    except Exception:
+        try:
+            ed = dt.date.fromisoformat(earnings_date)
+        except Exception:
+            ed = today
+        expiry = _next_friday(ed).isoformat()
+
+    # Planned exit: day after earnings (vol crush captured), capped at expiry.
+    try:
+        ed = dt.date.fromisoformat(earnings_date)
+    except Exception:
+        ed = today
+    planned_exit = ed + dt.timedelta(days=1)
+    while planned_exit.weekday() > 4:
+        planned_exit = planned_exit + dt.timedelta(days=1)
+    try:
+        exp_d = dt.date.fromisoformat(expiry)
+        if planned_exit > exp_d:
+            planned_exit = exp_d
+    except Exception:
+        pass
+
+    return EarningsIcRequest(
+        ticker=str(fields.get("ticker") or "").upper(),
+        # entry_date = today so the replay computes biz days from "now" to
+        # planned exit (the from-now horizon the Live Review needs).
+        entry_date=today.isoformat(),
+        expiry=expiry,
+        earnings_date=earnings_date,
+        earnings_timing=timing if timing in ("BMO", "AMC") else "UNK",
+        planned_exit_date=planned_exit.isoformat(),
+        planned_exit_offset_hours=0.0,
+        short_put=float(fields.get("shortPut") or 0),
+        long_put=float(fields.get("longPut") or 0),
+        short_call=float(fields.get("shortCall") or 0),
+        long_call=float(fields.get("longCall") or 0),
+        credit_received=float(fields.get("entryCredit") or 0),
+        # Run lean — Live Review only needs the path summary, not the
+        # full E1 payload re-echoed.
+        include_e1_payload=False,
+        n_history=20,
+        years_history=5,
+    )
+
+
+def _summarize_replay_for_review(scenario_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract a compact P10/P50/P90 + outcome bucket summary for the
+    Live Review evidence packet. The full scenario payload is too heavy
+    to ship to the frontend on every check-in.
+    """
+    out: Dict[str, Any] = {"available": True}
+    paths_n = int(scenario_payload.get("eventsUsed") or 0)
+    expected = scenario_payload.get("expectedValue") or {}
+    outcomes = scenario_payload.get("outcomeDistribution") or {}
+    timeline = scenario_payload.get("mtmTimeline") or []
+
+    # Derive P10/P50/P90 from the last MTM timeline step (per-path final PnL%).
+    p10 = p50 = p90 = None
+    if timeline:
+        last_step = timeline[-1] if isinstance(timeline[-1], dict) else None
+        if isinstance(last_step, dict):
+            p10 = last_step.get("p10") or last_step.get("p10PnlPct")
+            p50 = last_step.get("p50") or last_step.get("median") or last_step.get("p50PnlPct")
+            p90 = last_step.get("p90") or last_step.get("p90PnlPct")
+
+    if p50 is None:
+        p50 = expected.get("medianPnlPct") or expected.get("meanPnlPct")
+
+    full_collect = None
+    bucket_full = outcomes.get("FULL_CREDIT") or outcomes.get("full_credit") or outcomes.get("WIN_FULL")
+    if isinstance(bucket_full, dict):
+        try:
+            full_collect = float(bucket_full.get("pct") or 0.0) / 100.0
+        except Exception:
+            full_collect = None
+
+    breach_rate = None
+    bucket_loss = outcomes.get("FULL_LOSS") or outcomes.get("full_loss") or outcomes.get("MAX_LOSS")
+    if isinstance(bucket_loss, dict):
+        try:
+            breach_rate = float(bucket_loss.get("pct") or 0.0) / 100.0
+        except Exception:
+            breach_rate = None
+
+    out.update({
+        "pathsCount": paths_n,
+        "p10PnlPct": float(p10) if p10 is not None else None,
+        "p50PnlPct": float(p50) if p50 is not None else None,
+        "p90PnlPct": float(p90) if p90 is not None else None,
+        "meanPnlPct": expected.get("meanPnlPct"),
+        "medianPnlPct": expected.get("medianPnlPct"),
+        "sharpeProxy": expected.get("sharpeProxy"),
+        "fullCollectRate": full_collect,
+        "fullLossRate": breach_rate,
+        "outcomeDistribution": outcomes,
+        # Compact MTM curve for the frontend chart (date, p10, p50, p90).
+        "mtmCurve": [
+            {
+                "date": (s.get("date") if isinstance(s, dict) else None),
+                "p10": (s.get("p10") if isinstance(s, dict) else None),
+                "p50": (s.get("p50") or s.get("median") if isinstance(s, dict) else None),
+                "p90": (s.get("p90") if isinstance(s, dict) else None),
+            }
+            for s in (timeline or [])
+            if isinstance(s, dict)
+        ][:30],
+        "horizon": "now-to-expiry",
+        "creditRichness": scenario_payload.get("creditRichness"),
+    })
+    return out
+
+
+def run_for_open_trade(
+    fields: Dict[str, Any],
+    *,
+    current_spot: float,
+    client: Any,
+    flags: Optional[FeatureFlags] = None,
+    benzinga_client: Any = None,
+) -> Dict[str, Any]:
+    """Run the E15 analogue replay for an OPEN earnings trade.
+
+    Used by the Engine 1 Live Review v2 orchestrator. ``fields`` is the
+    extracted trade-record dict (see ``backend.e1_live_review._extract_trade_fields``);
+    ``current_spot`` is the desk's most recent spot resolution. Returns
+    the compact summary built by ``_summarize_replay_for_review`` rather
+    than the full ~1MB scenario payload — the frontend only needs the
+    P10/P50/P90 path numbers + the MTM curve for the projection chart.
+
+    Errors propagate to the caller, which wraps them into a degraded
+    ``{available: false, error: ...}`` evidence-layer record.
+    """
+    req = _coerce_open_trade_to_request(fields, current_spot=current_spot)
+    payload = run_earnings_scenario(
+        req, client=client, flags=flags, benzinga_client=benzinga_client,
+    )
+    summary = _summarize_replay_for_review(payload)
+    summary["request"] = {
+        "ticker": req.ticker,
+        "entryDate": req.entry_date,
+        "expiry": req.expiry,
+        "plannedExitDate": req.planned_exit_date,
+        "earningsDate": req.earnings_date,
+        "earningsTiming": req.earnings_timing,
+        "creditReceived": req.credit_received,
+    }
+    return summary

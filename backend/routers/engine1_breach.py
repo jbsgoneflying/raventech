@@ -1000,22 +1000,29 @@ def e1_list_trades():
 
 @router.post("/api/breach/trade/{trade_id}/live-review")
 async def e1_trade_live_review(trade_id: str, request: Request):
-    """v2: Live open-trade review.
+    """v2: Live open-trade review (three-phase, quant-grade evidence).
 
     The existing /checkin endpoint is earnings-specific (requires
     postEarningsOpen to compute gap / breach). Before earnings comes
     out, the desk still wants a hold/cut recommendation from the LLM
-    reading *current* conditions: spot vs shorts, days remaining,
-    IV drift, regime changes. This endpoint provides that.
+    reading *current* conditions, and after the print the desk wants a
+    quant-grade replay-vs-current-mark verdict.
 
-    Returns a narrative verdict (HOLD / ADJUST / CUT) + reasoning so
-    the desk can see "waiting through the white-knuckle is worth
-    it" vs "sell now while you still can" kind of guidance in-flight.
+    v2 routes through ``backend.e1_live_review.run_live_review`` which
+    assembles a phase-tuned evidence packet (current vs entry deltas,
+    news, regime, macro, analogue breach ladder, AND a full E15-style
+    replay of the desk's strikes against the analogue pool) in parallel,
+    feeds it into a phase-aware LLM verdict, and persists the full
+    payload as a check-in for post-mortem reconstruction.
 
     Body (optional):
-      { "currentSpot": 180.5,        # override for backtest / paper
-        "currentVix":  16.2,         # override
-        "notes":       "user note" }
+      {
+        "phase":       "pre_event" | "pre_open" | "post_open"  # explicit; else auto
+        "currentSpot": 180.5,     # override for backtest / paper
+        "currentVix":  16.2,      # override
+        "notes":       "...",     # user note
+        "force_refresh": true     # bypass 5-min orchestrator cache
+      }
     """
     try:
         body = await request.json()
@@ -1027,6 +1034,42 @@ async def e1_trade_live_review(trade_id: str, request: Request):
     trade = get_trade(trade_id)
     if trade is None:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    # --- v2 path -------------------------------------------------------
+    use_v2 = bool(body.get("v2", True))
+    if use_v2:
+        try:
+            from backend.e1_live_review import run_live_review
+
+            payload = run_live_review(
+                trade=trade,
+                phase_request=body.get("phase"),
+                current_spot_override=float(body.get("currentSpot") or 0.0),
+                current_vix_override=body.get("currentVix"),
+                notes=body.get("notes"),
+                force_refresh=bool(body.get("force_refresh", False)),
+            )
+            review = payload.get("review") or {}
+
+            # Persist full v2 review (phase + evidence + recommendation) so
+            # the desk can reconstruct what they saw at any past check-in
+            # for post-mortems and learning. ``add_checkin`` accepts an
+            # arbitrary dict; type=live_review_v2 marks the new shape.
+            try:
+                checkin_record = dict(review)
+                checkin_record["type"] = "live_review_v2"
+                checkin_record["userNotes"] = body.get("notes")
+                add_checkin(trade_id, checkin_record)
+            except Exception:
+                pass
+
+            return payload
+        except Exception as e:
+            LOG.exception("E1 live review v2 dispatch failed; falling through to v1")
+            # Intentionally fall through to v1 on unexpected failures so the
+            # desk never sees a 500 from a tertiary feature regression.
+
+    # --- v1 fallback (legacy contract) ---------------------------------
 
     ticker = trade.get("ticker") or ""
     entry = trade.get("entry") or {}

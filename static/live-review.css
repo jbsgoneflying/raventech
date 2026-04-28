@@ -1,0 +1,94 @@
+/* ============================================================
+   Live Review v2 — phase-aware Active Trade card
+   ------------------------------------------------------------
+   Most of the v2 card is rendered inline by static/app.js with
+   inline styles so it works even when the page-level theme is
+   in light or dark mode without contention. This stylesheet
+   provides:
+
+     1. Mobile-friendly tweaks (≤640px) so the phase-button row
+        wraps cleanly and the replay sparkline doesn't blow out.
+     2. Hover states for the phase buttons (otherwise inline
+        styles win and you get no feedback).
+     3. A subtle keyframe for the loading dot (defensive: app.js
+        injects this too on first run, but defining it here means
+        the dot animates even if the JS injection raced).
+
+   Loaded AFTER engine1-v2.css and the global stylesheet so any
+   contested rule wins via source order.
+   ============================================================ */
+
+@keyframes e1Pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* ---- Phase button row ---- */
+.e1ReviewPhaseRow {
+  --gap: 6px;
+}
+
+.e1ReviewPhaseBtn {
+  transition: transform 80ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.e1ReviewPhaseBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  filter: brightness(1.08);
+}
+
+.e1ReviewPhaseBtn:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+
+.e1ReviewPhaseBtn:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* ---- Live-review panel ---- */
+.e1ReviewPanel summary::-webkit-details-marker { display: none; }
+.e1ReviewPanel summary { list-style: none; }
+.e1ReviewPanel summary::before {
+  content: "▸ ";
+  display: inline-block;
+  margin-right: 4px;
+  transition: transform 120ms ease;
+  opacity: 0.55;
+}
+.e1ReviewPanel details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.e1ReviewPanel a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Mobile (iPhone, ≤640px) ---- */
+@media (max-width: 640px) {
+  .e1ReviewPhaseRow {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  .e1ReviewPhaseRow .e1ReviewPhaseBtn {
+    width: 100%;
+    text-align: center;
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+    min-height: 36px;
+  }
+  .e1ReviewPhaseRow > span:first-child {
+    margin-bottom: 2px;
+  }
+  /* Tile row stacks more aggressively. */
+  .e1ReviewPanel > div[style*="grid-template-columns:repeat(3"] {
+    grid-template-columns: 1fr 1fr 1fr !important;
+    gap: 6px !important;
+  }
+  /* Sparkline shrinks gracefully. */
+  .e1ReviewPanel svg {
+    height: 70px !important;
+  }
+}

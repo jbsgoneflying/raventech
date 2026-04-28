@@ -4078,12 +4078,21 @@ async function _loadE1ActiveTrades() {
       if (entry.entryWindow) html += '<div style="font-size:11px;opacity:.5;margin-bottom:4px">Entry: ' + entry.entryWindow + '</div>';
       if (entry.exitTarget) html += '<div style="font-size:11px;opacity:.5;margin-bottom:8px">Exit: ' + entry.exitTarget + '</div>';
 
-      // v2: live-review placeholder (populated on-demand by _runE1LiveReview).
-      html += '<div class="e1ReviewPanel" id="e1ReviewPanel-' + t.tradeId + '" style="display:none;margin:8px 0;padding:10px;border-radius:8px;background:rgba(125,182,255,0.06);border:1px solid rgba(125,182,255,0.2);font-size:12px;line-height:1.4"></div>';
+      // v2: live-review panel (populated on-demand by _runE1LiveReview).
+      // Phase buttons sit in a dedicated row above the close-action row so
+      // the desk can pick which check-in moment they want — Pre-event /
+      // Pre-open / Post-open — and the auto-detected phase is highlighted.
+      var autoPhase = _autoDetectE1Phase(entry.earningsDate, entry.earningsTiming);
+      html += '<div class="e1ReviewPhaseRow" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px;align-items:center">';
+      html += '<span style="font-size:10px;letter-spacing:0.4px;text-transform:uppercase;opacity:.55;margin-right:4px">Live Review</span>';
+      html += _e1PhaseBtnHtml(t.tradeId, "pre_event", "Pre-Event Check", autoPhase);
+      html += _e1PhaseBtnHtml(t.tradeId, "pre_open",  "Pre-Open Check",  autoPhase);
+      html += _e1PhaseBtnHtml(t.tradeId, "post_open", "Post-Open Check", autoPhase);
+      html += '</div>';
+      html += '<div class="e1ReviewPanel" id="e1ReviewPanel-' + t.tradeId + '" style="display:none;margin:6px 0 8px;padding:12px;border-radius:8px;background:rgba(125,182,255,0.06);border:1px solid rgba(125,182,255,0.2);font-size:12px;line-height:1.45"></div>';
 
       // Action buttons
       html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
-      html += '<button class="e1ReviewTradeBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid rgba(125,182,255,0.45);background:rgba(125,182,255,0.12);color:#7db6ff;cursor:pointer;font-weight:600">Run Live Review</button>';
       html += '<button class="e1CloseTradeBtn primaryButton" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;font-weight:600">Close Trade</button>';
       html += '<button class="e1CloseWinBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #16a34a;background:#16a34a18;color:#16a34a;cursor:pointer;font-weight:600">Close as Win</button>';
       html += '<button class="e1CloseLossBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #dc2626;background:#dc262618;color:#dc2626;cursor:pointer;font-weight:600">Close as Loss</button>';
@@ -4132,67 +4141,389 @@ function _wireE1CloseButtons() {
   document.querySelectorAll(".e1CloseExpBtn").forEach(function (btn) {
     btn.addEventListener("click", function () { _quickCloseE1Trade(btn.dataset.tradeId, "expired"); });
   });
-  document.querySelectorAll(".e1ReviewTradeBtn").forEach(function (btn) {
-    btn.addEventListener("click", function () { _runE1LiveReview(btn.dataset.tradeId); });
+  document.querySelectorAll(".e1ReviewPhaseBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      _runE1LiveReview(btn.dataset.tradeId, btn.dataset.phase);
+    });
   });
 }
 
-// v2: Live review of an open E1 trade against current market conditions.
-// Calls the new /api/breach/trade/{id}/live-review endpoint which runs
-// an LLM narration keyed on: current spot vs strikes, days-to-earnings,
-// VIX drift, regime label. Response is painted inline under the trade
-// row so the desk can triage open positions without leaving the page.
-async function _runE1LiveReview(tradeId) {
+// =============================================================================
+// Live Review v2 — three phase-driven check-ins per open trade
+//
+// Phases (auto-detected client-side too, so we can pre-highlight the right
+// button before the desk clicks):
+//   pre_event   entry → close on T-1
+//   pre_open    close T-1 → 9:30 ET T-0
+//   post_open   9:30 ET T-0 → expiry
+//
+// On click, we POST {phase} to /api/breach/trade/{id}/live-review and the
+// orchestrator returns a phase-tuned evidence packet (current vs entry
+// deltas, news, regime, macro flags, historical analogue ladder, plus a
+// full E15-style replay projection). We render it as a phase-aware card
+// with collapsible sections, an inline SVG MTM curve sparkline, and an
+// action ladder.
+// =============================================================================
+
+function _autoDetectE1Phase(earningsDate, earningsTiming) {
+  // Mirror the backend phase detector so the right button is highlighted
+  // BEFORE the desk clicks. Cheap heuristic — backend is authoritative.
+  if (!earningsDate) return "pre_event";
+  var ed;
+  try { ed = new Date(String(earningsDate).slice(0, 10) + "T09:30:00-04:00"); }
+  catch (e) { return "pre_event"; }
+  if (isNaN(ed.getTime())) return "pre_event";
+  var now = new Date();
+  var timing = String(earningsTiming || "UNK").toUpperCase();
+  // Approximate ET hour from local-now (good enough — backend re-checks).
+  var nowET = new Date(now.getTime());
+  var nowHour = nowET.getUTCHours() - 4; // EDT
+  if (nowHour < 0) nowHour += 24;
+
+  var dEd = new Date(ed.getFullYear(), ed.getMonth(), ed.getDate());
+  var dNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var dayDiff = Math.round((dEd - dNow) / 86400000);
+
+  if (timing === "AMC") {
+    if (dayDiff > 0) return "pre_event";
+    if (dayDiff === 0 && nowHour < 16) return "pre_event";
+    if (dayDiff === 0 && nowHour >= 16) return "pre_open";
+    if (dayDiff === -1 && nowHour < 9.5) return "pre_open";
+    return "post_open";
+  }
+  // BMO / UNK
+  if (dayDiff > 0) return "pre_event";
+  if (dayDiff === 0 && nowHour < 9.5) return "pre_open";
+  return "post_open";
+}
+
+function _e1PhaseBtnHtml(tradeId, phase, label, autoPhase) {
+  var isAuto = (phase === autoPhase);
+  var palette = {
+    pre_event: { color: "#7db6ff", bg: "rgba(125,182,255,0.10)" },
+    pre_open:  { color: "#a78bfa", bg: "rgba(167,139,250,0.10)" },
+    post_open: { color: "#3cd4a9", bg: "rgba(60,212,169,0.12)" },
+  }[phase] || { color: "#7db6ff", bg: "rgba(125,182,255,0.08)" };
+  var bd = isAuto ? palette.color : "rgba(255,255,255,0.18)";
+  var fw = isAuto ? "700" : "600";
+  var note = isAuto ? '<span style="margin-left:6px;font-size:9px;opacity:.65">·now</span>' : '';
+  return '<button class="e1ReviewPhaseBtn" data-trade-id="' + tradeId +
+    '" data-phase="' + phase +
+    '" title="' + escapeHtml(label) + (isAuto ? ' (auto-detected current phase)' : '') +
+    '" style="padding:5px 12px;font-size:11px;border-radius:6px;border:1px solid ' + bd +
+    ';background:' + palette.bg + ';color:' + palette.color +
+    ';cursor:pointer;font-weight:' + fw +
+    '">' + escapeHtml(label) + note + '</button>';
+}
+
+async function _runE1LiveReview(tradeId, phase) {
   var panel = document.getElementById("e1ReviewPanel-" + tradeId);
   if (!panel) return;
   panel.style.display = "";
-  panel.innerHTML = '<div style="opacity:.7">Reviewing…</div>';
+  var phaseLabel = ({ pre_event: "pre-event", pre_open: "pre-open", post_open: "post-open" }[phase] || phase || "live");
+  panel.innerHTML = (
+    '<div style="display:flex;align-items:center;gap:8px;color:rgba(255,255,255,0.75)">' +
+      '<div class="e1ReviewSpinner" style="width:10px;height:10px;border-radius:50%;background:#7db6ff;animation:e1Pulse 1.2s ease-in-out infinite"></div>' +
+      '<span>Running ' + escapeHtml(phaseLabel) + ' check… pulling spot, IV, regime, news, macro, analogues, and replay (this may take 30-60s on a cold cache)</span>' +
+    '</div>'
+  );
+  // Inject a one-time keyframes rule for the loading dot.
+  if (!document.getElementById("e1PulseKeyframes")) {
+    var st = document.createElement("style");
+    st.id = "e1PulseKeyframes";
+    st.textContent = "@keyframes e1Pulse {0%,100%{opacity:1}50%{opacity:.35}}";
+    document.head.appendChild(st);
+  }
   try {
     var resp = await fetch("/api/breach/trade/" + tradeId + "/live-review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ phase: phase || null }),
     });
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     var body = await resp.json();
     _paintE1LiveReview(panel, body);
   } catch (err) {
-    panel.innerHTML = '<div style="color:#dc2626">Live review failed: ' + escapeHtml(String(err.message || err)) + '</div>';
+    panel.innerHTML = '<div style="color:#ff7a7a">Live review failed: ' + escapeHtml(String(err.message || err)) + '</div>';
   }
+}
+
+function _e1VerdictColor(verdict) {
+  var v = String(verdict || "").toUpperCase();
+  if (v === "HOLD") return "#3cd4a9";
+  if (v === "ADJUST") return "#f3a847";
+  if (v === "CUT") return "#ff7a7a";
+  return "#7db6ff";
+}
+
+function _e1ChipColor(chip) {
+  if (chip === "breached") return "#ff7a7a";
+  if (chip === "short_strike_challenged") return "#f3a847";
+  if (chip === "caution") return "#f3a847";
+  if (chip === "on_track") return "#3cd4a9";
+  return "#7db6ff";
+}
+
+function _e1PhasePalette(phase) {
+  if (phase === "pre_event") return { color: "#7db6ff", label: "Pre-Event" };
+  if (phase === "pre_open")  return { color: "#a78bfa", label: "Pre-Open" };
+  if (phase === "post_open") return { color: "#3cd4a9", label: "Post-Open" };
+  return { color: "#7db6ff", label: String(phase || "live") };
+}
+
+function _e1FmtPct(v, digits) {
+  if (v === null || v === undefined || v === "") return "—";
+  var n = Number(v);
+  if (!isFinite(n)) return "—";
+  return (n >= 0 ? "+" : "") + n.toFixed(digits == null ? 1 : digits) + "%";
+}
+
+function _e1FmtNum(v, digits) {
+  if (v === null || v === undefined || v === "") return "—";
+  var n = Number(v);
+  if (!isFinite(n)) return "—";
+  return n.toFixed(digits == null ? 2 : digits);
+}
+
+function _e1MtmSparkline(curve) {
+  // Inline SVG sparkline of the P10/P50/P90 MTM curve. We avoid pulling in
+  // Chart.js because the rest of E1's index page doesn't load it; the
+  // sparkline conveys "is the median path going up or down from here?"
+  // which is the only question the desk asks of this widget.
+  if (!Array.isArray(curve) || curve.length < 2) return "";
+  var W = 360, H = 90, pad = 8;
+  var p50s = curve.map(function (s) { return Number(s.p50); }).filter(isFinite);
+  var p10s = curve.map(function (s) { return Number(s.p10); }).filter(isFinite);
+  var p90s = curve.map(function (s) { return Number(s.p90); }).filter(isFinite);
+  if (!p50s.length) return "";
+  var ymin = Math.min.apply(null, p10s.length ? p10s : p50s);
+  var ymax = Math.max.apply(null, p90s.length ? p90s : p50s);
+  if (ymin === ymax) { ymin -= 1; ymax += 1; }
+  var n = curve.length;
+  function px(i) { return pad + (i * (W - 2 * pad)) / (n - 1); }
+  function py(v) { return H - pad - ((v - ymin) * (H - 2 * pad)) / (ymax - ymin); }
+
+  var pathFor = function (key) {
+    var d = "";
+    for (var i = 0; i < n; i++) {
+      var v = Number(curve[i][key]);
+      if (!isFinite(v)) continue;
+      d += (d ? " L " : "M ") + px(i).toFixed(1) + " " + py(v).toFixed(1);
+    }
+    return d;
+  };
+
+  // Shaded P10-P90 area
+  var area = "";
+  for (var i = 0; i < n; i++) {
+    var u = Number(curve[i].p90), l = Number(curve[i].p10);
+    if (!isFinite(u) || !isFinite(l)) continue;
+    area += (area ? " L " : "M ") + px(i).toFixed(1) + " " + py(u).toFixed(1);
+  }
+  for (var j = n - 1; j >= 0; j--) {
+    var l2 = Number(curve[j].p10);
+    if (!isFinite(l2)) continue;
+    area += " L " + px(j).toFixed(1) + " " + py(l2).toFixed(1);
+  }
+  if (area) area += " Z";
+
+  var zeroY = py(0);
+  var zeroLine = (ymin <= 0 && ymax >= 0)
+    ? '<line x1="' + pad + '" x2="' + (W - pad) + '" y1="' + zeroY.toFixed(1) + '" y2="' + zeroY.toFixed(1) + '" stroke="rgba(255,255,255,0.18)" stroke-dasharray="3 3" stroke-width="1" />'
+    : '';
+
+  return (
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" style="display:block">' +
+      (area ? '<path d="' + area + '" fill="rgba(125,182,255,0.10)" stroke="none" />' : '') +
+      zeroLine +
+      '<path d="' + pathFor("p10") + '" fill="none" stroke="rgba(125,182,255,0.4)" stroke-width="1" stroke-dasharray="2 3" />' +
+      '<path d="' + pathFor("p90") + '" fill="none" stroke="rgba(125,182,255,0.4)" stroke-width="1" stroke-dasharray="2 3" />' +
+      '<path d="' + pathFor("p50") + '" fill="none" stroke="#7db6ff" stroke-width="2" />' +
+    '</svg>'
+  );
+}
+
+function _e1RenderHeadlineList(headlines) {
+  if (!Array.isArray(headlines) || !headlines.length) return '';
+  return headlines.slice(0, 6).map(function (h) {
+    var pri = h.priority || "low";
+    var dotColor = pri === "high" ? "#ff7a7a" : pri === "medium" ? "#f3a847" : "#7db6ff";
+    var t = String(h.title || "");
+    var url = h.url ? '<a href="' + escapeHtml(h.url) + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">' + escapeHtml(t) + '</a>' : escapeHtml(t);
+    return '<li style="margin:3px 0;list-style:none;display:flex;gap:6px;align-items:flex-start">' +
+      '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + dotColor + ';margin-top:5px;flex-shrink:0"></span>' +
+      '<span>' + url + '</span>' +
+      '</li>';
+  }).join("");
+}
+
+function _e1RenderActionLadder(ladder) {
+  if (!Array.isArray(ladder) || !ladder.length) return '';
+  return ladder.map(function (a) {
+    var prob = (a.probWin != null) ? Math.round(Number(a.probWin) * 100) + "%" : "—";
+    var pnl = (a.expectedPnlPct != null) ? _e1FmtPct(a.expectedPnlPct) : "—";
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:baseline;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.03);margin-bottom:4px">' +
+      '<strong style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:#e6ecf2">' + escapeHtml(String(a.action || "")) + '</strong>' +
+      '<span style="font-size:11px;opacity:.75">' + escapeHtml(String(a.label || a.rationale || "")) + '</span>' +
+      '<span style="font-size:11px;opacity:.7">prob ' + prob + '</span>' +
+      '<span style="font-size:11px;font-weight:600;color:' + ((a.expectedPnlPct != null && Number(a.expectedPnlPct) < 0) ? "#ff7a7a" : "#3cd4a9") + '">' + pnl + '</span>' +
+      '</div>';
+  }).join("");
 }
 
 function _paintE1LiveReview(panel, body) {
   var r = (body && body.review) || {};
-  var llm = r.llmAssessment || {};
-  var verdict = String(llm.verdict || "—").toUpperCase();
-  var verdictColor = "#7db6ff";
-  if (verdict === "HOLD") verdictColor = "#3cd4a9";
-  else if (verdict === "ADJUST") verdictColor = "#f3a847";
-  else if (verdict === "CUT") verdictColor = "#ff7a7a";
+  var rec = r.recommendation || {};
+  var ev = r.evidence || {};
+  var phase = r.phase || "pre_event";
+  var phasePal = _e1PhasePalette(phase);
 
-  var chipColor = "#7db6ff";
-  if (r.statusChip === "breached") chipColor = "#ff7a7a";
-  else if (r.statusChip === "short_strike_challenged") chipColor = "#f3a847";
-  else if (r.statusChip === "on_track") chipColor = "#3cd4a9";
+  // --- Top header row: phase chip + verdict + status chip + key numbers ---
+  var verdict = String(rec.verdict || (r.llmAssessment || {}).verdict || rec.preVerdict || "—").toUpperCase();
+  var verdictColor = _e1VerdictColor(verdict);
+  var conf = rec.confidence != null ? Math.round(Number(rec.confidence) * 100) + "%" : "—";
+  var chipColor = _e1ChipColor(r.statusChip);
+  var phaseChip =
+    '<span style="padding:3px 9px;border-radius:999px;background:' + phasePal.color + '22;color:' + phasePal.color + ';font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase">' + escapeHtml(phasePal.label) + '</span>';
+  var verdictPill =
+    '<span style="padding:3px 12px;border-radius:6px;background:' + verdictColor + '1f;color:' + verdictColor + ';font-size:13px;font-weight:700;letter-spacing:0.5px">' + escapeHtml(verdict) + '</span>' +
+    '<span style="font-size:10px;opacity:.7;margin-left:-4px">conf ' + conf + '</span>';
+  var statusPill =
+    '<span style="padding:2px 8px;border-radius:4px;background:' + chipColor + '22;color:' + chipColor + ';font-size:10px;text-transform:uppercase;letter-spacing:0.4px">' + escapeHtml(r.statusChip || "—") + '</span>';
 
-  var header = '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">' +
-    '<strong style="color:' + verdictColor + ';font-size:14px">' + verdict + '</strong>' +
-    '<span style="padding:2px 8px;border-radius:4px;background:' + chipColor + '22;color:' + chipColor + ';font-size:10px;text-transform:uppercase;letter-spacing:0.4px">' + escapeHtml(r.statusChip || "—") + '</span>' +
-    '<span style="opacity:.6">Spot $' + (r.currentSpot != null ? Number(r.currentSpot).toFixed(2) : "—") + '</span>' +
-    '<span style="opacity:.6">Nearest short: ' + (r.nearestShortPct != null ? Number(r.nearestShortPct).toFixed(2) + "%" : "—") + '</span>' +
-    '<span style="opacity:.6">' + (r.daysToEarnings != null ? r.daysToEarnings + "d to earnings" : "") + '</span>' +
+  var mismatchNote = r.phaseMismatch
+    ? '<span style="font-size:10px;color:#f3a847;margin-left:4px" title="The phase you picked doesn\'t match the auto-detected phase based on the clock; the review still ran with the phase you selected.">·phase override</span>'
+    : '';
+
+  var header = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
+    phaseChip + mismatchNote + verdictPill + statusPill +
+    '<span style="font-size:11px;opacity:.65">Spot $' + _e1FmtNum(r.currentSpot) + '</span>' +
+    '<span style="font-size:11px;opacity:.65">Nearest short ' + _e1FmtPct(r.nearestShortPct) + '</span>' +
+    '<span style="font-size:11px;opacity:.65">' + (r.daysToEarnings != null ? r.daysToEarnings + 'd to earnings' : '') + '</span>' +
     '</div>';
 
-  var narrative = llm.narrative ? '<div style="margin-bottom:6px">' + escapeHtml(llm.narrative) + '</div>' : '';
-  var keyPts = Array.isArray(llm.keyPoints) && llm.keyPoints.length
-    ? '<ul style="margin:4px 0 0 18px">' + llm.keyPoints.map(function (k) { return '<li>' + escapeHtml(k) + '</li>'; }).join("") + '</ul>'
-    : '';
-  var risks = Array.isArray(llm.riskFactors) && llm.riskFactors.length
-    ? '<div style="margin-top:6px"><strong>Risks</strong><ul style="margin:4px 0 0 18px">' + llm.riskFactors.map(function (k) { return '<li>' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
-    : '';
-  var deskNote = llm.deskNote ? '<div style="margin-top:6px;opacity:.8"><em>Desk note:</em> ' + escapeHtml(llm.deskNote) + '</div>' : '';
+  // --- Narrative block ---
+  var narrative = rec.narrative ? '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(255,255,255,0.03);border-left:3px solid ' + verdictColor + ';border-radius:0 6px 6px 0">' + escapeHtml(rec.narrative) + '</div>' : '';
 
-  panel.innerHTML = header + narrative + keyPts + risks + deskNote;
+  // --- Evidence tiles (spot/IV/regime) ---
+  var spotE = ev.spot || {};
+  var ivE = ev.iv || {};
+  var regE = ev.regime || {};
+  var tile = function (label, value, sub) {
+    return '<div style="padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid rgba(255,255,255,0.06);min-width:100px">' +
+      '<div style="font-size:9px;letter-spacing:0.5px;text-transform:uppercase;opacity:.5;margin-bottom:2px">' + escapeHtml(label) + '</div>' +
+      '<div style="font-size:13px;font-weight:600">' + value + '</div>' +
+      (sub ? '<div style="font-size:10px;opacity:.55;margin-top:1px">' + sub + '</div>' : '') +
+      '</div>';
+  };
+  var tiles = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">';
+  tiles += tile("Spot now",
+    "$" + _e1FmtNum(spotE.now),
+    spotE.atEntry ? "entry $" + _e1FmtNum(spotE.atEntry) : "");
+  tiles += tile("Put dist", _e1FmtPct(spotE.putDistPct, 2), "");
+  tiles += tile("Call dist", _e1FmtPct(spotE.callDistPct, 2), "");
+  if (ivE.now != null) {
+    tiles += tile("IV now",
+      _e1FmtNum(ivE.now, 2),
+      (ivE.crushSoFarPct != null ? "crush " + _e1FmtPct(ivE.crushSoFarPct, 0) : (ivE.atEntry != null ? "entry " + _e1FmtNum(ivE.atEntry, 2) : "")));
+  }
+  if (regE && regE.available !== false && regE.now) {
+    tiles += tile("Regime",
+      escapeHtml(String(regE.now)),
+      regE.atEntry ? "entry " + escapeHtml(String(regE.atEntry)) : "");
+  }
+  tiles += '</div>';
+
+  // --- Replay projection (P10/P50/P90 MTM curve + numbers) ---
+  var rp = ev.replay || {};
+  var replayBlock = "";
+  if (rp.available !== false) {
+    var p10 = rp.p10PnlPct, p50 = rp.p50PnlPct, p90 = rp.p90PnlPct;
+    var fcr = rp.fullCollectRate != null ? Math.round(Number(rp.fullCollectRate) * 100) + "%" : "—";
+    var pn = rp.pathsCount || "—";
+    var spark = _e1MtmSparkline(rp.mtmCurve || []);
+    replayBlock = '<div style="margin:8px 0;padding:10px 12px;background:rgba(125,182,255,0.05);border-radius:8px;border:1px solid rgba(125,182,255,0.18)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">' +
+        '<strong style="font-size:11px;letter-spacing:0.4px;text-transform:uppercase;color:#7db6ff">Replay Projection · ' + escapeHtml(String(pn)) + ' analogues</strong>' +
+        '<span style="font-size:10px;opacity:.6">now → expiry</span>' +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin-bottom:6px">' +
+        '<span>P10 <strong style="color:' + ((p10 != null && p10 < 0) ? "#ff7a7a" : "#e6ecf2") + '">' + _e1FmtPct(p10) + '</strong></span>' +
+        '<span>P50 <strong style="color:' + ((p50 != null && p50 < 0) ? "#ff7a7a" : "#3cd4a9") + '">' + _e1FmtPct(p50) + '</strong></span>' +
+        '<span>P90 <strong style="color:#3cd4a9">' + _e1FmtPct(p90) + '</strong></span>' +
+        '<span>Full-collect rate <strong>' + fcr + '</strong></span>' +
+      '</div>' +
+      (spark || '<div style="font-size:11px;opacity:.55">MTM curve unavailable.</div>') +
+      '</div>';
+  } else if (rp.error) {
+    replayBlock = '<div style="margin:8px 0;padding:8px 10px;background:rgba(243,168,71,0.06);border-radius:6px;font-size:11px;opacity:.75">Replay unavailable: ' + escapeHtml(String(rp.error)) + '</div>';
+  }
+
+  // --- Analogue ladder ---
+  var an = ev.analogues || {};
+  var analogueBlock = "";
+  if (an.available !== false && an.ladder) {
+    var ladderRows = ["1.0x", "1.5x", "2.0x"].map(function (k) {
+      var v = an.ladder[k];
+      return '<div><div style="font-size:9px;letter-spacing:0.4px;opacity:.5;text-transform:uppercase">' + k + ' EM</div>' +
+        '<div style="font-size:13px;font-weight:600;color:' + ((v != null && v >= 25) ? "#ff7a7a" : (v != null && v >= 10) ? "#f3a847" : "#3cd4a9") + '">' + (v != null ? _e1FmtNum(v, 0) + "%" : "—") + '</div></div>';
+    }).join("");
+    analogueBlock = '<div style="margin:8px 0;padding:10px 12px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
+        '<strong style="font-size:11px;letter-spacing:0.4px;text-transform:uppercase;opacity:.85">Historical breach ladder · n=' + (an.nEvents || "—") + '</strong>' +
+        (an.tailBias ? '<span style="font-size:10px;opacity:.6">tail bias: ' + escapeHtml(String(an.tailBias)) + '</span>' : '') +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px">' + ladderRows + '</div>' +
+      '</div>';
+  }
+
+  // --- News ---
+  var news = ev.news || {};
+  var newsBlock = "";
+  if (news.available !== false && Array.isArray(news.headlines) && news.headlines.length) {
+    var counts = news.counts || {};
+    newsBlock = '<details style="margin:8px 0;padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06)">' +
+      '<summary style="cursor:pointer;font-size:11px;letter-spacing:0.4px;text-transform:uppercase;opacity:.85;font-weight:600">' +
+      'News &middot; ' + (counts.total || news.headlines.length) + ' total ' +
+      (counts.high ? '· <span style="color:#ff7a7a">' + counts.high + ' high</span> ' : '') +
+      (counts.medium ? '· <span style="color:#f3a847">' + counts.medium + ' medium</span>' : '') +
+      '</summary>' +
+      '<ul style="margin:8px 0 0;padding:0">' + _e1RenderHeadlineList(news.headlines) + '</ul>' +
+      '</details>';
+  } else if (news.error) {
+    newsBlock = '<div style="margin:8px 0;font-size:10px;opacity:.55">News feed unavailable: ' + escapeHtml(String(news.error)) + '</div>';
+  }
+
+  // --- Macro ---
+  var macro = ev.macro || {};
+  var macroBlock = "";
+  if (macro.available !== false && Array.isArray(macro.flags) && macro.flags.length) {
+    macroBlock = '<div style="margin:6px 0;font-size:11px"><strong style="color:#f3a847">Macro flags:</strong> ' +
+      macro.flags.map(function (f) { return '<span style="padding:1px 6px;margin-right:4px;border-radius:4px;background:rgba(243,168,71,0.15);color:#f3a847;font-size:10px">' + escapeHtml(f) + '</span>'; }).join('') +
+      '</div>';
+  }
+
+  // --- Key points / risks / desk note ---
+  var keyPts = (Array.isArray(rec.keyPoints) && rec.keyPoints.length)
+    ? '<div style="margin-top:8px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;opacity:.7">Key points</strong>' +
+      '<ul style="margin:4px 0 0 18px;padding:0">' + rec.keyPoints.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
+    : '';
+  var risks = (Array.isArray(rec.riskFactors) && rec.riskFactors.length)
+    ? '<div style="margin-top:6px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:#f3a847">Risks</strong>' +
+      '<ul style="margin:4px 0 0 18px;padding:0">' + rec.riskFactors.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
+    : '';
+  var deskNote = rec.deskNote
+    ? '<div style="margin-top:8px;padding:6px 10px;background:rgba(60,212,169,0.08);border-radius:6px;font-size:11px"><em>Desk note:</em> ' + escapeHtml(rec.deskNote) + '</div>'
+    : '';
+
+  // --- Action ladder ---
+  var ladderBlock = "";
+  if (Array.isArray(rec.actionLadder) && rec.actionLadder.length) {
+    ladderBlock = '<div style="margin-top:10px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;opacity:.7;display:block;margin-bottom:6px">Action ladder</strong>' +
+      _e1RenderActionLadder(rec.actionLadder) + '</div>';
+  }
+
+  panel.innerHTML = header + narrative + tiles + replayBlock + analogueBlock + macroBlock + newsBlock + keyPts + risks + deskNote + ladderBlock;
 }
 
 async function _quickCloseE1Trade(tradeId, outcome) {
