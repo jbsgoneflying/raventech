@@ -652,7 +652,10 @@ def generate_live_review_v2(
     payload_str = json.dumps(payload, default=str, separators=(",", ":"))
 
     system_prompt = _live_review_system_prompt(phase)
-    model = getattr(f, "OPENAI_MODEL", None) or "gpt-5.4"
+    # Match the rest of the E1 advisor stack: read from E1_ADVISOR_MODEL and
+    # use temperature=0.3 (some gpt-5.x deployments reject temperature=0.0
+    # with `unsupported_value`, which silently nukes the narrative).
+    model = str(getattr(f, "E1_ADVISOR_MODEL", None) or "gpt-5.4").strip()
 
     try:
         response = client.chat.completions.create(
@@ -661,10 +664,8 @@ def generate_live_review_v2(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            # Deterministic so repeat clicks on the same evidence yield the
-            # same verdict — desk needs reproducibility for post-mortems.
-            temperature=0.0,
-            max_completion_tokens=600,
+            temperature=0.3,
+            max_completion_tokens=900,
             timeout=30,
             response_format={"type": "json_object"},
         )

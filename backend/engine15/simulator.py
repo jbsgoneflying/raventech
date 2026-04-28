@@ -1341,21 +1341,37 @@ def _summarize_replay_for_review(scenario_payload: Dict[str, Any]) -> Dict[str, 
     if p50 is None:
         p50 = expected.get("medianPnlPct") or expected.get("meanPnlPct")
 
-    full_collect = None
-    bucket_full = outcomes.get("FULL_CREDIT") or outcomes.get("full_credit") or outcomes.get("WIN_FULL")
-    if isinstance(bucket_full, dict):
-        try:
-            full_collect = float(bucket_full.get("pct") or 0.0) / 100.0
-        except Exception:
-            full_collect = None
+    # Engine 14 emits outcome buckets named: earlyTarget, fullCollect,
+    # whiteKnuckle, stopOut, breach (see backend.engine14.simulator.OUTCOMES).
+    # The Live Review surfaces:
+    #   fullCollectRate := earlyTarget% + fullCollect% (combined "wins")
+    #   stopOutRate     := stopOut%                    (soft loss)
+    #   breachRate      := breach%                     (max loss)
+    #   fullLossRate    := stopOut% + breach%          (any loss)
+    def _bucket_pct(bucket: Any) -> Optional[float]:
+        if isinstance(bucket, dict):
+            try:
+                return float(bucket.get("pct") or 0.0)
+            except (TypeError, ValueError):
+                return None
+        return None
 
-    breach_rate = None
-    bucket_loss = outcomes.get("FULL_LOSS") or outcomes.get("full_loss") or outcomes.get("MAX_LOSS")
-    if isinstance(bucket_loss, dict):
-        try:
-            breach_rate = float(bucket_loss.get("pct") or 0.0) / 100.0
-        except Exception:
-            breach_rate = None
+    early_pct = _bucket_pct(outcomes.get("earlyTarget") or outcomes.get("early_target"))
+    full_pct = _bucket_pct(outcomes.get("fullCollect") or outcomes.get("full_collect")
+                           or outcomes.get("FULL_CREDIT"))
+    stop_pct = _bucket_pct(outcomes.get("stopOut") or outcomes.get("stop_out"))
+    breach_pct = _bucket_pct(outcomes.get("breach") or outcomes.get("BREACH"))
+
+    def _frac(*pcts: Optional[float]) -> Optional[float]:
+        vals = [p for p in pcts if p is not None]
+        if not vals:
+            return None
+        return round(sum(vals) / 100.0, 4)
+
+    full_collect = _frac(early_pct, full_pct)
+    stop_out_rate = _frac(stop_pct)
+    breach_only_rate = _frac(breach_pct)
+    breach_rate = _frac(stop_pct, breach_pct)
 
     out.update({
         "pathsCount": paths_n,
@@ -1367,6 +1383,8 @@ def _summarize_replay_for_review(scenario_payload: Dict[str, Any]) -> Dict[str, 
         "sharpeProxy": expected.get("sharpeProxy"),
         "fullCollectRate": full_collect,
         "fullLossRate": breach_rate,
+        "stopOutRate": stop_out_rate,
+        "breachRate": breach_only_rate,
         "outcomeDistribution": outcomes,
         # Compact MTM curve for the frontend chart (date, p10, p50, p90).
         "mtmCurve": [

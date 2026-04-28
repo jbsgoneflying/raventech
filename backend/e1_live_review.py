@@ -173,7 +173,15 @@ def _extract_trade_fields(trade: Dict[str, Any]) -> Dict[str, Any]:
         "longCall": _f(entry.get("longCallStrike")),
         "entryCredit": _f(entry.get("entryCredit")),
         "spotAtEntry": _f(entry.get("spotAtEntry")),
-        "ivAtEntry": _f(entry.get("impliedVolEntry") or ctx.get("impliedVolEntry") or snap.get("iv30dMean")),
+        "ivAtEntry": _f(
+            entry.get("impliedVolEntry")
+            or ctx.get("impliedVolEntry")
+            # market_snapshot stores ORATS' iv30dMean under the misnomer
+            # ``vixLevel`` (see backend/trade_memory.py); fall back to it
+            # so we always have a usable IV anchor for the crush calc.
+            or snap.get("iv30dMean")
+            or snap.get("vixLevel")
+        ),
         "emPctAtEntry": _f(entry.get("impliedMovePct")),
         "emMultiple": _f(entry.get("emMultiple")),
         "wingWidth": _f(entry.get("wingWidth")),
@@ -242,7 +250,14 @@ def _layer_spot_iv(ticker: str, fields: Dict[str, Any], override_spot: float, ov
             resp = orats.live_summaries(ticker=ticker)
             rows = resp.rows or []
             if rows:
-                iv_val = rows[0].get("iv30dMean") or rows[0].get("ivMean")
+                r0 = rows[0]
+                iv_val = (
+                    r0.get("iv30dMean")
+                    or r0.get("ivMean")
+                    or r0.get("iv30d")
+                    or r0.get("iv30")
+                    or r0.get("orFcst30d")
+                )
     except Exception as e:
         out["ivError"] = f"{type(e).__name__}: {e}"
 
@@ -421,11 +436,18 @@ def _layer_macro() -> Dict[str, Any]:
 
 def _layer_analogues(ticker: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     """Historical breach-rate ladder for this ticker conditioned on the
-    trade's earnings event. Uses ``compute_breach_stats``."""
+    trade's earnings event.
+
+    Uses ``compute_breach_stats`` to get the raw earnings event log, then
+    feeds those events into ``compute_earnings_width_comparison`` to derive
+    the per-EM-multiple breach-rate ladder (1.0x / 1.5x / 2.0x).
+    """
     out: Dict[str, Any] = {"available": True}
     try:
         from backend.deps import get_client_optional
         from backend.earnings_logic import compute_breach_stats
+        from backend.e1_vrp_engine import compute_earnings_width_comparison
+
         client = get_client_optional()
         if client is None:
             out["available"] = False
@@ -443,19 +465,34 @@ def _layer_analogues(ticker: str, fields: Dict[str, Any]) -> Dict[str, Any]:
             n=20, years=5,
             next_event_override=next_event_override,
         )
-        em_breach = stats.get("emBreach") or {}
+        events = stats.get("events") or []
         summary = stats.get("summary") or {}
-        # em_breach can be float-map ("1.0":x, "1.5":y, "2.0":z) or dict-of-dicts.
+
+        # Per-EM-multiple ladder via the same engine E1 itself uses.
+        em_breach_summary: Dict[str, Any] = {}
+        try:
+            _, em_breach_summary = compute_earnings_width_comparison(
+                events,
+                em_mults=[1.0, 1.5, 2.0],
+                wing_pts=[5.0],
+                current_implied_move_pct=None,
+                stock_price=None,
+            )
+        except Exception as e:
+            LOG.debug("e1_live_review: width comparison failed: %s", e)
+            em_breach_summary = {}
+
         def _rate(key: str) -> Optional[float]:
-            v = em_breach.get(key)
+            v = em_breach_summary.get(key)
             if v is None:
                 return None
             if isinstance(v, dict):
-                v = v.get("breachRatePct") or v.get("breachPct")
+                v = v.get("breachRatePct") or v.get("breachPct") or v.get("emBreachPct")
             try:
                 return float(v)
             except (TypeError, ValueError):
                 return None
+
         em_mult = float(fields.get("emMultiple") or 0.0)
         ladder = {
             "1.0x": _rate("1.0"),
@@ -469,7 +506,11 @@ def _layer_analogues(ticker: str, fields: Dict[str, Any]) -> Dict[str, Any]:
             buckets = [(k, v) for (k, v) in buckets if v is not None]
             if buckets:
                 rate_at_em = min(buckets, key=lambda kv: abs(kv[0] - em_mult))[1]
-        out["nEvents"] = summary.get("eventsUsed") or summary.get("events_used") or len(stats.get("events") or [])
+        out["nEvents"] = (
+            summary.get("eventsUsed")
+            or summary.get("events_used")
+            or len(events)
+        )
         out["ladder"] = ladder
         out["rateAtEmPct"] = rate_at_em
         out["emMultiple"] = em_mult or None
@@ -562,16 +603,26 @@ def _score_action_ladder(*, fields: Dict[str, Any], evidence: Dict[str, Any], ph
         except Exception:
             return fallback
 
+    # Action ladder semantics:
+    #   HOLD     — outcome of riding the trade to expiry: p50 expected, p10/p90
+    #              tails, and probability of full-credit (combined wins).
+    #   CUT_NOW  — guaranteed outcome of closing at current mid. We don't have
+    #              the live mid, so we surface "guaranteed" as probWin=1.0 and
+    #              leave expectedPnlPct=None (the rationale explains it).
+    #   ROLL/TRIM— defensive; no replay simulates the adjusted structure, so
+    #              both fields stay None.
     ladder = [
         {"action": "HOLD", "label": "Hold through expiry",
-         "expectedPnlPct": _pct(p50, 0.0),
-         "p10PnlPct": _pct(p10, 0.0),
-         "p90PnlPct": _pct(p90, 0.0),
-         "probWin": (full_collect_rate if full_collect_rate is not None else None)},
+         "expectedPnlPct": _pct(p50, 0.0) if p50 is not None else None,
+         "p10PnlPct": _pct(p10, 0.0) if p10 is not None else None,
+         "p90PnlPct": _pct(p90, 0.0) if p90 is not None else None,
+         "probWin": (round(float(full_collect_rate), 4)
+                     if full_collect_rate is not None else None),
+         "rationale": "Ride the credit to expiry; analogue replay carries the trade."},
         {"action": "CUT_NOW", "label": "Cut now (close at mid)",
-         "expectedPnlPct": _pct(p50, 0.0) if p50 is not None and p50 < 50 else 50.0,
+         "expectedPnlPct": None,
          "probWin": 1.0,
-         "rationale": "Lock partial credit; eliminate gap risk."},
+         "rationale": "Lock partial credit; eliminate gap risk before earnings."},
         {"action": third_label, "label": third_action,
          "expectedPnlPct": None, "probWin": None,
          "rationale": "Trade defended structure for residual credit."},

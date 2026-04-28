@@ -4360,13 +4360,32 @@ function _e1RenderHeadlineList(headlines) {
 function _e1RenderActionLadder(ladder) {
   if (!Array.isArray(ladder) || !ladder.length) return '';
   return ladder.map(function (a) {
-    var prob = (a.probWin != null) ? Math.round(Number(a.probWin) * 100) + "%" : "—";
-    var pnl = (a.expectedPnlPct != null) ? _e1FmtPct(a.expectedPnlPct) : "—";
+    var probLabel;
+    if (a.probWin == null) {
+      probLabel = "prob —";
+    } else if (Number(a.probWin) >= 0.999) {
+      // CUT_NOW: closing at mid is guaranteed; "100%" is misleading next
+      // to a held-to-expiry probability of full credit, so call it out.
+      probLabel = "guaranteed";
+    } else {
+      probLabel = "prob " + Math.round(Number(a.probWin) * 100) + "%";
+    }
+    var pnl;
+    if (a.expectedPnlPct == null) {
+      pnl = "—";
+    } else {
+      pnl = _e1FmtPct(a.expectedPnlPct);
+    }
+    var pnlColor = (a.expectedPnlPct != null && Number(a.expectedPnlPct) < 0) ? "#ff7a7a" : "#3cd4a9";
+    var rangeStr = "";
+    if (a.p10PnlPct != null && a.p90PnlPct != null) {
+      rangeStr = ' <span style="opacity:.55;font-size:10px;font-weight:400">(p10 ' + _e1FmtPct(a.p10PnlPct) + ' / p90 ' + _e1FmtPct(a.p90PnlPct) + ')</span>';
+    }
     return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:baseline;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.03);margin-bottom:4px">' +
       '<strong style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:#e6ecf2">' + escapeHtml(String(a.action || "")) + '</strong>' +
       '<span style="font-size:11px;opacity:.75">' + escapeHtml(String(a.label || a.rationale || "")) + '</span>' +
-      '<span style="font-size:11px;opacity:.7">prob ' + prob + '</span>' +
-      '<span style="font-size:11px;font-weight:600;color:' + ((a.expectedPnlPct != null && Number(a.expectedPnlPct) < 0) ? "#ff7a7a" : "#3cd4a9") + '">' + pnl + '</span>' +
+      '<span style="font-size:11px;opacity:.7">' + probLabel + '</span>' +
+      '<span style="font-size:11px;font-weight:600;color:' + pnlColor + '">' + pnl + rangeStr + '</span>' +
       '</div>';
   }).join("");
 }
