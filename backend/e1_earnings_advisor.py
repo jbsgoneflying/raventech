@@ -362,10 +362,20 @@ def generate_e1_trade_analysis(
         content = response.choices[0].message.content.strip()
         result = _parse_llm_json(content)
 
-        if result is None or not _ADVISOR_REQUIRED_KEYS.issubset(set(result.keys())):
-            LOG.warning("E1 advisor: LLM response missing required keys")
-            fallback["_fallback_reason"] = "LLM returned invalid JSON"
+        if result is None:
+            LOG.warning("E1 advisor: LLM response unparseable; raw (first 400): %s", content[:400])
+            fallback["_fallback_reason"] = "LLM returned unparseable JSON"
             return fallback
+
+        # Tolerant schema: gpt-5.5 sometimes omits optional rationale fields.
+        # Accept any payload that parsed, fill missing keys from the fallback
+        # template, and surface which keys were absent for telemetry.
+        missing = _ADVISOR_REQUIRED_KEYS - set(result.keys())
+        if missing:
+            LOG.info("E1 advisor: LLM omitted keys=%s; backfilling from defaults", sorted(missing))
+            for k in missing:
+                result[k] = fallback.get(k)
+            result["_partial_keys_missing"] = sorted(missing)
 
         result["_source"] = "llm"
         result["_model"] = model
@@ -459,10 +469,17 @@ def generate_e1_post_mortem(
         content = response.choices[0].message.content.strip()
         result = _parse_llm_json(content)
 
-        if result is None or not _POST_MORTEM_REQUIRED_KEYS.issubset(set(result.keys())):
-            LOG.warning("E1 post-mortem: LLM response missing required keys")
-            fallback["_fallback_reason"] = "LLM returned invalid JSON"
+        if result is None:
+            LOG.warning("E1 post-mortem: LLM response unparseable; raw (first 400): %s", content[:400])
+            fallback["_fallback_reason"] = "LLM returned unparseable JSON"
             return fallback
+
+        missing = _POST_MORTEM_REQUIRED_KEYS - set(result.keys())
+        if missing:
+            LOG.info("E1 post-mortem: LLM omitted keys=%s; backfilling from defaults", sorted(missing))
+            for k in missing:
+                result[k] = fallback.get(k)
+            result["_partial_keys_missing"] = sorted(missing)
 
         result["_source"] = "llm"
         result["_model"] = model
