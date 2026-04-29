@@ -4776,6 +4776,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const kSel = $("k");
   ticker.value = (qsTicker || ticker.value || "AAPL").toUpperCase();
   setTickerLogo(ticker.value);
+  if (window.RavenUI && RavenUI.setEngineTabTitle) RavenUI.setEngineTabTitle(ticker.value);
 
   // Apply k from querystring if valid
   if (kSel && qsK && ["1.0", "1.5", "2.0"].includes(qsK)) {
@@ -4785,6 +4786,7 @@ document.addEventListener("DOMContentLoaded", () => {
   ticker.addEventListener("input", () => {
     ticker.value = ticker.value.toUpperCase();
     setTickerLogo(ticker.value);
+    if (window.RavenUI && RavenUI.setEngineTabTitle) RavenUI.setEngineTabTitle(ticker.value);
   });
 
   // Surface the desk's open book + trade journal immediately on page

@@ -228,6 +228,48 @@ function initInfoTips() {
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeTip(); });
 }
 
+// ---------------------------------------------------------------------------
+// Engine tab title helper.
+//
+// Desk often has 6-10 engine tabs open simultaneously during the trading day —
+// without a ticker hint, they all collapse to "Engine 1…" / "Engine 15…" in
+// Chrome's tab strip and become indistinguishable. This helper rewrites
+// `<title>` to `E{N} · {TICKER} — {Short Name}` (e.g. `E15 · GOOGL — Earnings
+// IC Scenario`) so the engine code + ticker stay visible even when the tab is
+// truncated to ~10-15 chars.
+//
+// Original title pattern expected: `Engine N — Short Name | Raven-Tech.co`
+// If the page's title doesn't match, this is a silent no-op (so pages that
+// manage their own dynamic title — e.g. SPX page rotating SPX/SPY/QQQ — are
+// not stomped on).
+// ---------------------------------------------------------------------------
+
+let _ravenOriginalTitle = null;
+let _ravenTitleParts = null; // { engineNum, shortName } | null (if pattern didn't match)
+
+function _parseEngineTitle(title) {
+  // Match "Engine 15 — Earnings IC Scenario | Raven-Tech.co"
+  // Em-dash (U+2014) is the standard separator across the app's titles.
+  const m = String(title || "").match(/^Engine\s+(\d+)\s+[—–-]\s+([^|]+?)(?:\s*\|.*)?$/);
+  if (!m) return null;
+  return { engineNum: m[1], shortName: m[2].trim() };
+}
+
+function setEngineTabTitle(ticker) {
+  if (_ravenOriginalTitle == null) {
+    _ravenOriginalTitle = document.title;
+    _ravenTitleParts = _parseEngineTitle(_ravenOriginalTitle);
+  }
+  if (!_ravenTitleParts) return; // page doesn't follow the engine title pattern
+  const t = String(ticker || "").trim().toUpperCase();
+  const { engineNum, shortName } = _ravenTitleParts;
+  if (t) {
+    document.title = `E${engineNum} · ${t} — ${shortName}`;
+  } else {
+    document.title = _ravenOriginalTitle;
+  }
+}
+
 // Expose a single global namespace
 window.RavenUI = {
   $,
@@ -243,6 +285,7 @@ window.RavenUI = {
   initTooltips,
   initInfoTips,
   installGlobalApiLoading,
+  setEngineTabTitle,
 };
 
 // ---------------------------------------------------------------------------

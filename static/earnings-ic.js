@@ -123,6 +123,7 @@
     const t = ($('ticker').value || '').trim().toUpperCase();
     if (!t) return null;
     $('ticker').value = t;
+    if (window.RavenUI && RavenUI.setEngineTabTitle) RavenUI.setEngineTabTitle(t);
     try {
       const n = parseInt($('historyN').value || '20', 10);
       const data = await postJson('/api/earnings-ic/scan', { ticker: t, n, years: 5 });
@@ -147,6 +148,7 @@
       return;
     }
     $('ticker').value = t;
+    if (window.RavenUI && RavenUI.setEngineTabTitle) RavenUI.setEngineTabTitle(t);
 
     // Require earnings date + timing before continuing (matches E1 v2).
     const evDate = $('earningsDate').value || '';
@@ -1494,6 +1496,15 @@
     });
     refreshCalculateEnabled();
 
+    // Live tab-title updates so multiple E15 tabs are distinguishable in
+    // the Chrome tab strip. See ui_kit.js#setEngineTabTitle for format.
+    const tickerInput = $('ticker');
+    if (tickerInput && window.RavenUI && RavenUI.setEngineTabTitle) {
+      tickerInput.addEventListener('input', function () {
+        RavenUI.setEngineTabTitle(tickerInput.value);
+      });
+    }
+
     if (window.DeskInsight) {
       window.DeskInsight.bind({
         engineId:           'e15',
@@ -1545,7 +1556,10 @@
       const wcKey = (q.get('wc_key') || q.get('wing_console_cache_key') || '').trim();
       const rank = (q.get('rank') || q.get('placement_rank') || '0').trim();
 
-      if (t) $('ticker').value = t;
+      if (t) {
+        $('ticker').value = t;
+        if (window.RavenUI && RavenUI.setEngineTabTitle) RavenUI.setEngineTabTitle(t);
+      }
       if (ed) $('earningsDate').value = ed;
       if (et && ['AMC', 'BMO', 'UNK'].includes(et)) $('earningsTiming').value = et;
       if (wcKey) {
