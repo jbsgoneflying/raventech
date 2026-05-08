@@ -25,11 +25,13 @@ from fastapi.testclient import TestClient
 
 from v2_app.foundation.analogues import (
     AnalogueIndex,
-    Standardizer,
     build_index_from_v1_trades,
     extract_features,
     feature_names,
-    _masked_cosine,
+)
+from v2_app.foundation.vectorspace import (
+    Standardizer,
+    masked_cosine as _masked_cosine,
 )
 
 

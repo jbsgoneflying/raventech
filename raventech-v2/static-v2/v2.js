@@ -93,6 +93,29 @@
     } catch (err) { /* ignore — keep baseline */ }
   }
 
+  async function refreshRegimeTile() {
+    var TARGET_N = 90;  // 90 days = ~one quarter of DMS snapshots
+    try {
+      var res = await fetch("/api/v2/regime/stats", { credentials: "include" });
+      if (!res.ok) return;
+      var data = await res.json();
+      var n = data.n_indexed || 0;
+      var pct = Math.min(100, (n / TARGET_N) * 100);
+      var caption;
+      if (n === 0) {
+        caption = "no index built — POST /api/v2/regime/build to ingest v1 DMS history";
+      } else {
+        var dist = data.label_distribution || {};
+        var parts = [];
+        ["Risk-On", "Transitional", "Risk-Off", "Stressed"].forEach(function (k) {
+          if (dist[k]) parts.push(dist[k] + " " + k);
+        });
+        caption = n + " days indexed · " + (parts.length ? parts.join(" · ") : "no labels yet");
+      }
+      updateBrainTile("regime_encoder", pct, caption);
+    } catch (err) { /* ignore — keep baseline */ }
+  }
+
   // ── Mobile drawer ─────────────────────────────────────────
   function wireDrawer() {
     var btn  = $("#v2MenuToggle");
@@ -217,6 +240,7 @@
     loadTicker();
     refreshConformalTile();
     refreshAnalogueTile();
+    refreshRegimeTile();
     ambientStream();
   });
 })();

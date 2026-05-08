@@ -94,7 +94,11 @@ def get_config() -> V2Config:
             "V2_ANTHROPIC_MODEL_EXTENDED", "claude-opus-4-1-20250805"
         ),
         openai_api_key=_str("OPENAI_API_KEY"),
-        enable_regime_encoder=_bool("V2_ENABLE_REGIME_ENCODER", False),
+        # Phase 1 module 3 — feature-space MVP shipped 2026-05-08. Daily
+        # market-state encoder over v1's front_layer:dms:* corpus, with
+        # nearest-day retrieval + cluster-prior over v1's regime label.
+        # Phase 2 swaps for a learned latent over a 60-day multi-asset panel.
+        enable_regime_encoder=_bool("V2_ENABLE_REGIME_ENCODER", True),
         # Phase 1 module 2 — feature-space MVP shipped 2026-05-08. Real
         # cross-ticker / cross-time analogue search via cosine similarity
         # over hand-crafted z-scored feature vectors. Phase 2 swaps the

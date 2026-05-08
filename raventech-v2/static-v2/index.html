@@ -113,18 +113,19 @@
         </div>
 
         <div class="v2BrainPanel" id="v2BrainPanel">
-          <article class="v2BrainTile">
-            <div class="v2BrainTileLabel">regime encoder</div>
-            <div class="v2BrainTileName">64-d learned latent</div>
+          <article class="v2BrainTile" data-brain-module="regime_encoder">
+            <div class="v2BrainTileLabel">regime encoder <span class="v2BrainLiveDot" aria-hidden="true"></span></div>
+            <div class="v2BrainTileName">daily market state · nearest days</div>
             <div class="v2BrainTileNote">
-              Time-series transformer over 10y of multi-asset panels. Replaces the
-              8-factor Gaussian HMM. Produces a regime embedding plus cluster
-              probabilities and nearest historical days.
+              Pure-Python feature-space encoder over v1's front_layer:dms history.
+              Returns a z-scored embedding plus a cluster prior (Risk-On / Transitional /
+              Risk-Off / Stressed) from the K nearest historical days.
             </div>
             <div class="v2BrainBarRow">
               <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="6"></div></div>
               <span class="v2BrainBarPct" data-pct-of="6">6%</span>
             </div>
+            <div class="v2BrainTileLive">phase 1 MVP — masked-cosine over hand-crafted features; learned latent is phase 2</div>
           </article>
 
           <article class="v2BrainTile" data-brain-module="contrastive_analogues">

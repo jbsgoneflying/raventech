@@ -54,22 +54,23 @@ def test_version_reports_foundation_flags(client: TestClient) -> None:
         "agent_committee",
     }
     assert expected.issubset(foundation.keys())
-    # Phase 1 modules 1 + 2 are real and on by default.
+    # Phase 1 modules 1, 2, 3 are real and on by default.
     assert foundation["conformal_calibration"] is True
     assert foundation["contrastive_analogues"] is True
-    # The remaining four are still phase 0 stubs.
-    pending = {k: v for k, v in foundation.items()
-               if k not in ("conformal_calibration", "contrastive_analogues")}
+    assert foundation["regime_encoder"] is True
+    # The remaining three are still phase 0 stubs.
+    online = {"conformal_calibration", "contrastive_analogues", "regime_encoder"}
+    pending = {k: v for k, v in foundation.items() if k not in online}
     assert all(v is False for v in pending.values())
 
 
-def test_regime_embed_returns_shape_in_phase0(client: TestClient) -> None:
+def test_regime_embed_legacy_get_advertises_phase1(client: TestClient) -> None:
     res = client.get("/api/v2/regime/embed")
     assert res.status_code == 200
     body = res.json()
-    assert body["status"] == "phase0_stub"
-    assert body["embedding_dim"] == 64
-    assert body["expected_cluster_count"] == 6
+    assert body["status"] == "phase1_mvp_active"
+    assert isinstance(body["feature_names"], list)
+    assert len(body["feature_names"]) > 0
 
 
 def test_analogues_search_advertises_shape(client: TestClient) -> None:
