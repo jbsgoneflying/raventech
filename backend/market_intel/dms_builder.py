@@ -256,8 +256,23 @@ def build_dms_v2(
         "confidence_band":      mi_snap.confidence_band,
         "factor_readings":      mi_snap.factor_readings,
     }
-    # Preserve legacy state/score so old UI/LLM still work.
-    v2_regime.setdefault("state", (out.get("regime") or {}).get("state", mi_snap.label))
+    # Promote canonical mi_snap label/score into legacy fields whenever we
+    # have a real source. Without this the legacy ``regime.state`` /
+    # ``regime.score`` keep echoing build_daily_market_state defaults
+    # (Transitional / 50.0) even on days when the HMM has actual readings,
+    # which left v2's regime encoder seeing 136 days of identical features
+    # in production.
+    canonical_label = (mi_snap.label or "").strip()
+    legacy_state = (out.get("regime") or {}).get("state")
+    has_real_signal = bool(mi_snap.source) and mi_snap.source != "legacy_fallback"
+    if canonical_label and (has_real_signal or not legacy_state):
+        v2_regime["state"] = canonical_label
+    else:
+        v2_regime.setdefault("state", legacy_state or canonical_label)
+    if mi_snap.probs and has_real_signal:
+        v2_regime["score"] = _stress_score_from_probs(mi_snap.probs)
+    elif "score" not in v2_regime:
+        v2_regime["score"] = (out.get("regime") or {}).get("score", 50.0)
     out["regime"] = v2_regime
 
     # Canonical vol_state (overwrites legacy derivation for consistency).
@@ -275,6 +290,23 @@ def build_dms_v2(
             "per_asset_loadings": xa_dict.get("per_asset_loadings", {}),
             "universe_coverage":  xa_dict.get("universe_coverage", {}),
         }
+
+    # ------------------------------------------------------------------
+    # Skeleton-default detector
+    # ------------------------------------------------------------------
+    # Flag DMS docs that are entirely the dataclass defaults so downstream
+    # consumers (v2 regime encoder, audit dashboards) can filter them out.
+    # The fingerprint we look for is exactly what build_daily_market_state
+    # produces when called with no real engine data:
+    #   regime.state == Transitional, regime.score == 50,
+    #   vol_state.level == 25 / term_structure == flat / skew == neutral,
+    #   news_risk.today == low, mi_snap.source missing or legacy_fallback.
+    out["data_quality"] = {
+        "skeleton_default": _is_skeleton_default(out, mi_snap),
+        "regime_source":    mi_snap.source or "missing",
+        "had_engine5":      bool(engine5_snapshot),
+        "generated_at":     out.get("generated_at"),
+    }
 
     # Dedicated market_intel block for LLM consumption + chat context.
     out["market_intel"] = {
@@ -294,3 +326,46 @@ def build_dms_v2(
     }
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Helpers (module-level so they can be unit-tested directly)
+# ---------------------------------------------------------------------------
+
+
+def _stress_score_from_probs(probs: Dict[str, float]) -> float:
+    """Convert HMM cluster probs into the legacy 0-100 stress score.
+
+    Risk-On contributes 0, Transitional 50, Stressed 100. Designed so a
+    pure Risk-On day scores ~10, pure Stressed ~90 — matching the bands
+    the rest of v1 uses.
+    """
+    if not isinstance(probs, dict) or not probs:
+        return 50.0
+    risk_on      = float(probs.get("risk_on", 0.0) or 0.0)
+    transitional = float(probs.get("transitional", 0.0) or 0.0)
+    stressed     = float(probs.get("stressed", 0.0) or 0.0)
+    total = risk_on + transitional + stressed
+    if total <= 0:
+        return 50.0
+    risk_on, transitional, stressed = (
+        risk_on / total, transitional / total, stressed / total,
+    )
+    return round(0.0 * risk_on + 50.0 * transitional + 100.0 * stressed, 2)
+
+
+def _is_skeleton_default(dms: Dict[str, Any], mi_snap: Any) -> bool:
+    """True when the DMS doc is exactly the build_daily_market_state default
+    fingerprint (no engine data fed in)."""
+    regime = dms.get("regime") or {}
+    vol = dms.get("vol_state") or {}
+    news = dms.get("news_risk") or {}
+    return (
+        float(regime.get("score", 0.0)) == 50.0
+        and str(regime.get("state", "")) == "Transitional"
+        and float(vol.get("level", 0.0)) == 25.0
+        and str(vol.get("term_structure", "")) == "flat"
+        and str(vol.get("skew", "")) == "neutral"
+        and str(news.get("today", "")) == "low"
+        and (not mi_snap.source or mi_snap.source == "legacy_fallback")
+    )

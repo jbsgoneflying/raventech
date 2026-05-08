@@ -94,11 +94,69 @@ def extract_market_state(dms: Mapping[str, Any]) -> dict[str, float | None]:
 
     Missing or non-numeric paths return ``None``, which the index treats as
     a masked dimension at search time (same semantics as the analogue index).
+
+    Skeleton-default docs (v1's ``build_daily_market_state`` fallback when
+    no engines fed it real data) return all-None so the index builder skips
+    them. v1 stamps these with ``data_quality.skeleton_default = True`` and
+    we also detect them by fingerprint for backward compat with historical
+    docs written before the v1 hygiene hotfix.
     """
+    if is_skeleton_default(dms):
+        return {name: None for name, _, _ in _FEATURES}
     out: dict[str, float | None] = {}
     for name, paths, cat_map in _FEATURES:
         out[name] = _resolve(dms, name, paths, cat_map)
     return out
+
+
+def is_skeleton_default(dms: Mapping[str, Any]) -> bool:
+    """Detect DMS docs that are pure build_daily_market_state defaults.
+
+    Two-tier check:
+      1. Explicit tag from the v1 hygiene hotfix
+         (``data_quality.skeleton_default == True``).
+      2. Fingerprint match for historical docs written before the hotfix:
+         regime.state == "Transitional" AND regime.score == 50 AND
+         vol_state.level == 25 AND term_structure == "flat" AND
+         skew == "neutral" AND news_risk.today == "low" AND no
+         meaningful regime.probs / regime.confidence.
+    """
+    dq = dms.get("data_quality") if isinstance(dms, Mapping) else None
+    if isinstance(dq, Mapping) and bool(dq.get("skeleton_default")):
+        return True
+
+    regime = dms.get("regime") or {}
+    vol = dms.get("vol_state") or {}
+    news = dms.get("news_risk") or {}
+    fingerprint = (
+        _safe_get(regime, "state") == "Transitional"
+        and _safe_get(regime, "score") == 50.0
+        and _safe_get(vol, "level") == 25.0
+        and _safe_get(vol, "term_structure") == "flat"
+        and _safe_get(vol, "skew") == "neutral"
+        and _safe_get(news, "today") == "low"
+    )
+    if not fingerprint:
+        return False
+    # The fingerprint is permissive — any genuinely neutral day matches it.
+    # If the doc carries an mi_snap-derived signal (probs with non-default
+    # mass, or confidence > 0.5), trust it as real and don't filter.
+    probs = regime.get("probs") if isinstance(regime, Mapping) else None
+    if isinstance(probs, Mapping) and probs:
+        try:
+            risk_on = float(probs.get("risk_on", 0.0) or 0.0)
+            stressed = float(probs.get("stressed", 0.0) or 0.0)
+            if risk_on > 0.25 or stressed > 0.25:
+                return False
+        except (TypeError, ValueError):
+            pass
+    confidence = regime.get("confidence") if isinstance(regime, Mapping) else None
+    try:
+        if float(confidence or 0.0) > 0.5:
+            return False
+    except (TypeError, ValueError):
+        pass
+    return True
 
 
 def _resolve(
@@ -330,12 +388,19 @@ def build_index_from_dms_history(
     docs = list(dms_docs)
     feature_rows: list[dict[str, float | None]] = []
     metadata_rows: list[dict[str, Any]] = []
-    skipped = {"no_date": 0, "all_features_missing": 0}
+    skipped = {
+        "no_date": 0,
+        "all_features_missing": 0,
+        "skeleton_default": 0,
+    }
 
     for d in docs:
         date = str(d.get("date") or "").strip()
         if not date:
             skipped["no_date"] += 1
+            continue
+        if is_skeleton_default(d):
+            skipped["skeleton_default"] += 1
             continue
         feats = extract_market_state(d)
         if not any(v is not None for v in feats.values()):

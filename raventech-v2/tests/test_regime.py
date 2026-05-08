@@ -15,6 +15,7 @@ from v2_app.foundation.regime import (
     RegimeIndex,
     build_index_from_dms_history,
     extract_market_state,
+    is_skeleton_default,
     regime_label,
 )
 
@@ -173,6 +174,70 @@ def test_regime_label_with_alt_field() -> None:
 def test_regime_label_returns_none_on_unknown() -> None:
     assert regime_label({"date": "x", "regime": {"state": "Pizzaaaaa"}}) is None
     assert regime_label({"date": "x"}) is None
+
+
+# ── Skeleton-default detector ──────────────────────────────
+
+
+def _skeleton_doc(date: str = "2026-04-15") -> dict[str, Any]:
+    """Mirror what v1's build_daily_market_state writes when fed nothing."""
+    return {
+        "date": date,
+        "regime": {"state": "Transitional", "score": 50.0, "drivers": []},
+        "vol_state": {"level": 25.0, "term_structure": "flat", "skew": "neutral"},
+        "news_risk": {"today": "low", "week_ahead": []},
+        "engine_gates": {
+            "earnings": "selective", "red_dog": "allowed", "ichimoku": "selective",
+            "index_income": "allowed", "post_event_ext": "selective",
+        },
+        "earnings_candidates": [],
+    }
+
+
+def test_skeleton_default_via_explicit_tag() -> None:
+    doc = _risk_on("2026-04-15")
+    doc["data_quality"] = {"skeleton_default": True}
+    assert is_skeleton_default(doc) is True
+
+
+def test_skeleton_default_via_fingerprint() -> None:
+    doc = _skeleton_doc()
+    assert is_skeleton_default(doc) is True
+
+
+def test_skeleton_with_real_probs_not_filtered() -> None:
+    """A neutral day with real HMM probs is NOT a skeleton."""
+    doc = _skeleton_doc()
+    doc["regime"]["probs"] = {"risk_on": 0.30, "transitional": 0.40, "stressed": 0.30}
+    assert is_skeleton_default(doc) is False
+
+
+def test_skeleton_with_high_confidence_not_filtered() -> None:
+    doc = _skeleton_doc()
+    doc["regime"]["confidence"] = 0.72
+    assert is_skeleton_default(doc) is False
+
+
+def test_real_risk_on_doc_not_skeleton() -> None:
+    assert is_skeleton_default(_risk_on("2026-04-15")) is False
+
+
+def test_real_stressed_doc_not_skeleton() -> None:
+    assert is_skeleton_default(_stressed("2026-04-15")) is False
+
+
+def test_extract_returns_all_none_for_skeleton() -> None:
+    feats = extract_market_state(_skeleton_doc())
+    for v in feats.values():
+        assert v is None
+
+
+def test_build_index_skips_skeletons_separately() -> None:
+    # 18 real synthetic + 5 skeleton defaults
+    docs = _synthetic_corpus() + [_skeleton_doc(f"2026-05-0{i}") for i in range(5)]
+    idx, stats = build_index_from_dms_history(docs)
+    assert idx.n_indexed == 18
+    assert stats["skipped"]["skeleton_default"] == 5
 
 
 # ── End-to-end build + search ─────────────────────────────
