@@ -169,6 +169,11 @@ def _mirror_one_engine(
     if reset:
         cal.state.scores.clear()
 
+    # Track which extraction path actually populated each observation so the
+    # operator can see at a glance whether v1 is storing the prediction in
+    # the canonical place or via one of the documented fallbacks.
+    out["sources"] = {}
+
     for tid in trade_ids:
         out["n_trades_seen"] += 1
         try:
@@ -186,15 +191,8 @@ def _mirror_one_engine(
             continue
         out["n_closed"] += 1
 
-        ctx = doc.get("entryContext") or {}
-        breach_pct = ctx.get("breachPct")
-        if breach_pct is None:
-            out["skips"]["no_breach_prediction"] += 1
-            continue
-
-        try:
-            prediction = float(breach_pct) / 100.0
-        except (TypeError, ValueError):
+        prediction, source = _extract_breach_prediction(doc)
+        if prediction is None:
             out["skips"]["no_breach_prediction"] += 1
             continue
         if not (0.0 <= prediction <= 1.0):
@@ -211,11 +209,79 @@ def _mirror_one_engine(
         ts = doc.get("closedAt") or doc.get("loggedAt")
         cal.observe(prediction=prediction, realized=realized, ts=ts)
         out["n_observations_logged"] += 1
+        out["sources"][source] = out["sources"].get(source, 0) + 1
 
     persisted = save_calibrator(engine, metric, cal)
     out["persisted"] = persisted
     out["final_n_calibration"] = cal.state.n
     return out
+
+
+def _extract_breach_prediction(doc: dict[str, Any]) -> tuple[float | None, str]:
+    """Find the predicted breach probability in a v1 trade document.
+
+    v1 stores this in several places depending on which engine + advisor
+    path produced the trade. We try them in priority order — the first
+    non-null, in-range value wins. Returns (prediction, source_label)
+    where source_label is e.g. "entryContext.breachPct" so the operator
+    can audit which path is being used in practice.
+
+    All v1 values live on a 0..100 percent scale; we normalize to [0, 1]
+    for the conformal calibrator.
+    """
+    candidates: list[tuple[str, Any]] = [
+        # 1. The canonical place — set by the SPX IC advisor (engine2_spx_ic.py
+        #    line 3994 of static/app.js: breachPct = breach_close_prob * 100).
+        ("entryContext.breachPct", _safe_get(doc, "entryContext", "breachPct")),
+        # 2. Top-level breach snapshot (from the e1 post-mortem prompt schema —
+        #    backend/prompts/e1_post_mortem.txt: "breachSnapshot — breach rate").
+        ("breachSnapshot.breachRate", _safe_get(doc, "breachSnapshot", "breachRate")),
+        ("breachSnapshot.breachRatePct", _safe_get(doc, "breachSnapshot", "breachRatePct")),
+        ("breachSnapshot.breachPct", _safe_get(doc, "breachSnapshot", "breachPct")),
+        ("breachSnapshot.emBreachPct", _safe_get(doc, "breachSnapshot", "emBreachPct")),
+        # 3. Entry-side mirror used by some E1 advisor paths.
+        ("entry.emBreachPct", _safe_get(doc, "entry", "emBreachPct")),
+        ("entry.breachPct", _safe_get(doc, "entry", "breachPct")),
+        # 4. EM-bucketed breach summary (E1 keyed by EM multiple, e.g. {"1.0": 18, "1.5": 12}).
+        #    We pick the smallest valid value as the "tightest wing" estimate so the calibrator
+        #    sees a defensible single number rather than an arbitrary key.
+        ("entryContext.emBreachSummary[min]", _min_of_dict_values(_safe_get(doc, "entryContext", "emBreachSummary"))),
+        # 5. Market snapshot fallback (rare).
+        ("marketSnapshot.breachPct", _safe_get(doc, "marketSnapshot", "breachPct")),
+    ]
+    for label, raw in candidates:
+        try:
+            if raw is None:
+                continue
+            v = float(raw) / 100.0
+            if 0.0 <= v <= 1.0:
+                return v, label
+        except (TypeError, ValueError):
+            continue
+    return None, "none"
+
+
+def _safe_get(doc: dict[str, Any], *path: str) -> Any:
+    cur: Any = doc
+    for p in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(p)
+    return cur
+
+
+def _min_of_dict_values(d: Any) -> float | None:
+    if not isinstance(d, dict) or not d:
+        return None
+    vals: list[float] = []
+    for v in d.values():
+        try:
+            f = float(v)
+            if 0.0 <= f <= 100.0:
+                vals.append(f)
+        except (TypeError, ValueError):
+            continue
+    return min(vals) if vals else None
 
 
 def _get_json(client: Any, key: str) -> Any:

@@ -205,9 +205,13 @@ def test_mirror_skips_malformed_predictions(monkeypatch) -> None:
     summary = v1_mirror.mirror_v1_breach_probability()
     e1 = summary["engines"]["e1"]
     assert e1["n_observations_logged"] == 0
-    assert e1["skips"]["no_breach_prediction"] == 2
+    # The extractor tries every known path; trades that have *no* valid value
+    # in any path land in no_breach_prediction. The out-of-range trade also
+    # ends up there because the extractor falls through bad values rather
+    # than bailing — there's just no other path for that fixture.
+    assert e1["skips"]["no_breach_prediction"] == 3
     assert e1["skips"]["no_outcome_class"] == 1
-    assert e1["skips"]["out_of_range_prediction"] == 1
+    assert e1["skips"]["out_of_range_prediction"] == 0
 
 
 def test_mirror_reset_replaces_existing_state(monkeypatch) -> None:
@@ -262,6 +266,75 @@ def test_mirror_endpoint(client: TestClient, monkeypatch) -> None:
     seen = {(c["engine"], c["metric"]) for c in lst["calibrators"]}
     assert ("e1", "breach_probability") in seen
     assert ("e2", "breach_probability") in seen
+
+
+def test_mirror_extracts_from_fallback_paths(monkeypatch) -> None:
+    """When entryContext.breachPct is null, fall back to breachSnapshot etc."""
+    fake = FakeRedis()
+    ids = ["fb_breach_snapshot", "fb_em_summary", "fb_entry_em", "no_pred"]
+
+    fake.set("e1:trades:fb_breach_snapshot", json.dumps({
+        "status": "closed",
+        "entryContext": {"breachPct": None},
+        "breachSnapshot": {"breachRatePct": 22.0},
+        "outcome": {"outcomeClass": "win"},
+    }))
+    fake.set("e1:trades:fb_em_summary", json.dumps({
+        "status": "closed",
+        "entryContext": {"breachPct": None, "emBreachSummary": {"1.0": 28.0, "1.5": 14.0, "2.0": 8.0}},
+        "outcome": {"outcomeClass": "loss"},
+    }))
+    fake.set("e1:trades:fb_entry_em", json.dumps({
+        "status": "closed",
+        "entryContext": {"breachPct": None},
+        "entry": {"emBreachPct": 17.5},
+        "outcome": {"outcomeClass": "scratch"},
+    }))
+    fake.set("e1:trades:no_pred", json.dumps({
+        "status": "closed",
+        "entryContext": {"breachPct": None},
+        "outcome": {"outcomeClass": "win"},
+    }))
+    fake.set("e1:trades:index", json.dumps(ids))
+    fake.set("e2:trades:index", json.dumps([]))
+
+    from v2_app.foundation import conformal_store, v1_mirror
+    monkeypatch.setattr(conformal_store, "_redis_client", lambda: fake)
+    monkeypatch.setattr(v1_mirror, "_redis_client", lambda: fake)
+
+    summary = v1_mirror.mirror_v1_breach_probability()
+    e1 = summary["engines"]["e1"]
+    assert e1["n_observations_logged"] == 3
+    assert e1["skips"]["no_breach_prediction"] == 1
+    # Sources audit: each fallback path used exactly once.
+    assert e1["sources"]["breachSnapshot.breachRatePct"] == 1
+    assert e1["sources"]["entryContext.emBreachSummary[min]"] == 1
+    assert e1["sources"]["entry.emBreachPct"] == 1
+
+
+def test_extract_helper_priority_order() -> None:
+    from v2_app.foundation.v1_mirror import _extract_breach_prediction
+    # entryContext.breachPct wins when present — even if breachSnapshot has a value.
+    doc = {
+        "entryContext": {"breachPct": 25.0},
+        "breachSnapshot": {"breachRatePct": 99.0},
+    }
+    pred, src = _extract_breach_prediction(doc)
+    assert pred == pytest.approx(0.25)
+    assert src == "entryContext.breachPct"
+
+    # Out-of-range values are skipped and we fall through to the next.
+    doc = {
+        "entryContext": {"breachPct": 250.0},
+        "breachSnapshot": {"breachRatePct": 18.0},
+    }
+    pred, src = _extract_breach_prediction(doc)
+    assert pred == pytest.approx(0.18)
+    assert src == "breachSnapshot.breachRatePct"
+
+    # All-null returns (None, "none").
+    pred, src = _extract_breach_prediction({"entryContext": {}})
+    assert pred is None and src == "none"
 
 
 def test_mirror_endpoint_only_engine(client: TestClient, monkeypatch) -> None:
