@@ -54,11 +54,13 @@ def test_version_reports_foundation_flags(client: TestClient) -> None:
         "agent_committee",
     }
     assert expected.issubset(foundation.keys())
-    # Phase 1 module 1: conformal calibration is real and on by default.
+    # Phase 1 modules 1 + 2 are real and on by default.
     assert foundation["conformal_calibration"] is True
-    # All other Foundation Brain modules are still phase 0 stubs.
-    other = {k: v for k, v in foundation.items() if k != "conformal_calibration"}
-    assert all(v is False for v in other.values())
+    assert foundation["contrastive_analogues"] is True
+    # The remaining four are still phase 0 stubs.
+    pending = {k: v for k, v in foundation.items()
+               if k not in ("conformal_calibration", "contrastive_analogues")}
+    assert all(v is False for v in pending.values())
 
 
 def test_regime_embed_returns_shape_in_phase0(client: TestClient) -> None:
@@ -71,14 +73,15 @@ def test_regime_embed_returns_shape_in_phase0(client: TestClient) -> None:
 
 
 def test_analogues_search_advertises_shape(client: TestClient) -> None:
+    """Legacy GET search endpoint still works and advertises Phase 1 status."""
     res = client.get("/api/v2/analogues/search", params={"ticker": "NVDA", "k": 80})
     assert res.status_code == 200
     body = res.json()
-    assert body["status"] == "phase0_stub"
+    assert body["status"] == "phase1_mvp_active"
     assert body["query"]["ticker"] == "NVDA"
     assert body["query"]["k"] == 80
     assert body["query"]["cross_ticker"] is True
-    assert body["embedding_space"]["dim"] == 128
+    assert "feature-space" in str(body["embedding_space"]["dim"])
 
 
 def test_counterfactual_log_accepts_payload(client: TestClient) -> None:

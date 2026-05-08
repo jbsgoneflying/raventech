@@ -67,6 +67,32 @@
     } catch (err) { /* ignore — keep baseline */ }
   }
 
+  // Pull /api/v2/analogues/stats and update the analogue tile with a
+  // composite reading: indexed-trade count vs target + ticker diversity.
+  // Target index size for "100% online" is 1000 trades.
+  async function refreshAnalogueTile() {
+    var TARGET_N = 1000;
+    try {
+      var res = await fetch("/api/v2/analogues/stats", { credentials: "include" });
+      if (!res.ok) return;
+      var data = await res.json();
+      var indexes = data.indexes || [];
+      var total = indexes.reduce(function (acc, i) { return acc + (i.n_indexed || 0); }, 0);
+      var tickers = new Set();
+      indexes.forEach(function (i) {
+        (i.tickers || []).forEach(function (t) { tickers.add(t.ticker); });
+      });
+      var pct = Math.min(100, (total / TARGET_N) * 100);
+      var caption;
+      if (indexes.length === 0) {
+        caption = "no index built — POST /api/v2/analogues/build to index v1 trades";
+      } else {
+        caption = total + " trades indexed · " + tickers.size + " tickers · " + indexes.length + " engine" + (indexes.length === 1 ? "" : "s");
+      }
+      updateBrainTile("contrastive_analogues", pct, caption);
+    } catch (err) { /* ignore — keep baseline */ }
+  }
+
   // ── Mobile drawer ─────────────────────────────────────────
   function wireDrawer() {
     var btn  = $("#v2MenuToggle");
@@ -190,6 +216,7 @@
     loadVersion();
     loadTicker();
     refreshConformalTile();
+    refreshAnalogueTile();
     ambientStream();
   });
 })();

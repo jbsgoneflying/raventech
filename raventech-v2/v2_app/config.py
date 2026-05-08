@@ -95,7 +95,11 @@ def get_config() -> V2Config:
         ),
         openai_api_key=_str("OPENAI_API_KEY"),
         enable_regime_encoder=_bool("V2_ENABLE_REGIME_ENCODER", False),
-        enable_contrastive_analogues=_bool("V2_ENABLE_CONTRASTIVE_ANALOGUES", False),
+        # Phase 1 module 2 — feature-space MVP shipped 2026-05-08. Real
+        # cross-ticker / cross-time analogue search via cosine similarity
+        # over hand-crafted z-scored feature vectors. Phase 2 swaps the
+        # encoder for a learned contrastive embedder.
+        enable_contrastive_analogues=_bool("V2_ENABLE_CONTRASTIVE_ANALOGUES", True),
         # Phase 1 module 1 — shipped 2026-05-08. Module is real, not a stub.
         # Defaults to True so the dashboard reads "brain 1/6 modules online".
         enable_conformal_calibration=_bool("V2_ENABLE_CONFORMAL", True),
