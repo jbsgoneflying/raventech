@@ -1,15 +1,20 @@
-"""Layer 3 - Agentic Reasoning (Anthropic-native).
+"""Phase 1 module 4 — agent committee.
 
-Phase 3 deliverables:
+A 5-agent Claude mesh that deliberates over a candidate trade. Each
+agent has a sharply-defined role, sees the same setup, and writes a
+typed verdict. The Synthesizer reads everyone's output and emits the
+final committee decision.
 
-- ``researcher``         pulls evidence (chains, news, calendar, fundamentals)
-- ``quant``              critiques numbers, requests reruns
-- ``devils_advocate``    actively tries to break the trade
-- ``risk_officer``       hard caps, constitution enforcement
-- ``synthesizer``        produces the final desk note + dissent flag
-- ``memory``             persistent vector store of past trades + episodes
-- ``mcp_tools``          v2 engine endpoints exposed as MCP tools
-
-Default model: Claude Sonnet 4.5+ (V2_ANTHROPIC_MODEL_DEFAULT).
-Hard cases auto-escalate to Opus / extended thinking.
+The committee reads from the Foundation Brain (regime encoder,
+contrastive analogues, conformal calibrator) so a single deliberation
+fuses learned regime context, historical precedent, and calibrated
+breach probability into one verdict.
 """
+
+from .committee import (  # noqa: F401
+    AgentRole,
+    AgentVerdict,
+    CommitteeDecision,
+    CommitteeRunner,
+    SetupPayload,
+)

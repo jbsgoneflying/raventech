@@ -93,6 +93,32 @@
     } catch (err) { /* ignore — keep baseline */ }
   }
 
+  async function refreshCommitteeTile() {
+    var TARGET_N = 25;  // 25 deliberations to fill the bar
+    try {
+      var res = await fetch("/api/v2/committee/recent?n=100", { credentials: "include" });
+      if (!res.ok) return;
+      var data = await res.json();
+      var entries = (data && data.entries) || [];
+      var n = entries.length;
+      var counts = { approve: 0, monitor: 0, decline: 0 };
+      entries.forEach(function (e) {
+        if (counts.hasOwnProperty(e.decision)) counts[e.decision] += 1;
+      });
+      var pct = Math.min(100, (n / TARGET_N) * 100);
+      var caption;
+      if (n === 0) {
+        caption = "no deliberations yet — POST /api/v2/committee/deliberate with a setup";
+      } else {
+        caption = n + " deliberation" + (n === 1 ? "" : "s") + " · "
+                + counts.approve + " approve · "
+                + counts.monitor + " monitor · "
+                + counts.decline + " decline";
+      }
+      updateBrainTile("agent_committee", pct, caption);
+    } catch (err) { /* ignore — keep baseline */ }
+  }
+
   async function refreshRegimeTile() {
     var TARGET_N = 90;  // 90 days = ~one quarter of DMS snapshots
     try {
@@ -241,6 +267,7 @@
     refreshConformalTile();
     refreshAnalogueTile();
     refreshRegimeTile();
+    refreshCommitteeTile();
     ambientStream();
   });
 })();

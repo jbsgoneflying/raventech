@@ -109,5 +109,9 @@ def get_config() -> V2Config:
         enable_conformal_calibration=_bool("V2_ENABLE_CONFORMAL", True),
         enable_path_generator=_bool("V2_ENABLE_PATH_GENERATOR", False),
         enable_learned_ranker=_bool("V2_ENABLE_LEARNED_RANKER", False),
-        enable_agent_committee=_bool("V2_ENABLE_AGENT_COMMITTEE", False),
+        # Phase 1 module 4 — agent committee shipped 2026-05-08. Five-agent
+        # Claude mesh (Researcher / Quant / Devil's Advocate / Risk Officer
+        # / Synthesizer) wired to the Foundation Brain. Defaults to True so
+        # the dashboard reads "brain 4/6 modules online".
+        enable_agent_committee=_bool("V2_ENABLE_AGENT_COMMITTEE", True),
     )
