@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY raventech-v2/requirements-v2.txt /app/requirements-v2.txt
+RUN pip install --no-cache-dir -r /app/requirements-v2.txt
+
+COPY raventech-v2/v2_app   /app/v2_app
+COPY raventech-v2/static-v2 /app/static-v2
+COPY raventech-v2/deploy   /app/deploy
+
+RUN chmod +x /app/deploy/entrypoint-v2.sh
+
+EXPOSE 8001
+
+ENTRYPOINT ["/app/deploy/entrypoint-v2.sh"]

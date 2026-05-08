@@ -1,0 +1,11 @@
+# Phase 0 v2 dependencies — intentionally tiny.
+# Heavy ML libs (torch, faiss, anthropic) get added in Phase 1+ as each
+# Foundation Brain module ships, so v2 cold-starts stay fast in Phase 0.
+
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+gunicorn>=22.0,<24.0
+pydantic>=2.7,<3.0
+python-dotenv>=1.0,<2.0
+redis>=5.0,<6.0
+httpx>=0.27,<0.29

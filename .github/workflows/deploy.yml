@@ -20,13 +20,19 @@ jobs:
           script_stop: true
           command_timeout: 8m
           script: |
+            set -e
             echo "--- Connected to $(hostname) ---"
             cd /opt/breach-algo
             echo "--- Pulling latest code ---"
             git pull
-            echo "--- Building and restarting app container ---"
+            echo "--- Building and restarting v1 (app) ---"
             docker compose up -d --build app
-            echo "--- Waiting for app to start ---"
-            sleep 8
-            curl -sf http://localhost:8000/api/health && echo "Health check PASSED" || echo "Health check FAILED (app may still be starting)"
+            echo "--- Building and restarting v2 (app-v2) ---"
+            docker compose up -d --build app-v2 || echo "WARN: app-v2 build/start returned non-zero (continuing — v1 must not regress)"
+            echo "--- Waiting for both services to start ---"
+            sleep 10
+            echo "--- v1 health ---"
+            curl -sf http://localhost:8000/api/health && echo "v1 health PASSED" || echo "v1 health FAILED (app may still be starting)"
+            echo "--- v2 health ---"
+            curl -sf http://localhost:8001/api/v2/health && echo "v2 health PASSED" || echo "v2 health FAILED (app-v2 may still be starting)"
             echo "--- Deploy complete at $(date) ---"

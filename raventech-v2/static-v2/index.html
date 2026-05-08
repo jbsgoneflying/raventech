@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven Tech v2 — Foundation Brain</title>
+    <meta name="theme-color" content="#06070a" />
+    <meta
+      name="description"
+      content="Raven Tech v2 — learned regime embeddings, cross-ticker contrastive analogues, conformal-calibrated probabilities, and an agentic Claude committee. The v2 trading brain."
+    />
+    <link rel="icon" type="image/svg+xml" href="/static/assets/favicon-v2.svg" />
+    <link rel="stylesheet" href="/static/v2.css?v=1" />
+  </head>
+  <body>
+    <div class="v2Shell">
+      <header class="v2Topbar">
+        <a class="v2Brand" href="/" aria-label="Raven Tech v2 home">
+          <span class="v2BrandMark" aria-hidden="true"></span>
+          <span class="v2BrandText">
+            <span class="v2BrandTitle">Raven Tech</span>
+            <span class="v2BrandTag">v2 · foundation brain</span>
+          </span>
+        </a>
+
+        <div class="v2TopRight">
+          <span class="v2RegimeChip" id="v2RegimeChip">
+            <span class="v2RegimeDot"></span>
+            <span id="v2RegimeChipText">regime · loading…</span>
+          </span>
+          <a class="v2BackToV1" href="https://app.raven-tech.co" rel="noopener">v1 desk →</a>
+        </div>
+      </header>
+
+      <aside class="v2Sidebar">
+        <div class="v2SideLabel">Trading engines</div>
+        <a class="v2NavLink is-active" href="/">
+          <span class="v2NavGlyph">◈</span>
+          <span>Overview</span>
+          <span class="v2NavMeta">v2.0.α</span>
+        </a>
+        <a class="v2NavLink" href="/e1">
+          <span class="v2NavGlyph">E1</span>
+          <span>Earnings IC</span>
+          <span class="v2NavMeta">phase 0</span>
+        </a>
+        <a class="v2NavLink" href="/e15">
+          <span class="v2NavGlyph">E15</span>
+          <span>Earnings Scenario</span>
+          <span class="v2NavMeta">phase 0</span>
+        </a>
+        <a class="v2NavLink" href="/e2">
+          <span class="v2NavGlyph">E2</span>
+          <span>SPX Weekly IC</span>
+          <span class="v2NavMeta">phase 0</span>
+        </a>
+        <a class="v2NavLink" href="/e14">
+          <span class="v2NavGlyph">E14</span>
+          <span>SPX Scenario</span>
+          <span class="v2NavMeta">phase 0</span>
+        </a>
+        <a class="v2NavLink" href="/mi">
+          <span class="v2NavGlyph">MI</span>
+          <span>Market Brain</span>
+          <span class="v2NavMeta">phase 0</span>
+        </a>
+
+        <div class="v2SideLabel" style="margin-top:18px;">System</div>
+        <a class="v2NavLink" href="/api/v2/health" target="_blank" rel="noopener">
+          <span class="v2NavGlyph">⚡</span>
+          <span>Health</span>
+        </a>
+        <a class="v2NavLink" href="/api/v2/version" target="_blank" rel="noopener">
+          <span class="v2NavGlyph">v</span>
+          <span>Version</span>
+        </a>
+      </aside>
+
+      <main class="v2Main">
+        <!-- HERO -->
+        <section class="v2Hero">
+          <span class="v2HeroBadge">phase 0 · scaffolding · live</span>
+          <h1 class="v2HeroTitle">
+            One brain. Five engines.<br />
+            Every trade <em>reasoned, calibrated, remembered.</em>
+          </h1>
+          <p class="v2HeroSub">
+            Raven Tech v2 replaces hand-tuned weights with learned representations,
+            point-estimate probabilities with conformal calibration, and siloed
+            advisors with an agentic Claude committee that can disagree, escalate,
+            and self-improve overnight. The v1 desk keeps trading. v2 grows up
+            beside it, in the open.
+          </p>
+          <a class="v2HeroCTA" href="/mi">
+            Tour the brain
+            <span aria-hidden="true">→</span>
+          </a>
+          <a class="v2HeroCTAGhost" href="https://app.raven-tech.co" rel="noopener">
+            Open v1 desk
+          </a>
+        </section>
+
+        <!-- FOUNDATION BRAIN STATUS -->
+        <div class="v2SectionHead">
+          <h2 class="v2SectionTitle">Foundation brain</h2>
+          <span class="v2SectionLine"></span>
+          <span class="v2SectionTag" id="v2BrainTag">layer 1 · phase 0</span>
+        </div>
+
+        <div class="v2BrainPanel" id="v2BrainPanel">
+          <article class="v2BrainTile">
+            <div class="v2BrainTileLabel">regime encoder</div>
+            <div class="v2BrainTileName">64-d learned latent</div>
+            <div class="v2BrainTileNote">
+              Time-series transformer over 10y of multi-asset panels. Replaces the
+              8-factor Gaussian HMM. Produces a regime embedding plus cluster
+              probabilities and nearest historical days.
+            </div>
+            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="3"></div></div>
+          </article>
+
+          <article class="v2BrainTile">
+            <div class="v2BrainTileLabel">contrastive analogues</div>
+            <div class="v2BrainTileName">cross-ticker · cross-time</div>
+            <div class="v2BrainTileNote">
+              ANN search in a learned event-embedding space. Drops E15's same-ticker
+              constraint — a NVDA setup can pull peer analogues from 8 tickers
+              and 5 different years that share the same fingerprint.
+            </div>
+            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
+          </article>
+
+          <article class="v2BrainTile">
+            <div class="v2BrainTileLabel">conformal calibrator</div>
+            <div class="v2BrainTileName">guaranteed coverage</div>
+            <div class="v2BrainTileNote">
+              Wraps every probability the engines emit. "65% breach" finally means
+              65% over rolling out-of-sample windows. A live coverage tracker
+              alerts when models drift past nominal.
+            </div>
+            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="8"></div></div>
+          </article>
+
+          <article class="v2BrainTile">
+            <div class="v2BrainTileLabel">path generator</div>
+            <div class="v2BrainTileName">conditional diffusion</div>
+            <div class="v2BrainTileNote">
+              Replaces the OHLC MAE proxy with regime-conditional intraday paths
+              fit to tick history. Calibrated touch / breach / MAE distributions
+              instead of biased close-only proxies.
+            </div>
+            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="1"></div></div>
+          </article>
+
+          <article class="v2BrainTile">
+            <div class="v2BrainTileLabel">learned ranker</div>
+            <div class="v2BrainTileName">trades from desk PnL</div>
+            <div class="v2BrainTileNote">
+              Offline contextual bandit on the existing trade journal. Replaces
+              hand-set composite weights. Evaluated with doubly-robust off-policy
+              estimation so v2 ranker improvement is bounded before live A/B.
+            </div>
+            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
+          </article>
+
+          <article class="v2BrainTile">
+            <div class="v2BrainTileLabel">agent committee</div>
+            <div class="v2BrainTileName">Claude · 5-agent mesh</div>
+            <div class="v2BrainTileNote">
+              Researcher → Quant → Devil's Advocate → Risk Officer → Synthesizer.
+              MCP tools over every v2 engine. Persistent memory across sessions.
+              Streams a live debate; flags dissent on the card.
+            </div>
+            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
+          </article>
+        </div>
+
+        <!-- ENGINES -->
+        <div class="v2SectionHead">
+          <h2 class="v2SectionTitle">Engines, rebuilt</h2>
+          <span class="v2SectionLine"></span>
+          <span class="v2SectionTag">layer 2 · phase 2</span>
+        </div>
+
+        <div class="v2Grid">
+          <a class="v2Card" href="/e15">
+            <div class="v2CardHead">
+              <span class="v2CardCode">e15 v2</span>
+              <span class="v2CardStatus" data-state="phase0">phase 0</span>
+            </div>
+            <h3 class="v2CardTitle">Earnings IC scenario</h3>
+            <p class="v2CardSub">
+              Cross-ticker analogues. The biggest single unlock in v2 — a NVDA
+              setup retrieves peer earnings events instead of being limited to
+              NVDA's own history.
+            </p>
+            <div class="v2CardFoot">
+              <span class="v2Pill v2Pill--cyan">contrastive matcher</span>
+              <span class="v2Pill v2Pill--violet">learned conditioning</span>
+              <span class="v2Pill">chain replay</span>
+            </div>
+          </a>
+
+          <a class="v2Card" href="/e14">
+            <div class="v2CardHead">
+              <span class="v2CardCode">e14 v2</span>
+              <span class="v2CardStatus" data-state="phase0">phase 0</span>
+            </div>
+            <h3 class="v2CardTitle">SPX IC scenario</h3>
+            <p class="v2CardSub">
+              Drops weighted-L2 kNN for the contrastive embedder. Sizing becomes
+              risk-budget-aware on the committee's confidence + conformal
+              interval width. Exit rules become a learned policy.
+            </p>
+            <div class="v2CardFoot">
+              <span class="v2Pill v2Pill--cyan">contrastive matcher</span>
+              <span class="v2Pill v2Pill--em">conformal sizing</span>
+              <span class="v2Pill v2Pill--violet">learned exit policy</span>
+            </div>
+          </a>
+
+          <a class="v2Card" href="/e1">
+            <div class="v2CardHead">
+              <span class="v2CardCode">e1 v2</span>
+              <span class="v2CardStatus" data-state="phase0">phase 0</span>
+            </div>
+            <h3 class="v2CardTitle">Single-name earnings IC</h3>
+            <p class="v2CardSub">
+              Hand-set VRP weights (30/25/20/15/10) replaced by a learned ranker
+              trained on your own desk PnL. Diffusion paths replace the OHLC
+              MAE proxy.
+            </p>
+            <div class="v2CardFoot">
+              <span class="v2Pill v2Pill--violet">learned ranker</span>
+              <span class="v2Pill v2Pill--em">conformal CI</span>
+              <span class="v2Pill">diffusion paths</span>
+            </div>
+          </a>
+
+          <a class="v2Card" href="/e2">
+            <div class="v2CardHead">
+              <span class="v2CardCode">e2 v2</span>
+              <span class="v2CardStatus" data-state="phase0">phase 0</span>
+            </div>
+            <h3 class="v2CardTitle">SPX weekly IC</h3>
+            <p class="v2CardSub">
+              Bootstrap MC swapped for regime-conditional path generation. Dealer
+              gamma enters the wing composite directly as a learned feature, not
+              just an EM-preference nudge.
+            </p>
+            <div class="v2CardFoot">
+              <span class="v2Pill">path generator</span>
+              <span class="v2Pill v2Pill--cyan">learned gamma feature</span>
+              <span class="v2Pill v2Pill--em">conformal CI</span>
+            </div>
+          </a>
+
+          <a class="v2Card" href="/mi">
+            <div class="v2CardHead">
+              <span class="v2CardCode">mi v2</span>
+              <span class="v2CardStatus" data-state="phase0">phase 0</span>
+            </div>
+            <h3 class="v2CardTitle">Market brain</h3>
+            <p class="v2CardSub">
+              Live UMAP projection of the regime embedding. "Today is closest to
+              these 5 historical days" with a one-tap drill into how each engine
+              behaved in those analogues.
+            </p>
+            <div class="v2CardFoot">
+              <span class="v2Pill v2Pill--cyan">regime encoder</span>
+              <span class="v2Pill v2Pill--violet">UMAP</span>
+              <span class="v2Pill">live attribution</span>
+            </div>
+          </a>
+
+          <a class="v2Card" href="https://app.raven-tech.co" rel="noopener">
+            <div class="v2CardHead">
+              <span class="v2CardCode">v1 desk</span>
+              <span class="v2CardStatus" data-state="ready">live</span>
+            </div>
+            <h3 class="v2CardTitle">Production desk</h3>
+            <p class="v2CardSub">
+              v1 keeps trading. Every v1 request is silently mirrored through
+              v2 so we accumulate a counterfactual dataset of disagreements
+              before the desk ever sees a v2 verdict.
+            </p>
+            <div class="v2CardFoot">
+              <span class="v2Pill v2Pill--em">live</span>
+              <span class="v2Pill v2Pill--amber">counterfactual mirror</span>
+            </div>
+          </a>
+        </div>
+
+        <!-- COUNTERFACTUAL TICKER -->
+        <div class="v2SectionHead">
+          <h2 class="v2SectionTitle">Counterfactual journal</h2>
+          <span class="v2SectionLine"></span>
+          <span class="v2SectionTag">layer 4 · phase 0</span>
+        </div>
+
+        <div class="v2Ticker" aria-label="v1 vs v2 disagreement stream">
+          <span class="v2TickerLabel">v1 ⇋ v2 stream</span>
+          <div class="v2TickerBody">
+            <div class="v2TickerInner">
+              <span class="v2TickerItem"><span class="v2TickerKind">[awaiting]</span> first <span class="v2TickerEng">v2</span> trades land here once Phase 1 ships.</span>
+              <span class="v2TickerItem"><span class="v2TickerKind">[awaiting]</span> Every v1 verdict will be mirrored through <span class="v2TickerEng">v2</span> in shadow mode.</span>
+              <span class="v2TickerItem"><span class="v2TickerKind">[awaiting]</span> Disagreements stream live; right-then-wrong tracked over rolling windows.</span>
+              <span class="v2TickerItem"><span class="v2TickerKind">[awaiting]</span> first <span class="v2TickerEng">v2</span> trades land here once Phase 1 ships.</span>
+              <span class="v2TickerItem"><span class="v2TickerKind">[awaiting]</span> Every v1 verdict will be mirrored through <span class="v2TickerEng">v2</span> in shadow mode.</span>
+              <span class="v2TickerItem"><span class="v2TickerKind">[awaiting]</span> Disagreements stream live; right-then-wrong tracked over rolling windows.</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="/static/v2.js?v=1"></script>
+  </body>
+</html>

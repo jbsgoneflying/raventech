@@ -1,5 +1,5 @@
 services:
-  # ─── Main Site (FastAPI) ─────────────────────────────────────
+  # ─── Main Site (FastAPI) — v1 ─────────────────────────────────
   app:
     build: .
     env_file:
@@ -14,6 +14,28 @@ services:
       # Engine 14's SQLite chain cache (and anything else under data/)
       # lives here so a 2-year backfill is not wiped on every deploy.
       - app_data:/app/data
+
+  # ─── Raven Tech v2 (FastAPI) — separate service ───────────────
+  # Lives at v2.app.raven-tech.co (or /v2/* on the root domain
+  # before DNS for the subdomain is in place). Shares Redis with
+  # v1 and reads (read-only) the same SQLite chain cache.
+  app-v2:
+    build:
+      context: .
+      dockerfile: raventech-v2/Dockerfile.v2
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - V2_BIND_PORT=8001
+    restart: unless-stopped
+    depends_on:
+      - redis
+    volumes:
+      # v2 reads v1's chain cache and trade journal but never writes to it.
+      - app_data:/app/data:ro
 
   redis:
     image: redis:7-alpine

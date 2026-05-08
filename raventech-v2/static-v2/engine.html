@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven Tech v2 — Engine</title>
+    <meta name="theme-color" content="#06070a" />
+    <link rel="icon" type="image/svg+xml" href="/static/assets/favicon-v2.svg" />
+    <link rel="stylesheet" href="/static/v2.css?v=1" />
+  </head>
+  <body>
+    <div class="v2Shell">
+      <header class="v2Topbar">
+        <a class="v2Brand" href="/" aria-label="Raven Tech v2 home">
+          <span class="v2BrandMark" aria-hidden="true"></span>
+          <span class="v2BrandText">
+            <span class="v2BrandTitle">Raven Tech</span>
+            <span class="v2BrandTag" id="v2EngineTag">v2 · engine</span>
+          </span>
+        </a>
+        <div class="v2TopRight">
+          <span class="v2RegimeChip"><span class="v2RegimeDot"></span><span id="v2RegimeChipText">v2 · phase 0</span></span>
+          <a class="v2BackToV1" href="https://app.raven-tech.co" rel="noopener">v1 desk →</a>
+        </div>
+      </header>
+
+      <aside class="v2Sidebar">
+        <div class="v2SideLabel">Trading engines</div>
+        <a class="v2NavLink" href="/"><span class="v2NavGlyph">◈</span><span>Overview</span><span class="v2NavMeta">v2.0.α</span></a>
+        <a class="v2NavLink" data-engine="e1"  href="/e1"><span class="v2NavGlyph">E1</span><span>Earnings IC</span><span class="v2NavMeta">phase 0</span></a>
+        <a class="v2NavLink" data-engine="e15" href="/e15"><span class="v2NavGlyph">E15</span><span>Earnings Scenario</span><span class="v2NavMeta">phase 0</span></a>
+        <a class="v2NavLink" data-engine="e2"  href="/e2"><span class="v2NavGlyph">E2</span><span>SPX Weekly IC</span><span class="v2NavMeta">phase 0</span></a>
+        <a class="v2NavLink" data-engine="e14" href="/e14"><span class="v2NavGlyph">E14</span><span>SPX Scenario</span><span class="v2NavMeta">phase 0</span></a>
+        <a class="v2NavLink" data-engine="mi"  href="/mi"><span class="v2NavGlyph">MI</span><span>Market Brain</span><span class="v2NavMeta">phase 0</span></a>
+      </aside>
+
+      <main class="v2Main">
+        <section class="v2Hero">
+          <span class="v2HeroBadge" id="v2EngineBadge">phase 0 · scaffolding</span>
+          <h1 class="v2HeroTitle" id="v2EngineTitle">Engine</h1>
+          <p class="v2HeroSub" id="v2EngineSub">Loading…</p>
+          <a class="v2HeroCTA" id="v2EngineCTA" href="https://app.raven-tech.co" rel="noopener">
+            Use v1 today <span aria-hidden="true">→</span>
+          </a>
+          <a class="v2HeroCTAGhost" href="/">Back to brain overview</a>
+        </section>
+
+        <div class="v2SectionHead">
+          <h2 class="v2SectionTitle" id="v2EngineRoadmapTitle">v2 roadmap</h2>
+          <span class="v2SectionLine"></span>
+          <span class="v2SectionTag" id="v2EngineRoadmapTag">layer 2 · phase 2</span>
+        </div>
+
+        <div class="v2BrainPanel" id="v2EngineRoadmap"></div>
+
+        <div class="v2SectionHead">
+          <h2 class="v2SectionTitle">v2 endpoints</h2>
+          <span class="v2SectionLine"></span>
+          <span class="v2SectionTag">live</span>
+        </div>
+
+        <div class="v2Grid" id="v2EngineEndpoints"></div>
+      </main>
+    </div>
+
+    <script src="/static/engine.js?v=1"></script>
+  </body>
+</html>
