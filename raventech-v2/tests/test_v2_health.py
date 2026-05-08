@@ -94,6 +94,76 @@ def test_counterfactual_log_accepts_payload(client: TestClient) -> None:
     assert "logged" in body
 
 
+def test_counterfactual_recent_no_redis_returns_empty(client: TestClient) -> None:
+    """Without Redis the endpoint must degrade to an empty list, never 500."""
+    res = client.get("/api/v2/counterfactual/recent")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["entries"] == []
+    assert body["n_returned"] == 0
+    assert body["n_disagreements"] == 0
+
+
+def test_counterfactual_recent_with_fake_redis(client: TestClient, monkeypatch) -> None:
+    """When Redis returns entries, the endpoint normalizes and ranks them."""
+    fake_entries = [
+        (
+            "1700000002000-0",
+            {
+                "ts": "2026-05-08T11:30:00Z",
+                "engine": "e15",
+                "request_id": "req-2",
+                "agree": "0",
+                "delta_summary": "v2 dissent on cluster",
+                "v1_verdict": '{"verdict":"GO","confidence":0.7,"chatter":"ignored"}',
+                "v2_verdict": '{"verdict":"PASS","confidence":0.55}',
+            },
+        ),
+        (
+            "1700000001000-0",
+            {
+                "ts": "2026-05-08T11:25:00Z",
+                "engine": "e14",
+                "request_id": "req-1",
+                "agree": "1",
+                "delta_summary": "",
+                "v1_verdict": '{"verdict":"HOLD"}',
+                "v2_verdict": '{"verdict":"HOLD"}',
+            },
+        ),
+    ]
+
+    class FakeRedis:
+        def xrevrange(self, name, count):  # noqa: ARG002
+            return fake_entries[:count]
+
+    from v2_app import counterfactual_logger
+
+    monkeypatch.setattr(counterfactual_logger, "_redis_client", lambda: FakeRedis())
+
+    res = client.get("/api/v2/counterfactual/recent", params={"n": 5})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["n_returned"] == 2
+    assert body["n_disagreements"] == 1
+
+    first = body["entries"][0]
+    assert first["engine"] == "e15"
+    assert first["agree"] is False
+    # Verdicts are summarized to known keys only — "chatter" must be dropped.
+    assert "chatter" not in first["v1_verdict"]
+    assert first["v1_verdict"] == {"verdict": "GO", "confidence": 0.7}
+    assert first["v2_verdict"] == {"verdict": "PASS", "confidence": 0.55}
+
+
+def test_counterfactual_recent_clamps_n(client: TestClient) -> None:
+    """Caller-supplied n is clamped to [1, 200]; FastAPI Query handles bounds."""
+    res = client.get("/api/v2/counterfactual/recent", params={"n": 999})
+    assert res.status_code == 422  # FastAPI rejects out-of-range
+    res = client.get("/api/v2/counterfactual/recent", params={"n": 0})
+    assert res.status_code == 422
+
+
 def test_landing_page_renders_v2_brand(client: TestClient) -> None:
     res = client.get("/")
     assert res.status_code == 200

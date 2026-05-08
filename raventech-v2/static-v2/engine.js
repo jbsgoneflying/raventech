@@ -150,5 +150,29 @@
     });
   }
 
-  document.addEventListener("DOMContentLoaded", function () { render(getEngine()); });
+  // Mobile drawer (mirrors v2.js — engine pages don't load v2.js, so we
+  // inline the lean version here).
+  function wireDrawer() {
+    var btn = document.getElementById("v2MenuToggle");
+    var ovl = document.getElementById("v2NavOverlay");
+    var side = document.getElementById("v2Sidebar");
+    if (!btn) return;
+    var open  = function () { document.body.classList.add("v2NavOpen");    btn.setAttribute("aria-expanded", "true"); };
+    var close = function () { document.body.classList.remove("v2NavOpen"); btn.setAttribute("aria-expanded", "false"); };
+    btn.addEventListener("click", function () {
+      document.body.classList.contains("v2NavOpen") ? close() : open();
+    });
+    if (ovl) ovl.addEventListener("click", close);
+    if (side) side.addEventListener("click", function (ev) {
+      if (ev.target.closest("a")) close();
+    });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") close();
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    render(getEngine());
+    wireDrawer();
+  });
 })();

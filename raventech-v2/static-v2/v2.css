@@ -132,7 +132,7 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 248px 1fr;
   grid-template-rows: 64px 1fr;
   grid-template-areas:
     "topbar topbar"
@@ -150,12 +150,43 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   background: rgba(6, 7, 10, 0.60);
+  position: sticky;
+  top: 0;
+  z-index: 50;
 }
 
 .v2Brand {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+
+/* Hamburger toggle - only visible on mobile (≤900px). */
+.v2MenuToggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--v2-line);
+  background: var(--v2-surface);
+  color: var(--v2-text-soft);
+  cursor: pointer;
+  margin-right: 4px;
+  transition: color 0.18s, border-color 0.18s;
+}
+
+.v2MenuToggle:hover { color: var(--v2-cyan); border-color: var(--v2-line-glow); }
+
+.v2MenuToggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 
 .v2BrandMark {
@@ -263,7 +294,7 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
 .v2Sidebar {
   grid-area: sidebar;
   border-right: 1px solid var(--v2-line);
-  padding: 22px 14px;
+  padding: 22px 12px;
   background: linear-gradient(180deg, rgba(10, 12, 18, 0.40), rgba(6, 7, 10, 0.20));
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -279,21 +310,30 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
   letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--v2-text-faint);
-  padding: 14px 12px 8px;
+  padding: 14px 10px 8px;
 }
 
 .v2NavLink {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 10px 10px;
   border-radius: var(--v2-radius-md);
   color: var(--v2-text-soft);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.1px;
+  letter-spacing: 0.05px;
   border: 1px solid transparent;
+  white-space: nowrap;
   transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+
+.v2NavLink > span:nth-child(2) {
+  /* The label - keep it from overflowing the row even at narrow widths. */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .v2NavLink:hover {
@@ -310,15 +350,16 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
 }
 
 .v2NavGlyph {
-  width: 20px;
-  height: 20px;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
   border-radius: 6px;
   background: var(--v2-bg-3);
   border: 1px solid var(--v2-line-strong);
   display: grid;
   place-items: center;
   font-family: var(--v2-font-mono);
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 600;
   color: var(--v2-text-mute);
   letter-spacing: 0;
@@ -331,11 +372,26 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
 }
 
 .v2NavMeta {
+  flex: 0 0 auto;
   margin-left: auto;
   font-family: var(--v2-font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--v2-text-faint);
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
+}
+
+/* Mobile drawer overlay (only rendered on mobile via media query). */
+.v2NavOverlay {
+  display: none;
+  position: fixed;
+  inset: 64px 0 0 0;
+  background: rgba(6, 7, 10, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 40;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
 }
 
 /* ── Main column ────────────────────────────────────────── */
@@ -620,7 +676,9 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
 .v2BrainPanel {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* Hard cap at 3 columns so 6 tiles always render as a balanced 3x2,
+     never a wide 5+1 orphan row. Steps down at smaller viewports. */
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .v2BrainTile {
@@ -628,7 +686,7 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
   border-radius: var(--v2-radius-md);
   border: 1px solid var(--v2-line);
   background: rgba(11, 14, 22, 0.65);
-  padding: 16px 18px;
+  padding: 16px 18px 18px;
   overflow: hidden;
 }
 
@@ -656,19 +714,46 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
 }
 
 .v2BrainBar {
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.05);
-  margin-top: 12px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  margin-top: 14px;
   overflow: hidden;
+  /* Subtle inner shadow so the empty trough reads as a real bar even
+     before the fill animates in. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 .v2BrainBarFill {
   height: 100%;
   width: 0%;
   background: linear-gradient(90deg, var(--v2-cyan), var(--v2-violet));
-  box-shadow: 0 0 12px var(--v2-cyan-glow);
-  transition: width 1.5s ease;
+  box-shadow: 0 0 14px var(--v2-cyan-glow), inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  transition: width 1.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Tiny chip showing the numeric % to the right of the bar — confirms
+   "phase 0, barely begun" rather than "render bug." */
+.v2BrainBarRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.v2BrainBarRow .v2BrainBar {
+  flex: 1 1 auto;
+  margin-top: 0;
+}
+
+.v2BrainBarPct {
+  font-family: var(--v2-font-mono);
+  font-size: 10px;
+  color: var(--v2-text-mute);
+  letter-spacing: 0.4px;
+  min-width: 32px;
+  text-align: right;
 }
 
 /* ── Counterfactual ticker (footer) ─────────────────────── */
@@ -714,8 +799,12 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
   to   { transform: translateX(-50%); }
 }
 
-.v2TickerItem .v2TickerKind { color: var(--v2-cyan); }
-.v2TickerItem .v2TickerEng  { color: var(--v2-violet); }
+.v2TickerItem { display: inline-flex; gap: 6px; align-items: baseline; }
+.v2TickerItem .v2TickerKind         { color: var(--v2-cyan); }
+.v2TickerItem .v2TickerKind--mag    { color: var(--v2-magenta); }
+.v2TickerItem .v2TickerKind--em     { color: var(--v2-emerald); }
+.v2TickerItem .v2TickerEng          { color: var(--v2-violet); }
+.v2TickerItem .v2TickerNote         { color: var(--v2-text-mute); font-style: italic; }
 
 /* ── Streaming text effect (for agent output) ───────────── */
 .v2StreamCaret {
@@ -737,12 +826,93 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
 .mono { font-family: var(--v2-font-mono); }
 
 /* ── Responsive ────────────────────────────────────────── */
+
+/* Tablet: brain grid drops from 3 cols to 2; engine cards stay flexible. */
+@media (max-width: 1100px) {
+  .v2BrainPanel { grid-template-columns: repeat(2, 1fr); }
+  .v2Main { padding: 28px 28px 50px; }
+}
+
+/* Small tablet / large phone: drawer-style sidebar, single-col grids. */
 @media (max-width: 900px) {
   .v2Shell {
     grid-template-columns: 1fr;
-    grid-template-areas: "topbar" "main";
+    grid-template-areas:
+      "topbar"
+      "main";
   }
-  .v2Sidebar { display: none; }
-  .v2Main { padding: 24px 18px; }
-  .v2Hero { padding: 36px 24px; }
+
+  .v2MenuToggle { display: inline-flex; }
+
+  .v2Sidebar {
+    position: fixed;
+    top: 64px;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 84vw);
+    transform: translateX(-100%);
+    transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 60;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    background: linear-gradient(180deg, rgba(10, 12, 18, 0.96), rgba(6, 7, 10, 0.92));
+    overflow-y: auto;
+    padding-bottom: 32px;
+  }
+
+  body.v2NavOpen .v2Sidebar     { transform: translateX(0); }
+  body.v2NavOpen .v2NavOverlay  { display: block; opacity: 1; pointer-events: auto; }
+
+  .v2NavOverlay { display: block; }
+
+  .v2BrainPanel { grid-template-columns: 1fr; }
+  .v2Grid       { grid-template-columns: 1fr; }
+
+  .v2Topbar      { padding: 0 14px; }
+  .v2Main        { padding: 22px 16px 60px; max-width: 100%; }
+  .v2Hero        { padding: 32px 22px; }
+  .v2HeroTitle   { font-size: clamp(28px, 7vw, 44px); margin: 14px 0 12px; }
+  .v2HeroSub     { font-size: 14.5px; margin-bottom: 22px; }
+  .v2HeroCTA     { padding: 11px 18px; font-size: 13px; }
+  .v2HeroCTAGhost { display: none; } /* keep the primary CTA prominent */
+
+  .v2SectionHead { margin: 36px 4px 14px; }
+  .v2SectionTitle { font-size: 22px; }
+
+  .v2Card        { padding: 18px 18px; }
+  .v2CardTitle   { font-size: 21px; }
+
+  .v2BrandTitle  { font-size: 19px; }
+  .v2BrandTag    { font-size: 9px; }
+}
+
+/* Phone portrait: hide the regime chip's expanded text + "v1 desk" link
+   only stays compact. Keep tap targets ≥44px. */
+@media (max-width: 540px) {
+  .v2RegimeChip { padding: 5px 9px 5px 7px; font-size: 10px; }
+  .v2RegimeChip span:last-child { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .v2BackToV1   { padding: 8px 11px; font-size: 10.5px; }
+  .v2Hero        { padding: 26px 18px; }
+  .v2Main        { padding: 18px 14px 60px; }
+  .v2Ticker      { padding: 12px 14px; gap: 10px; }
+  .v2TickerLabel { font-size: 9px; }
+  .v2BrandText   { display: none; } /* on phones, mark + tag is enough */
+}
+
+/* Tap-target / accessibility: ensure all interactive controls are ≥44px high
+   on touch devices, regardless of viewport width. */
+@media (hover: none) and (pointer: coarse) {
+  .v2NavLink     { padding: 12px 12px; }
+  .v2HeroCTA,
+  .v2HeroCTAGhost,
+  .v2BackToV1    { min-height: 44px; }
+}
+
+/* Reduced-motion: kill the ambient drift + ticker for users who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  body::before          { animation: none; }
+  .v2BrandMark::after   { animation: none; opacity: 0.85; }
+  .v2RegimeDot          { animation: none; }
+  .v2TickerInner        { animation: none; }
+  .v2StreamCaret        { animation: none; opacity: 0.85; }
+  .v2BrainBarFill       { transition: none; }
 }

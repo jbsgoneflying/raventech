@@ -28,7 +28,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 LOG = logging.getLogger("v2.counterfactual")
 
@@ -83,6 +83,66 @@ def log_counterfactual(
     except Exception as exc:
         LOG.warning("xadd failed for %s: %s", stream_name, exc)
         return None
+
+
+def recent_counterfactuals(
+    *,
+    n: int = 24,
+    stream_name: str = "v2:counterfactual",
+) -> list[dict[str, Any]]:
+    """Read the last ``n`` entries from the counterfactual Redis stream.
+
+    Newest-first. Each entry includes the parsed verdict dicts (limited to a
+    few well-known keys) plus the timestamps the logger writes. Returns ``[]``
+    if Redis is unavailable or the stream is empty so callers can render a
+    "still waiting" state without exception handling.
+    """
+    n = max(1, min(int(n or 0), 200))
+    client = _redis_client()
+    if client is None:
+        return []
+    try:
+        # XREVRANGE returns newest-first when called with "+ -" bounds.
+        raw = client.xrevrange(stream_name, count=n)
+    except Exception as exc:
+        LOG.warning("xrevrange failed for %s: %s", stream_name, exc)
+        return []
+
+    return [_normalize_entry(sid, fields) for sid, fields in raw or []]
+
+
+def _normalize_entry(sid: str, fields: Mapping[str, Any]) -> dict[str, Any]:
+    def _parse(name: str) -> dict[str, Any]:
+        try:
+            return json.loads(fields.get(name) or "{}")
+        except Exception:
+            return {}
+
+    agree_raw = str(fields.get("agree") or "0").lower()
+    return {
+        "id": str(sid),
+        "ts": fields.get("ts") or "",
+        "engine": fields.get("engine") or "unknown",
+        "request_id": fields.get("request_id") or "",
+        "agree": agree_raw in ("1", "true", "yes"),
+        "delta_summary": fields.get("delta_summary") or "",
+        "v1_verdict": _summarize(_parse("v1_verdict")),
+        "v2_verdict": _summarize(_parse("v2_verdict")),
+    }
+
+
+_VERDICT_KEYS: Iterable[str] = ("verdict", "stance", "recommendation", "label", "go", "confidence")
+
+
+def _summarize(verdict: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only well-known verdict keys so the UI doesn't leak large blobs."""
+    if not verdict:
+        return {}
+    out: dict[str, Any] = {}
+    for k in _VERDICT_KEYS:
+        if k in verdict:
+            out[k] = verdict[k]
+    return out
 
 
 def _shallow_agree(a: Mapping[str, Any] | None, b: Mapping[str, Any] | None) -> bool:

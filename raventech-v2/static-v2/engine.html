@@ -11,6 +11,9 @@
   <body>
     <div class="v2Shell">
       <header class="v2Topbar">
+        <button class="v2MenuToggle" id="v2MenuToggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="v2Sidebar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
         <a class="v2Brand" href="/" aria-label="Raven Tech v2 home">
           <span class="v2BrandMark" aria-hidden="true"></span>
           <span class="v2BrandText">
@@ -24,7 +27,9 @@
         </div>
       </header>
 
-      <aside class="v2Sidebar">
+      <div class="v2NavOverlay" id="v2NavOverlay" aria-hidden="true"></div>
+
+      <aside class="v2Sidebar" id="v2Sidebar">
         <div class="v2SideLabel">Trading engines</div>
         <a class="v2NavLink" href="/"><span class="v2NavGlyph">◈</span><span>Overview</span><span class="v2NavMeta">v2.0.α</span></a>
         <a class="v2NavLink" data-engine="e1"  href="/e1"><span class="v2NavGlyph">E1</span><span>Earnings IC</span><span class="v2NavMeta">phase 0</span></a>

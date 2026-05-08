@@ -15,6 +15,9 @@
   <body>
     <div class="v2Shell">
       <header class="v2Topbar">
+        <button class="v2MenuToggle" id="v2MenuToggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="v2Sidebar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
         <a class="v2Brand" href="/" aria-label="Raven Tech v2 home">
           <span class="v2BrandMark" aria-hidden="true"></span>
           <span class="v2BrandText">
@@ -32,7 +35,9 @@
         </div>
       </header>
 
-      <aside class="v2Sidebar">
+      <div class="v2NavOverlay" id="v2NavOverlay" aria-hidden="true"></div>
+
+      <aside class="v2Sidebar" id="v2Sidebar">
         <div class="v2SideLabel">Trading engines</div>
         <a class="v2NavLink is-active" href="/">
           <span class="v2NavGlyph">◈</span>
@@ -116,7 +121,10 @@
               8-factor Gaussian HMM. Produces a regime embedding plus cluster
               probabilities and nearest historical days.
             </div>
-            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="3"></div></div>
+            <div class="v2BrainBarRow">
+              <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="6"></div></div>
+              <span class="v2BrainBarPct" data-pct-of="6">6%</span>
+            </div>
           </article>
 
           <article class="v2BrainTile">
@@ -127,7 +135,10 @@
               constraint — a NVDA setup can pull peer analogues from 8 tickers
               and 5 different years that share the same fingerprint.
             </div>
-            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
+            <div class="v2BrainBarRow">
+              <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="4"></div></div>
+              <span class="v2BrainBarPct" data-pct-of="4">4%</span>
+            </div>
           </article>
 
           <article class="v2BrainTile">
@@ -138,7 +149,10 @@
               65% over rolling out-of-sample windows. A live coverage tracker
               alerts when models drift past nominal.
             </div>
-            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="8"></div></div>
+            <div class="v2BrainBarRow">
+              <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="12"></div></div>
+              <span class="v2BrainBarPct" data-pct-of="12">12%</span>
+            </div>
           </article>
 
           <article class="v2BrainTile">
@@ -149,7 +163,10 @@
               fit to tick history. Calibrated touch / breach / MAE distributions
               instead of biased close-only proxies.
             </div>
-            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="1"></div></div>
+            <div class="v2BrainBarRow">
+              <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
+              <span class="v2BrainBarPct" data-pct-of="2">2%</span>
+            </div>
           </article>
 
           <article class="v2BrainTile">
@@ -160,7 +177,10 @@
               hand-set composite weights. Evaluated with doubly-robust off-policy
               estimation so v2 ranker improvement is bounded before live A/B.
             </div>
-            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
+            <div class="v2BrainBarRow">
+              <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="4"></div></div>
+              <span class="v2BrainBarPct" data-pct-of="4">4%</span>
+            </div>
           </article>
 
           <article class="v2BrainTile">
@@ -171,7 +191,10 @@
               MCP tools over every v2 engine. Persistent memory across sessions.
               Streams a live debate; flags dissent on the card.
             </div>
-            <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
+            <div class="v2BrainBarRow">
+              <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="3"></div></div>
+              <span class="v2BrainBarPct" data-pct-of="3">3%</span>
+            </div>
           </article>
         </div>
 
