@@ -96,7 +96,9 @@ def get_config() -> V2Config:
         openai_api_key=_str("OPENAI_API_KEY"),
         enable_regime_encoder=_bool("V2_ENABLE_REGIME_ENCODER", False),
         enable_contrastive_analogues=_bool("V2_ENABLE_CONTRASTIVE_ANALOGUES", False),
-        enable_conformal_calibration=_bool("V2_ENABLE_CONFORMAL", False),
+        # Phase 1 module 1 — shipped 2026-05-08. Module is real, not a stub.
+        # Defaults to True so the dashboard reads "brain 1/6 modules online".
+        enable_conformal_calibration=_bool("V2_ENABLE_CONFORMAL", True),
         enable_path_generator=_bool("V2_ENABLE_PATH_GENERATOR", False),
         enable_learned_ranker=_bool("V2_ENABLE_LEARNED_RANKER", False),
         enable_agent_committee=_bool("V2_ENABLE_AGENT_COMMITTEE", False),

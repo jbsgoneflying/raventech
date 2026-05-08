@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .auth import invite_gate
 from .config import get_config
-from .routers import analogues, counterfactual, health, regime
+from .routers import analogues, conformal, counterfactual, health, regime
 
 try:
     load_dotenv()
@@ -60,6 +60,7 @@ app.include_router(health.router)
 app.include_router(regime.router)
 app.include_router(analogues.router)
 app.include_router(counterfactual.router)
+app.include_router(conformal.router)
 
 
 # ── Static frontend ──

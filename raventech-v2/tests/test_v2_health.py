@@ -54,8 +54,11 @@ def test_version_reports_foundation_flags(client: TestClient) -> None:
         "agent_committee",
     }
     assert expected.issubset(foundation.keys())
-    # Phase 0: all foundation modules disabled by default.
-    assert all(v is False for v in foundation.values())
+    # Phase 1 module 1: conformal calibration is real and on by default.
+    assert foundation["conformal_calibration"] is True
+    # All other Foundation Brain modules are still phase 0 stubs.
+    other = {k: v for k, v in foundation.items() if k != "conformal_calibration"}
+    assert all(v is False for v in other.values())
 
 
 def test_regime_embed_returns_shape_in_phase0(client: TestClient) -> None:
