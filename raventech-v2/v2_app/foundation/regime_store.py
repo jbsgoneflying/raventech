@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,7 +18,6 @@ try:
 except Exception:  # pragma: no cover - tests inject a fake client
     redis = None  # type: ignore
 
-from ..config import get_config
 from .regime import RegimeIndex, build_index_from_dms_history
 
 LOG = logging.getLogger("v2.regime_store")
@@ -35,8 +35,8 @@ V2_REGIME_BUILT_AT_KEY = "v2:regime:built_at"
 def _redis_client():
     if redis is None:
         raise RuntimeError("redis package not available")
-    cfg = get_config()
-    return redis.Redis.from_url(cfg.redis_url, decode_responses=True)
+    url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    return redis.Redis.from_url(url, decode_responses=True)
 
 
 def now_ts() -> str:
