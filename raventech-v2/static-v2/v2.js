@@ -93,6 +93,26 @@
     } catch (err) { /* ignore — keep baseline */ }
   }
 
+  async function refreshPathTile() {
+    var TARGET_N = 500;  // 500 returns aggregated across corpora to fill bar
+    try {
+      var res = await fetch("/api/v2/paths/stats", { credentials: "include" });
+      if (!res.ok) return;
+      var data = await res.json();
+      var tickers = (data && data.tickers) || [];
+      var n = (data && data.n_total) || 0;
+      var pct = Math.min(100, (n / TARGET_N) * 100);
+      var caption;
+      if (n === 0) {
+        caption = "no return corpus — POST /api/v2/paths/corpus/save with daily log-returns";
+      } else {
+        var t = tickers.length;
+        caption = n + " returns indexed · " + t + " ticker" + (t === 1 ? "" : "s");
+      }
+      updateBrainTile("path_generator", pct, caption);
+    } catch (err) { /* ignore — keep baseline */ }
+  }
+
   async function refreshCommitteeTile() {
     var TARGET_N = 25;  // 25 deliberations to fill the bar
     try {
@@ -268,6 +288,7 @@
     refreshAnalogueTile();
     refreshRegimeTile();
     refreshCommitteeTile();
+    refreshPathTile();
     ambientStream();
   });
 })();

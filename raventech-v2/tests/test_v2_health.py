@@ -54,15 +54,16 @@ def test_version_reports_foundation_flags(client: TestClient) -> None:
         "agent_committee",
     }
     assert expected.issubset(foundation.keys())
-    # Phase 1 modules 1-4 are real and on by default.
+    # Phase 1 modules 1-5 are real and on by default.
     assert foundation["conformal_calibration"] is True
     assert foundation["contrastive_analogues"] is True
     assert foundation["regime_encoder"] is True
     assert foundation["agent_committee"] is True
-    # The remaining two are still phase 0 stubs.
+    assert foundation["path_generator"] is True
+    # Only the learned ranker remains a phase 0 stub.
     online = {
         "conformal_calibration", "contrastive_analogues",
-        "regime_encoder", "agent_committee",
+        "regime_encoder", "agent_committee", "path_generator",
     }
     pending = {k: v for k, v in foundation.items() if k not in online}
     assert all(v is False for v in pending.values())

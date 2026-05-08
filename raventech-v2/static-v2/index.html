@@ -158,18 +158,21 @@
             <div class="v2BrainTileLive">phase 1 — module shipped, awaiting first observations</div>
           </article>
 
-          <article class="v2BrainTile">
-            <div class="v2BrainTileLabel">path generator</div>
-            <div class="v2BrainTileName">conditional diffusion</div>
+          <article class="v2BrainTile" data-brain-module="path_generator">
+            <div class="v2BrainTileLabel">path generator <span class="v2BrainLiveDot" aria-hidden="true"></span></div>
+            <div class="v2BrainTileName">regime-conditional bootstrap</div>
             <div class="v2BrainTileNote">
-              Replaces the OHLC MAE proxy with regime-conditional intraday paths
-              fit to tick history. Calibrated touch / breach / MAE distributions
-              instead of biased close-only proxies.
+              Pure-Python resampler over per-ticker return corpora.
+              Optionally weights each historical day by similarity to the
+              current regime (via the regime encoder's nearest-day output)
+              so breach probabilities reflect today's regime, not the
+              full unconditional distribution.
             </div>
             <div class="v2BrainBarRow">
               <div class="v2BrainBar"><div class="v2BrainBarFill" data-progress="2"></div></div>
               <span class="v2BrainBarPct" data-pct-of="2">2%</span>
             </div>
+            <div class="v2BrainTileLive">phase 1 MVP — bootstrap + regime weights; conditional diffusion is phase 2</div>
           </article>
 
           <article class="v2BrainTile">

@@ -107,7 +107,11 @@ def get_config() -> V2Config:
         # Phase 1 module 1 — shipped 2026-05-08. Module is real, not a stub.
         # Defaults to True so the dashboard reads "brain 1/6 modules online".
         enable_conformal_calibration=_bool("V2_ENABLE_CONFORMAL", True),
-        enable_path_generator=_bool("V2_ENABLE_PATH_GENERATOR", False),
+        # Phase 1 module 5 — path generator MVP shipped 2026-05-08. Pure-Python
+        # bootstrap resampler with optional regime-conditional weighting via
+        # /api/v2/regime/nearest. Phase 2 swaps for a conditional diffusion
+        # model trained on dealer-gamma + IV-surface conditioning.
+        enable_path_generator=_bool("V2_ENABLE_PATH_GENERATOR", True),
         enable_learned_ranker=_bool("V2_ENABLE_LEARNED_RANKER", False),
         # Phase 1 module 4 — agent committee shipped 2026-05-08. Five-agent
         # Claude mesh (Researcher / Quant / Devil's Advocate / Risk Officer
