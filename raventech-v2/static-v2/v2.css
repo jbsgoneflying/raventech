@@ -756,6 +756,39 @@ a:hover { text-shadow: 0 0 12px var(--v2-cyan-glow); }
   text-align: right;
 }
 
+/* Live caption + the "this tile is wired to a real endpoint" dot. */
+.v2BrainTileLive {
+  margin-top: 10px;
+  font-family: var(--v2-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: var(--v2-text-faint);
+  line-height: 1.5;
+}
+
+.v2BrainLiveDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--v2-text-faint);
+  vertical-align: middle;
+}
+
+.v2BrainTile.is-live .v2BrainLiveDot {
+  background: var(--v2-emerald);
+  box-shadow: 0 0 8px var(--v2-emerald);
+  animation: v2LivePulse 1.8s ease-in-out infinite;
+}
+
+.v2BrainTile.is-live .v2BrainTileLive { color: var(--v2-emerald); }
+
+@keyframes v2LivePulse {
+  0%, 100% { opacity: 1.0; }
+  50%      { opacity: 0.45; }
+}
+
 /* ── Counterfactual ticker (footer) ─────────────────────── */
 .v2Ticker {
   margin-top: 56px;

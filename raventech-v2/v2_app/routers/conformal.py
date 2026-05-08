@@ -23,6 +23,7 @@ from ..foundation.conformal_store import (
     now_ts,
     save_calibrator,
 )
+from ..foundation.v1_mirror import mirror_v1_breach_probability
 
 router = APIRouter()
 
@@ -111,3 +112,30 @@ def list_all() -> dict:
         "default_bounds_by_metric": DEFAULT_BOUNDS_BY_METRIC,
         "calibrators": rows,
     }
+
+
+class MirrorPayload(BaseModel):
+    only_engine: str | None = Field(
+        None, description="If set to 'e1' or 'e2', restrict mirror to that engine only."
+    )
+    reset: bool = Field(
+        True,
+        description="Clear each touched calibrator before replaying so re-runs are idempotent.",
+    )
+    max_per_engine: int = Field(5000, ge=1, le=50000)
+
+
+@router.post("/api/v2/conformal/mirror")
+def mirror_v1(payload: MirrorPayload | None = None) -> dict:
+    """Replay v1 closed trades into the v2 conformal calibrator.
+
+    Reads ``e1:trades:*`` and ``e2:trades:*`` from Redis, extracts the
+    (predicted breach probability, realized loss/no-loss) pair from each
+    closed trade, and observes it via the breach_probability calibrator.
+    """
+    p = payload or MirrorPayload()
+    return mirror_v1_breach_probability(
+        only_engine=p.only_engine,
+        reset=p.reset,
+        max_per_engine=p.max_per_engine,
+    )

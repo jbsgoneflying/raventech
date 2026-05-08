@@ -15,10 +15,12 @@
   function $$(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
 
   // ── Animate brain bars + populate the % chip ──────────────
+  // Each tile may declare data-progress (hardcoded baseline) and/or
+  // data-live-source (an API path to query for a live "n / target" reading).
+  // Tiles with data-live-source override the baseline once the API responds.
   function animateBrainBars() {
     $$(".v2BrainBarFill").forEach(function (el) {
       var pct = parseFloat(el.dataset.progress || "0");
-      // Phase 0 reads as "barely begun" but always visible (>=14% fill).
       var clamped = Math.max(14, Math.min(100, pct));
       requestAnimationFrame(function () { el.style.width = clamped + "%"; });
     });
@@ -26,6 +28,43 @@
       var n = parseFloat(el.dataset.pctOf || "0");
       el.textContent = (Math.round(n)) + "%";
     });
+  }
+
+  // Updates a tile's bar + chip + caption with a live measurement.
+  function updateBrainTile(moduleId, pct, captionText) {
+    var tile = document.querySelector('[data-brain-module="' + moduleId + '"]');
+    if (!tile) return;
+    var bar = tile.querySelector(".v2BrainBarFill");
+    var chip = tile.querySelector(".v2BrainBarPct");
+    var caption = tile.querySelector(".v2BrainTileLive");
+    var clamped = Math.max(14, Math.min(100, pct));
+    if (bar) bar.style.width = clamped + "%";
+    if (chip) chip.textContent = Math.round(pct) + "%";
+    if (caption && captionText) caption.textContent = captionText;
+    tile.classList.add("is-live");
+  }
+
+  // Pull /api/v2/conformal/list and update the conformal tile with the
+  // sum of n_calibration across all (engine, metric) calibrators.
+  // Target window for "100% online" is 200 observations — enough for
+  // tight intervals at α=0.1 (Lei et al. recommend n≥100, we want headroom).
+  async function refreshConformalTile() {
+    var TARGET_N = 200;
+    try {
+      var res = await fetch("/api/v2/conformal/list", { credentials: "include" });
+      if (!res.ok) return;
+      var data = await res.json();
+      var cals = data.calibrators || [];
+      var total = cals.reduce(function (acc, c) { return acc + (c.n || 0); }, 0);
+      var pct = Math.min(100, (total / TARGET_N) * 100);
+      var caption;
+      if (cals.length === 0) {
+        caption = "no calibrators yet — POST /api/v2/conformal/mirror to backfill";
+      } else {
+        caption = total + " observations · " + cals.length + " calibrator" + (cals.length === 1 ? "" : "s");
+      }
+      updateBrainTile("conformal_calibrator", pct, caption);
+    } catch (err) { /* ignore — keep baseline */ }
   }
 
   // ── Mobile drawer ─────────────────────────────────────────
@@ -150,6 +189,7 @@
     wireDrawer();
     loadVersion();
     loadTicker();
+    refreshConformalTile();
     ambientStream();
   });
 })();
