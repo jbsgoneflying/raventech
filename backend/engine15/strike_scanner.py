@@ -706,10 +706,12 @@ def run_strike_scan(
 ) -> Dict[str, Any]:
     """End-to-end tier-1 scan.
 
-    Returns the verdict dict shaped for the router response. ``baseline_credit``
-    is the desk's actual collected credit — we use it for the baseline scored
-    record so the deltas read against what the desk actually paid, not the
-    chain-mid the scanner would re-derive.
+    Returns the verdict dict shaped for the router response.
+
+    Pricing reference: the scanner re-prices the baseline strikes against
+    the same chain it uses for the candidates, so credit deltas are
+    apples-to-apples. The desk's actual ``baseline_credit`` is preserved
+    separately under ``baseline.desk_credit`` for display.
     """
     step = infer_strike_step([
         s for s in (
@@ -718,25 +720,41 @@ def run_strike_scan(
         ) if s is not None
     ])
 
-    # Score baseline at the desk's actual credit (not re-derived).
-    baseline_max_loss = _max_loss(baseline_strikes, baseline_credit)
-    p_breach_base, ci_base, _n_base = _estimate_breach_rate(
-        candidate=baseline_strikes, matched_events=matched_events, user_spot=user_spot,
+    # Re-price the baseline at chain mids so candidates compare apples-to-
+    # apples. Fall back to the desk's collected credit if the chain can't
+    # price the baseline (rare — the entry chain should always cover the
+    # user's strikes).
+    baseline_scored = score_candidate(
+        baseline_strikes,
+        entry_chain=entry_chain, matched_events=matched_events,
+        user_spot=user_spot, snap_max_pts=snap_max_pts,
+        fill_model=fill_model, baseline=None,
     )
-    ev_base = (1.0 - p_breach_base) * baseline_credit - p_breach_base * baseline_max_loss
-    baseline_scored = ScoredCandidate(
-        strikes=baseline_strikes,
-        credit=round(baseline_credit, 4),
-        max_loss=round(baseline_max_loss, 4),
-        p_breach=round(p_breach_base, 4),
-        p_breach_interval=(round(ci_base[0], 4), round(ci_base[1], 4)),
-        ev=round(ev_base, 4),
-        delta_breach_pct=0.0, delta_credit_pct=0.0,
-        delta_max_loss_pct=0.0, delta_ev_pct=0.0,
-        is_baseline=True,
-    )
+    if baseline_scored is None:
+        baseline_max_loss = _max_loss(baseline_strikes, baseline_credit)
+        p_breach_base, ci_base, _n_base = _estimate_breach_rate(
+            candidate=baseline_strikes, matched_events=matched_events,
+            user_spot=user_spot,
+        )
+        ev_base = (
+            (1.0 - p_breach_base) * baseline_credit
+            - p_breach_base * baseline_max_loss
+        )
+        baseline_scored = ScoredCandidate(
+            strikes=baseline_strikes,
+            credit=round(baseline_credit, 4),
+            max_loss=round(baseline_max_loss, 4),
+            p_breach=round(p_breach_base, 4),
+            p_breach_interval=(round(ci_base[0], 4), round(ci_base[1], 4)),
+            ev=round(ev_base, 4),
+            delta_breach_pct=0.0, delta_credit_pct=0.0,
+            delta_max_loss_pct=0.0, delta_ev_pct=0.0,
+            is_baseline=True,
+        )
+    else:
+        baseline_scored.is_baseline = True
 
-    # Generate + score candidates.
+    # Generate + score candidates against the chain-priced baseline.
     candidates = generate_candidates(
         baseline_strikes=baseline_strikes, strike_step=step,
     )
@@ -760,6 +778,9 @@ def run_strike_scan(
         n_priced += 1
 
     out = rank_and_verdict(baseline=baseline_scored, scored=scored)
+    # Preserve the desk's actual collected credit for display alongside
+    # the chain-mid baseline credit used for scoring.
+    out["baseline"]["desk_credit"] = round(float(baseline_credit), 4)
     out["strike_step"] = step
     out["scan_meta"] = {
         "n_generated":   len(candidates),
