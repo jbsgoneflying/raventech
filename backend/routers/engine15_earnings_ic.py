@@ -699,6 +699,13 @@ def earnings_ic_strike_scan(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
     # Pull the entry-day chain slice once. The scanner re-uses it across
     # all candidates so a scan stays sub-second.
+    chain_meta = {
+        "requested_trade_date": req.entry_date,
+        "requested_expiry":     req.expiry,
+        "used_trade_date":      req.entry_date,
+        "used_expiry":          req.expiry,
+        "fallback":             False,
+    }
     try:
         entry_chain = chain_cache.fetch_chain_slice(
             ticker=req.ticker, trade_date=req.entry_date, expiry=req.expiry,
@@ -706,14 +713,30 @@ def earnings_ic_strike_scan(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     except Exception as e:
         LOG.warning("strike-scan: chain fetch failed for %s: %s", req.ticker, e)
         entry_chain = []
+
     if not entry_chain:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"No cached chain for {req.ticker} {req.entry_date} -> "
-                f"{req.expiry}. Run /backfill first."
-            ),
-        )
+        # Forward-looking trades won't have a cached entry-day chain yet
+        # (ORATS chains only exist once trading starts). Fall back to the
+        # most recent cached (trade_date, expiry) pair so the scanner can
+        # still surface relative strike-shift verdicts. The UI shows a
+        # "pricing from cached chain on <date>" note when this fires.
+        try:
+            fallback = _find_nearest_cached_chain(req.ticker, req.entry_date)
+        except Exception as e:
+            LOG.warning("strike-scan: fallback lookup failed for %s: %s", req.ticker, e)
+            fallback = None
+        if fallback is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"No cached chain for {req.ticker} on or before "
+                    f"{req.entry_date}. Run /backfill first."
+                ),
+            )
+        fb_date, fb_expiry, entry_chain = fallback
+        chain_meta["used_trade_date"] = fb_date
+        chain_meta["used_expiry"]     = fb_expiry
+        chain_meta["fallback"]        = True
 
     from backend.engine14.chain_replay import FillModel
     from backend.engine15.strike_scanner import run_strike_scan
@@ -741,12 +764,58 @@ def earnings_ic_strike_scan(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             detail=f"Strike scan failed: {type(e).__name__}: {e}",
         )
 
+    result["chain_meta"] = chain_meta
     return {
         "ticker":    req.ticker,
         "entryDate": req.entry_date,
         "expiry":    req.expiry,
         **result,
     }
+
+
+def _find_nearest_cached_chain(
+    ticker: str, requested_trade_date: str,
+) -> Optional[tuple]:
+    """Find the most recent cached (trade_date, expiry) for ``ticker``
+    on or before ``requested_trade_date``. Returns
+    ``(trade_date, expiry, chain_rows)`` or ``None`` when no chain
+    exists in cache for that ticker.
+
+    Prefers the latest cached trade_date and, within that day, the
+    earliest available expiry (most likely to match the user's
+    short-DTE earnings window).
+    """
+    try:
+        dates = chain_cache.fetch_cached_trade_dates(ticker=ticker)
+    except Exception:
+        return None
+    if not dates:
+        return None
+    # Candidates are cached dates on or before the requested date. If
+    # nothing precedes, fall through to the latest cached date overall
+    # (the desk would rather see a slightly forward chain than nothing).
+    earlier = [d for d in dates if d <= requested_trade_date]
+    pool = earlier if earlier else dates
+    for fb_date in reversed(pool):
+        try:
+            expiries = chain_cache.fetch_expiries_on(
+                ticker=ticker, trade_date=fb_date,
+            )
+        except Exception:
+            continue
+        if not expiries:
+            continue
+        # Prefer the shortest-DTE expiry to mimic an earnings-week setup.
+        fb_expiry = expiries[0]
+        try:
+            rows = chain_cache.fetch_chain_slice(
+                ticker=ticker, trade_date=fb_date, expiry=fb_expiry,
+            )
+        except Exception:
+            rows = []
+        if rows:
+            return (fb_date, fb_expiry, rows)
+    return None
 
 
 # ---------------------------------------------------------------------------

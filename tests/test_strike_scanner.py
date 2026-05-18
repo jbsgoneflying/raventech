@@ -586,3 +586,54 @@ def test_strike_scan_endpoint_503_when_chain_uncached(
     r = client.post("/api/earnings-ic/strike-scan", json=body)
     assert r.status_code == 503
     assert "No cached chain" in r.json()["detail"]
+
+
+def test_strike_scan_endpoint_falls_back_to_nearest_cached_chain(
+    client, _enable_engine15, tmp_chain_db,
+):
+    """When the requested entry date has no cached chain (forward-looking
+    trade), the scanner should fall back to the most recent cached
+    (trade_date, expiry) pair and flag the fallback in chain_meta."""
+    # Seed an OLDER chain for HD — say six months back.
+    rows = []
+    for k in [315.0, 320.0, 325.0, 330.0, 335.0, 340.0, 345.0, 350.0, 355.0, 360.0]:
+        intrinsic_put = max(0.0, k - 335.0)
+        intrinsic_call = max(0.0, 335.0 - k)
+        extrinsic = max(0.10, 2.0 - abs(k - 335.0) * 0.02)
+        rows.append({
+            "ticker": "HD", "tradeDate": "2025-11-15", "expirDate": "2025-11-21",
+            "strike": float(k), "stockPrice": 335.0,
+            "callMidPrice": intrinsic_call + extrinsic,
+            "callBidPrice": (intrinsic_call + extrinsic) * 0.95,
+            "callAskPrice": (intrinsic_call + extrinsic) * 1.05,
+            "callMidIv": 0.30,
+            "putMidPrice": intrinsic_put + extrinsic,
+            "putBidPrice": (intrinsic_put + extrinsic) * 0.95,
+            "putAskPrice": (intrinsic_put + extrinsic) * 1.05,
+            "putMidIv": 0.30,
+            "callOpenInterest": 100, "putOpenInterest": 100,
+        })
+    chain_cache.upsert_chain(ticker="HD", trade_date="2025-11-15", rows=rows)
+
+    # Request a FORWARD-looking entry/expiry that doesn't have a cached chain.
+    req = _scenario_request_payload()
+    req["entryDate"]        = "2026-04-15"
+    req["expiry"]           = "2026-04-17"
+    req["earningsDate"]     = "2026-04-16"
+    req["plannedExitDate"]  = "2026-04-17"
+    body = {
+        "scenarioRequest": req,
+        "baseline":        _baseline_payload(_matched_events_normal_dist(n=20)),
+    }
+    r = client.post("/api/earnings-ic/strike-scan", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    meta = out.get("chain_meta") or {}
+    assert meta.get("fallback") is True
+    assert meta.get("requested_trade_date") == "2026-04-15"
+    assert meta.get("used_trade_date") == "2025-11-15"
+    # Scan should produce a verdict + at least some priced candidates.
+    assert out["verdict"] in (
+        "dominating", "safer_alternative", "richer_alternative", "optimal",
+    )
+    assert out["scan_meta"]["n_priced"] > 0

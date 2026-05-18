@@ -647,13 +647,21 @@
 
     const headline = String(d.headline || '');
     const baseline = d.baseline || {};
+    const chainMeta = d.chain_meta || {};
+    const fallbackNote = chainMeta.fallback
+      ? `<div class="e15ScanFallbackNote">Pricing from cached chain on ${escapeHtml(String(chainMeta.used_trade_date || ''))} (entry-day chain ${escapeHtml(String(chainMeta.requested_trade_date || ''))} not yet cached). Relative deltas remain informative.</div>`
+      : '';
+    const deskCredit = (baseline.desk_credit != null && Math.abs(baseline.desk_credit - baseline.credit) > 0.01)
+      ? ` · desk collected ${fmtNum(baseline.desk_credit, 2)}`
+      : '';
     verdictEl.innerHTML = `
       <div class="e15ScanVerdictBadge">${verdictLabel}</div>
       <div class="e15ScanVerdictHeadline">${escapeHtml(headline)}</div>
       <div class="e15ScanVerdictMeta">
-        baseline: credit ${fmtNum(baseline.credit, 2)} · breach ${fmtPct((baseline.p_breach || 0) * 100, 1)}
+        baseline: credit ${fmtNum(baseline.credit, 2)}${deskCredit} · breach ${fmtPct((baseline.p_breach || 0) * 100, 1)}
         · scanned ${scannedN} alternatives
       </div>
+      ${fallbackNote}
     `;
 
     // Top alternatives (up to 3).
