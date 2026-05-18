@@ -599,6 +599,157 @@ def earnings_ic_scenario(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# /api/earnings-ic/strike-scan — "what if you moved the short put out 2 strikes?"
+# ---------------------------------------------------------------------------
+
+
+def _baseline_strikes_from_request(req) -> "CandidateStrikes":
+    """Build a baseline CandidateStrikes from the parsed EarningsIcRequest."""
+    from backend.engine15.strike_scanner import CandidateStrikes, STRUCTURE_IC
+
+    return CandidateStrikes(
+        short_put=float(req.short_put),
+        long_put=float(req.long_put),
+        short_call=float(req.short_call),
+        long_call=float(req.long_call),
+        structure=STRUCTURE_IC,
+    )
+
+
+def _user_spot_from_baseline(baseline: Dict[str, Any]) -> Optional[float]:
+    """Pull the user spot out of the baseline scenario response.
+
+    The scenario response stores it under ``entryState.userSpot``. We fall
+    back to ``engine1Summary.stockPrice`` when entryState is missing.
+    """
+    entry = baseline.get("entryState") or {}
+    spot = entry.get("userSpot")
+    if spot is None:
+        e1 = baseline.get("engine1Summary") or {}
+        spot = e1.get("stockPrice")
+    if spot is None:
+        return None
+    try:
+        s = float(spot)
+        return s if s > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _matched_events_from_baseline(baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Lift the baseline's matchedEvents list — used by the tier-1 breach
+    estimator. Each entry already has ``realizedMovePct``."""
+    ev = baseline.get("matchedEvents")
+    return list(ev) if isinstance(ev, list) else []
+
+
+@router.post("/api/earnings-ic/strike-scan")
+def earnings_ic_strike_scan(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Tier-1 strike scanner.
+
+    Generates ~120 candidate IC / fly / vertical variants around the user's
+    mapped trade, re-prices each from the cached entry-day chain, estimates
+    breach probability via the baseline's matchedEvents history, and emits
+    one of four verdicts: dominating / safer / richer / optimal.
+
+    Request body:
+        ``scenarioRequest``: identical shape to /api/earnings-ic/scenario
+        ``baseline``:        a recent response from /api/earnings-ic/scenario
+        ``snapMaxPts``:      optional strike-snap tolerance (default 5.0)
+        ``fillMode``:        optional "mid" | "nbbo" | "mid_penalty"
+    """
+    _ensure_enabled()
+    scenario_body = body.get("scenarioRequest") or {}
+    if not isinstance(scenario_body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="scenarioRequest must be an object matching /scenario shape.",
+        )
+    baseline = body.get("baseline") or {}
+    if not isinstance(baseline, dict) or not baseline.get("matchedEvents"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "baseline must include matchedEvents from a recent "
+                "/api/earnings-ic/scenario response."
+            ),
+        )
+
+    req = _parse_scenario_body(scenario_body)
+
+    user_spot = _user_spot_from_baseline(baseline)
+    if user_spot is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "baseline.entryState.userSpot is required to scale strike "
+                "distances. Re-run /scenario and pass that response in."
+            ),
+        )
+
+    matched_events = _matched_events_from_baseline(baseline)
+    if len(matched_events) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Need at least 3 matchedEvents in the baseline to estimate "
+                f"breach rate; got {len(matched_events)}."
+            ),
+        )
+
+    # Pull the entry-day chain slice once. The scanner re-uses it across
+    # all candidates so a scan stays sub-second.
+    try:
+        entry_chain = chain_cache.fetch_chain_slice(
+            ticker=req.ticker, trade_date=req.entry_date, expiry=req.expiry,
+        )
+    except Exception as e:
+        LOG.warning("strike-scan: chain fetch failed for %s: %s", req.ticker, e)
+        entry_chain = []
+    if not entry_chain:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"No cached chain for {req.ticker} {req.entry_date} -> "
+                f"{req.expiry}. Run /backfill first."
+            ),
+        )
+
+    from backend.engine14.chain_replay import FillModel
+    from backend.engine15.strike_scanner import run_strike_scan
+
+    fill_mode = str(body.get("fillMode") or "nbbo").strip().lower()
+    snap_max_pts = float(body.get("snapMaxPts") or 5.0)
+    fill_model = FillModel.from_str(fill_mode)
+
+    baseline_strikes = _baseline_strikes_from_request(req)
+
+    try:
+        result = run_strike_scan(
+            baseline_strikes=baseline_strikes,
+            baseline_credit=float(req.credit_received),
+            entry_chain=entry_chain,
+            matched_events=matched_events,
+            user_spot=float(user_spot),
+            snap_max_pts=snap_max_pts,
+            fill_model=fill_model,
+        )
+    except Exception as e:
+        LOG.exception("strike-scan failed for %s", req.ticker)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Strike scan failed: {type(e).__name__}: {e}",
+        )
+
+    return {
+        "ticker":    req.ticker,
+        "entryDate": req.entry_date,
+        "expiry":    req.expiry,
+        **result,
+    }
+
+
+# ---------------------------------------------------------------------------
 # /api/earnings-ic/pre-check — live NBBO & strike existence sanity
 # ---------------------------------------------------------------------------
 

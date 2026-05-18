@@ -553,6 +553,238 @@
     renderMatchedEvents(d);
     renderDroppedEvents(d);
     renderNotes(d);
+    scheduleStrikeScan(d);
+  }
+
+  // ------------------------------------------------------------------
+  // Strike Scanner — "what if you moved the short put out 2 strikes?"
+  // ------------------------------------------------------------------
+  let _scanTimer = null;
+  let _scanGen = 0;          // generation counter, lets us cancel stale runs
+  let _scanLastResult = null;
+
+  function scheduleStrikeScan(scenarioData, { immediate = false } = {}) {
+    if (!scenarioData || !Array.isArray(scenarioData.matchedEvents) || scenarioData.matchedEvents.length < 3) {
+      hideStrikeScan();
+      return;
+    }
+    if (_scanTimer) { clearTimeout(_scanTimer); _scanTimer = null; }
+    const delay = immediate ? 0 : 250;
+    _scanTimer = setTimeout(() => runStrikeScan(scenarioData), delay);
+  }
+
+  async function runStrikeScan(scenarioData) {
+    const body = collectScenarioBody();
+    if (!body) { hideStrikeScan(); return; }
+    const gen = ++_scanGen;
+
+    const divider = $('strikeScanDivider');
+    const panel = $('strikeScanPanel');
+    const status = $('strikeScanStatus');
+    if (divider) divider.style.display = '';
+    if (panel) panel.style.display = '';
+    if (status) {
+      status.style.display = '';
+      status.textContent = 'scanning…';
+    }
+
+    try {
+      const resp = await postJson('/api/earnings-ic/strike-scan', {
+        scenarioRequest: body,
+        baseline:        scenarioData,
+        snapMaxPts:      5.0,
+        fillMode:        'nbbo',
+      });
+      if (gen !== _scanGen) return;  // stale response, ignore
+      _scanLastResult = resp;
+      renderStrikeScan(resp);
+    } catch (err) {
+      if (gen !== _scanGen) return;
+      const msg = (err && err.message) || String(err);
+      // Sad-path: chain not cached or thin pool — silently hide the panel
+      // and surface a console hint. Never block the main render.
+      console.warn('strike-scan failed:', msg);
+      hideStrikeScan();
+    }
+  }
+
+  function hideStrikeScan() {
+    const divider = $('strikeScanDivider');
+    const panel = $('strikeScanPanel');
+    if (divider) divider.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+  }
+
+  function renderStrikeScan(d) {
+    const verdictEl = $('strikeScanVerdict');
+    const altsEl = $('strikeScanAlts');
+    const status = $('strikeScanStatus');
+    const countEl = $('strikeScanCount');
+    const tableEl = $('strikeScanTable');
+    if (!verdictEl || !altsEl) return;
+
+    const verdict = String(d.verdict || 'optimal');
+    const scannedN = Number(d.scanned_n || 0);
+    if (status) {
+      status.textContent = `scanned ${scannedN}`;
+    }
+
+    // Verdict header card.
+    verdictEl.innerHTML = '';
+    const verdictClass = {
+      dominating:           'e15ScanVerdict--green',
+      safer_alternative:    'e15ScanVerdict--amber',
+      richer_alternative:   'e15ScanVerdict--amber',
+      optimal:              'e15ScanVerdict--grey',
+    }[verdict] || 'e15ScanVerdict--grey';
+    verdictEl.className = `e15ScanVerdict ${verdictClass}`;
+    const verdictLabel = {
+      dominating:           'Better Trade Available',
+      safer_alternative:    'Equivalent-but-Safer Alternative',
+      richer_alternative:   'Richer Alternative at Similar Risk',
+      optimal:              'As Good As It Gets',
+    }[verdict] || 'Scan Result';
+
+    const headline = String(d.headline || '');
+    const baseline = d.baseline || {};
+    verdictEl.innerHTML = `
+      <div class="e15ScanVerdictBadge">${verdictLabel}</div>
+      <div class="e15ScanVerdictHeadline">${escapeHtml(headline)}</div>
+      <div class="e15ScanVerdictMeta">
+        baseline: credit ${fmtNum(baseline.credit, 2)} · breach ${fmtPct((baseline.p_breach || 0) * 100, 1)}
+        · scanned ${scannedN} alternatives
+      </div>
+    `;
+
+    // Top alternatives (up to 3).
+    altsEl.innerHTML = '';
+    const alts = Array.isArray(d.top_alternatives) ? d.top_alternatives : [];
+    if (alts.length === 0) {
+      altsEl.innerHTML = '<div class="e15ScanEmpty">No Pareto-dominating alternatives in this scan.</div>';
+    }
+    alts.forEach((alt, idx) => {
+      altsEl.appendChild(buildScanAltCard(alt, idx));
+    });
+
+    // Disclosure table — full sorted candidate list.
+    const all = Array.isArray(d.all_candidates) ? d.all_candidates : [];
+    if (countEl) countEl.textContent = String(all.length);
+    if (tableEl) {
+      tableEl.innerHTML = buildScanTable(all);
+    }
+  }
+
+  function buildScanAltCard(alt, idx) {
+    const card = document.createElement('div');
+    card.className = 'e15ScanAltCard';
+    const s = alt.strikes || {};
+    const structureLabel = {
+      iron_condor:    'Iron Condor',
+      iron_fly:       'Iron Fly',
+      asymmetric_ic:  'Asymmetric IC',
+      put_vertical:   'Put Vertical',
+      call_vertical:  'Call Vertical',
+    }[String(s.structure || '')] || 'Alternative';
+
+    const strikesHtml = [
+      s.shortPut  != null ? `SP ${Number(s.shortPut).toFixed(0)}`  : '',
+      s.longPut   != null ? `LP ${Number(s.longPut).toFixed(0)}`   : '',
+      s.shortCall != null ? `SC ${Number(s.shortCall).toFixed(0)}` : '',
+      s.longCall  != null ? `LC ${Number(s.longCall).toFixed(0)}`  : '',
+    ].filter(Boolean).join(' · ');
+
+    card.innerHTML = `
+      <div class="e15ScanAltHeader">
+        <span class="e15ScanAltStructure">${structureLabel}</span>
+        <span class="e15ScanAltStrikes">${strikesHtml}</span>
+      </div>
+      <div class="e15ScanAltDeltas">
+        <span class="e15ScanDelta ${deltaClass(alt.delta_credit_pct, true)}">credit ${fmtSignedPct(alt.delta_credit_pct)}</span>
+        <span class="e15ScanDelta ${deltaClass(-alt.delta_breach_pct, true)}">breach ${fmtSignedPct(alt.delta_breach_pct)}</span>
+        <span class="e15ScanDelta ${deltaClass(alt.delta_ev_pct, true)}">EV ${fmtSignedPct(alt.delta_ev_pct)}</span>
+      </div>
+      <div class="e15ScanAltRationale">${escapeHtml(alt.rationale || '')}</div>
+      <div class="e15ScanAltMetrics">
+        credit ${fmtNum(alt.credit, 2)} · breach ${fmtPct((alt.p_breach || 0) * 100, 1)} · max loss ${fmtNum(alt.max_loss, 2)}
+      </div>
+      <button class="e15ScanApplyBtn" data-alt-idx="${idx}">Apply to form</button>
+    `;
+    const btn = card.querySelector('.e15ScanApplyBtn');
+    if (btn) {
+      btn.addEventListener('click', () => applyStrikeAlternative(alt));
+    }
+    return card;
+  }
+
+  function buildScanTable(all) {
+    if (!all.length) return '<tbody></tbody>';
+    const head = `
+      <thead>
+        <tr>
+          <th>Structure</th><th>SP</th><th>LP</th><th>SC</th><th>LC</th>
+          <th>Credit</th><th>ΔCredit</th><th>Breach</th><th>ΔBreach</th>
+          <th>EV</th><th>ΔEV</th>
+        </tr>
+      </thead>`;
+    const rows = all.slice(0, 60).map(c => {
+      const s = c.strikes || {};
+      return `<tr>
+        <td>${escapeHtml(String(s.structure || '—'))}</td>
+        <td>${s.shortPut  != null ? Number(s.shortPut).toFixed(0)  : '—'}</td>
+        <td>${s.longPut   != null ? Number(s.longPut).toFixed(0)   : '—'}</td>
+        <td>${s.shortCall != null ? Number(s.shortCall).toFixed(0) : '—'}</td>
+        <td>${s.longCall  != null ? Number(s.longCall).toFixed(0)  : '—'}</td>
+        <td>${fmtNum(c.credit, 2)}</td>
+        <td class="${deltaClass(c.delta_credit_pct, true)}">${fmtSignedPct(c.delta_credit_pct)}</td>
+        <td>${fmtPct((c.p_breach || 0) * 100, 1)}</td>
+        <td class="${deltaClass(-c.delta_breach_pct, true)}">${fmtSignedPct(c.delta_breach_pct)}</td>
+        <td>${fmtNum(c.ev, 2)}</td>
+        <td class="${deltaClass(c.delta_ev_pct, true)}">${fmtSignedPct(c.delta_ev_pct)}</td>
+      </tr>`;
+    }).join('');
+    return head + `<tbody>${rows}</tbody>`;
+  }
+
+  function applyStrikeAlternative(alt) {
+    const s = alt && alt.strikes;
+    if (!s) return;
+    const setVal = (id, val) => {
+      const el = $(id);
+      if (!el) return;
+      if (val == null) {
+        // Two-leg verticals leave the other side blank — but the form
+        // requires all four legs, so we keep the existing baseline value
+        // there to avoid breaking the next /scenario submit.
+        return;
+      }
+      el.value = String(val);
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    setVal('shortPut',  s.shortPut);
+    setVal('longPut',   s.longPut);
+    setVal('shortCall', s.shortCall);
+    setVal('longCall',  s.longCall);
+    banner('Strikes applied. Re-run Calculate to re-price the scenario.', 'info');
+  }
+
+  function deltaClass(delta, higherIsBetter) {
+    const v = Number(delta);
+    if (!Number.isFinite(v) || Math.abs(v) < 0.5) return 'e15ScanDelta--flat';
+    const good = higherIsBetter ? v > 0 : v < 0;
+    return good ? 'e15ScanDelta--good' : 'e15ScanDelta--bad';
+  }
+
+  function fmtSignedPct(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    const sign = n > 0 ? '+' : '';
+    return `${sign}${n.toFixed(1)}%`;
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch] || ch));
   }
 
   // ------------------------------------------------------------------
@@ -1495,6 +1727,17 @@
       if (el) el.addEventListener('change', refreshCalculateEnabled);
     });
     refreshCalculateEnabled();
+
+    // Strike Scanner: debounced re-run when any leg or credit changes —
+    // lets the desk tweak the form and watch the verdict refresh live.
+    ['shortPut', 'longPut', 'shortCall', 'longCall', 'creditReceived'].forEach(function (id) {
+      const el = $(id);
+      if (!el) return;
+      const handler = function () {
+        if (state.scenario) scheduleStrikeScan(state.scenario);
+      };
+      el.addEventListener('change', handler);
+    });
 
     // Live tab-title updates so multiple E15 tabs are distinguishable in
     // the Chrome tab strip. See ui_kit.js#setEngineTabTitle for format.

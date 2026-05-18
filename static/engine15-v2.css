@@ -357,3 +357,227 @@ main .deskDivider.e15Divider:first-of-type {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ----- Strike Scanner ("what-if optimizer") -------------------- */
+
+#strikeScanDivider .scanStatus {
+  margin-left: 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.e15ScanPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--surfaceSolid);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.e15ScanVerdict {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: var(--hover);
+}
+
+.e15ScanVerdictBadge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.e15ScanVerdictHeadline {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.e15ScanVerdictMeta {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.e15ScanVerdict--green {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.35);
+}
+.e15ScanVerdict--green .e15ScanVerdictBadge { color: #15803d; }
+
+.e15ScanVerdict--amber {
+  background: rgba(217, 119, 6, 0.10);
+  border-color: rgba(217, 119, 6, 0.38);
+}
+.e15ScanVerdict--amber .e15ScanVerdictBadge { color: #b45309; }
+
+.e15ScanVerdict--grey {
+  background: rgba(100, 116, 139, 0.10);
+  border-color: rgba(100, 116, 139, 0.30);
+}
+.e15ScanVerdict--grey .e15ScanVerdictBadge { color: #475569; }
+
+.e15ScanAltCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.e15ScanAltCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.e15ScanAltHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.e15ScanAltStructure {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.e15ScanAltStrikes {
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.e15ScanAltDeltas {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.e15ScanDelta {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  border: 1px solid var(--line);
+}
+
+.e15ScanDelta--good {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: rgba(22, 163, 74, 0.30);
+  color: #15803d;
+  font-weight: 600;
+}
+
+.e15ScanDelta--bad {
+  background: rgba(220, 38, 38, 0.10);
+  border-color: rgba(220, 38, 38, 0.28);
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.e15ScanDelta--flat {
+  color: var(--muted);
+}
+
+.e15ScanAltRationale {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.e15ScanAltMetrics {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.e15ScanApplyBtn {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.e15ScanApplyBtn:hover {
+  background: var(--hover);
+  border-color: var(--text);
+}
+
+.e15ScanEmpty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 4px;
+}
+
+.e15ScanDisclosure {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.e15ScanDisclosure summary {
+  cursor: pointer;
+  padding: 6px 0;
+  user-select: none;
+}
+
+.e15ScanTableWrap {
+  overflow-x: auto;
+  margin-top: 6px;
+}
+
+.e15ScanTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.e15ScanTable th,
+.e15ScanTable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.e15ScanTable th:first-child,
+.e15ScanTable td:first-child {
+  text-align: left;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.e15ScanTable th {
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  text-transform: uppercase;
+}

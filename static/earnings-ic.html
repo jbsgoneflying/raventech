@@ -476,6 +476,20 @@
         </div>
         <div id="crossCheckPanel" class="e15Grid" style="display:none;"></div>
 
+        <!-- E15 Strike Scanner — "what if you moved the short put out 2 strikes?" -->
+        <div class="deskDivider e15Divider" data-insight="strike_scanner" id="strikeScanDivider" style="display:none;">
+          <span class="deskDividerText e15DividerText">Strike Scanner <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(what-if optimizer)</span></span>
+          <span class="scanStatus" id="strikeScanStatus" style="display:none;"></span>
+        </div>
+        <section class="e15ScanPanel" id="strikeScanPanel" style="display:none;">
+          <div class="e15ScanVerdict" id="strikeScanVerdict"></div>
+          <div class="e15ScanAltCards" id="strikeScanAlts"></div>
+          <details class="e15ScanDisclosure" id="strikeScanDisclosure">
+            <summary>show all <span id="strikeScanCount">0</span> scanned candidates</summary>
+            <div class="e15ScanTableWrap"><table class="e15ScanTable" id="strikeScanTable"></table></div>
+          </details>
+        </section>
+
         <div class="deskDivider e15Divider" data-insight="entry_state"><span class="deskDividerText e15DividerText">Entry State</span></div>
         <div id="entryCards" class="e15Grid"></div>
 
