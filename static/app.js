@@ -828,6 +828,17 @@ function _e1TBFmt(x, digits = 2) {
   return n.toFixed(digits);
 }
 
+function _e1TrackBuilderIsReady(state) {
+  return !!(
+    state &&
+    state.ticker &&
+    state.event_date &&
+    ["AMC", "BMO"].includes(String(state.event_timing || "").toUpperCase()) &&
+    Number(state.spot) > 0 &&
+    Number(state.emPct) > 0
+  );
+}
+
 function renderTrackBuilder(payload) {
   const host = $("e1TrackBuilder");
   const section = $("e1TrackBuilderSection");
@@ -836,12 +847,18 @@ function renderTrackBuilder(payload) {
   const ticker = String(payload?.ticker || "").toUpperCase();
   const ne = payload?.nextEvent || {};
   const eventDate = String(ne.earnDateNext || $("mcEventDate")?.value || "").slice(0, 10);
-  const eventTiming = String(ne.timingPlanned || $("mcEventTiming")?.value || "").toUpperCase();
+  const eventTiming = String(
+    ne.timingPlanned ||
+    ne.earningsTiming ||
+    payload?.current?.earningsTiming ||
+    $("mcEventTiming")?.value ||
+    ""
+  ).toUpperCase();
   const cur = payload?.current || {};
   const spot = Number(cur.stockPrice || 0) || null;
   const emPct = Number(cur.impliedMovePct || 0) || null;
 
-  if (!ticker || !eventDate || !["AMC", "BMO"].includes(eventTiming) || !spot || !emPct) {
+  if (!ticker) {
     section.classList.add("hidden");
     host.innerHTML = "";
     return;
@@ -853,6 +870,7 @@ function renderTrackBuilder(payload) {
   _e1TrackBuilderState.spot = spot;
   _e1TrackBuilderState.emPct = emPct;
   _e1TrackBuilderState.preview = null;
+  const isReady = _e1TrackBuilderIsReady(_e1TrackBuilderState);
 
   section.classList.remove("hidden");
 
@@ -889,11 +907,15 @@ function renderTrackBuilder(payload) {
       </div>
 
       <div class="e1TBActions" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
-        <button type="button" id="e1TBPreviewBtn" style="padding:8px 16px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer;">Preview Strikes</button>
-        <button type="button" id="e1TBTrackBtn" class="primaryButton" style="padding:8px 18px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;">Start Tracking</button>
+        <button type="button" id="e1TBPreviewBtn" ${isReady ? "" : "disabled"} style="padding:8px 16px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer;">Preview Strikes</button>
+        <button type="button" id="e1TBTrackBtn" class="primaryButton" ${isReady ? "" : "disabled"} style="padding:8px 18px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;">Start Tracking</button>
       </div>
 
-      <div id="e1TBPreview" style="margin-top:14px;font-size:12px;opacity:0.85;min-height:22px;"></div>
+      <div id="e1TBPreview" style="margin-top:14px;font-size:12px;opacity:0.85;min-height:22px;">
+        ${isReady
+          ? ""
+          : '<span style="opacity:.75;">Set earnings date/timing and run Calculate so Trade Builder can price strikes.</span>'}
+      </div>
     </div>
   `;
 
@@ -906,6 +928,10 @@ function renderTrackBuilder(payload) {
 async function _previewTrackCandidate() {
   const previewHost = $("e1TBPreview");
   if (!previewHost) return;
+  if (!_e1TrackBuilderIsReady(_e1TrackBuilderState)) {
+    previewHost.innerHTML = '<span style="color:#ff9500;">Trade Builder needs ticker + earnings date/timing + spot/implied move. Run Calculate first.</span>';
+    return;
+  }
   const em = parseFloat($("e1TBEm")?.value) || 0;
   const wing = parseFloat($("e1TBWing")?.value) || 0;
   if (!(em >= 0.25 && em <= 3) || !(wing >= 1 && wing <= 50)) {
@@ -947,6 +973,10 @@ async function _previewTrackCandidate() {
 
 async function _submitTrackCandidate() {
   const state = _e1TrackBuilderState;
+  if (!_e1TrackBuilderIsReady(state)) {
+    alert("Trade Builder is missing pricing context. Run Calculate with earnings date/timing first.");
+    return;
+  }
   const em = parseFloat($("e1TBEm")?.value) || 0;
   const wing = parseFloat($("e1TBWing")?.value) || 0;
   const creditOverride = parseFloat($("e1TBCredit")?.value);
@@ -4548,6 +4578,8 @@ function _showE1CloseModal(tradeId) {
 // Engine 1 — Trade Journal
 // ---------------------------------------------------------------------------
 
+let _e1TradeJournalExpanded = false;
+
 async function _loadE1TradeJournal() {
   var sec = $("e1TradeJournal");
   var el = $("e1TradeJournalContent");
@@ -4567,9 +4599,11 @@ async function _loadE1TradeJournal() {
 
     sec.classList.remove("hidden");
     var html = '<div class="taPanel">';
-    html += '<div class="taHeader"><div class="taHeaderRow"><span class="taHeaderTitle">Trade Journal</span>';
-    html += '<span style="font-size:12px;opacity:.6">Learning System · ' + (perf.totalClosed || 0) + ' closed trades</span>';
-    html += '</div></div>';
+    html += '<button id="e1TradeJournalToggle" type="button" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border:none;background:transparent;cursor:pointer;border-bottom:1px solid var(--border);text-align:left">';
+    html += '<span style="font-size:15px;font-weight:700">Trade Journal</span>';
+    html += '<span style="font-size:12px;opacity:.6">Learning System · ' + (perf.totalClosed || 0) + ' closed trades · ' + (_e1TradeJournalExpanded ? 'Hide' : 'Show') + '</span>';
+    html += '</button>';
+    html += '<div id="e1TradeJournalBody" style="display:' + (_e1TradeJournalExpanded ? "block" : "none") + ';">';
 
     // Performance Stats
     if (perf.hasData) {
@@ -4624,8 +4658,15 @@ async function _loadE1TradeJournal() {
       html += '</div>';
     }
 
-    html += '</div>';
+    html += '</div></div>';
     el.innerHTML = html;
+    var tg = $("e1TradeJournalToggle");
+    if (tg) {
+      tg.addEventListener("click", function () {
+        _e1TradeJournalExpanded = !_e1TradeJournalExpanded;
+        _loadE1TradeJournal();
+      });
+    }
   } catch (e) {
     sec.classList.add("hidden");
   }
