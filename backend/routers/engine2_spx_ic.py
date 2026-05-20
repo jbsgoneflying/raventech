@@ -21,7 +21,9 @@ from backend.engine2_trades import (
     list_active_trades,
     list_closed_trades,
     log_trade,
+    promote_to_live,
 )
+from backend.e2_live_review import run_e2_live_review
 from backend.market_hours import is_us_equity_market_open
 from backend.deps import (
     LOG,
@@ -326,12 +328,14 @@ def _build_e2_command_deck_payload(
         "wingConsole":   console.to_dict(),
         "mcResults":     (mc_result.to_dict() if mc_result else {}),
         "maeDistribution": mae_dist.to_dict(),
+        "historyBreakerRisk": scan_payload.get("historyBreakerRisk"),
         "regime":        {"mi_v2": scan_payload.get("current", {}).get("regimeMiV2")},
         "scan":          {
             "expectedMove":  scan_payload.get("expectedMove"),
             "oddsLikeNow":   scan_payload.get("oddsLikeNow"),
             "underlying":    scan_payload.get("underlying"),
             "current":       scan_payload.get("current"),
+            "historyBreakerRisk": scan_payload.get("historyBreakerRisk"),
             "asOfDate":      as_of_date,
         },
     }
@@ -869,6 +873,50 @@ def spx_ic_trade_checkin(trade_id: str, body: Dict[str, Any] = Body(default={}))
         "tracking": tracking,
         "currentSpot": current_spot,
     }
+
+
+@router.post("/api/spx-ic/trade/{trade_id}/promote")
+def spx_ic_trade_promote(trade_id: str):
+    """Promote a tracked trade candidate to live mode."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    trade = promote_to_live(trade_id, store=store, flags=f)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+    return {"status": "ok", "trade": trade}
+
+
+@router.post("/api/spx-ic/trade/{trade_id}/live-review")
+def spx_ic_trade_live_review(trade_id: str, body: Dict[str, Any] = Body(default={})):
+    """Run phase-based live review using E14 replay as backend context."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    trade = get_trade(trade_id, store=store)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+    px_ctx = fetch_live_price_context_optional(client=get_client(), ticker="SPX")
+    current_spot = float(px_ctx.get("price", 0)) if px_ctx else 0.0
+    if current_spot <= 0:
+        raise HTTPException(status_code=502, detail="Could not fetch current spot price")
+    current_regime, current_vol, _regime_source = _current_regime_for_tracker(store=store, flags=f)
+    review = run_e2_live_review(
+        trade=trade,
+        current_spot=current_spot,
+        current_regime=current_regime,
+        current_vol=current_vol,
+        phase=body.get("phase"),
+        flags=f,
+        store=store,
+    )
+    return {"tradeId": trade_id, "review": review, "currentSpot": current_spot}
 
 
 @router.post("/api/spx-ic/trade/{trade_id}/close")

@@ -55,6 +55,12 @@ def _stub_scan():
         "params":       {"emMults": [1.0, 1.5, 2.0], "wingWidthPts": [5, 10, 15]},
         "weeks":        weeks,
         "riskGrid":     {"cells": [], "count": 0},
+        "historyBreakerRisk": {
+            "score": 42.0,
+            "level": "elevated",
+            "gate": "CAUTION",
+            "drivers": ["Recent moves are hotter than baseline."],
+        },
     }
 
 
@@ -102,6 +108,7 @@ def test_wing_console_happy_path(client):
     assert body["mcResults"]["n_sims"] > 0
     # MI v2 is carried end-to-end
     assert body["regime"]["mi_v2"]["label"] == "Risk-On"
+    assert body["historyBreakerRisk"]["level"] == "elevated"
 
 
 def test_wing_console_rejects_bad_underlying(client):

@@ -2091,7 +2091,7 @@ function _paintE2WingConsole(host, deck) {
 
       <div class="e2ConsoleActions">
         <button type="button" id="e2BuildTradeBtn" class="e2ConsoleActions--primary">Use Selected Placement (Log Trade)</button>
-        <button type="button" id="e2SimE14Btn">Simulate in E14</button>
+        <button type="button" id="e2SimE14Btn">Preview Replay (in-page)</button>
         <button type="button" id="e2ExportBtn">Export JSON</button>
       </div>
     </div>
@@ -2197,42 +2197,30 @@ function _wireE2DeckActions(deck) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
   }
-  // v2: Wire "Simulate in E14" -> open /ic-scenario with the selected
-  // placement pre-filled. E14 replays the specific 4-strike structure
-  // against its analogue pool for realized-path outcomes.
+  // Single-surface E2/E14 UX: run replay in-page instead of opening /ic-scenario.
   const simBtn = document.getElementById("e2SimE14Btn");
   if (simBtn) {
-    simBtn.addEventListener("click", () => {
+    simBtn.addEventListener("click", async () => {
       const idx = _E2CommandDeckState.selectedIndex || 0;
       const wc = (deck && deck.wingConsole) || {};
       const p = (wc.placements || [])[idx];
       if (!p) return;
-      // E2's entry is "this trading day" and expiry is the Friday weekly
-      // already computed on the scan side. Pull both from state so the
-      // URL carries unambiguous dates E14 can drop straight into its
-      // scenario form.
       const entryDate = _E2CommandDeckState.as_of_date || (wc.as_of_date || "");
       const expiry = _E2CommandDeckState.expiry_date ||
         ((_E2CommandDeckState.lastPayload || {}).expectedMove || {}).expiry || "";
       if (!entryDate || !expiry) {
-        alert("E14 handoff needs entry + expiry dates from the scan. Click Run first, then try again.");
+        alert("Replay preview needs entry + expiry dates from the scan. Click Run first, then try again.");
         return;
       }
-      const qs = new URLSearchParams({
-        src:        "e2",
+      await _showE2ReplayPreview({
         entry_date: String(entryDate).slice(0, 10),
-        expiry:     String(expiry).slice(0, 10),
-        short_put:  String(p.short_put_strike || ""),
-        long_put:   String(p.long_put_strike || ""),
-        short_call: String(p.short_call_strike || ""),
-        long_call:  String(p.long_call_strike || ""),
-        credit:     String(((p.credit_dollars || 0) / 100.0).toFixed(2)),
-        em_mult:    String(p.em_mult || ""),
-        wing_pts:   String(p.wing_pts || ""),
-        rank:       String(idx),
-        composite:  String(p.composite_score || ""),
+        expiry: String(expiry).slice(0, 10),
+        short_put: Number(p.short_put_strike || 0),
+        long_put: Number(p.long_put_strike || 0),
+        short_call: Number(p.short_call_strike || 0),
+        long_call: Number(p.long_call_strike || 0),
+        credit_received: Number(((p.credit_dollars || 0) / 100.0).toFixed(2)),
       });
-      window.open(`/ic-scenario?${qs.toString()}`, "_blank", "noopener,noreferrer");
     });
   }
 
@@ -2251,6 +2239,62 @@ function _wireE2DeckActions(deck) {
         console.warn("E2 adjust modal failed", err);
       }
     });
+  }
+}
+
+async function _showE2ReplayPreview(req) {
+  var existing = document.getElementById("e2ReplayPreviewOverlay");
+  if (existing) existing.remove();
+  var overlay = document.createElement("div");
+  overlay.id = "e2ReplayPreviewOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center";
+  overlay.innerHTML =
+    '<div style="width:min(720px,92vw);background:var(--surface,#161a22);border:1px solid var(--border,rgba(255,255,255,.12));border-radius:12px;padding:18px;color:var(--text,#f3f4f6)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+        '<div style="font-size:15px;font-weight:700">Replay Preview (E14 backend)</div>' +
+        '<button id="e2ReplayPreviewClose" type="button" class="chipToggle" style="font-size:11px;padding:3px 10px">Close</button>' +
+      '</div>' +
+      '<div id="e2ReplayPreviewBody" style="font-size:12px;color:var(--text-secondary,#c7ceda)">Running replay...</div>' +
+    "</div>";
+  document.body.appendChild(overlay);
+  function close() { overlay.remove(); }
+  document.getElementById("e2ReplayPreviewClose").addEventListener("click", close);
+  overlay.addEventListener("click", function (ev) { if (ev.target === overlay) close(); });
+  var bodyEl = document.getElementById("e2ReplayPreviewBody");
+  try {
+    var resp = await fetch("/api/ic-scenario", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        underlying: "SPX",
+        entry_date: req.entry_date,
+        expiry: req.expiry,
+        short_put: req.short_put,
+        long_put: req.long_put,
+        short_call: req.short_call,
+        long_call: req.long_call,
+        credit_received: req.credit_received,
+      }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    var tl = Array.isArray(data.mtmTimeline) ? data.mtmTimeline : [];
+    var last = tl.length ? tl[tl.length - 1] : {};
+    var out = data.outcomeDistribution || {};
+    bodyEl.innerHTML =
+      '<div style="display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:8px;margin-bottom:10px">' +
+        '<div class="e15Card"><div class="e15CardLabel">P10</div><div class="e15CardValue">' + _fmtPctE2(last.p10, 1) + '</div></div>' +
+        '<div class="e15Card"><div class="e15CardLabel">P50</div><div class="e15CardValue">' + _fmtPctE2(last.p50, 1) + '</div></div>' +
+        '<div class="e15Card"><div class="e15CardLabel">P90</div><div class="e15CardValue">' + _fmtPctE2(last.p90, 1) + '</div></div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:6px">' +
+        '<div>Full collect: <strong>' + _fmtPctE2((out.fullCollect || {}).pct, 1) + '</strong></div>' +
+        '<div>Early target: <strong>' + _fmtPctE2((out.earlyTarget || {}).pct, 1) + '</strong></div>' +
+        '<div>White-knuckle: <strong>' + _fmtPctE2((out.whiteKnuckle || {}).pct, 1) + '</strong></div>' +
+        '<div>Breach: <strong>' + _fmtPctE2((out.breach || {}).pct, 1) + '</strong></div>' +
+      '</div>';
+  } catch (err) {
+    bodyEl.innerHTML = '<span style="color:#ff7a7a">Replay preview failed: ' + escapeHtml(String(err.message || err)) + "</span>";
   }
 }
 
@@ -2310,6 +2354,7 @@ function _showE2AdjustModal(deck, placement) {
 
     const body = {
       source: "wing_console",
+      mode: "tracked",
       underlying: underlying,
       entryDay: edVal,
       entry: {
@@ -2332,6 +2377,7 @@ function _showE2AdjustModal(deck, placement) {
         breachCloseProb:     placement.breach_close_prob,
         touchIntraweekProb:  placement.touch_intraweek_prob,
         maeP95VsWing:        placement.mae_p95_vs_wing,
+        historyBreakerRisk:  deck && deck.historyBreakerRisk ? deck.historyBreakerRisk : null,
       },
       wingConsole: {
         rank:           placement._rank,
@@ -2421,6 +2467,10 @@ function _renderMcReading(deck) {
   const mc = deck && deck.mcResults;
   if (!mc || !mc.n_sims) { sec.classList.add("hidden"); return; }
   sec.classList.remove("hidden");
+  const hb = deck && (deck.historyBreakerRisk || (deck.scan || {}).historyBreakerRisk);
+  const hbNote = (hb && String(hb.gate || "").toUpperCase() === "NO_TRADE")
+    ? '<div style="margin-top:6px;color:#ffb388;font-size:11px">Warn-only guardrail is elevated (NO_TRADE). Conservative defaults are intentional, not missing data.</div>'
+    : "";
   body.innerHTML = (
     `<div class="taPanel" style="padding:12px 16px">` +
       `<div class="taMuted" style="font-size:12px;margin-bottom:6px">` +
@@ -2429,6 +2479,7 @@ function _renderMcReading(deck) {
       `pool used/total: <strong>${mc.pool_size_used}/${mc.pool_size_total}</strong>` +
       `</div>` +
       (Array.isArray(mc.notes) && mc.notes.length ? `<div class="taMuted" style="font-size:11px">${mc.notes.map(escapeHtml).join(" · ")}</div>` : "") +
+      hbNote +
     `</div>`
   );
 }
@@ -2950,6 +3001,7 @@ async function _logAdvisorTrade(advisorResult) {
     var em = advisorResult.expectedMove || {};
     var body = {
       source: "advisor",
+      mode: "live",
       entry: {
         underlying: ticket.underlying || "SPX",
         spotAtEntry: Number(current.regime?.components?.spotPrice) || 0,
@@ -2969,6 +3021,7 @@ async function _logAdvisorTrade(advisorResult) {
         macroBucket: current.macro?.bucket,
         emPct: em.oratsExpectedMovePct || em.expectedMovePct,
         volPressureState: lastPayload?.liveContext?.volPressure?.state,
+        historyBreakerRisk: advisorResult.historyBreakerRisk || null,
       },
       advisorVerdict: advisorResult.advisor,
     };
@@ -3005,6 +3058,7 @@ async function _logAdjustedTrade(advisorResult) {
 
     var body = {
       source: "adjusted",
+      mode: "live",
       entry: {
         underlying: ticket.underlying || "SPX",
         spotAtEntry: Number(current.regime?.components?.spotPrice) || 0,
@@ -3024,6 +3078,7 @@ async function _logAdjustedTrade(advisorResult) {
         macroBucket: current.macro?.bucket,
         emPct: em.oratsExpectedMovePct || em.expectedMovePct,
         volPressureState: lastPayload?.liveContext?.volPressure?.state,
+        historyBreakerRisk: advisorResult.historyBreakerRisk || null,
       },
       advisorVerdict: advisorResult.advisor,
       originalTicket: {
@@ -3073,13 +3128,16 @@ async function _loadActiveTrades() {
     }
 
     sec.classList.remove("hidden");
+    var liveCount = trades.filter(function (t) { return String(t.mode || "live").toLowerCase() === "live"; }).length;
+    var trackedCount = trades.length - liveCount;
     var html = '<div class="taPanel">';
-    html += '<div class="taHeader"><span class="taHeaderTitle">Active Trades</span><span class="taHeaderMeta">' + trades.length + ' open</span></div>';
+    html += '<div class="taHeader"><span class="taHeaderTitle">Active Trades</span><span class="taHeaderMeta">' + liveCount + ' live · ' + trackedCount + ' tracked</span></div>';
 
     var staleCheckinTradeIds = [];
 
     trades.forEach(function (t) {
       var entry = t.entry || {};
+      var mode = String(t.mode || "live").toLowerCase();
       var tracking = t.tracking || {};
       var status = tracking.deterministicStatus || "on_track";
       var lastCheckin = (t.checkIns || []).slice(-1)[0];
@@ -3107,13 +3165,24 @@ async function _loadActiveTrades() {
       html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
       html += '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">';
       html += escapeHtml(entry.underlying || "SPX") + ' IC · $' + escapeHtml(String(entry.wingWidth || "")) + ' wings';
+      html += mode === "tracked"
+        ? ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#0a84ff;color:#fff;font-weight:700">TRACKED</span>'
+        : ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#34c759;color:#fff;font-weight:700">LIVE</span>';
       if (t.source === "engine14") html += ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#0a84ff;color:#fff;font-weight:600">E14</span>';
       else if (t.source === "adjusted") html += ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#5856d6;color:#fff;font-weight:600">ADJ</span>';
       if (entryReconcile) html += ' ' + _reconcileBadge(entryReconcile);
       html += '</div>';
       html += '<div style="display:flex;align-items:center;gap:8px">' + _statusBadge(status);
       html += '<button class="chipToggle" data-checkin-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Check In</button>';
-      html += '<button class="chipToggle" data-close-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Close</button>';
+      html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_event" type="button" style="font-size:10px;padding:3px 8px">Pre-event</button>';
+      html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_open" type="button" style="font-size:10px;padding:3px 8px">Pre-open</button>';
+      html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="post_open" type="button" style="font-size:10px;padding:3px 8px">Post-open</button>';
+      if (mode === "tracked") {
+        html += '<button class="chipToggle" data-promote-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px;background:#34c759;color:#fff;border-color:#34c759">Promote LIVE</button>';
+        html += '<button class="chipToggle" data-stop-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Stop Tracking</button>';
+      } else {
+        html += '<button class="chipToggle" data-close-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Close</button>';
+      }
       html += '</div></div>';
 
       html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;font-size:11px">';
@@ -3161,6 +3230,18 @@ async function _loadActiveTrades() {
         html += '</div>';
       }
 
+      var hb = (t.entryContext || {}).historyBreakerRisk;
+      if (hb && hb.level && hb.level !== "low") {
+        var hbColor = hb.level === "high" ? "#ff453a" : "#ff9f0a";
+        html += '<div style="margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;border-left:3px solid ' + hbColor + '">';
+        html += '<div style="font-size:11px;font-weight:700;color:' + hbColor + '">History-breaker ' + escapeHtml(String(hb.level || "").toUpperCase()) + ' · score ' + escapeHtml(String(hb.score || "—")) + '</div>';
+        if (Array.isArray(hb.drivers) && hb.drivers.length) {
+          html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:3px">' + escapeHtml(String(hb.drivers[0])) + '</div>';
+        }
+        html += '</div>';
+      }
+      html += '<div id="e2LiveReviewBox-' + escapeHtml(t.tradeId) + '" style="margin-top:8px"></div>';
+
       html += '</div>';
     });
 
@@ -3172,6 +3253,17 @@ async function _loadActiveTrades() {
     });
     el.querySelectorAll("[data-close-id]").forEach(function (btn) {
       btn.addEventListener("click", function () { _closeTrade(btn.dataset.closeId); });
+    });
+    el.querySelectorAll("[data-promote-id]").forEach(function (btn) {
+      btn.addEventListener("click", function () { _promoteTrackedTrade(btn.dataset.promoteId); });
+    });
+    el.querySelectorAll("[data-stop-id]").forEach(function (btn) {
+      btn.addEventListener("click", function () { _stopTrackingTrade(btn.dataset.stopId); });
+    });
+    el.querySelectorAll("[data-live-review-id]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        _runE2LiveReview(btn.dataset.liveReviewId, btn.dataset.liveReviewPhase || "pre_event");
+      });
     });
 
     if (staleCheckinTradeIds.length > 0 && !_autoCheckinRunning) {
@@ -3199,6 +3291,95 @@ async function _runCheckin(tradeId) {
     _loadActiveTrades();
   } catch (err) {
     alert("Check-in error: " + err.message);
+  }
+}
+
+async function _promoteTrackedTrade(tradeId) {
+  try {
+    var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/promote", { method: "POST" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    _loadActiveTrades();
+  } catch (err) {
+    alert("Promote error: " + err.message);
+  }
+}
+
+async function _stopTrackingTrade(tradeId) {
+  try {
+    var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "cancelled_tracking", notes: "Stopped tracking candidate." }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    _loadActiveTrades();
+    _loadTradeJournal();
+  } catch (err) {
+    alert("Stop tracking error: " + err.message);
+  }
+}
+
+function _fmtPctOrDash(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+  return Number(v).toFixed(1) + "%";
+}
+
+function _paintE2LiveReview(tradeId, review) {
+  var host = document.getElementById("e2LiveReviewBox-" + tradeId);
+  if (!host) return;
+  var proj = review.projection || {};
+  var ladder = review.actionLadder || {};
+  var llm = review.llm || {};
+  var hb = review.historyBreaker || null;
+  var hbHtml = "";
+  if (hb && hb.level && hb.level !== "low") {
+    var c = hb.level === "high" ? "#ff453a" : "#ff9f0a";
+    hbHtml = '<div style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid ' + c + ';font-size:11px;color:#f4f6fa">' +
+      'History-breaker ' + escapeHtml(String(hb.level || "").toUpperCase()) + ' (' + escapeHtml(String(hb.score || "—")) + ')' +
+      "</div>";
+  }
+  var rows = Array.isArray(ladder.rows) ? ladder.rows : [];
+  host.innerHTML =
+    '<div style="margin-top:8px;padding:10px;border-radius:10px;background:#171b24;border:1px solid rgba(255,255,255,.1)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+        '<div style="font-size:12px;font-weight:700;color:#f5f7ff">Live Review · ' + escapeHtml(String(review.phase || "pre_event")) + '</div>' +
+        '<div style="font-size:11px;color:#d9e1ef">Pre-verdict: <strong style="color:#fff">' + escapeHtml(String(ladder.preVerdict || "HOLD")) + "</strong></div>" +
+      "</div>" +
+      '<div style="display:grid;grid-template-columns:repeat(3,minmax(100px,1fr));gap:8px">' +
+        '<div><div style="font-size:10px;color:#aeb8ca">P10</div><div style="font-size:14px;font-weight:700;color:#f0f4ff">' + _fmtPctOrDash(proj.p10) + "</div></div>" +
+        '<div><div style="font-size:10px;color:#aeb8ca">P50</div><div style="font-size:14px;font-weight:700;color:#f0f4ff">' + _fmtPctOrDash(proj.p50) + "</div></div>" +
+        '<div><div style="font-size:10px;color:#aeb8ca">P90</div><div style="font-size:14px;font-weight:700;color:#f0f4ff">' + _fmtPctOrDash(proj.p90) + "</div></div>" +
+      "</div>" +
+      '<div style="margin-top:8px;font-size:11px;color:#dbe3f2">Full collect ' + _fmtPctOrDash(proj.fullCollectRate) +
+      ' · White-knuckle ' + _fmtPctOrDash(proj.whiteKnuckleRate) + ' · Breach ' + _fmtPctOrDash(proj.breachRate) + "</div>" +
+      '<div style="margin-top:8px;font-size:11px;color:#e7ecf8;background:rgba(255,255,255,.03);padding:8px;border-radius:8px">' +
+      escapeHtml(String(llm.headline || "No narrative returned.")) + "</div>" +
+      (rows.length ? ('<div style="margin-top:8px;font-size:11px;color:#dce4f2">' + rows.slice(0, 3).map(function (r) {
+        return '<div style="margin-top:2px"><strong style="color:#fff">' + escapeHtml(String(r.action || "HOLD")) + "</strong> " +
+          escapeHtml(String(r.probability || "—")) + "% · " + escapeHtml(String(r.note || "")) + "</div>";
+      }).join("") + "</div>") : "") +
+      hbHtml +
+    "</div>";
+}
+
+async function _runE2LiveReview(tradeId, phase) {
+  var host = document.getElementById("e2LiveReviewBox-" + tradeId);
+  if (host) {
+    host.innerHTML = '<div style="margin-top:8px;padding:8px;border-radius:8px;background:#1b1f2a;color:#d7dfef;font-size:11px">Running ' + escapeHtml(String(phase || "pre_event")) + ' review…</div>';
+  }
+  try {
+    var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/live-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phase: phase || "pre_event" }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    _paintE2LiveReview(tradeId, data.review || {});
+  } catch (err) {
+    if (host) {
+      host.innerHTML = '<div style="margin-top:8px;padding:8px;border-radius:8px;background:#2a1b1b;color:#ffb2b2;font-size:11px">Live review failed: ' + escapeHtml(String(err.message || err)) + "</div>";
+    }
   }
 }
 

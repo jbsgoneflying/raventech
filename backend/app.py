@@ -351,10 +351,9 @@ def gap_regime_page():
 
 @app.get("/ic-scenario")
 def ic_scenario_page():
-    fl = get_flags()
-    if not getattr(fl, "ENABLE_ENGINE14_IC_SCENARIO", False):
-        raise HTTPException(status_code=404, detail="Engine 14 disabled")
-    return FileResponse(str(STATIC_DIR / "ic-scenario.html"))
+    # E2/E14 single-surface desk migration:
+    # keep Engine 14 APIs available, but retire the standalone /ic-scenario page UX.
+    return RedirectResponse(url="/spx", status_code=302)
 
 
 # NOTE: The /earnings-ic page was retired 2026-05-20 alongside the

@@ -18,6 +18,7 @@ from backend.engine2_gamma_addons import (
 from backend.expected_move import compute_expected_move_from_chain, compute_strike_targets
 from backend.oi_clusters import compute_open_interest_clusters
 from backend.orats_client import OratsClient, OratsError
+from backend.e2_history_breaker import compute_e2_history_breaker_risk
 from backend.technicals import DailyBar as TechDailyBar
 from backend.technicals import (
     _ema_series,
@@ -1944,6 +1945,7 @@ def compute_engine2_spx_ic(
         # v2: historical weekly pool used by the Wing Console + MC.
         "weeks": weeks_out,
     }
+    out["historyBreakerRisk"] = compute_e2_history_breaker_risk(out)
 
     # v2: strip legacy desk-consensus verdict fields from the primary
     # /api/spx-ic response when E2_EMIT_DESK_CONSENSUS is off. The advisor

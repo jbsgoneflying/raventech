@@ -92,6 +92,14 @@ def _generate_trade_id(underlying: str = "SPX") -> str:
     return f"e2-{today}-{underlying}-{short_uuid}"
 
 
+def normalize_trade_mode(mode: Any) -> str:
+    m = str(mode or "").strip().lower()
+    if m in ("live", "tracked"):
+        return m
+    # Back-compat: legacy records had no mode and represented active/live trades.
+    return "live"
+
+
 def log_trade(
     trade_data: Dict[str, Any],
     store: Optional[RedisStore] = None,
@@ -117,13 +125,15 @@ def log_trade(
         LOG.debug("E2 trade enrichment failed (non-fatal): %s", exc)
 
     source = trade_data.get("source", "advisor")
+    mode = normalize_trade_mode(trade_data.get("mode") or "tracked")
     trade = {
         "tradeId": trade_id,
         "status": "active",
+        "mode": mode,
         "loggedAt": _utcnow_iso(),
         "source": source,
         "entry": trade_data.get("entry", {}),
-        "entryContext": trade_data.get("entryContext", {}),
+        "entryContext": trade_data.get("entryContext", {}) if isinstance(trade_data.get("entryContext"), dict) else {},
         "marketSnapshot": trade_data.get("marketSnapshot", {}),
         "positionGreeks": trade_data.get("positionGreeks", {}),
         "advisorVerdict": trade_data.get("advisorVerdict"),
@@ -149,7 +159,12 @@ def log_trade(
 
 
 def _load_trade(trade_id: str, store: RedisStore) -> Optional[Dict[str, Any]]:
-    return store.get_json(f"{_TRADE_KEY_PREFIX}{trade_id}")
+    trade = store.get_json(f"{_TRADE_KEY_PREFIX}{trade_id}")
+    if isinstance(trade, dict):
+        trade["mode"] = normalize_trade_mode(trade.get("mode"))
+        if not isinstance(trade.get("entryContext"), dict):
+            trade["entryContext"] = {}
+    return trade
 
 
 def list_active_trades(
@@ -178,6 +193,24 @@ def get_trade(
     if s is None:
         return None
     return _load_trade(trade_id, s)
+
+
+def promote_to_live(
+    trade_id: str,
+    store: Optional[RedisStore] = None,
+    flags: Optional[FeatureFlags] = None,
+) -> Optional[Dict[str, Any]]:
+    s = store or get_store_optional()
+    if s is None:
+        return None
+    trade = _load_trade(trade_id, s)
+    if trade is None:
+        return None
+    trade["mode"] = "live"
+    ttl = _trade_ttl(flags)
+    s.set_json(f"{_TRADE_KEY_PREFIX}{trade_id}", trade, ttl_s=ttl)
+    _refresh_index_ttl(s, flags)
+    return trade
 
 
 def close_trade(

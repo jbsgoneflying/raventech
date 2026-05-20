@@ -27,6 +27,7 @@ from backend.engine2_trades import (
     list_active_trades,
     list_closed_trades,
     log_trade,
+    promote_to_live,
 )
 from backend.news_theme_intelligence import (
     compute_market_adjusted_intensity,
@@ -94,6 +95,23 @@ class TestTradeCRUD:
         trades = list_active_trades(store=store)
         assert len(trades) == 2
         assert all(t["status"] == "active" for t in trades)
+        assert all("mode" in t for t in trades)
+
+    def test_log_trade_defaults_to_tracked_mode(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        tid = log_trade({"entry": {"underlying": "SPX"}}, store=store, flags=flags)
+        trade = get_trade(tid, store=store)
+        assert trade is not None
+        assert trade["mode"] == "tracked"
+
+    def test_promote_to_live(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        tid = log_trade({"entry": {"underlying": "SPX"}, "mode": "tracked"}, store=store, flags=flags)
+        updated = promote_to_live(tid, store=store, flags=flags)
+        assert updated is not None
+        assert updated["mode"] == "live"
 
     def test_close_trade(self):
         store = FakeStore()
@@ -143,7 +161,11 @@ class TestTradeCRUD:
 
 class TestTradeTracking:
     def _make_trade(self, sp=6300, sc=6600, spot_entry=6450, wing=10,
-                    entry_date="2026-03-24", expiry_date="2026-03-28"):
+                    entry_date=None, expiry_date=None):
+        if entry_date is None or expiry_date is None:
+            today = dt.date.today()
+            entry_date = (today - dt.timedelta(days=1)).isoformat()
+            expiry_date = (today + dt.timedelta(days=4)).isoformat()
         return {
             "entry": {
                 "underlying": "SPX",
