@@ -4,14 +4,13 @@
 (function () {
   "use strict";
 
-  // Desk-trimmed nav: only the engines the desk uses daily. E1b and
-  // E2b remain inset under their parent scanners. Other engines still
-  // work via direct URL; they're just hidden from the drawer to
-  // reduce noise. To re-expose one, add it back here.
+  // Desk-trimmed nav: only the engines the desk uses daily. E2b
+  // remains inset under E2. Engine 1b (earnings-ic) was retired
+  // 2026-05-20; its analogue replay still powers E1's Live Review
+  // projection panel server-side.
   var NAV_ITEMS = [
     { href: "/",                label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
-    { href: "/breach",          label: "Engine 1",  desc: "Earnings hold risk with Monte Carlo" },
-    { href: "/earnings-ic",     label: "Engine 1b", desc: "Earnings IC scenario replay",        sub: true },
+    { href: "/breach",          label: "Engine 1",  desc: "Earnings IC / IV-crush desktop" },
     { href: "/spx",             label: "Engine 2",  desc: "SPX/SPY iron condor scanner" },
     { href: "/ic-scenario",     label: "Engine 2b", desc: "SPX/SPY IC scenario replay",         sub: true },
     { href: "/post-event",      label: "Engine 7",  desc: "Post-event trade extension evaluator" },

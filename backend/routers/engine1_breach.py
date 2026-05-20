@@ -186,295 +186,12 @@ def breach(
 
 
 # ---------------------------------------------------------------------------
-# Engine 1 v2 — Wing Decision Console
+# Engine 1 v2 — Wing Decision Console (REMOVED 2026-05-20)
 # ---------------------------------------------------------------------------
-@router.post("/api/breach/wing-console")
-async def e1_wing_console(request: Request):
-    """Engine 1 v2 — ranked wing-placement console.
-
-    Body:
-        {
-            "ticker":        "NVDA",
-            "event_date":    "2026-05-28",          # required
-            "event_timing":  "AMC",                 # required (AMC|BMO)
-            "n":             20,                    # optional lookback events
-            "years":         5,                     # optional lookback years
-            "weights":       {...},                 # optional weight overrides
-            "em_mults":      [...],                 # optional grid override
-            "wing_pts":      [...]                  # optional grid override
-        }
-
-    Returns a :class:`WingConsolePayload`-shaped dict with ranked
-    placements + weights_used + mae + theta + regime context.
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    ticker = str(body.get("ticker", "")).strip().upper()
-    if not ticker:
-        raise HTTPException(status_code=400, detail="ticker is required")
-
-    f = get_flags()
-    if not bool(getattr(f, "ENABLE_E1_V2", False)):
-        raise HTTPException(
-            status_code=404,
-            detail="Engine 1 v2 is disabled (ENABLE_E1_V2=0).",
-        )
-
-    event_date_eff = str(body.get("event_date") or body.get("mc_event_date") or "").strip() or None
-    event_timing_eff = str(body.get("event_timing") or body.get("mc_event_timing") or "").strip().upper() or None
-    if not event_date_eff or not event_timing_eff:
-        raise HTTPException(
-            status_code=400,
-            detail="event_date + event_timing (AMC|BMO) are required.",
-        )
-    if event_timing_eff not in ("AMC", "BMO"):
-        raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
-    try:
-        dt.date.fromisoformat(event_date_eff[:10])
-    except ValueError as _e:
-        raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
-
-    n_lookback = int(body.get("n") or 20)
-    years_lookback = int(body.get("years") or 5)
-
-    weights_override = body.get("weights") or {}
-    em_mults_override = body.get("em_mults") or None
-    wing_pts_override = body.get("wing_pts") or None
-
-    from backend.engine1 import (
-        WingConsoleWeights, build_wing_console,
-    )
-    from backend.engine1.mae_proxy import MAEDistribution
-
-    weights = WingConsoleWeights.from_flags(f)
-    if isinstance(weights_override, dict):
-        for k_, v_ in weights_override.items():
-            if hasattr(weights, k_):
-                try:
-                    setattr(weights, k_, float(v_))
-                except Exception:
-                    pass
-
-    try:
-        client = get_client()
-        benzinga_client = get_benzinga_client_optional()
-
-        payload = compute_breach_stats(
-            client=client,
-            ticker=ticker,
-            n=max(1, min(50, n_lookback)),
-            years=max(1, min(10, years_lookback)),
-            k=1.0,
-            flags_override=f,
-            next_event_override={"date": event_date_eff, "timing": event_timing_eff},
-            benzinga_client=benzinga_client,
-        )
-
-        mae_raw = payload.get("e1WingMAE") or {}
-        mae_dist: Optional[MAEDistribution] = None
-        if isinstance(mae_raw, dict) and int(mae_raw.get("n") or 0) > 0:
-            # Rehydrate a minimal MAEDistribution from the serialized form.
-            mae_dist = MAEDistribution(
-                n=int(mae_raw.get("n") or 0),
-                p50=float(mae_raw.get("p50") or 0.0),
-                p75=float(mae_raw.get("p75") or 0.0),
-                p90=float(mae_raw.get("p90") or 0.0),
-                p95=float(mae_raw.get("p95") or 0.0),
-                max=float(mae_raw.get("max") or 0.0),
-                source=str(mae_raw.get("source") or "daily_ohlc_proxy"),
-                notes=list(mae_raw.get("notes") or []),
-                hold_days=int(mae_raw.get("hold_days") or 2),
-            )
-
-        console = build_wing_console(
-            ticker=ticker,
-            event_date=event_date_eff,
-            event_timing=event_timing_eff,
-            payload=payload,
-            mae_distribution=mae_dist,
-            weights=weights,
-            em_mults=em_mults_override,
-            wing_pts=wing_pts_override,
-            flags=f,
-        )
-        return console.to_dict()
-
-    except HTTPException:
-        raise
-    except BreachInputError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except OratsError as e:
-        LOG.exception("ORATS failure (wing-console)")
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    except Exception as e:
-        LOG.exception("Wing console failed")
-        raise HTTPException(status_code=500, detail="Internal error") from e
-
-
-# ---------------------------------------------------------------------------
-# Engine 1 v2 — score-placement (exact slider)
-# ---------------------------------------------------------------------------
-@router.post("/api/breach/wing-console/score-placement")
-async def e1_score_placement(request: Request):
-    """Engine 1 v2 — exact single-placement score for the hand-tune slider.
-
-    Body:
-        {
-            "ticker":        "NVDA",
-            "event_date":    "2026-05-28",    # required
-            "event_timing":  "AMC",           # required
-            "em_mult":       1.37,            # required (> 0, <= 3)
-            "wing_pts":      6.5,             # required (> 0)
-            "symmetry":      "symmetric",     # optional (only symmetric today)
-            "weights":       {...},           # optional weight overrides
-            "refresh":       false            # optional — force cache miss
-        }
-
-    Requires a prior call to ``POST /api/breach/wing-console`` for the
-    same (ticker, event_date, event_timing) within the last 10 minutes so
-    the scoring context is cached. If the context expired, we run a
-    just-enough breach-stats pass to rebuild it — at the cost of the usual
-    ORATS round trip.
-
-    Returns a single :class:`PlacementScore` dict plus provenance.
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    ticker = str(body.get("ticker", "")).strip().upper()
-    if not ticker:
-        raise HTTPException(status_code=400, detail="ticker is required")
-
-    f = get_flags()
-    if not bool(getattr(f, "ENABLE_E1_V2", False)):
-        raise HTTPException(
-            status_code=404,
-            detail="Engine 1 v2 is disabled (ENABLE_E1_V2=0).",
-        )
-
-    event_date_eff = str(body.get("event_date") or "").strip() or None
-    event_timing_eff = str(body.get("event_timing") or "").strip().upper() or None
-    if not event_date_eff or not event_timing_eff:
-        raise HTTPException(
-            status_code=400,
-            detail="event_date + event_timing (AMC|BMO) are required.",
-        )
-    if event_timing_eff not in ("AMC", "BMO"):
-        raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
-    try:
-        dt.date.fromisoformat(event_date_eff[:10])
-    except ValueError as _e:
-        raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
-
-    try:
-        em_mult = float(body.get("em_mult"))
-        wing_pts = float(body.get("wing_pts"))
-    except (TypeError, ValueError) as _e:
-        raise HTTPException(status_code=400, detail="em_mult and wing_pts must be numeric") from _e
-
-    if not (0.25 <= em_mult <= 3.0):
-        raise HTTPException(status_code=400, detail="em_mult out of range [0.25, 3.0]")
-    if not (1.0 <= wing_pts <= 50.0):
-        raise HTTPException(status_code=400, detail="wing_pts out of range [1.0, 50.0]")
-
-    symmetry = str(body.get("symmetry") or "symmetric")
-    refresh = bool(body.get("refresh"))
-
-    from backend.engine1 import (
-        WingConsoleWeights, get_scoring_context, score_single_placement,
-    )
-
-    weights_override: Optional[WingConsoleWeights] = None
-    raw_weights = body.get("weights") or {}
-    if isinstance(raw_weights, dict) and raw_weights:
-        weights_override = WingConsoleWeights.from_flags(f)
-        for k_, v_ in raw_weights.items():
-            if hasattr(weights_override, k_):
-                try:
-                    setattr(weights_override, k_, float(v_))
-                except Exception:
-                    pass
-
-    ctx = None if refresh else get_scoring_context(ticker, event_date_eff, event_timing_eff)
-    source = "cached_context"
-
-    if ctx is None:
-        # Cold start: rebuild the context by running a full wing-console pass.
-        # The build_wing_console call populates the scoring-context cache as
-        # a side effect, after which we can score the arbitrary placement.
-        try:
-            client = get_client()
-            benzinga_client = get_benzinga_client_optional()
-            payload = compute_breach_stats(
-                client=client, ticker=ticker, n=20, years=5, k=1.0,
-                flags_override=f,
-                next_event_override={"date": event_date_eff, "timing": event_timing_eff},
-                benzinga_client=benzinga_client,
-            )
-            from backend.engine1.mae_proxy import MAEDistribution as _MD
-            from backend.engine1 import build_wing_console
-            mae_raw = payload.get("e1WingMAE") or {}
-            mae_dist: Optional[_MD] = None
-            if isinstance(mae_raw, dict) and int(mae_raw.get("n") or 0) > 0:
-                mae_dist = _MD(
-                    n=int(mae_raw.get("n") or 0),
-                    p50=float(mae_raw.get("p50") or 0.0),
-                    p75=float(mae_raw.get("p75") or 0.0),
-                    p90=float(mae_raw.get("p90") or 0.0),
-                    p95=float(mae_raw.get("p95") or 0.0),
-                    max=float(mae_raw.get("max") or 0.0),
-                    source=str(mae_raw.get("source") or "daily_ohlc_proxy"),
-                    notes=list(mae_raw.get("notes") or []),
-                    hold_days=int(mae_raw.get("hold_days") or 2),
-                )
-            build_wing_console(
-                ticker=ticker, event_date=event_date_eff, event_timing=event_timing_eff,
-                payload=payload, mae_distribution=mae_dist,
-                weights=weights_override or WingConsoleWeights.from_flags(f),
-                flags=f,
-            )
-            ctx = get_scoring_context(ticker, event_date_eff, event_timing_eff)
-            source = "rebuilt_context"
-        except HTTPException:
-            raise
-        except BreachInputError as _bie:
-            raise HTTPException(status_code=400, detail=str(_bie)) from _bie
-        except OratsError as _oe:
-            LOG.exception("ORATS failure (score-placement cold start)")
-            raise HTTPException(status_code=502, detail=str(_oe)) from _oe
-        except Exception as _e:
-            LOG.exception("score-placement cold start failed")
-            raise HTTPException(status_code=500, detail="Internal error") from _e
-
-    if ctx is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to build scoring context (no event pool available).",
-        )
-
-    try:
-        placement = score_single_placement(
-            context=ctx, em_mult=em_mult, wing_pts=wing_pts,
-            symmetry=symmetry, weights_override=weights_override,
-        )
-    except Exception as _e:
-        LOG.exception("score_single_placement failed")
-        raise HTTPException(status_code=500, detail="Scoring failed") from _e
-
-    return {
-        "ticker":       ticker,
-        "event_date":   event_date_eff,
-        "event_timing": event_timing_eff,
-        "placement":    placement.to_dict(),
-        "context_source": source,
-        "weights_used": (weights_override or ctx.weights).as_dict(),
-        "context_ages_ok": True,
-    }
+# The wing-console + score-placement routes were retired alongside the
+# Trade Builder + Tracked Trades refactor. The new flow logs candidates
+# directly via POST /api/breach/trade with mode="tracked" and reads
+# strikes/credit via POST /api/breach/trade/draft-price (below).
 
 
 @router.get("/api/breach-compare")
@@ -1034,7 +751,13 @@ async def e1_advisor(request: Request):
 
 @router.post("/api/breach/trade")
 async def e1_log_trade(request: Request):
-    """Log a new Engine 1 earnings IC trade."""
+    """Log a new Engine 1 earnings IC trade.
+
+    Body honors ``mode`` (``"tracked"`` default, or ``"live"`` for an
+    immediately-committed position). Tracked trades behave identically
+    in storage and live-review pipelines; the UI buckets them separately
+    and an explicit ``/promote`` flip is required to mark them live.
+    """
     try:
         body = await request.json()
     except Exception:
@@ -1053,18 +776,188 @@ async def e1_log_trade(request: Request):
         except Exception:
             pass
 
-    from backend.e1_earnings_trades import log_trade
+    from backend.e1_earnings_trades import log_trade, get_trade
     trade_id = log_trade(body)
     if trade_id is None:
         raise HTTPException(status_code=500, detail="Failed to persist trade")
-    return {"tradeId": trade_id, "status": "active"}
+    persisted = get_trade(trade_id) or {}
+    return {
+        "tradeId": trade_id,
+        "status": "active",
+        "mode": persisted.get("mode", "tracked"),
+    }
+
+
+@router.post("/api/breach/trade/draft-price")
+async def e1_trade_draft_price(request: Request):
+    """Single-placement strike + credit preview for the Trade Builder.
+
+    Body:
+        {
+            "ticker":        "NVDA",       # required
+            "event_date":    "YYYY-MM-DD", # required
+            "event_timing":  "AMC" | "BMO",# required
+            "emMultiple":    1.25,         # required, > 0
+            "wingWidth":     5.0           # required, > 0 (points)
+        }
+
+    Returns the four candidate strikes (rounded to nearest $0.50), the
+    estimated credit from the breach trade builder when available, and
+    breach-distance percentages. Uses the existing ORATS breach cache
+    (5-min TTL via `breach_cache`) so repeated previews on the same
+    ticker do not re-fetch.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    ticker = str(body.get("ticker") or "").strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+
+    event_date_eff = str(body.get("event_date") or "").strip() or None
+    event_timing_eff = str(body.get("event_timing") or "").strip().upper() or None
+    if not event_date_eff or not event_timing_eff:
+        raise HTTPException(
+            status_code=400,
+            detail="event_date + event_timing (AMC|BMO) are required.",
+        )
+    if event_timing_eff not in ("AMC", "BMO"):
+        raise HTTPException(status_code=400, detail="event_timing must be AMC or BMO")
+    try:
+        dt.date.fromisoformat(event_date_eff[:10])
+    except ValueError as _e:
+        raise HTTPException(status_code=400, detail="event_date must be YYYY-MM-DD") from _e
+
+    try:
+        em_mult = float(body.get("emMultiple") or 0)
+        wing_pts = float(body.get("wingWidth") or 0)
+    except (TypeError, ValueError) as _e:
+        raise HTTPException(status_code=400, detail="emMultiple and wingWidth must be numeric") from _e
+    if not (0.25 <= em_mult <= 3.0):
+        raise HTTPException(status_code=400, detail="emMultiple out of range [0.25, 3.0]")
+    if not (1.0 <= wing_pts <= 50.0):
+        raise HTTPException(status_code=400, detail="wingWidth out of range [1.0, 50.0]")
+
+    f = get_flags()
+    key = breach_cache_key(ticker=ticker, n=20, years=5, k=1.0, event_date=event_date_eff, event_timing=event_timing_eff)
+    payload = None
+    with breach_cache_lock:
+        payload = breach_cache.get(key)
+
+    try:
+        if payload is None:
+            client = get_client()
+            benzinga_client = get_benzinga_client_optional()
+            payload = compute_breach_stats(
+                client=client,
+                ticker=ticker,
+                n=20,
+                years=5,
+                k=1.0,
+                flags_override=f,
+                next_event_override={"date": event_date_eff, "timing": event_timing_eff},
+                benzinga_client=benzinga_client,
+            )
+            with breach_cache_lock:
+                breach_cache[key] = payload
+    except BreachInputError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except OratsError as e:
+        LOG.exception("ORATS failure (draft-price)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("draft-price failed")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+    current = payload.get("current") or {}
+    try:
+        spot = float(current.get("stockPrice") or 0) or None
+    except Exception:
+        spot = None
+    try:
+        em_pct = float(current.get("impliedMovePct") or 0) or None
+    except Exception:
+        em_pct = None
+
+    if not spot or not em_pct or em_pct <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Spot or implied-move not available for draft pricing; rerun the E1 scan first.",
+        )
+
+    em_dollars = spot * (em_pct / 100.0)
+    short_put_raw = spot - (em_mult * em_dollars)
+    short_call_raw = spot + (em_mult * em_dollars)
+
+    def _round_half(x: float) -> float:
+        return round(x * 2.0) / 2.0
+
+    short_put = _round_half(short_put_raw)
+    short_call = _round_half(short_call_raw)
+    long_put = _round_half(short_put - wing_pts)
+    long_call = _round_half(short_call + wing_pts)
+
+    breach_dist_put_pct = round((spot - short_put) / spot * 100.0, 2) if spot else None
+    breach_dist_call_pct = round((short_call - spot) / spot * 100.0, 2) if spot else None
+
+    # Best-effort credit lookup from the trade-builder block if it matches
+    # our wing width; otherwise fall back to a heuristic of ~10% of wing.
+    est_credit = None
+    credit_source = "heuristic"
+    tb = payload.get("tradeBuilder") or {}
+    try:
+        if isinstance(tb, dict):
+            tb_wings = tb.get("wingWidth")
+            tb_credit = tb.get("credit") or tb.get("midCredit") or tb.get("estCredit")
+            if tb_wings is not None and tb_credit is not None and abs(float(tb_wings) - wing_pts) < 0.5:
+                est_credit = round(float(tb_credit), 2)
+                credit_source = "trade_builder"
+    except Exception:
+        pass
+    if est_credit is None:
+        est_credit = round(wing_pts * 0.10, 2)
+
+    return {
+        "ticker": ticker,
+        "eventDate": event_date_eff,
+        "eventTiming": event_timing_eff,
+        "emMultiple": em_mult,
+        "wingWidth": wing_pts,
+        "spot": round(spot, 2),
+        "impliedMovePct": round(em_pct, 2),
+        "shortPutStrike": short_put,
+        "longPutStrike": long_put,
+        "shortCallStrike": short_call,
+        "longCallStrike": long_call,
+        "estCredit": est_credit,
+        "creditSource": credit_source,
+        "breachDistPutPct": breach_dist_put_pct,
+        "breachDistCallPct": breach_dist_call_pct,
+    }
 
 
 @router.get("/api/breach/trades")
 def e1_list_trades():
-    """List active Engine 1 earnings IC trades."""
+    """List active Engine 1 earnings IC trades (tracked + live)."""
     from backend.e1_earnings_trades import list_active_trades
     return {"trades": list_active_trades()}
+
+
+@router.post("/api/breach/trade/{trade_id}/promote")
+async def e1_trade_promote(trade_id: str):
+    """Promote a tracked Engine 1 trade to live mode."""
+    from backend.e1_earnings_trades import promote_to_live
+    trade = promote_to_live(trade_id)
+    if trade is None:
+        raise HTTPException(status_code=404, detail="Trade not found, closed, or unavailable")
+    return {
+        "tradeId": trade_id,
+        "mode": trade.get("mode"),
+        "promotedAt": trade.get("promotedAt"),
+        "status": trade.get("status"),
+    }
 
 
 @router.post("/api/breach/trade/{trade_id}/live-review")

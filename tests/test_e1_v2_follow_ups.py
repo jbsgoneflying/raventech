@@ -1,16 +1,19 @@
 """Engine 1 v2 — follow-up improvements tests.
 
-Covers the three post-ship fixes:
+Covers the post-ship fixes that survived the 2026-05-20 refactor that
+retired the Wing Decision Console:
 
 1. ``DailyBar`` now carries high / low so ``mae_proxy`` reports
    ``daily_ohlc_proxy`` (not ``open_close_fallback``) when upstream
-   bars have the fields.
-2. ``POST /api/breach/wing-console/score-placement`` returns an exact
-   composite for arbitrary (em_mult, wing_pts) against the cached
-   scoring context (no expensive re-fetch).
-3. The legacy desk-consensus verdict (TRADE / LEAN_PASS / PASS / FADE)
+   bars have the fields. (Still consumed by E15 simulator's E1
+   wing-MAE cross-check.)
+2. The legacy desk-consensus verdict (TRADE / LEAN_PASS / PASS / FADE)
    is no longer emitted in the /api/breach response body by default;
    the LLM advisor still re-computes it internally.
+
+The score-placement / wing-console HTTP tests were removed when those
+routes were deleted; the pure-python scoring primitives still have
+coverage via the E15 simulator tests.
 """
 from __future__ import annotations
 
@@ -94,7 +97,7 @@ def test_mae_falls_back_to_open_close_when_highlow_missing():
 
 
 # ---------------------------------------------------------------------------
-# 2) /api/breach/wing-console/score-placement
+# 2) Desk-consensus stripped from /api/breach by default
 # ---------------------------------------------------------------------------
 
 
@@ -141,130 +144,6 @@ def patched_breach_stats(monkeypatch):
         lambda: None,
     )
     yield
-
-
-def test_score_placement_cold_start_builds_context(client, patched_breach_stats):
-    r = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA",
-        "event_date": "2026-05-28",
-        "event_timing": "AMC",
-        "em_mult": 1.37,
-        "wing_pts": 6.5,
-    })
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["ticker"] == "NVDA"
-    assert body["context_source"] in ("cached_context", "rebuilt_context")
-    p = body["placement"]
-    assert p["em_mult"] == pytest.approx(1.37)
-    assert p["wing_pts"] == pytest.approx(6.5)
-    assert 0.0 <= p["composite_score"] <= 100.0
-    # Strike derivation is symmetric and on the right side of spot.
-    assert p["short_put_strike"] < 100 < p["short_call_strike"]
-
-
-def test_score_placement_uses_cached_context_on_second_call(client, patched_breach_stats):
-    # Prime the cache via a full wing-console build.
-    r0 = client.post("/api/breach/wing-console", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-    })
-    assert r0.status_code == 200
-    r = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-        "em_mult": 1.42, "wing_pts": 8.0,
-    })
-    assert r.status_code == 200
-    body = r.json()
-    assert body["context_source"] == "cached_context"
-
-
-def test_score_placement_refresh_rebuilds_context(client, patched_breach_stats):
-    # First build → populates cache.
-    client.post("/api/breach/wing-console", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-    })
-    r = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-        "em_mult": 1.5, "wing_pts": 7.5, "refresh": True,
-    })
-    assert r.status_code == 200
-    assert r.json()["context_source"] == "rebuilt_context"
-
-
-def test_score_placement_requires_event_fields(client, patched_breach_stats):
-    r = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA", "em_mult": 1.5, "wing_pts": 7.5,
-    })
-    assert r.status_code == 400
-
-
-def test_score_placement_rejects_out_of_range(client, patched_breach_stats):
-    r = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-        "em_mult": 5.0, "wing_pts": 7.5,
-    })
-    assert r.status_code == 400
-    r2 = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-        "em_mult": 1.5, "wing_pts": 0.0,
-    })
-    assert r2.status_code == 400
-
-
-def test_score_placement_honours_weights_override(client, patched_breach_stats):
-    client.post("/api/breach/wing-console", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-    })
-    r = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-        "em_mult": 1.5, "wing_pts": 7.5,
-        "weights": {"gap": 0.95, "ctc": 0.01, "mae": 0.02, "theta": 0.01, "credit": 0.01},
-    })
-    assert r.status_code == 200
-    assert r.json()["weights_used"]["gap"] == pytest.approx(0.95)
-
-
-def test_score_placement_respects_v2_kill_switch(client, monkeypatch, patched_breach_stats):
-    import backend.routers.engine1_breach as mod
-    from backend.config import get_flags
-    class _F:
-        pass
-    for k, v in vars(get_flags()).items():
-        setattr(_F, k, v)
-    _F.ENABLE_E1_V2 = False
-    monkeypatch.setattr(mod, "get_flags", lambda: _F)
-    r = client.post("/api/breach/wing-console/score-placement", json={
-        "ticker": "NVDA", "event_date": "2026-05-28", "event_timing": "AMC",
-        "em_mult": 1.5, "wing_pts": 7.5,
-    })
-    assert r.status_code == 404
-
-
-def test_score_single_placement_direct_call():
-    """End-to-end test through the pure-python API (no HTTP)."""
-    from backend.engine1 import (
-        MAEDistribution, ScoringContext, WingConsoleWeights,
-        score_single_placement, store_scoring_context,
-    )
-    ctx = ScoringContext(
-        ticker="X", event_date="2026-05-28", event_timing="AMC",
-        spot=100.0, implied_move_pct=5.0,
-        events=[{"signedMovePct": r * 5.0, "impliedMovePct": 5.0} for r in
-                [0.3, 0.5, 0.7, 0.9, 1.1]],
-        mae=MAEDistribution(n=5, p50=3, p75=5, p90=7, p95=9, max=10,
-                            source="daily_ohlc_proxy"),
-        theta=None,
-        median_credit_pts=1.0,
-        weights=WingConsoleWeights(),
-    )
-    store_scoring_context(ctx)
-    p = score_single_placement(context=ctx, em_mult=1.33, wing_pts=6.5)
-    assert 0.0 <= p.composite_score <= 100.0
-
-
-# ---------------------------------------------------------------------------
-# 3) Desk-consensus stripped from /api/breach by default
-# ---------------------------------------------------------------------------
 
 
 def _breach_stats_with_consensus():

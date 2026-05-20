@@ -773,16 +773,8 @@ function renderEngine1DecisionPanel(payload) {
 }
 
 // ---------------------------------------------------------------------------
-// Engine 1 v2 — Wing Decision Console (primary card)
+// Engine 1 — Source-chip helper (shared with E1 calc results)
 // ---------------------------------------------------------------------------
-
-const _e1WingConsoleState = {
-  ticker: "",
-  event_date: "",
-  event_timing: "",
-  lastConsole: null,
-  selectedIndex: 0,
-};
 
 function refreshE1SourceChip(nextEvent) {
   const ctrls = window.__ravenE1Controls;
@@ -808,437 +800,247 @@ function refreshE1SourceChip(nextEvent) {
   } catch { /* ignore */ }
 }
 
-function _fmtPct(x, digits = 1) {
+// ---------------------------------------------------------------------------
+// Engine 1 — Trade Builder (manual EM x wings → tracked candidate)
+// ---------------------------------------------------------------------------
+//
+// Replaces the retired Wing Decision Console. The agent dials EM
+// multiple + wing width on a small form, clicks "Preview" to round-trip
+// /api/breach/trade/draft-price (cheap, uses the existing 5-min breach
+// cache), then clicks "Start Tracking" to log the trade with
+// mode="tracked". Tracked trades show up in the LIVE/TRACKING sections
+// of the Trades panel below, where they get the same three-phase Live
+// Review treatment as live positions.
+
+const _e1TrackBuilderState = {
+  ticker: "",
+  event_date: "",
+  event_timing: "",
+  spot: null,
+  emPct: null,
+  preview: null,
+};
+
+function _e1TBFmt(x, digits = 2) {
   if (x === null || x === undefined) return "—";
   const n = Number(x);
   if (!Number.isFinite(n)) return "—";
-  return `${n.toFixed(digits)}%`;
+  return n.toFixed(digits);
 }
 
-function _scoreColor(score) {
-  if (score >= 75) return "e1MetricGood";
-  if (score >= 55) return "e1MetricMed";
-  return "e1MetricRisky";
-}
-
-function _metricColorLowerBetter(x, goodMax, badMin) {
-  if (x === null || x === undefined) return "";
-  const v = Number(x);
-  if (!Number.isFinite(v)) return "";
-  if (v <= goodMax) return "e1MetricGood";
-  if (v >= badMin) return "e1MetricRisky";
-  return "e1MetricMed";
-}
-
-function renderWingConsole(payload) {
-  const host = $("e1WingConsole");
-  const section = $("e1WingConsoleSection");
+function renderTrackBuilder(payload) {
+  const host = $("e1TrackBuilder");
+  const section = $("e1TrackBuilderSection");
   if (!host || !section) return;
-
-  section.classList.remove("hidden");
-  host.innerHTML =
-    `<div class="e1ConsoleWarnings">Scoring wing placements…</div>`;
 
   const ticker = String(payload?.ticker || "").toUpperCase();
   const ne = payload?.nextEvent || {};
-  const eventDate = String(ne.earnDateNext || $("mcEventDate")?.value || "")
-    .slice(0, 10);
-  const eventTiming = String(ne.timingPlanned || $("mcEventTiming")?.value || "")
-    .toUpperCase();
+  const eventDate = String(ne.earnDateNext || $("mcEventDate")?.value || "").slice(0, 10);
+  const eventTiming = String(ne.timingPlanned || $("mcEventTiming")?.value || "").toUpperCase();
+  const cur = payload?.current || {};
+  const spot = Number(cur.stockPrice || 0) || null;
+  const emPct = Number(cur.impliedMovePct || 0) || null;
 
-  _e1WingConsoleState.ticker = ticker;
-  _e1WingConsoleState.event_date = eventDate;
-  _e1WingConsoleState.event_timing = eventTiming;
-
-  if (!ticker || !eventDate || !["AMC", "BMO"].includes(eventTiming)) {
-    host.innerHTML =
-      `<div class="e1ConsoleWarnings">Fill in ticker + earnings date + timing, then Calculate.</div>`;
+  if (!ticker || !eventDate || !["AMC", "BMO"].includes(eventTiming) || !spot || !emPct) {
+    section.classList.add("hidden");
+    host.innerHTML = "";
     return;
   }
 
-  fetch("/api/breach/wing-console", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ticker, event_date: eventDate, event_timing: eventTiming,
-    }),
-  })
-    .then(async (resp) => {
-      if (!resp.ok) {
-        const txt = await resp.text();
-        throw new Error(`wing-console ${resp.status}: ${txt}`);
-      }
-      return resp.json();
-    })
-    .then((console_) => {
-      _e1WingConsoleState.lastConsole = console_;
-      _e1WingConsoleState.selectedIndex = 0;
-      _paintWingConsole(host, console_);
-    })
-    .catch((err) => {
-      host.innerHTML =
-        `<div class="e1ConsoleWarnings">Wing Console unavailable: ${
-          String(err?.message || err)
-            .replace(/</g, "&lt;")
-        }</div>`;
-    });
-}
+  _e1TrackBuilderState.ticker = ticker;
+  _e1TrackBuilderState.event_date = eventDate;
+  _e1TrackBuilderState.event_timing = eventTiming;
+  _e1TrackBuilderState.spot = spot;
+  _e1TrackBuilderState.emPct = emPct;
+  _e1TrackBuilderState.preview = null;
 
-function _paintWingConsole(host, data) {
-  const placements = Array.isArray(data?.placements) ? data.placements : [];
-  const weights = data?.weights_used || {};
-  const mae = data?.mae || {};
-  const theta = data?.theta || {};
-  const topN = placements.slice(0, 7);
-
-  const spot = Number(data?.spot);
-  const im = Number(data?.implied_move_pct);
-  const regime = data?.regime_label ? String(data.regime_label) : "—";
-  const regimeP = data?.regime_prob;
-  const maeN = Number(mae?.n || 0);
-
-  const subtitleBits = [
-    `<span><strong>${data.ticker}</strong></span>`,
-    `<span>Earnings <strong>${data.event_date}</strong> (${data.event_timing})</span>`,
-    `<span>Spot <strong>${Number.isFinite(spot) ? spot.toFixed(2) : "—"}</strong></span>`,
-    `<span>Implied move <strong>${Number.isFinite(im) ? im.toFixed(2) : "—"}%</strong></span>`,
-    `<span>Regime <strong>${regime}${
-      regimeP !== null && regimeP !== undefined ? ` ${(Number(regimeP) * 100).toFixed(0)}%` : ""
-    }</strong></span>`,
-    `<span>MAE pool <strong>n=${maeN}</strong> ${mae?.source ? `(${mae.source})` : ""}</span>`,
-  ].join("");
-
-  const weightsRow = Object.entries(weights)
-    .filter(([k]) => !["max_tolerable_mae_pct", "target_theta_pct", "target_credit_mult"].includes(k))
-    .map(([k, v]) => `<span title="weight"><strong>${k}</strong> ${Number(v).toFixed(2)}</span>`)
-    .join(" · ");
-
-  const rowsHtml = topN.map((p, i) => _renderPlacementRow(p, i, i === 0)).join("");
-
-  const warningsHtml = Array.isArray(data?.warnings) && data.warnings.length
-    ? `<div class="e1ConsoleWarnings">${data.warnings.map(_escape).join(" · ")}</div>`
-    : "";
+  section.classList.remove("hidden");
 
   host.innerHTML = `
-    <div class="e1Console">
-      <div class="e1ConsoleHeader">
+    <div class="e1TrackBuilder">
+      <div class="e1TBHeader" style="display:flex;flex-wrap:wrap;gap:18px;font-size:12px;opacity:0.85;margin-bottom:12px;">
+        <span><strong>${escapeHtml(ticker)}</strong></span>
+        <span>Earnings <strong>${escapeHtml(eventDate)}</strong> (${escapeHtml(eventTiming)})</span>
+        <span>Spot <strong>$${_e1TBFmt(spot, 2)}</strong></span>
+        <span>Implied move <strong>${_e1TBFmt(emPct, 2)}%</strong></span>
+      </div>
+
+      <div class="e1TBForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;align-items:end;">
         <div>
-          <h3 class="e1ConsoleTitle">Ranked wing placements</h3>
-          <div class="e1ConsoleSubtitle">${subtitleBits}</div>
+          <label for="e1TBEm" style="display:block;font-size:11px;opacity:0.7;margin-bottom:3px;">EM Multiple</label>
+          <input id="e1TBEm" type="number" min="0.5" max="3" step="0.05" value="1.25"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--bg,inherit);" />
         </div>
-        <div class="e1ConsoleSubtitle" style="font-size:10px;opacity:.8">
-          Weights → ${weightsRow}
+        <div>
+          <label for="e1TBWing" style="display:block;font-size:11px;opacity:0.7;margin-bottom:3px;">Wing Width (pts)</label>
+          <input id="e1TBWing" type="number" min="1" max="50" step="0.5" value="5"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--bg,inherit);" />
+        </div>
+        <div>
+          <label for="e1TBCredit" style="display:block;font-size:11px;opacity:0.7;margin-bottom:3px;">Credit ($, optional)</label>
+          <input id="e1TBCredit" type="number" min="0" step="0.01" placeholder="auto"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--bg,inherit);" />
+        </div>
+        <div>
+          <label for="e1TBNote" style="display:block;font-size:11px;opacity:0.7;margin-bottom:3px;">Note (optional)</label>
+          <input id="e1TBNote" type="text" placeholder="e.g. tight wings vs base case"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--bg,inherit);" />
         </div>
       </div>
 
-      ${warningsHtml}
+      <div class="e1TBActions" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+        <button type="button" id="e1TBPreviewBtn" style="padding:8px 16px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer;">Preview Strikes</button>
+        <button type="button" id="e1TBTrackBtn" class="primaryButton" style="padding:8px 18px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;">Start Tracking</button>
+      </div>
 
-      <table class="e1PlacementTable" aria-label="Ranked wing placements">
-        <thead>
-          <tr>
-            <th>#</th><th>EM ×</th><th>Wings (pts)</th>
-            <th>P short / C short</th>
-            <th>Credit ($)</th>
-            <th>Brch gap</th><th>Brch CTC</th>
-            <th>MAE p95 (% wing)</th>
-            <th>Theta cap</th>
-            <th>Score</th>
-            <th>Conf.</th>
-          </tr>
-        </thead>
-        <tbody id="e1PlacementRows">
-          ${rowsHtml}
-        </tbody>
-      </table>
-
-      ${_renderTunerAndActions(data)}
+      <div id="e1TBPreview" style="margin-top:14px;font-size:12px;opacity:0.85;min-height:22px;"></div>
     </div>
   `;
 
-  const rowsEl = host.querySelector("#e1PlacementRows");
-  if (rowsEl) {
-    rowsEl.querySelectorAll(".e1PlacementRow").forEach((row) => {
-      row.addEventListener("click", () => {
-        const idx = Number(row.getAttribute("data-index") || 0);
-        _e1WingConsoleState.selectedIndex = idx;
-        rowsEl.querySelectorAll(".e1PlacementRow").forEach((r) => {
-          r.classList.remove("e1PlacementRow--selected");
-        });
-        row.classList.add("e1PlacementRow--selected");
-      });
-    });
+  const previewBtn = $("e1TBPreviewBtn");
+  const trackBtn = $("e1TBTrackBtn");
+  if (previewBtn) previewBtn.addEventListener("click", _previewTrackCandidate);
+  if (trackBtn) trackBtn.addEventListener("click", _submitTrackCandidate);
+}
+
+async function _previewTrackCandidate() {
+  const previewHost = $("e1TBPreview");
+  if (!previewHost) return;
+  const em = parseFloat($("e1TBEm")?.value) || 0;
+  const wing = parseFloat($("e1TBWing")?.value) || 0;
+  if (!(em >= 0.25 && em <= 3) || !(wing >= 1 && wing <= 50)) {
+    previewHost.innerHTML = `<span style="color:#ff9500;">EM must be 0.25–3.0 and wing width 1–50 pts.</span>`;
+    return;
   }
-
-  _wireTuner(data);
-  _wireWingActions(data);
-}
-
-function _renderPlacementRow(p, i, isTop) {
-  const scoreClass = _scoreColor(Number(p.composite_score));
-  const maeClass = _metricColorLowerBetter(p.mae_p95_pct, 40, 90);
-  const gapClass = _metricColorLowerBetter((p.breach_gap_prob || 0) * 100, 15, 35);
-  const ctcClass = _metricColorLowerBetter((p.breach_ctc_prob || 0) * 100, 20, 40);
-  const star = isTop ? '<span class="e1StarTop">★</span>' : "";
-  return `
-    <tr class="e1PlacementRow ${isTop ? "e1PlacementRow--top" : ""}"
-        data-index="${i}">
-      <td class="e1RankCell">${i + 1}${star}</td>
-      <td>${Number(p.em_mult).toFixed(2)}</td>
-      <td>${Number(p.wing_pts).toFixed(1)}</td>
-      <td>${Number(p.short_put_strike).toFixed(2)} / ${Number(p.short_call_strike).toFixed(2)}</td>
-      <td>$${Number(p.credit_dollars).toFixed(0)}</td>
-      <td class="${gapClass}">${_fmtPct((p.breach_gap_prob || 0) * 100)}</td>
-      <td class="${ctcClass}">${_fmtPct((p.breach_ctc_prob || 0) * 100)}</td>
-      <td class="${maeClass}">${_fmtPct(p.mae_p95_pct)}</td>
-      <td>${_fmtPct(p.theta_capture_pct)}</td>
-      <td class="e1ScoreCell ${scoreClass}">${Number(p.composite_score).toFixed(1)}</td>
-      <td>${String(p.confidence || "—")}</td>
-    </tr>
-  `;
-}
-
-function _renderTunerAndActions(data) {
-  const g = data?.grid || {};
-  const emVals = Array.isArray(g.em_mults) ? g.em_mults : [1.0, 1.25, 1.5, 1.75, 2.0];
-  const wpVals = Array.isArray(g.wing_pts) ? g.wing_pts : [5, 7.5, 10];
-  const emMin = Math.min(...emVals);
-  const emMax = Math.max(...emVals);
-  const wpMin = Math.min(...wpVals);
-  const wpMax = Math.max(...wpVals);
-
-  const top = (data?.placements || [])[0] || {};
-  const emDefault = Number(top.em_mult || 1.5);
-  const wpDefault = Number(top.wing_pts || 7.5);
-
-  return `
-    <div class="e1Tuner">
-      <div class="e1TunerField">
-        <label for="e1TunerEm">EM multiple <span id="e1TunerEmValue" class="e1TunerValue">${emDefault.toFixed(2)}</span></label>
-        <input id="e1TunerEm" type="range" min="${emMin}" max="${emMax}" step="0.05" value="${emDefault}" />
-      </div>
-      <div class="e1TunerField">
-        <label for="e1TunerWp">Wing width (pts) <span id="e1TunerWpValue" class="e1TunerValue">${wpDefault.toFixed(1)}</span></label>
-        <input id="e1TunerWp" type="range" min="${wpMin}" max="${wpMax}" step="0.5" value="${wpDefault}" />
-      </div>
-      <div class="e1TunerScoreBox">
-        <div>Custom placement score: <strong id="e1TunerScore">—</strong></div>
-        <div style="font-size:11px;color:var(--text-muted,#9aa0a6)" id="e1TunerScoreNote">snap to nearest grid</div>
-      </div>
-    </div>
-
-    <div class="e1ConsoleActions">
-      <button type="button" id="e1BuildTradeBtn" class="e1ConsoleActions--primary">Build Trade from selected</button>
-      <button type="button" id="e1SimulateE15Btn">Simulate Top Pick in E15</button>
-      <button type="button" id="e1AdvisorBtn">Run LLM Advisor Narrative</button>
-      <button type="button" id="e1ExportBtn">Export JSON</button>
-    </div>
-
-    <div id="e1AdvisorNarrative" class="e1AdvisorNarrative" style="display:none"></div>
-  `;
-}
-
-function _nearestPlacement(placements, em, wp) {
-  if (!Array.isArray(placements) || !placements.length) return null;
-  let best = null;
-  let bestDist = Infinity;
-  for (const p of placements) {
-    const d = Math.pow(p.em_mult - em, 2) + Math.pow((p.wing_pts - wp) / 2.5, 2);
-    if (d < bestDist) {
-      best = p;
-      bestDist = d;
-    }
-  }
-  return best;
-}
-
-function _wireTuner(data) {
-  const emEl = $("e1TunerEm");
-  const wpEl = $("e1TunerWp");
-  const emV  = $("e1TunerEmValue");
-  const wpV  = $("e1TunerWpValue");
-  const scoreEl = $("e1TunerScore");
-  const noteEl  = $("e1TunerScoreNote");
-
-  // Debounced exact-score fetch. Optimistic-render the nearest-grid score
-  // immediately for instant feedback, then replace with the server's exact
-  // value once it lands. This turns a 15-point grid into a continuous
-  // scoring surface without a JS math mirror.
-  let _scorePlacementSeq = 0;
-  let _scoreDebounceTimer = null;
-  const _DEBOUNCE_MS = 220;
-  let _lastExactPlacement = null;
-
-  function _paintPlacement(p, tag) {
-    if (!p) return;
-    scoreEl.textContent = Number(p.composite_score).toFixed(1);
-    scoreEl.className = _scoreColor(Number(p.composite_score));
-    const bits = [
-      `${tag}`,
-      `brch_gap ${_fmtPct((p.breach_gap_prob || 0) * 100)}`,
-      `theta ${_fmtPct(p.theta_capture_pct)}`,
-      `credit $${Number(p.credit_dollars || 0).toFixed(0)}`,
-    ];
-    noteEl.textContent = bits.join(" · ");
-  }
-
-  function _fetchExact(em, wp) {
-    const seq = ++_scorePlacementSeq;
-    fetch("/api/breach/wing-console/score-placement", {
+  previewHost.innerHTML = `<em>Pricing…</em>`;
+  try {
+    const resp = await fetch("/api/breach/trade/draft-price", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ticker: _e1WingConsoleState.ticker,
-        event_date: _e1WingConsoleState.event_date,
-        event_timing: _e1WingConsoleState.event_timing,
-        em_mult: em, wing_pts: wp,
+        ticker: _e1TrackBuilderState.ticker,
+        event_date: _e1TrackBuilderState.event_date,
+        event_timing: _e1TrackBuilderState.event_timing,
+        emMultiple: em,
+        wingWidth: wing,
       }),
-    })
-      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then((body) => {
-        if (seq !== _scorePlacementSeq) return;  // stale
-        _lastExactPlacement = body.placement || null;
-        _paintPlacement(_lastExactPlacement, "exact");
-      })
-      .catch((err) => {
-        if (seq !== _scorePlacementSeq) return;
-        // Fall back to nearest-neighbor (the optimistic render below already
-        // painted it, so here we just add a note).
-        const base = noteEl.textContent || "";
-        noteEl.textContent = `${base} · exact scoring unavailable`;
-        console.warn("score-placement:", err);
-      });
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`draft-price ${resp.status}: ${txt.slice(0, 160)}`);
+    }
+    const body = await resp.json();
+    _e1TrackBuilderState.preview = body;
+    previewHost.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+        <div><strong>Put spread</strong><br/>${_e1TBFmt(body.shortPutStrike, 2)} / ${_e1TBFmt(body.longPutStrike, 2)}</div>
+        <div><strong>Call spread</strong><br/>${_e1TBFmt(body.shortCallStrike, 2)} / ${_e1TBFmt(body.longCallStrike, 2)}</div>
+        <div><strong>Est. credit</strong><br/>$${_e1TBFmt(body.estCredit, 2)} <span style="opacity:0.6;">(${escapeHtml(body.creditSource || "")})</span></div>
+        <div><strong>Put cushion</strong><br/>${_e1TBFmt(body.breachDistPutPct, 2)}%</div>
+        <div><strong>Call cushion</strong><br/>${_e1TBFmt(body.breachDistCallPct, 2)}%</div>
+      </div>
+    `;
+  } catch (err) {
+    previewHost.innerHTML = `<span style="color:#ff3b30;">Preview failed: ${escapeHtml(String(err?.message || err))}</span>`;
   }
-
-  function recompute() {
-    const em = Number(emEl.value);
-    const wp = Number(wpEl.value);
-    emV.textContent = em.toFixed(2);
-    wpV.textContent = wp.toFixed(1);
-
-    // Optimistic: nearest-neighbor from the already-scored grid.
-    const near = _nearestPlacement(data.placements || [], em, wp);
-    if (near) _paintPlacement(near, `grid ~ EM ${near.em_mult.toFixed(2)} / ${near.wing_pts.toFixed(1)}pts`);
-
-    // Exact: debounced server round-trip.
-    if (_scoreDebounceTimer) clearTimeout(_scoreDebounceTimer);
-    _scoreDebounceTimer = setTimeout(() => _fetchExact(em, wp), _DEBOUNCE_MS);
-  }
-  if (emEl) emEl.addEventListener("input", recompute);
-  if (wpEl) wpEl.addEventListener("input", recompute);
-  recompute();
 }
 
-function _wireWingActions(data) {
-  const buildBtn  = $("e1BuildTradeBtn");
-  const simBtn    = $("e1SimulateE15Btn");
-  const advBtn    = $("e1AdvisorBtn");
-  const expBtn    = $("e1ExportBtn");
-  const narrativeEl = $("e1AdvisorNarrative");
+async function _submitTrackCandidate() {
+  const state = _e1TrackBuilderState;
+  const em = parseFloat($("e1TBEm")?.value) || 0;
+  const wing = parseFloat($("e1TBWing")?.value) || 0;
+  const creditOverride = parseFloat($("e1TBCredit")?.value);
+  const note = ($("e1TBNote")?.value || "").trim();
 
-  if (simBtn) {
-    simBtn.addEventListener("click", () => {
-      // v2 handoff to Engine 15: open the Command Deck with the
-      // selected placement's rank + the Wing Console cache key, so
-      // E15's router-level hydrator pre-fills strikes + credit.
-      const idx = _e1WingConsoleState.selectedIndex || 0;
-      const ticker = _e1WingConsoleState.ticker;
-      const eventDate = _e1WingConsoleState.event_date;
-      const eventTiming = _e1WingConsoleState.event_timing;
-      const cacheKey = (data && data.cache_key) || "handoff";
-      if (!ticker || !eventDate || !eventTiming) return;
-      const qs = new URLSearchParams({
-        ticker,
-        event_date: eventDate,
-        event_timing: eventTiming,
-        wc_key: cacheKey,
-        rank: String(idx),
+  if (!(em >= 0.25 && em <= 3) || !(wing >= 1 && wing <= 50)) {
+    alert("Enter EM (0.25–3.0) and wing width (1–50 pts) before tracking.");
+    return;
+  }
+
+  // Resolve strikes + credit via draft-price if we don't already have a
+  // preview that matches the current inputs.
+  let preview = state.preview;
+  const previewMatches = preview
+    && Math.abs((preview.emMultiple || 0) - em) < 1e-6
+    && Math.abs((preview.wingWidth || 0) - wing) < 1e-6;
+  if (!previewMatches) {
+    try {
+      const resp = await fetch("/api/breach/trade/draft-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: state.ticker,
+          event_date: state.event_date,
+          event_timing: state.event_timing,
+          emMultiple: em,
+          wingWidth: wing,
+        }),
       });
-      window.open(`/earnings-ic?${qs.toString()}`, "_blank", "noopener,noreferrer");
-    });
-  }
-
-  if (buildBtn) {
-    buildBtn.addEventListener("click", () => {
-      const idx = _e1WingConsoleState.selectedIndex || 0;
-      const p = (data.placements || [])[idx];
-      if (!p) return;
-      // Stamp rank onto the placement so the modal can record provenance.
-      const withRank = Object.assign({}, p, { _rank: idx });
-      // v2: open the Adjust & Log modal seeded from the Wing Console
-      // placement so the desk can tweak em/wings/credit/strikes + notes
-      // before the trade is logged as open (available to the live-
-      // review LLM afterwards).
-      try {
-        _showE1AdjustModalFromPlacement(lastPayload, withRank);
-      } catch (err) {
-        console.warn("adjust modal failed", err);
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`draft-price ${resp.status}: ${txt.slice(0, 160)}`);
       }
-    });
+      preview = await resp.json();
+      _e1TrackBuilderState.preview = preview;
+    } catch (err) {
+      alert("Failed to price candidate: " + (err?.message || err));
+      return;
+    }
   }
 
-  if (advBtn) {
-    advBtn.addEventListener("click", async () => {
-      if (!narrativeEl) return;
-      narrativeEl.style.display = "block";
-      narrativeEl.textContent = "Requesting narrative…";
-      try {
-        const resp = await fetch("/api/breach/advisor", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ticker: _e1WingConsoleState.ticker,
-            event_date: _e1WingConsoleState.event_date,
-            event_timing: _e1WingConsoleState.event_timing,
-          }),
-        });
-        if (!resp.ok) throw new Error(`advisor ${resp.status}`);
-        const body = await resp.json();
-        // The /api/breach/advisor response can be either a flat string under
-        // analysis/narrative or a structured object under `advisor` (verdict,
-        // confidence, tradeTicket, rationale sections, etc.). Extract a
-        // human-readable narrative for both shapes — never render an object
-        // directly (that produces "[object Object]").
-        const adv = body?.advisor;
-        let narrative;
-        if (typeof body?.analysis === "string" && body.analysis) {
-          narrative = body.analysis;
-        } else if (typeof body?.narrative === "string" && body.narrative) {
-          narrative = body.narrative;
-        } else if (adv && typeof adv === "object") {
-          const parts = [];
-          if (adv.verdict) parts.push(`Verdict: ${adv.verdict}`);
-          if (adv.confidence != null) parts.push(`Confidence: ${adv.confidence}/100`);
-          if (adv.wingWidthRationale) parts.push(`\nWing Width — ${adv.wingWidthRationale}`);
-          if (adv.riskContext) parts.push(`\nRisk Context — ${adv.riskContext}`);
-          if (adv.entryPlan) parts.push(`\nEntry Plan — ${adv.entryPlan}`);
-          if (adv.managementPlan) parts.push(`\nManagement — ${adv.managementPlan}`);
-          if (adv.exitRules) parts.push(`\nExit Rules — ${adv.exitRules}`);
-          if (adv.passReason) parts.push(`\nPass Reason — ${adv.passReason}`);
-          if (adv.deskNote) parts.push(`\nDesk Note — ${adv.deskNote}`);
-          narrative = parts.length ? parts.join("\n") : JSON.stringify(adv, null, 2).slice(0, 2000);
-        } else if (typeof adv === "string") {
-          narrative = adv;
-        } else {
-          narrative = JSON.stringify(body).slice(0, 1200);
-        }
-        narrativeEl.textContent = "";
-        narrativeEl.innerHTML = `<strong>LLM Advisor</strong><br/>${_escape(String(narrative)).replace(/\n/g, "<br/>")}`;
-      } catch (err) {
-        narrativeEl.textContent = `Advisor unavailable: ${String(err?.message || err)}`;
+  const credit = Number.isFinite(creditOverride) && creditOverride > 0
+    ? creditOverride
+    : Number(preview.estCredit);
+
+  const body = {
+    source: "track_builder",
+    mode: "tracked",
+    ticker: state.ticker,
+    entry: {
+      emMultiple: em,
+      wingWidth: wing,
+      entryCredit: credit,
+      shortPutStrike: preview.shortPutStrike,
+      shortCallStrike: preview.shortCallStrike,
+      longPutStrike: preview.longPutStrike,
+      longCallStrike: preview.longCallStrike,
+      spotAtEntry: preview.spot,
+      impliedMovePct: preview.impliedMovePct,
+      earningsDate: state.event_date,
+      earningsTiming: state.event_timing,
+    },
+    entryContext: {
+      earningsTiming: state.event_timing,
+      breachPctSource: preview.creditSource,
+    },
+    adjustmentNote: note || `Tracked candidate · EM ${em.toFixed(2)}× · $${wing} wings.`,
+  };
+
+  try {
+    const resp = await fetch("/api/breach/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 160)}`);
+    }
+    const result = await resp.json();
+    const previewHost = $("e1TBPreview");
+    if (previewHost) {
+      previewHost.innerHTML = `<span style="color:#34c759;">Tracking ${escapeHtml(state.ticker)} · EM ${em.toFixed(2)}× · $${wing} wings (trade ${escapeHtml(result.tradeId)}).</span>`;
+    }
+    if (typeof _loadE1ActiveTrades === "function") {
+      await _loadE1ActiveTrades();
+      const target = document.getElementById("e1ActiveTrades");
+      if (target) {
+        try { target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+        catch (_e) { target.scrollIntoView(); }
       }
-    });
-  }
-
-  if (expBtn) {
-    expBtn.addEventListener("click", () => {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `wing-console-${data.ticker}-${data.event_date}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    });
+    }
+  } catch (err) {
+    alert("Failed to start tracking: " + (err?.message || err));
   }
 }
 
@@ -3088,8 +2890,10 @@ function render(payload) {
   // Scan-first decision header (instrument panel style)
   try { renderEngine1DecisionPanel(payload); } catch { /* ignore */ }
 
-  // E1 v2: Wing Decision Console (primary card) + source chip refresh.
-  try { renderWingConsole(payload); } catch (err) { console.warn("wing console render failed:", err); }
+  // E1 — Trade Builder (manual EM / wings / credit → draft-price → log
+  // as tracked) + source chip refresh. The Wing Decision Console was
+  // retired 2026-05-20.
+  try { renderTrackBuilder(payload); } catch (err) { console.warn("track builder render failed:", err); }
   try { refreshE1SourceChip(payload?.nextEvent || null); } catch { /* ignore */ }
 
   const rg = payload.regime || {};
@@ -3910,14 +3714,10 @@ function _showE1AdjustModal(payload, advisorData) {
   });
 }
 
-// --- v2: Adjust & Log modal seeded from a Wing Console placement ---
-// Called by `e1BuildTradeBtn` on the Wing Decision Console. Builds the
-// same modal shape as _showE1AdjustModal but pre-fills the numeric fields
-// from the placement's strikes / credit / em_mult / wing_pts / MC-derived
-// confidence tag, and records `source: "wing_console"` + the placement
-// rank + composite score in the POST body so the live-review LLM has
-// full provenance for every logged trade.
-function _showE1AdjustModalFromPlacement(payload, placement) {
+// --- v2 (DEPRECATED): Adjust & Log modal seeded from a Wing Console
+// placement. Retained only because some external callers may still
+// reference it; the new Trade Builder uses _submitTrackCandidate directly.
+function _showE1AdjustModalFromPlacement_DEPRECATED(payload, placement) {
   var cur = payload?.current || {};
   var ticker = payload?.ticker || "";
   var timing = (cur.earningsTiming || "AMC").toUpperCase();
@@ -4057,6 +3857,61 @@ function _adjField(label, id, defVal, type, min, max, step, options) {
 }
 
 // --- Active Trades (monitoring + close) ---
+function _e1TradeCardHtml(t) {
+  var entry = t.entry || {};
+  var mode = String(t.mode || "live").toLowerCase();
+  var isTracked = mode === "tracked";
+  var badgeBg = isTracked ? "#7c4dff22" : "#16a34a22";
+  var badgeColor = isTracked ? "#7c4dff" : "#16a34a";
+  var badgeText = isTracked ? "TRACK" : "LIVE";
+
+  var html = '<div style="background:var(--surface2,#f8f9fa);border-radius:8px;padding:12px 16px;margin-bottom:12px;border:1px solid var(--border)' + (isTracked ? ';border-left:3px solid ' + badgeColor : '') + '">';
+
+  html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">';
+  html += '<span style="font-weight:700;font-size:14px">' + (t.ticker || "—") + '</span>';
+  html += '<span style="font-size:10px;font-weight:700;letter-spacing:0.5px;padding:2px 8px;border-radius:4px;background:' + badgeBg + ';color:' + badgeColor + '">' + badgeText + '</span>';
+  html += '<span style="font-size:12px;opacity:.6">' + (entry.emMultiple || "?") + 'x EM · $' + (entry.wingWidth || "?") + ' wings</span>';
+  html += '<span style="font-size:12px;opacity:.6">' + (entry.earningsTiming || "?") + ' · ' + (entry.earningsDate || "?") + '</span>';
+  html += '<span style="font-size:11px;opacity:.4">' + (isTracked ? 'Tracking since ' : 'Logged ') + (t.loggedAt || "").slice(0, 16).replace("T", " ") + '</span>';
+  if (t.promotedAt) {
+    html += '<span style="font-size:11px;opacity:.45">Promoted ' + String(t.promotedAt).slice(0, 16).replace("T", " ") + '</span>';
+  }
+  html += '</div>';
+
+  if (entry.shortPutStrike || entry.shortCallStrike) {
+    html += '<div style="font-size:12px;opacity:.7;margin-bottom:8px">';
+    html += 'Strikes: ' + (entry.shortPutStrike || "?") + '/' + (entry.longPutStrike || "?") + ' put · ' + (entry.shortCallStrike || "?") + '/' + (entry.longCallStrike || "?") + ' call';
+    if (entry.entryCredit) html += ' · Credit: $' + entry.entryCredit;
+    html += '</div>';
+  }
+  if (entry.entryWindow) html += '<div style="font-size:11px;opacity:.5;margin-bottom:4px">Entry: ' + entry.entryWindow + '</div>';
+  if (entry.exitTarget) html += '<div style="font-size:11px;opacity:.5;margin-bottom:8px">Exit: ' + entry.exitTarget + '</div>';
+
+  var autoPhase = _autoDetectE1Phase(entry.earningsDate, entry.earningsTiming);
+  html += '<div class="e1ReviewPhaseRow" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px;align-items:center">';
+  html += '<span style="font-size:10px;letter-spacing:0.4px;text-transform:uppercase;opacity:.55;margin-right:4px">' + (isTracked ? 'What-If Review' : 'Live Review') + '</span>';
+  html += _e1PhaseBtnHtml(t.tradeId, "pre_event", "Pre-Event Check", autoPhase);
+  html += _e1PhaseBtnHtml(t.tradeId, "pre_open",  "Pre-Open Check",  autoPhase);
+  html += _e1PhaseBtnHtml(t.tradeId, "post_open", "Post-Open Check", autoPhase);
+  html += '</div>';
+  html += '<div class="e1ReviewPanel" id="e1ReviewPanel-' + t.tradeId + '" style="display:none;margin:6px 0 8px;padding:12px;border-radius:8px;background:rgba(125,182,255,0.06);border:1px solid rgba(125,182,255,0.2);font-size:12px;line-height:1.45"></div>';
+
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  if (isTracked) {
+    html += '<button class="e1PromoteTradeBtn primaryButton" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;font-weight:600">Promote to LIVE</button>';
+    html += '<button class="e1StopTrackBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer;opacity:.7">Stop Tracking</button>';
+  } else {
+    html += '<button class="e1CloseTradeBtn primaryButton" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;font-weight:600">Close Trade</button>';
+    html += '<button class="e1CloseWinBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #16a34a;background:#16a34a18;color:#16a34a;cursor:pointer;font-weight:600">Close as Win</button>';
+    html += '<button class="e1CloseLossBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #dc2626;background:#dc262618;color:#dc2626;cursor:pointer;font-weight:600">Close as Loss</button>';
+    html += '<button class="e1CloseExpBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer;opacity:.7">Expired Worthless</button>';
+  }
+  html += '</div>';
+
+  html += '</div>';
+  return html;
+}
+
 async function _loadE1ActiveTrades() {
   var areaInAdvisor = $("e1ActiveTradesArea");
   var sec = $("e1ActiveTrades");
@@ -4075,71 +3930,40 @@ async function _loadE1ActiveTrades() {
       return;
     }
 
-    var html = '<div style="padding:16px;border-top:2px solid var(--border)">';
-    html += '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">';
-    html += '<h3 style="margin:0;font-size:15px;font-weight:700">Active Trades</h3>';
-    html += '<span style="font-size:12px;opacity:.6">' + trades.length + ' open position' + (trades.length > 1 ? 's' : '') + '</span>';
-    html += '</div>';
-
-    for (var ti = 0; ti < trades.length; ti++) {
-      var t = trades[ti];
-      var entry = t.entry || {};
-      var ctx = t.entryContext || {};
-      html += '<div style="background:var(--surface2,#f8f9fa);border-radius:8px;padding:12px 16px;margin-bottom:12px;border:1px solid var(--border)">';
-
-      // Trade header
-      html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">';
-      html += '<span style="font-weight:700;font-size:14px">' + (t.ticker || "—") + '</span>';
-      html += '<span style="font-size:12px;opacity:.6">' + (entry.emMultiple || "?") + 'x EM · $' + (entry.wingWidth || "?") + ' wings</span>';
-      html += '<span style="font-size:12px;opacity:.6">' + (entry.earningsTiming || "?") + ' · ' + (entry.earningsDate || "?") + '</span>';
-      html += '<span style="font-size:11px;opacity:.4">Logged ' + (t.loggedAt || "").slice(0, 16).replace("T", " ") + '</span>';
-      html += '</div>';
-
-      // Entry details
-      if (entry.shortPutStrike || entry.shortCallStrike) {
-        html += '<div style="font-size:12px;opacity:.7;margin-bottom:8px">';
-        html += 'Strikes: ' + (entry.shortPutStrike || "?") + '/' + (entry.longPutStrike || "?") + ' put · ' + (entry.shortCallStrike || "?") + '/' + (entry.longCallStrike || "?") + ' call';
-        if (entry.entryCredit) html += ' · Credit: $' + entry.entryCredit;
-        html += '</div>';
+    // Group trades by mode. Legacy docs without mode are treated as
+    // live by the backend so they stay in the live group.
+    var live = [];
+    var tracked = [];
+    for (var i = 0; i < trades.length; i++) {
+      if (String(trades[i].mode || "live").toLowerCase() === "tracked") {
+        tracked.push(trades[i]);
+      } else {
+        live.push(trades[i]);
       }
-      if (entry.entryWindow) html += '<div style="font-size:11px;opacity:.5;margin-bottom:4px">Entry: ' + entry.entryWindow + '</div>';
-      if (entry.exitTarget) html += '<div style="font-size:11px;opacity:.5;margin-bottom:8px">Exit: ' + entry.exitTarget + '</div>';
-
-      // v2: live-review panel (populated on-demand by _runE1LiveReview).
-      // Phase buttons sit in a dedicated row above the close-action row so
-      // the desk can pick which check-in moment they want — Pre-event /
-      // Pre-open / Post-open — and the auto-detected phase is highlighted.
-      var autoPhase = _autoDetectE1Phase(entry.earningsDate, entry.earningsTiming);
-      html += '<div class="e1ReviewPhaseRow" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px;align-items:center">';
-      html += '<span style="font-size:10px;letter-spacing:0.4px;text-transform:uppercase;opacity:.55;margin-right:4px">Live Review</span>';
-      html += _e1PhaseBtnHtml(t.tradeId, "pre_event", "Pre-Event Check", autoPhase);
-      html += _e1PhaseBtnHtml(t.tradeId, "pre_open",  "Pre-Open Check",  autoPhase);
-      html += _e1PhaseBtnHtml(t.tradeId, "post_open", "Post-Open Check", autoPhase);
-      html += '</div>';
-      html += '<div class="e1ReviewPanel" id="e1ReviewPanel-' + t.tradeId + '" style="display:none;margin:6px 0 8px;padding:12px;border-radius:8px;background:rgba(125,182,255,0.06);border:1px solid rgba(125,182,255,0.2);font-size:12px;line-height:1.45"></div>';
-
-      // Action buttons
-      html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
-      html += '<button class="e1CloseTradeBtn primaryButton" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;font-weight:600">Close Trade</button>';
-      html += '<button class="e1CloseWinBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #16a34a;background:#16a34a18;color:#16a34a;cursor:pointer;font-weight:600">Close as Win</button>';
-      html += '<button class="e1CloseLossBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #dc2626;background:#dc262618;color:#dc2626;cursor:pointer;font-weight:600">Close as Loss</button>';
-      html += '<button class="e1CloseExpBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer;opacity:.7">Expired Worthless</button>';
-      html += '</div>';
-
-      html += '</div>';
     }
+
+    var html = '<div style="padding:16px;border-top:2px solid var(--border)">';
+
+    if (live.length) {
+      html += '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px">';
+      html += '<h3 style="margin:0;font-size:15px;font-weight:700">Live Trades</h3>';
+      html += '<span style="font-size:11px;letter-spacing:0.4px;padding:2px 8px;border-radius:4px;background:#16a34a22;color:#16a34a;font-weight:700">' + live.length + ' OPEN</span>';
+      html += '</div>';
+      for (var li = 0; li < live.length; li++) html += _e1TradeCardHtml(live[li]);
+    }
+
+    if (tracked.length) {
+      if (live.length) html += '<div style="height:8px;"></div>';
+      html += '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px">';
+      html += '<h3 style="margin:0;font-size:15px;font-weight:700">Tracked Candidates</h3>';
+      html += '<span style="font-size:11px;letter-spacing:0.4px;padding:2px 8px;border-radius:4px;background:#7c4dff22;color:#7c4dff;font-weight:700">' + tracked.length + ' WATCHING</span>';
+      html += '<span style="font-size:11px;opacity:.55">paper / what-if — promote to commit</span>';
+      html += '</div>';
+      for (var tj = 0; tj < tracked.length; tj++) html += _e1TradeCardHtml(tracked[tj]);
+    }
+
     html += '</div>';
 
-    // ALWAYS render into the standalone section so the desk has a
-    // consistent place to find their open book — regardless of whether
-    // the Wing Console has rendered or not. We also MIRROR into the
-    // inline #e1ActiveTradesArea when it exists (created by the Wing
-    // Console), so the desk gets immediate feedback right after a log
-    // without scrolling. Earlier behaviour was either-or, which hid
-    // the standalone section whenever the Wing Console was on screen
-    // and made open trades impossible to find on a fresh page open
-    // (e.g. coming back the next morning to check on an overnight
-    // position before BMO earnings).
     if (sec && el) {
       el.innerHTML = html;
       sec.classList.remove("hidden");
@@ -4148,7 +3972,6 @@ async function _loadE1ActiveTrades() {
       areaInAdvisor.innerHTML = html;
     }
 
-    // Wire close buttons
     _wireE1CloseButtons();
   } catch (e) {
     if (sec) sec.classList.add("hidden");
@@ -4168,11 +3991,51 @@ function _wireE1CloseButtons() {
   document.querySelectorAll(".e1CloseExpBtn").forEach(function (btn) {
     btn.addEventListener("click", function () { _quickCloseE1Trade(btn.dataset.tradeId, "expired"); });
   });
+  document.querySelectorAll(".e1PromoteTradeBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () { _promoteE1Trade(btn.dataset.tradeId); });
+  });
+  document.querySelectorAll(".e1StopTrackBtn").forEach(function (btn) {
+    btn.addEventListener("click", function () { _stopTrackingE1Trade(btn.dataset.tradeId); });
+  });
   document.querySelectorAll(".e1ReviewPhaseBtn").forEach(function (btn) {
     btn.addEventListener("click", function () {
       _runE1LiveReview(btn.dataset.tradeId, btn.dataset.phase);
     });
   });
+}
+
+async function _promoteE1Trade(tradeId) {
+  if (!tradeId) return;
+  if (!confirm("Promote this tracked candidate to a LIVE position?")) return;
+  try {
+    var resp = await fetch("/api/breach/trade/" + encodeURIComponent(tradeId) + "/promote", { method: "POST" });
+    if (!resp.ok) {
+      var txt = await resp.text();
+      throw new Error("HTTP " + resp.status + ": " + txt.slice(0, 160));
+    }
+    await _loadE1ActiveTrades();
+  } catch (e) {
+    alert("Failed to promote trade: " + (e?.message || e));
+  }
+}
+
+async function _stopTrackingE1Trade(tradeId) {
+  if (!tradeId) return;
+  if (!confirm("Stop tracking this candidate? It will be archived (closed) with no P&L.")) return;
+  try {
+    var resp = await fetch("/api/breach/trade/" + encodeURIComponent(tradeId) + "/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ closeReason: "cancelled_tracking", notes: "Stopped tracking from E1 desktop." }),
+    });
+    if (!resp.ok) {
+      var txt = await resp.text();
+      throw new Error("HTTP " + resp.status + ": " + txt.slice(0, 160));
+    }
+    await _loadE1ActiveTrades();
+  } catch (e) {
+    alert("Failed to stop tracking: " + (e?.message || e));
+  }
 }
 
 // =============================================================================
@@ -4310,6 +4173,50 @@ function _e1FmtNum(v, digits) {
   var n = Number(v);
   if (!isFinite(n)) return "—";
   return n.toFixed(digits == null ? 2 : digits);
+}
+
+function _e1ReplayMetricsGrid(rp) {
+  // 2x3 grid of E15-derived path stats. Surfaces the analogue insights
+  // the desk used to have to open the E15 page for: early-exit %,
+  // full-collect %, white-knuckle %, median MAE %, and the exit-rule
+  // optimizer's recommended profit-target / stop-loss / time-stop.
+  if (!rp) return "";
+
+  var pct = function (frac, digits) {
+    if (frac == null) return "—";
+    var v = Number(frac);
+    if (!isFinite(v)) return "—";
+    return v.toFixed(digits == null ? 0 : digits) + "%";
+  };
+  var fracPct = function (x) { return x == null ? "—" : Math.round(Number(x) * 100) + "%"; };
+  var num = function (x, d) {
+    if (x == null) return "—";
+    var v = Number(x);
+    if (!isFinite(v)) return "—";
+    return v.toFixed(d == null ? 1 : d);
+  };
+
+  var rec = rp.exitRulesRec || {};
+  var earlyDays = rp.daysToEarlyExit;
+
+  var cell = function (label, value, sub) {
+    return '<div style="padding:6px 8px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid rgba(255,255,255,0.05)">' +
+      '<div style="font-size:9px;letter-spacing:0.4px;text-transform:uppercase;opacity:.55;margin-bottom:2px">' + escapeHtml(label) + '</div>' +
+      '<div style="font-size:12px;font-weight:600">' + value + '</div>' +
+      (sub ? '<div style="font-size:9px;opacity:.5;margin-top:1px">' + escapeHtml(sub) + '</div>' : '') +
+      '</div>';
+  };
+
+  return (
+    '<div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:6px;margin-top:8px;font-family:inherit">' +
+      cell("Early Exit", fracPct(rp.earlyExitRate), (earlyDays != null ? "avg " + num(earlyDays, 1) + "d" : "")) +
+      cell("Full Collect", fracPct(rp.fullCollectRate), "early+full") +
+      cell("White-Knuckle", fracPct(rp.whiteKnuckleRate), "won but scary") +
+      cell("MAE p50", (rp.medianMaePct != null ? num(rp.medianMaePct, 1) + "%" : "—"), "median mid-life") +
+      cell("Reco PT", (rec.profitTarget != null ? pct(rec.profitTarget, 0) : "—"), "profit target") +
+      cell("Reco SL", (rec.stopLoss != null ? pct(rec.stopLoss, 0) : "—"), (rec.timeStopDays != null ? "time stop " + rec.timeStopDays + "d" : "")) +
+    '</div>'
+  );
 }
 
 function _e1MtmSparkline(curve) {
@@ -4500,6 +4407,7 @@ function _paintE1LiveReview(panel, body) {
         '<span>Full-collect rate <strong>' + fcr + '</strong></span>' +
       '</div>' +
       (spark || '<div style="font-size:11px;opacity:.55">MTM curve unavailable.</div>') +
+      _e1ReplayMetricsGrid(rp) +
       '</div>';
   } else if (rp.error) {
     replayBlock = '<div style="margin:8px 0;padding:8px 10px;background:rgba(243,168,71,0.06);border-radius:6px;font-size:11px;opacity:.75">Replay unavailable: ' + escapeHtml(String(rp.error)) + '</div>';

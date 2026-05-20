@@ -357,12 +357,13 @@ def ic_scenario_page():
     return FileResponse(str(STATIC_DIR / "ic-scenario.html"))
 
 
-@app.get("/earnings-ic")
-def earnings_ic_page():
-    fl = get_flags()
-    if not getattr(fl, "ENABLE_ENGINE15_EARNINGS_IC", False):
-        raise HTTPException(status_code=404, detail="Engine 15 disabled")
-    return FileResponse(str(STATIC_DIR / "earnings-ic.html"))
+# NOTE: The /earnings-ic page was retired 2026-05-20 alongside the
+# Wing Decision Console refactor. The /api/earnings-ic/* routes
+# (registered via include_router(engine15_earnings_ic)) stay alive
+# because the simulator powers E1 Live Review's projection panel
+# server-side and we want existing deep-link integrations and any
+# external callers to keep working. The static HTML/JS no longer
+# exists, so the page route would 500 if we tried to serve it.
 
 
 @app.get("/compare")

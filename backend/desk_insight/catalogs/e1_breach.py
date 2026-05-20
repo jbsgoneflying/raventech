@@ -24,36 +24,11 @@ ENGINE_META = {
 
 CATALOG = {
 
-    "wing_console": {
-        "title": "Wing Decision Console",
-        "spec": (
-            "Primary card on the /breach page. Scores a 15-point grid "
-            "(5 EM-multiples × 3 wing-widths) of candidate symmetric "
-            "iron-condor placements and ranks them by a deterministic "
-            "composite score (0-100).\n"
-            "The five scoring dimensions are:\n"
-            "- breach_gap_prob: historical gap-breach rate at that EM "
-            "multiple (daily OHLC, close→open earnings gap).\n"
-            "- breach_ctc_prob: historical close-to-close breach rate.\n"
-            "- mae_p95: 95th-pct Max Adverse Excursion across the "
-            "hold window as % of wing width — the White-Knuckle proxy.\n"
-            "- theta_capture: expected % of entry credit retained by "
-            "the planned exit, from the ticker's IV-crush pattern.\n"
-            "- credit_est: estimated entry credit in points.\n"
-            "Default weights: gap 30% / ctc 20% / MAE 25% / theta 15% / "
-            "credit 10%. Desk-tunable via E1_WING_SCORE_WEIGHT_*.\n"
-            "Replaces the legacy TRADE / LEAN_PASS / PASS verdict: "
-            "instead of asking 'should I trade?', it answers 'given "
-            "we're trading, where do the wings go?'"
-        ),
-        "related_cards": [
-            {"engine": "e1", "slug": "placement_score", "label": "Placement Scorecard"},
-            {"engine": "e1", "slug": "mae_distribution", "label": "MAE (White-Knuckle) Pool"},
-            {"engine": "e1", "slug": "theta_capture", "label": "Theta Capture Estimate"},
-            {"engine": "e1", "slug": "breach_stats", "label": "Breach Statistics"},
-            {"engine": "e1", "slug": "mc_earnings_risk", "label": "MC Earnings Risk (per-placement)"},
-        ],
-    },
+    # NOTE: The "wing_console" slug was retired 2026-05-20 alongside
+    # the Wing Decision Console UI removal. The placement/MAE/theta
+    # primitives still exist server-side because Engine 15's simulator
+    # uses them for the E1 cross-check, but they have no /breach
+    # surface anymore.
 
     "placement_score": {
         "title": "Placement Scorecard",
@@ -75,7 +50,6 @@ CATALOG = {
             "pull the sliders to explore alternatives."
         ),
         "related_cards": [
-            {"engine": "e1", "slug": "wing_console", "label": "Wing Decision Console"},
             {"engine": "e1", "slug": "mae_distribution", "label": "MAE Pool"},
             {"engine": "e1", "slug": "theta_capture", "label": "Theta Capture"},
         ],
@@ -102,7 +76,6 @@ CATALOG = {
             "panic-close territory. That's the signal the desk needs."
         ),
         "related_cards": [
-            {"engine": "e1", "slug": "wing_console", "label": "Wing Decision Console"},
             {"engine": "e1", "slug": "placement_score", "label": "Placement Scorecard"},
             {"engine": "e1", "slug": "gap_vs_ctc", "label": "Gap vs Close-to-Close"},
         ],
@@ -127,7 +100,6 @@ CATALOG = {
             "Drives the theta term of the composite score."
         ),
         "related_cards": [
-            {"engine": "e1", "slug": "wing_console", "label": "Wing Decision Console"},
             {"engine": "e1", "slug": "vrp_analysis", "label": "VRP Analysis"},
             {"engine": "e1", "slug": "placement_score", "label": "Placement Scorecard"},
         ],

@@ -34,6 +34,19 @@ def _trade_key(trade_id: str) -> str:
     return f"{_PREFIX}:{trade_id}"
 
 
+def normalize_trade_mode(trade: Dict[str, Any]) -> str:
+    """Return the trade's mode, defaulting legacy docs (no field) to "live".
+
+    Existing on-disk trades pre-date the tracked/live split; treat them as
+    live so nothing already visible silently flips to paper.
+    """
+    raw = trade.get("mode")
+    if raw is None:
+        return "live"
+    rs = str(raw).lower().strip()
+    return "tracked" if rs == "tracked" else "live"
+
+
 def _refresh_index_ttl(store: RedisStore) -> None:
     """Touch the index key's TTL without modifying its contents.
 
@@ -97,6 +110,13 @@ def log_trade(
     trade_id = str(uuid.uuid4())[:12]
     source = str(trade_data.get("source", "advisor"))
 
+    # mode = "tracked" (paper / what-if) | "live" (committed real position).
+    # Default to "tracked" so new builder submissions don't accidentally
+    # surface as live capital. Legacy docs without `mode` are treated as
+    # "live" on read (see normalize_trade_mode).
+    raw_mode = str(trade_data.get("mode", "tracked") or "tracked").lower().strip()
+    mode = "live" if raw_mode == "live" else "tracked"
+
     # Enrich entryContext.breachPct from breachSnapshot/predictionSnapshot if
     # the FE didn't set it. This is what the v2 conformal calibrator reads.
     try:
@@ -108,6 +128,7 @@ def log_trade(
     trade: Dict[str, Any] = {
         "tradeId": trade_id,
         "status": "active",
+        "mode": mode,
         "loggedAt": _utcnow_iso(),
         "source": source,
         "ticker": str(trade_data.get("ticker", "")).upper(),
@@ -241,11 +262,45 @@ def get_trade(trade_id: str, store: Optional[RedisStore] = None) -> Optional[Dic
     s = store or get_store_optional()
     if s is None:
         return None
-    return s.get_json(_trade_key(trade_id))
+    trade = s.get_json(_trade_key(trade_id))
+    if isinstance(trade, dict):
+        trade["mode"] = normalize_trade_mode(trade)
+    return trade
 
 
 def list_active_trades(store: Optional[RedisStore] = None) -> List[Dict[str, Any]]:
     return [t for t in _list_all(store) if t.get("status") in ("active", "monitoring")]
+
+
+def promote_to_live(
+    trade_id: str,
+    store: Optional[RedisStore] = None,
+) -> Optional[Dict[str, Any]]:
+    """Flip a tracked trade to live mode and stamp promotedAt.
+
+    Idempotent: a trade already in live mode is returned unchanged.
+    Returns None if the trade is missing, closed, or Redis is unavailable.
+    """
+    s = store or get_store_optional()
+    if s is None:
+        return None
+    trade = get_trade(trade_id, store=s)
+    if trade is None:
+        return None
+    if trade.get("status") != "active":
+        return None
+    if normalize_trade_mode(trade) == "live":
+        return trade
+    trade["mode"] = "live"
+    trade["promotedAt"] = _utcnow_iso()
+    try:
+        ttl = int(get_flags().E1_TRADE_TTL_S)
+        s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
+        _refresh_index_ttl(s)
+        return trade
+    except Exception as e:
+        LOG.warning("E1 promote_to_live failed: %s", e)
+        return None
 
 
 def list_closed_trades(store: Optional[RedisStore] = None, limit: int = 100) -> List[Dict[str, Any]]:
@@ -706,6 +761,7 @@ def _list_all(store: Optional[RedisStore] = None) -> List[Dict[str, Any]]:
         for tid in raw:
             t = s.get_json(_trade_key(str(tid)))
             if isinstance(t, dict):
+                t["mode"] = normalize_trade_mode(t)
                 out.append(t)
         return out
     except Exception:

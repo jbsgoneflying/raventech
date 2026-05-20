@@ -653,6 +653,8 @@ def run_live_review(
     fields = _extract_trade_fields(trade)
     ticker = fields["ticker"]
     trade_id = str(trade.get("tradeId") or "")
+    raw_mode = str(trade.get("mode") or "").lower().strip()
+    mode = "tracked" if raw_mode == "tracked" else "live"
 
     auto_phase = auto_detect_phase(
         earnings_date=fields["earningsDate"],
@@ -740,6 +742,7 @@ def run_live_review(
             days_to_earnings=days_to_earnings,
             pre_verdict=pre_verdict,
             pre_confidence=pre_conf,
+            mode=mode,
         )
     except Exception as e:
         LOG.warning("e1_live_review: LLM v2 advisor failed: %s", e)
@@ -791,6 +794,7 @@ def run_live_review(
         "llmAssessment": llm_assessment,
         "userNotes": notes,
         # v2 fields
+        "mode": mode,
         "phase": phase,
         "phaseAuto": auto_phase,
         "phaseMismatch": (phase != auto_phase),

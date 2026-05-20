@@ -136,3 +136,76 @@ def test_live_review_accepts_body_overrides(client, monkeypatch):
     assert review["userNotes"] == "paper check"
     # Spot 150.5 with shorts 140/160 -> +6.27% below call, +6.9% above put -> on_track.
     assert review["statusChip"] == "on_track"
+
+
+# ---------------------------------------------------------------------------
+# _summarize_replay_for_review — projection-tile fields surfaced to the FE
+# ---------------------------------------------------------------------------
+
+def _scenario_payload_fixture():
+    """A minimal but realistic scenario_payload dict shaped the way
+    ``run_earnings_scenario`` returns it, just enough to exercise the
+    new summary fields."""
+    return {
+        "eventsUsed": 18,
+        "expectedValue": {
+            "meanPnlPct": 32.0,
+            "medianPnlPct": 45.0,
+            "sharpeProxy": 0.82,
+        },
+        "outcomeDistribution": {
+            "earlyTarget": {"pct": 33.3, "n": 6, "avgDays": 1.5, "avgPnlPct": 75.0},
+            "fullCollect": {"pct": 27.8, "n": 5, "avgDays": 4.0, "avgPnlPct": 95.0},
+            "whiteKnuckle": {"pct": 11.1, "n": 2, "avgDays": 3.5, "avgPnlPct": 60.0},
+            "stopOut":     {"pct": 16.7, "n": 3, "avgDays": 2.0, "avgPnlPct": -80.0},
+            "breach":      {"pct": 11.1, "n": 2, "avgDays": 1.0, "avgPnlPct": -150.0},
+        },
+        "mtmTimeline": [
+            {"date": "2026-05-21", "p10": -20.0, "p50": 5.0,  "p90": 30.0},
+            {"date": "2026-05-22", "p10": -35.0, "p50": 18.0, "p90": 55.0},
+            {"date": "2026-05-23", "p10": -55.0, "p50": 32.0, "p90": 78.0},
+        ],
+        "matchedEvents": [
+            {"mae": 5.0}, {"mae": 9.0}, {"mae": 7.0}, {"mae": 14.0}, {"mae": 11.0},
+        ],
+        "exitRulesOptimization": {
+            "recommendedProfitTarget": 50.0,
+            "recommendedStopLoss": -100.0,
+            "recommendedTimeStopDays": 3,
+        },
+        "creditRichness": {"verdict": "rich"},
+    }
+
+
+def test_summarize_replay_surfaces_new_projection_fields():
+    from backend.engine15.simulator import _summarize_replay_for_review
+
+    out = _summarize_replay_for_review(_scenario_payload_fixture())
+
+    # New rate buckets (returned as fractions, not percent).
+    assert out["earlyExitRate"] == pytest.approx(0.333, abs=0.001)
+    assert out["whiteKnuckleRate"] == pytest.approx(0.111, abs=0.001)
+    assert out["stopOutRate"] == pytest.approx(0.167, abs=0.001)
+    assert out["breachRate"] == pytest.approx(0.111, abs=0.001)
+    assert out["fullCollectRate"] == pytest.approx(0.611, abs=0.002)
+    # Days-to-early-exit forwarded from the earlyTarget bucket.
+    assert out["daysToEarlyExit"] == pytest.approx(1.5)
+    # MAE p50 computed from matchedEvents (median of 5,7,9,11,14 -> 9.0).
+    assert out["medianMaePct"] == pytest.approx(9.0)
+    # Exit-rule recommendation forwarded as a compact dict.
+    assert out["exitRulesRec"] == {
+        "profitTarget": 50.0,
+        "stopLoss": -100.0,
+        "timeStopDays": 3,
+    }
+
+
+def test_summarize_replay_is_tolerant_of_missing_fields():
+    from backend.engine15.simulator import _summarize_replay_for_review
+
+    out = _summarize_replay_for_review({})
+    assert out["available"] is True
+    assert out["earlyExitRate"] is None
+    assert out["whiteKnuckleRate"] is None
+    assert out["medianMaePct"] is None
+    assert out["exitRulesRec"] is None

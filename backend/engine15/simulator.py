@@ -1322,12 +1322,21 @@ def _summarize_replay_for_review(scenario_payload: Dict[str, Any]) -> Dict[str, 
     """Extract a compact P10/P50/P90 + outcome bucket summary for the
     Live Review evidence packet. The full scenario payload is too heavy
     to ship to the frontend on every check-in.
+
+    Surfaces (in addition to legacy fullCollectRate / breachRate):
+      - earlyExitRate, whiteKnuckleRate          — extra outcome buckets
+      - daysToEarlyExit                          — avg days of earlyTarget paths
+      - medianMaePct                             — median MAE across replay paths
+      - exitRulesRec {profitTarget, stopLoss,
+                      timeStopDays}              — optimizer output
     """
     out: Dict[str, Any] = {"available": True}
     paths_n = int(scenario_payload.get("eventsUsed") or 0)
     expected = scenario_payload.get("expectedValue") or {}
     outcomes = scenario_payload.get("outcomeDistribution") or {}
     timeline = scenario_payload.get("mtmTimeline") or []
+    matched = scenario_payload.get("matchedEvents") or []
+    exit_opt = scenario_payload.get("exitRulesOptimization") or {}
 
     # Derive P10/P50/P90 from the last MTM timeline step (per-path final PnL%).
     p10 = p50 = p90 = None
@@ -1344,23 +1353,41 @@ def _summarize_replay_for_review(scenario_payload: Dict[str, Any]) -> Dict[str, 
     # Engine 14 emits outcome buckets named: earlyTarget, fullCollect,
     # whiteKnuckle, stopOut, breach (see backend.engine14.simulator.OUTCOMES).
     # The Live Review surfaces:
-    #   fullCollectRate := earlyTarget% + fullCollect% (combined "wins")
-    #   stopOutRate     := stopOut%                    (soft loss)
-    #   breachRate      := breach%                     (max loss)
-    #   fullLossRate    := stopOut% + breach%          (any loss)
+    #   fullCollectRate  := earlyTarget% + fullCollect%   (combined "wins")
+    #   earlyExitRate    := earlyTarget%                  (won early)
+    #   whiteKnuckleRate := whiteKnuckle%                 (won, scary MAE)
+    #   stopOutRate      := stopOut%                      (soft loss)
+    #   breachRate       := breach%                       (max loss)
+    #   fullLossRate     := stopOut% + breach%            (any loss)
+    def _bucket(name: str, *aliases: str) -> Optional[Dict[str, Any]]:
+        for k in (name, *aliases):
+            v = outcomes.get(k)
+            if isinstance(v, dict):
+                return v
+        return None
+
     def _bucket_pct(bucket: Any) -> Optional[float]:
         if isinstance(bucket, dict):
             try:
-                return float(bucket.get("pct") or 0.0)
+                raw = bucket.get("pct")
+                if raw is None:
+                    return None
+                return float(raw)
             except (TypeError, ValueError):
                 return None
         return None
 
-    early_pct = _bucket_pct(outcomes.get("earlyTarget") or outcomes.get("early_target"))
-    full_pct = _bucket_pct(outcomes.get("fullCollect") or outcomes.get("full_collect")
-                           or outcomes.get("FULL_CREDIT"))
-    stop_pct = _bucket_pct(outcomes.get("stopOut") or outcomes.get("stop_out"))
-    breach_pct = _bucket_pct(outcomes.get("breach") or outcomes.get("BREACH"))
+    early_b = _bucket("earlyTarget", "early_target")
+    full_b = _bucket("fullCollect", "full_collect", "FULL_CREDIT")
+    wk_b = _bucket("whiteKnuckle", "white_knuckle")
+    stop_b = _bucket("stopOut", "stop_out")
+    breach_b = _bucket("breach", "BREACH")
+
+    early_pct = _bucket_pct(early_b)
+    full_pct = _bucket_pct(full_b)
+    wk_pct = _bucket_pct(wk_b)
+    stop_pct = _bucket_pct(stop_b)
+    breach_pct = _bucket_pct(breach_b)
 
     def _frac(*pcts: Optional[float]) -> Optional[float]:
         vals = [p for p in pcts if p is not None]
@@ -1369,9 +1396,58 @@ def _summarize_replay_for_review(scenario_payload: Dict[str, Any]) -> Dict[str, 
         return round(sum(vals) / 100.0, 4)
 
     full_collect = _frac(early_pct, full_pct)
+    early_exit_rate = _frac(early_pct)
+    white_knuckle_rate = _frac(wk_pct)
     stop_out_rate = _frac(stop_pct)
     breach_only_rate = _frac(breach_pct)
     breach_rate = _frac(stop_pct, breach_pct)
+
+    # Median MAE across all replay paths (matched events carry per-path MAE).
+    median_mae_pct: Optional[float] = None
+    try:
+        mae_vals = [
+            float(ev.get("mae"))
+            for ev in matched
+            if isinstance(ev, dict) and ev.get("mae") is not None
+        ]
+        if mae_vals:
+            from statistics import median as _median
+            median_mae_pct = round(_median(mae_vals), 1)
+    except Exception:
+        median_mae_pct = None
+
+    # Days-to-early-exit pulled directly from the earlyTarget bucket if present.
+    def _avg_days(bucket: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not isinstance(bucket, dict):
+            return None
+        try:
+            v = bucket.get("avgDays")
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    days_to_early_exit = _avg_days(early_b)
+
+    # Forward the exit-rule optimizer's recommendation in a compact shape.
+    exit_rules_rec: Optional[Dict[str, Any]] = None
+    if isinstance(exit_opt, dict) and exit_opt:
+        try:
+            exit_rules_rec = {
+                "profitTarget": (
+                    float(exit_opt.get("recommendedProfitTarget"))
+                    if exit_opt.get("recommendedProfitTarget") is not None else None
+                ),
+                "stopLoss": (
+                    float(exit_opt.get("recommendedStopLoss"))
+                    if exit_opt.get("recommendedStopLoss") is not None else None
+                ),
+                "timeStopDays": (
+                    int(exit_opt.get("recommendedTimeStopDays"))
+                    if exit_opt.get("recommendedTimeStopDays") is not None else None
+                ),
+            }
+        except (TypeError, ValueError):
+            exit_rules_rec = None
 
     out.update({
         "pathsCount": paths_n,
@@ -1382,9 +1458,14 @@ def _summarize_replay_for_review(scenario_payload: Dict[str, Any]) -> Dict[str, 
         "medianPnlPct": expected.get("medianPnlPct"),
         "sharpeProxy": expected.get("sharpeProxy"),
         "fullCollectRate": full_collect,
+        "earlyExitRate": early_exit_rate,
+        "whiteKnuckleRate": white_knuckle_rate,
         "fullLossRate": breach_rate,
         "stopOutRate": stop_out_rate,
         "breachRate": breach_only_rate,
+        "daysToEarlyExit": days_to_early_exit,
+        "medianMaePct": median_mae_pct,
+        "exitRulesRec": exit_rules_rec,
         "outcomeDistribution": outcomes,
         # Compact MTM curve for the frontend chart (date, p10, p50, p90).
         "mtmCurve": [

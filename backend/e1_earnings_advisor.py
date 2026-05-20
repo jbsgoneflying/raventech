@@ -510,8 +510,16 @@ def generate_e1_post_mortem(
 _LIVE_REVIEW_REQUIRED_KEYS = {"verdict", "confidence", "narrative", "keyPoints", "riskFactors", "deskNote"}
 
 
-def _live_review_system_prompt(phase: str) -> str:
+def _live_review_system_prompt(phase: str, mode: str = "live") -> str:
     """Phase-tuned system prompt for the live-review LLM call.
+
+    ``mode`` switches the framing:
+
+    - ``live``    — desk holds real capital. Verdicts are direct action calls.
+    - ``tracked`` — paper / what-if candidate. Verdicts are still HOLD /
+      ADJUST / CUT but framed as "if this were live ..." learning notes
+      so the desk can compare candidates without confusing tracked
+      narrative with action directives.
 
     Each phase has a different decision the desk wants from the model:
 
@@ -527,15 +535,30 @@ def _live_review_system_prompt(phase: str) -> str:
       exiting at the open mid for partial credit, holding for full IV
       crush, or taking the loss now before theta works against us.
     """
-    base = (
-        "You are a senior vol-crush options desk analyst reviewing an OPEN "
-        "earnings iron condor. Be concise, decisive, and cite the numbers. "
-        "Return STRICT JSON with keys: verdict (one of HOLD|ADJUST|CUT), "
-        "confidence (0.0-1.0 float), narrative (2-3 sentences), "
-        "keyPoints (array of 2-4 short bullets), riskFactors (array of 1-3 "
-        "short bullets), deskNote (one-sentence trader-style summary). "
-        "Do not invent numbers; use the evidence packet."
-    )
+    if mode == "tracked":
+        base = (
+            "You are a senior vol-crush options desk analyst reviewing a TRACKED "
+            "(paper / what-if) earnings iron condor candidate. The desk has NOT "
+            "committed capital; this is a candidate they are following to compare "
+            "against alternates. Be concise, decisive, and cite the numbers. "
+            "Return STRICT JSON with keys: verdict (one of HOLD|ADJUST|CUT — "
+            "interpret as 'if this were live, what would the action be?'), "
+            "confidence (0.0-1.0 float), narrative (2-3 sentences framed as "
+            "'if live, ...' learning), keyPoints (array of 2-4 short bullets), "
+            "riskFactors (array of 1-3 short bullets), deskNote (one-sentence "
+            "what-if summary; explicitly mention this is a tracked candidate). "
+            "Do not invent numbers; use the evidence packet."
+        )
+    else:
+        base = (
+            "You are a senior vol-crush options desk analyst reviewing an OPEN "
+            "earnings iron condor. Be concise, decisive, and cite the numbers. "
+            "Return STRICT JSON with keys: verdict (one of HOLD|ADJUST|CUT), "
+            "confidence (0.0-1.0 float), narrative (2-3 sentences), "
+            "keyPoints (array of 2-4 short bullets), riskFactors (array of 1-3 "
+            "short bullets), deskNote (one-sentence trader-style summary). "
+            "Do not invent numbers; use the evidence packet."
+        )
     if phase == "pre_event":
         return base + (
             " Phase: PRE_EVENT. The desk holds the position now and wants to "
@@ -613,7 +636,13 @@ def _summarize_evidence_for_llm(evidence: Dict[str, Any]) -> Dict[str, Any]:
             "p50PnlPct": replay.get("p50PnlPct"),
             "p90PnlPct": replay.get("p90PnlPct"),
             "fullCollectRate": replay.get("fullCollectRate"),
-            "fullLossRate": replay.get("fullLossRate"),
+            "earlyExitRate": replay.get("earlyExitRate"),
+            "whiteKnuckleRate": replay.get("whiteKnuckleRate"),
+            "stopOutRate": replay.get("stopOutRate"),
+            "breachRate": replay.get("breachRate"),
+            "medianMaePct": replay.get("medianMaePct"),
+            "daysToEarlyExit": replay.get("daysToEarlyExit"),
+            "exitRulesRec": replay.get("exitRulesRec"),
             "creditRichness": (replay.get("creditRichness") or {}).get("verdict") if replay.get("creditRichness") else None,
         }
     return out
@@ -628,14 +657,21 @@ def generate_live_review_v2(
     days_to_earnings: Optional[int],
     pre_verdict: str,
     pre_confidence: float,
+    mode: str = "live",
     flags: Optional[FeatureFlags] = None,
 ) -> Optional[Dict[str, Any]]:
     """Phase-tuned LLM narrative for the Engine 1 Live Review v2 card.
+
+    ``mode`` is ``"live"`` (real position) or ``"tracked"`` (paper /
+    what-if candidate). Tracked mode swaps in a prompt that frames the
+    verdict as "if this were live ..." learning so paper candidates do
+    not generate action-directive deskNotes.
 
     Returns ``None`` when the LLM is unavailable or returns invalid JSON
     — the caller falls back to the rule-based pre-verdict and ladder.
     """
     f = flags or get_flags()
+    mode_norm = "tracked" if str(mode or "").lower().strip() == "tracked" else "live"
 
     client = _get_openai_client()
     if client is None:
@@ -648,8 +684,10 @@ def generate_live_review_v2(
 
     payload = {
         "phase": phase,
+        "mode": mode_norm,
         "ticker": ticker,
         "trade": {
+            "mode": mode_norm,
             "shortPut": fields.get("shortPut"),
             "longPut": fields.get("longPut"),
             "shortCall": fields.get("shortCall"),
@@ -678,7 +716,7 @@ def generate_live_review_v2(
     }
     payload_str = json.dumps(payload, default=str, separators=(",", ":"))
 
-    system_prompt = _live_review_system_prompt(phase)
+    system_prompt = _live_review_system_prompt(phase, mode=mode_norm)
     # Match the rest of the E1 advisor stack: read from E1_ADVISOR_MODEL and
     # use temperature=1 (gpt-5.5 only accepts the default temperature; any
     # other value triggers an `unsupported_value` 400 that nukes the narrative).
@@ -722,6 +760,7 @@ def generate_live_review_v2(
         result["_source"] = "llm"
         result["_model"] = model
         result["_phase"] = phase
+        result["_mode"] = mode_norm
         result["_generatedAt"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         return result
     except Exception as e:
