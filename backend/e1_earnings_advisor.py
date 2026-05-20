@@ -619,6 +619,15 @@ def _summarize_evidence_for_llm(evidence: Dict[str, Any]) -> Dict[str, Any]:
     macro = evidence.get("macro") or {}
     if isinstance(macro, dict) and macro.get("flags"):
         out["macroFlags"] = macro.get("flags")
+    hb = evidence.get("historyBreaker") or {}
+    if isinstance(hb, dict) and hb:
+        out["historyBreaker"] = {
+            "score": hb.get("score"),
+            "level": hb.get("level"),
+            "gate": hb.get("gate"),
+            "overrideFavorableStats": hb.get("overrideFavorableStats"),
+            "drivers": (hb.get("drivers") or [])[:3],
+        }
 
     analogues = evidence.get("analogues") or {}
     if isinstance(analogues, dict) and analogues.get("available", True):

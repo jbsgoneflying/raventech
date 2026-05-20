@@ -72,6 +72,24 @@ def test_log_trade_honors_explicit_live_mode():
     assert doc["mode"] == "live"
 
 
+def test_log_trade_persists_history_breaker_snapshot_in_entry_context():
+    from backend import e1_earnings_trades as mod
+    store = _FakeStore()
+    tid = mod.log_trade(
+        {
+            "ticker": "NVDA",
+            "entry": {},
+            "historyBreakerRisk": {"score": 71.0, "gate": "NO_TRADE", "level": "high"},
+        },
+        store=store,
+    )
+    doc = mod.get_trade(tid, store=store)
+    ctx = doc.get("entryContext") or {}
+    assert isinstance(ctx, dict)
+    assert isinstance(ctx.get("historyBreakerRisk"), dict)
+    assert ctx["historyBreakerRisk"]["gate"] == "NO_TRADE"
+
+
 def test_get_trade_backfills_legacy_docs_as_live():
     """A doc that pre-dates the mode field should read back as live."""
     from backend import e1_earnings_trades as mod
@@ -183,6 +201,7 @@ def _stub_breach_payload():
         "current": {"stockPrice": 100.0, "impliedMovePct": 5.0},
         "nextEvent": {},
         "events": [],
+        "historyBreakerRisk": {"score": 66.0, "level": "elevated", "gate": "CAUTION"},
     }
 
 
@@ -284,6 +303,8 @@ def test_draft_price_returns_symmetric_strikes(client, _stub_orats):
     # Sanity: cushions are positive and roughly symmetric.
     assert body["breachDistPutPct"] > 0
     assert body["breachDistCallPct"] > 0
+    assert isinstance(body.get("historyBreakerRisk"), dict)
+    assert body["historyBreakerRisk"]["gate"] == "CAUTION"
 
 
 def test_draft_price_rejects_out_of_range_em(client, _stub_orats):

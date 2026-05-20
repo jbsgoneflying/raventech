@@ -467,6 +467,9 @@ def _layer_analogues(ticker: str, fields: Dict[str, Any]) -> Dict[str, Any]:
         )
         events = stats.get("events") or []
         summary = stats.get("summary") or {}
+        hb = stats.get("historyBreakerRisk")
+        if isinstance(hb, dict):
+            out["historyBreaker"] = hb
 
         # Per-EM-multiple ladder via the same engine E1 itself uses.
         em_breach_summary: Dict[str, Any] = {}
@@ -568,6 +571,9 @@ def _score_action_ladder(*, fields: Dict[str, Any], evidence: Dict[str, Any], ph
 
     news = (evidence.get("news") or {})
     high_news = ((news.get("counts") or {}).get("high") or 0)
+    hb = evidence.get("historyBreaker") if isinstance(evidence.get("historyBreaker"), dict) else {}
+    hb_score = hb.get("score")
+    hb_gate = str(hb.get("gate") or "OK").upper()
 
     # --- Rule-based pre-verdict ---
     pre = "HOLD"
@@ -587,6 +593,18 @@ def _score_action_ladder(*, fields: Dict[str, Any], evidence: Dict[str, Any], ph
     if high_news >= 2 and pre == "HOLD":
         # Multiple high-priority headlines → bump caution one notch.
         pre, conf = "ADJUST", max(conf, 0.6)
+    # Warn-only history-breaker influence: never hard-veto, but nudge
+    # confidence/verdict away from a naive HOLD when divergence is high.
+    if hb_gate == "NO_TRADE" and pre == "HOLD":
+        pre, conf = "ADJUST", max(conf, 0.66)
+    elif hb_gate == "CAUTION" and pre == "HOLD":
+        conf = max(0.5, conf - 0.08)
+    if hb_score is not None:
+        try:
+            if float(hb_score) >= 70.0 and pre == "HOLD":
+                pre, conf = "ADJUST", max(conf, 0.66)
+        except (TypeError, ValueError):
+            pass
 
     # --- Action ladder (3 actions, phase-tuned third action) ---
     third_label, third_action = "ROLL_PUT", "Roll the challenged short out/down"
@@ -713,6 +731,7 @@ def run_live_review(
         "news": layers.get("news"),
         "macro": layers.get("macro"),
         "analogues": layers.get("analogues"),
+        "historyBreaker": ((layers.get("analogues") or {}).get("historyBreaker") if isinstance(layers.get("analogues"), dict) else None),
         "replay": layers.get("replay"),
     }
 

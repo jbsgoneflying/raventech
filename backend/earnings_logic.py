@@ -20,6 +20,7 @@ from backend.stats_utils import beta_posterior_from_counts
 from backend.trade_builder import compute_trade_builder
 from backend.wing_recommendation import compute_wing_recommendation
 from backend.mc_simulator import bootstrap_tas_stability, optimize_wings_risk_only, run_monte_carlo
+from backend.e1_history_breaker import compute_history_breaker_risk
 from backend.technicals import compute_technicals_payload
 from backend.expected_move import (
     compute_expected_move,
@@ -2695,6 +2696,31 @@ def compute_breach_stats(
     except Exception as e:
         LOG.debug("E1 VRP engine failed for %s: %s", t, e)
         out["vrpAnalysis"] = {"vrpScore": None, "notes": [f"VRP engine unavailable: {type(e).__name__}"]}
+
+    # --- History-breaker risk (warn-only composite guardrail) ---
+    try:
+        out["historyBreakerRisk"] = compute_history_breaker_risk(
+            summary=(summary if isinstance(summary, dict) else {}),
+            events=(out_events if isinstance(out_events, list) else []),
+            regime=(regime if isinstance(regime, dict) else {}),
+            regime_validation=(regime_validation if isinstance(regime_validation, dict) else {}),
+            stability=(out.get("stability") if isinstance(out.get("stability"), dict) else None),
+            gap_vs_ctc=(out.get("gapVsCtc") if isinstance(out.get("gapVsCtc"), dict) else None),
+            event_risk=(event_risk if isinstance(event_risk, dict) else None),
+            quarters=(quarters if isinstance(quarters, dict) else {}),
+            current_quarter_key=current_quarter_key,
+        )
+    except Exception as e:
+        LOG.debug("E1 history-breaker risk failed for %s: %s", t, e)
+        out["historyBreakerRisk"] = {
+            "score": None,
+            "level": "unknown",
+            "gate": "OK",
+            "confidence": "low",
+            "overrideFavorableStats": False,
+            "drivers": [f"History-breaker unavailable: {type(e).__name__}"],
+            "signals": {},
+        }
 
     # E1 v2: strip verdict-emitting fields from the primary /api/breach
     # payload when the desk-consensus flag is off. The LLM advisor still

@@ -138,6 +138,47 @@ def test_live_review_accepts_body_overrides(client, monkeypatch):
     assert review["statusChip"] == "on_track"
 
 
+def test_score_action_ladder_nudges_hold_when_history_breaker_is_high():
+    from backend.e1_live_review import _score_action_ladder
+
+    fields = {"emMultiple": 1.5}
+    evidence = {
+        "spot": {"nearestShortPct": 6.0, "putDistPct": 7.0, "callDistPct": 8.0},
+        "statusChip": "on_track",
+        "replay": {"p10PnlPct": 2.0, "p50PnlPct": 45.0, "p90PnlPct": 80.0, "fullCollectRate": 0.85},
+        "analogues": {"rateAtEmPct": 10.0},
+        "news": {"counts": {"high": 0}},
+        "historyBreaker": {"score": 78.0, "gate": "NO_TRADE", "level": "high"},
+    }
+    _ladder, pre, conf = _score_action_ladder(fields=fields, evidence=evidence, phase="pre_event")
+    assert pre == "ADJUST"
+    assert conf >= 0.66
+
+
+def test_live_review_includes_history_breaker_evidence(client, monkeypatch):
+    monkeypatch.setattr("backend.deps.get_client_optional", lambda: None)
+    monkeypatch.setattr(
+        "backend.e1_live_review._layer_analogues",
+        lambda ticker, fields: {
+            "available": True,
+            "ladder": {"1.0x": 10.0, "1.5x": 5.0, "2.0x": 2.0},
+            "rateAtEmPct": 10.0,
+            "historyBreaker": {"score": 61.0, "gate": "CAUTION", "level": "elevated", "drivers": ["Test driver"]},
+        },
+    )
+
+    tid = _log_trade(client)
+    r = client.post(
+        f"/api/breach/trade/{tid}/live-review",
+        json={"currentSpot": 150.5, "force_refresh": True},
+    )
+    assert r.status_code == 200, r.text
+    review = r.json()["review"]
+    hb = (review.get("evidence") or {}).get("historyBreaker")
+    assert isinstance(hb, dict)
+    assert hb.get("gate") == "CAUTION"
+
+
 # ---------------------------------------------------------------------------
 # _summarize_replay_for_review — projection-tile fields surfaced to the FE
 # ---------------------------------------------------------------------------

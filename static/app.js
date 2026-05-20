@@ -818,6 +818,7 @@ const _e1TrackBuilderState = {
   event_timing: "",
   spot: null,
   emPct: null,
+  historyBreakerRisk: null,
   preview: null,
 };
 
@@ -869,8 +870,14 @@ function renderTrackBuilder(payload) {
   _e1TrackBuilderState.event_timing = eventTiming;
   _e1TrackBuilderState.spot = spot;
   _e1TrackBuilderState.emPct = emPct;
+  _e1TrackBuilderState.historyBreakerRisk = (payload?.historyBreakerRisk && typeof payload.historyBreakerRisk === "object")
+    ? payload.historyBreakerRisk
+    : null;
   _e1TrackBuilderState.preview = null;
   const hasPricingCtx = _e1TrackBuilderHasPricingContext(_e1TrackBuilderState);
+  const hb = _e1TrackBuilderState.historyBreakerRisk;
+  const hbGate = String(hb?.gate || "OK").toUpperCase();
+  const hbWarn = hbGate !== "OK";
 
   section.classList.remove("hidden");
 
@@ -922,6 +929,12 @@ function renderTrackBuilder(payload) {
       </div>
 
       <div id="e1TBPreview" style="margin-top:14px;font-size:12px;opacity:0.85;min-height:22px;">
+        ${hbWarn
+          ? `<div style="margin-bottom:8px;padding:7px 9px;border-radius:6px;background:rgba(243,168,71,0.14);border:1px solid rgba(243,168,71,0.34);color:var(--text-primary,#e6e6e6);line-height:1.35;">
+               <strong style="color:#f3a847;">History-break risk ${escapeHtml(hbGate)}</strong>${hb?.score != null ? ` · score ${escapeHtml(String(hb.score))}` : ""}.
+               ${escapeHtml((Array.isArray(hb?.drivers) && hb.drivers[0]) ? hb.drivers[0] : "Context risk is elevated despite favorable baseline stats.")}
+             </div>`
+          : ""}
         ${hasPricingCtx
           ? '<span style="opacity:.75;">Tip: you can optionally enter short strikes manually, or click Preview for auto-priced strikes.</span>'
           : '<span style="opacity:.75;">Auto pricing is unavailable right now. You can still enter short strikes manually and click Start Tracking.</span>'}
@@ -967,7 +980,17 @@ async function _previewTrackCandidate() {
     }
     const body = await resp.json();
     _e1TrackBuilderState.preview = body;
+    const hb = (body?.historyBreakerRisk && typeof body.historyBreakerRisk === "object")
+      ? body.historyBreakerRisk
+      : _e1TrackBuilderState.historyBreakerRisk;
+    const hbWarn = String(hb?.gate || "OK").toUpperCase() !== "OK";
     previewHost.innerHTML = `
+      ${hbWarn
+        ? `<div style="margin-bottom:8px;padding:7px 9px;border-radius:6px;background:rgba(243,168,71,0.14);border:1px solid rgba(243,168,71,0.34);color:var(--text-primary,#e6e6e6);line-height:1.35;">
+             <strong style="color:#f3a847;">History-break risk ${escapeHtml(String(hb.gate || "CAUTION"))}</strong>${hb?.score != null ? ` · score ${escapeHtml(String(hb.score))}` : ""}.
+             ${escapeHtml((Array.isArray(hb?.drivers) && hb.drivers[0]) ? hb.drivers[0] : "Context risk is elevated; treat this as a warn-only guardrail.")}
+           </div>`
+        : ""}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
         <div><strong>Put spread</strong><br/>${_e1TBFmt(body.shortPutStrike, 2)} / ${_e1TBFmt(body.longPutStrike, 2)}</div>
         <div><strong>Call spread</strong><br/>${_e1TBFmt(body.shortCallStrike, 2)} / ${_e1TBFmt(body.longCallStrike, 2)}</div>
@@ -1053,10 +1076,14 @@ async function _submitTrackCandidate() {
   const shortCallStrike = useManual ? manualShortCall : preview.shortCallStrike;
   const longPutStrike = useManual ? (manualShortPut - wing) : preview.longPutStrike;
   const longCallStrike = useManual ? (manualShortCall + wing) : preview.longCallStrike;
+  const historyBreakerRisk = (preview?.historyBreakerRisk && typeof preview.historyBreakerRisk === "object")
+    ? preview.historyBreakerRisk
+    : state.historyBreakerRisk;
 
   const body = {
     source: "track_builder",
     mode: "tracked",
+    historyBreakerRisk: historyBreakerRisk || undefined,
     ticker: state.ticker,
     entry: {
       emMultiple: em,
@@ -1074,6 +1101,7 @@ async function _submitTrackCandidate() {
     entryContext: {
       earningsTiming: state.event_timing,
       breachPctSource: useManual ? "manual_strikes" : preview.creditSource,
+      historyBreakerRisk: historyBreakerRisk || undefined,
     },
     adjustmentNote: note || `Tracked candidate · EM ${em.toFixed(2)}× · $${wing} wings${useManual ? " · manual strikes" : ""}.`,
   };
@@ -3952,6 +3980,10 @@ function _adjField(label, id, defVal, type, min, max, step, options) {
 // --- Active Trades (monitoring + close) ---
 function _e1TradeCardHtml(t) {
   var entry = t.entry || {};
+  var entryCtx = (t.entryContext && typeof t.entryContext === "object") ? t.entryContext : {};
+  var hb = (entryCtx.historyBreakerRisk && typeof entryCtx.historyBreakerRisk === "object") ? entryCtx.historyBreakerRisk : null;
+  var hbGate = String((hb && hb.gate) || "OK").toUpperCase();
+  var hbWarn = hbGate !== "OK";
   var mode = String(t.mode || "live").toLowerCase();
   var isTracked = mode === "tracked";
   var badgeBg = isTracked ? "#7c4dff22" : "#16a34a22";
@@ -3965,6 +3997,9 @@ function _e1TradeCardHtml(t) {
   html += '<span style="font-size:10px;font-weight:700;letter-spacing:0.5px;padding:2px 8px;border-radius:4px;background:' + badgeBg + ';color:' + badgeColor + '">' + badgeText + '</span>';
   html += '<span style="font-size:12px;opacity:.6">' + (entry.emMultiple || "?") + 'x EM · $' + (entry.wingWidth || "?") + ' wings</span>';
   html += '<span style="font-size:12px;opacity:.6">' + (entry.earningsTiming || "?") + ' · ' + (entry.earningsDate || "?") + '</span>';
+  if (hbWarn) {
+    html += '<span style="font-size:10px;font-weight:700;letter-spacing:0.45px;padding:2px 8px;border-radius:4px;background:#f3a84722;color:#f3a847">HIST RISK ' + hbGate + (hb && hb.score != null ? ' · ' + hb.score : "") + '</span>';
+  }
   html += '<span style="font-size:11px;opacity:.4">' + (isTracked ? 'Tracking since ' : 'Logged ') + (t.loggedAt || "").slice(0, 16).replace("T", " ") + '</span>';
   if (t.promotedAt) {
     html += '<span style="font-size:11px;opacity:.45">Promoted ' + String(t.promotedAt).slice(0, 16).replace("T", " ") + '</span>';
@@ -3979,6 +4014,12 @@ function _e1TradeCardHtml(t) {
   }
   if (entry.entryWindow) html += '<div style="font-size:11px;opacity:.5;margin-bottom:4px">Entry: ' + entry.entryWindow + '</div>';
   if (entry.exitTarget) html += '<div style="font-size:11px;opacity:.5;margin-bottom:8px">Exit: ' + entry.exitTarget + '</div>';
+  if (hbWarn) {
+    var hbDriver = (Array.isArray(hb.drivers) && hb.drivers[0]) ? hb.drivers[0] : "Context risk is elevated; treat this candidate as warn-only.";
+    html += '<div style="font-size:11px;margin:6px 0 8px;padding:6px 8px;border-radius:6px;background:#f3a84712;border:1px solid #f3a84733;color:var(--text-primary,#e6e6e6);line-height:1.35">' +
+      '<strong style="color:#f3a847">History-breaker:</strong> ' + escapeHtml(String(hbDriver)) +
+      '</div>';
+  }
 
   var autoPhase = _autoDetectE1Phase(entry.earningsDate, entry.earningsTiming);
   html += '<div class="e1ReviewPhaseRow" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px;align-items:center">';
@@ -3991,6 +4032,9 @@ function _e1TradeCardHtml(t) {
 
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
   if (isTracked) {
+    if (hbWarn) {
+      html += '<div style="width:100%;font-size:10px;color:#f3a847;opacity:.95;margin-bottom:4px">Promote remains enabled (warn-only policy), but context risk is elevated.</div>';
+    }
     html += '<button class="e1PromoteTradeBtn primaryButton" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;font-weight:600">Promote to LIVE</button>';
     html += '<button class="e1StopTrackBtn" data-trade-id="' + t.tradeId + '" style="padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid var(--border);background:none;cursor:pointer;opacity:.7">Stop Tracking</button>';
   } else {
@@ -4205,7 +4249,7 @@ async function _runE1LiveReview(tradeId, phase) {
   panel.style.display = "";
   var phaseLabel = ({ pre_event: "pre-event", pre_open: "pre-open", post_open: "post-open" }[phase] || phase || "live");
   panel.innerHTML = (
-    '<div style="display:flex;align-items:center;gap:8px;color:rgba(255,255,255,0.75)">' +
+    '<div style="display:flex;align-items:center;gap:8px;color:var(--text-primary,#e6e6e6);font-size:12px;line-height:1.35;padding:8px 10px;border-radius:8px;background:rgba(125,182,255,0.08);border:1px solid rgba(125,182,255,0.22)">' +
       '<div class="e1ReviewSpinner" style="width:10px;height:10px;border-radius:50%;background:#7db6ff;animation:e1Pulse 1.2s ease-in-out infinite"></div>' +
       '<span>Running ' + escapeHtml(phaseLabel) + ' check… pulling spot, IV, regime, news, macro, analogues, and replay (this may take 30-60s on a cold cache)</span>' +
     '</div>'
@@ -4406,12 +4450,12 @@ function _e1RenderActionLadder(ladder) {
     var pnlColor = (a.expectedPnlPct != null && Number(a.expectedPnlPct) < 0) ? "#ff7a7a" : "#3cd4a9";
     var rangeStr = "";
     if (a.p10PnlPct != null && a.p90PnlPct != null) {
-      rangeStr = ' <span style="opacity:.78;font-size:10px;font-weight:500">(p10 ' + _e1FmtPct(a.p10PnlPct) + ' / p90 ' + _e1FmtPct(a.p90PnlPct) + ')</span>';
+      rangeStr = ' <span style="opacity:.96;font-size:10px;font-weight:600;color:var(--text-primary,#e6e6e6)">(p10 ' + _e1FmtPct(a.p10PnlPct) + ' / p90 ' + _e1FmtPct(a.p90PnlPct) + ')</span>';
     }
-    return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:baseline;padding:7px 9px;border-radius:6px;background:rgba(255,255,255,0.06);margin-bottom:5px">' +
-      '<strong style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:#e6ecf2">' + escapeHtml(String(a.action || "")) + '</strong>' +
-      '<span style="font-size:12px;opacity:.92">' + escapeHtml(String(a.label || a.rationale || "")) + '</span>' +
-      '<span style="font-size:11px;opacity:.88">' + probLabel + '</span>' +
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:baseline;padding:7px 9px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);margin-bottom:5px">' +
+      '<strong style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-primary,#e6e6e6);opacity:.96">' + escapeHtml(String(a.action || "")) + '</strong>' +
+      '<span style="font-size:12px;color:var(--text-primary,#e6e6e6);opacity:.98">' + escapeHtml(String(a.label || a.rationale || "")) + '</span>' +
+      '<span style="font-size:11px;color:var(--text-primary,#e6e6e6);opacity:.94">' + probLabel + '</span>' +
       '<span style="font-size:12px;font-weight:700;color:' + pnlColor + '">' + pnl + rangeStr + '</span>' +
       '</div>';
   }).join("");
@@ -4455,6 +4499,7 @@ function _paintE1LiveReview(panel, body) {
   var spotE = ev.spot || {};
   var ivE = ev.iv || {};
   var regE = ev.regime || {};
+  var hbE = ev.historyBreaker || {};
   var tile = function (label, value, sub) {
     return '<div style="padding:8px 10px;background:rgba(255,255,255,0.05);border-radius:6px;border:1px solid rgba(255,255,255,0.10);min-width:100px">' +
       '<div style="font-size:9px;letter-spacing:0.5px;text-transform:uppercase;opacity:.78;margin-bottom:2px">' + escapeHtml(label) + '</div>' +
@@ -4478,6 +4523,14 @@ function _paintE1LiveReview(panel, body) {
       escapeHtml(String(regE.now)),
       regE.atEntry ? "entry " + escapeHtml(String(regE.atEntry)) : "");
   }
+  if (hbE && hbE.score !== undefined && hbE.score !== null) {
+    var hbSub = (Array.isArray(hbE.drivers) && hbE.drivers[0]) ? hbE.drivers[0] : ("gate " + String(hbE.gate || "OK"));
+    tiles += tile(
+      "History breaker",
+      escapeHtml(String(hbE.level || "low").toUpperCase()) + " · " + escapeHtml(String(hbE.score)),
+      escapeHtml(hbSub)
+    );
+  }
   tiles += '</div>';
 
   // --- Replay projection (P10/P50/P90 MTM curve + numbers) ---
@@ -4494,7 +4547,7 @@ function _paintE1LiveReview(panel, body) {
         '<span style="font-size:10px;opacity:.85">now → expiry</span>' +
       '</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin-bottom:6px">' +
-        '<span>P10 <strong style="color:' + ((p10 != null && p10 < 0) ? "#ff7a7a" : "#e6ecf2") + '">' + _e1FmtPct(p10) + '</strong></span>' +
+        '<span style="color:var(--text-primary,#e6e6e6)">P10 <strong style="color:' + ((p10 != null && p10 < 0) ? "#ff7a7a" : "var(--text-primary,#e6e6e6)") + '">' + _e1FmtPct(p10) + '</strong></span>' +
         '<span>P50 <strong style="color:' + ((p50 != null && p50 < 0) ? "#ff7a7a" : "#3cd4a9") + '">' + _e1FmtPct(p50) + '</strong></span>' +
         '<span>P90 <strong style="color:#3cd4a9">' + _e1FmtPct(p90) + '</strong></span>' +
         '<span>Full-collect rate <strong>' + fcr + '</strong></span>' +

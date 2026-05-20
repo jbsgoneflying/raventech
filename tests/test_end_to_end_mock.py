@@ -241,4 +241,11 @@ def test_compute_breach_stats_mocked():
     assert so["current"]["skewQuality"] == "MISSING"
     assert "Skew unavailable" in (so["current"]["notes"] or "")
 
+    # History-breaker guardrail (warn-only explainability block)
+    hb = out.get("historyBreakerRisk")
+    assert isinstance(hb, dict)
+    for key in ("score", "level", "gate", "overrideFavorableStats", "drivers", "signals"):
+        assert key in hb
+    assert hb["gate"] in ("OK", "CAUTION", "NO_TRADE")
+
 

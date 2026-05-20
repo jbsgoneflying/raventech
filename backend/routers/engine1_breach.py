@@ -935,6 +935,7 @@ async def e1_trade_draft_price(request: Request):
         "creditSource": credit_source,
         "breachDistPutPct": breach_dist_put_pct,
         "breachDistCallPct": breach_dist_call_pct,
+        "historyBreakerRisk": (payload.get("historyBreakerRisk") if isinstance(payload.get("historyBreakerRisk"), dict) else None),
     }
 
 

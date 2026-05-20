@@ -125,6 +125,13 @@ def log_trade(
     except Exception as exc:
         LOG.debug("E1 trade enrichment failed (non-fatal): %s", exc)
 
+    entry_context = trade_data.get("entryContext")
+    if not isinstance(entry_context, dict):
+        entry_context = {}
+    hb = trade_data.get("historyBreakerRisk")
+    if "historyBreakerRisk" not in entry_context and isinstance(hb, dict):
+        entry_context["historyBreakerRisk"] = hb
+
     trade: Dict[str, Any] = {
         "tradeId": trade_id,
         "status": "active",
@@ -133,7 +140,7 @@ def log_trade(
         "source": source,
         "ticker": str(trade_data.get("ticker", "")).upper(),
         "entry": trade_data.get("entry", {}),
-        "entryContext": trade_data.get("entryContext", {}),
+        "entryContext": entry_context,
         "marketSnapshot": trade_data.get("marketSnapshot", {}),
         "vrpSnapshot": trade_data.get("vrpSnapshot", {}),
         "breachSnapshot": trade_data.get("breachSnapshot", {}),
@@ -265,6 +272,8 @@ def get_trade(trade_id: str, store: Optional[RedisStore] = None) -> Optional[Dic
     trade = s.get_json(_trade_key(trade_id))
     if isinstance(trade, dict):
         trade["mode"] = normalize_trade_mode(trade)
+        if not isinstance(trade.get("entryContext"), dict):
+            trade["entryContext"] = {}
     return trade
 
 
@@ -762,6 +771,8 @@ def _list_all(store: Optional[RedisStore] = None) -> List[Dict[str, Any]]:
             t = s.get_json(_trade_key(str(tid)))
             if isinstance(t, dict):
                 t["mode"] = normalize_trade_mode(t)
+                if not isinstance(t.get("entryContext"), dict):
+                    t["entryContext"] = {}
                 out.append(t)
         return out
     except Exception:
