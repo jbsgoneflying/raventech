@@ -381,6 +381,17 @@ def run_monte_carlo(
     if structure is None:
         put_mult = _to_float(wing_recommendation.get("putWingMultiple") or wing_recommendation.get("baseWingMultiple"))
         call_mult = _to_float(wing_recommendation.get("callWingMultiple") or wing_recommendation.get("baseWingMultiple"))
+        # Fallback: when wing recommendation can't produce multipliers
+        # (e.g., quarter/regime inputs incomplete), keep MC available by
+        # using the desk-selected breach multiple as a symmetric proxy.
+        # This restores the legacy behavior where MC still runs from
+        # EM-distance targets even without wing asymmetry guidance.
+        if put_mult is None or call_mult is None:
+            k_mult = _to_float((params or {}).get("k"))
+            if k_mult is not None and k_mult > 0:
+                put_mult = k_mult if put_mult is None else put_mult
+                call_mult = k_mult if call_mult is None else call_mult
+                notes.append(f"Wing multipliers unavailable; using symmetric {k_mult:.2f}× EM from breach multiple.")
         if put_mult is None or call_mult is None:
             return {
                 "nSims": 0,
@@ -692,6 +703,11 @@ def optimize_wings_risk_only(
 
     base_put = _to_float(wing_recommendation.get("putWingMultiple") or wing_recommendation.get("baseWingMultiple"))
     base_call = _to_float(wing_recommendation.get("callWingMultiple") or wing_recommendation.get("baseWingMultiple"))
+    if base_put is None or base_call is None:
+        k_mult = _to_float((params or {}).get("k"))
+        if k_mult is not None and k_mult > 0:
+            base_put = k_mult if base_put is None else base_put
+            base_call = k_mult if base_call is None else base_call
     if base_put is None or base_call is None:
         return {"mode": "RISK_ONLY", "notes": ["Optimization unavailable: missing heuristic wing multiples."]}
 

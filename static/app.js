@@ -2297,6 +2297,19 @@ function renderSkewWings(payload) {
 
   if (wingCard) wingCard.classList.toggle("hidden", !hasWing);
   if (hasWing && wingGrid) {
+    const fallbackMult = (() => {
+      const k = Number(payload?.params?.k);
+      return Number.isFinite(k) && k > 0 ? k : null;
+    })();
+    const baseWingVal = (wr.baseWingMultiple !== null && wr.baseWingMultiple !== undefined)
+      ? `${Number(wr.baseWingMultiple).toFixed(2)}× EM`
+      : (fallbackMult != null ? `${fallbackMult.toFixed(2)}× EM (fallback)` : "—");
+    const putWingVal = (wr.putWingMultiple !== null && wr.putWingMultiple !== undefined)
+      ? `${Number(wr.putWingMultiple).toFixed(2)}× EM`
+      : (fallbackMult != null ? `${fallbackMult.toFixed(2)}× EM (fallback)` : "—");
+    const callWingVal = (wr.callWingMultiple !== null && wr.callWingMultiple !== undefined)
+      ? `${Number(wr.callWingMultiple).toFixed(2)}× EM`
+      : (fallbackMult != null ? `${fallbackMult.toFixed(2)}× EM (fallback)` : "—");
     const conf = String(wr.confidence || "—");
     const confBadge =
       conf === "HIGH" ? pill("HIGH", "good") : conf === "MED" ? pill("MED", "warn") : pill("LOW", "neutral");
@@ -2308,9 +2321,9 @@ function renderSkewWings(payload) {
       <div class="k">Structure mode</div><div class="v">${escapeHtml(modeTxt)}</div>
       <div class="k">Confidence</div><div class="v">${confBadge}</div>
       <div class="k">TAS</div><div class="v mono">${wr.tas !== null && wr.tas !== undefined ? Number(wr.tas).toFixed(3) : "—"}</div>
-      <div class="k">Base wing</div><div class="v mono">${wr.baseWingMultiple !== null && wr.baseWingMultiple !== undefined ? `${Number(wr.baseWingMultiple).toFixed(2)}× EM` : "—"}</div>
-      <div class="k">Put wing</div><div class="v mono">${wr.putWingMultiple !== null && wr.putWingMultiple !== undefined ? `${Number(wr.putWingMultiple).toFixed(2)}× EM` : "—"}</div>
-      <div class="k">Call wing</div><div class="v mono">${wr.callWingMultiple !== null && wr.callWingMultiple !== undefined ? `${Number(wr.callWingMultiple).toFixed(2)}× EM` : "—"}</div>
+      <div class="k">Base wing</div><div class="v mono">${baseWingVal}</div>
+      <div class="k">Put wing</div><div class="v mono">${putWingVal}</div>
+      <div class="k">Call wing</div><div class="v mono">${callWingVal}</div>
     `;
   }
 
@@ -2613,13 +2626,17 @@ function renderTradeBuilder(payload) {
   const impPct = _bestImpliedMovePct(payload);
   const wr = payload?.wingRecommendation || null;
   const gate = (payload?.regime?.guidance || {})?.tradeGate;
+  const fallbackMult = (() => {
+    const k = Number(payload?.params?.k);
+    return Number.isFinite(k) && k > 0 ? k : null;
+  })();
 
   const baseMult = (wr && wr.baseWingMultiple !== null && wr.baseWingMultiple !== undefined) ? Number(wr.baseWingMultiple) : null;
   const recPut = (wr && wr.putWingMultiple !== null && wr.putWingMultiple !== undefined) ? Number(wr.putWingMultiple) : null;
   const recCall = (wr && wr.callWingMultiple !== null && wr.callWingMultiple !== undefined) ? Number(wr.callWingMultiple) : null;
 
-  let putMult = baseMult;
-  let callMult = baseMult;
+  let putMult = (baseMult != null ? baseMult : fallbackMult);
+  let callMult = (baseMult != null ? baseMult : fallbackMult);
   if (tradeBuilderState.symmetry === "auto") {
     if (recPut !== null && recCall !== null && String(wr?.confidence || "") !== "LOW") {
       putMult = recPut;
@@ -2679,7 +2696,10 @@ function renderTradeBuilder(payload) {
   const src = cur?.source ? `source=${cur.source}` : "";
   const asOf = usingDelayed && cur?.delayedUpdatedAt ? `updated=${cur.delayedUpdatedAt}` : cur?.asOfDate ? `asOf=${cur.asOfDate}` : "";
   const meta = [src, emLabel, asOf].filter(Boolean).join(", ");
-  if (notes) notes.textContent = `${extra} Assumed price $${price.toFixed(2)}; implied move ${impPct.toFixed(2)}%.${meta ? ` (${meta})` : ""}`;
+  const multNote = (baseMult == null && fallbackMult != null)
+    ? ` Wing multipliers unavailable; using breach multiple fallback (${fallbackMult.toFixed(2)}× EM).`
+    : "";
+  if (notes) notes.textContent = `${extra}${multNote} Assumed price $${price.toFixed(2)}; implied move ${impPct.toFixed(2)}%.${meta ? ` (${meta})` : ""}`;
 }
 
 function renderEarningsTable(events) {
