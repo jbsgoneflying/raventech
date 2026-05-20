@@ -3197,6 +3197,113 @@ async function _logAdjustedTrade(advisorResult) {
 // ---------------------------------------------------------------------------
 
 var _autoCheckinRunning = false;
+var _e2TradeLaneExpanded = { live: true, tracked: true };
+
+function _e2FmtCheckinAge(ts) {
+  if (!ts) return { label: "", isStale: false };
+  var checkinMs = new Date(ts).getTime();
+  var ageMs = Date.now() - checkinMs;
+  if (!Number.isFinite(ageMs) || ageMs < 0) return { label: "", isStale: false };
+  var ageMins = Math.floor(ageMs / 60000);
+  var label = "";
+  if (ageMins < 60) label = ageMins + "m ago";
+  else if (ageMins < 1440) label = Math.floor(ageMins / 60) + "h ago";
+  else label = Math.floor(ageMins / 1440) + "d ago";
+  return { label: label, isStale: ageMins > 360 };
+}
+
+function _e2TradeFlagChip(text, color) {
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:' + color + ';color:#fff">' + escapeHtml(String(text || "")) + "</span>";
+}
+
+function _e2LaneHeader(title, count, laneKey) {
+  var isOpen = !!_e2TradeLaneExpanded[laneKey];
+  return '<button type="button" data-lane-toggle="' + laneKey + '" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border:none;background:rgba(255,255,255,.02);cursor:pointer;text-align:left;border-radius:10px">' +
+    '<span style="font-size:13px;font-weight:700">' + escapeHtml(title) + ' <span style="opacity:.6;font-weight:600">(' + count + ')</span></span>' +
+    '<span style="font-size:11px;opacity:.7">' + (isOpen ? "Hide" : "Show") + "</span></button>";
+}
+
+function _e2RenderTradeCard(t) {
+  var entry = t.entry || {};
+  var mode = String(t.mode || "live").toLowerCase();
+  var tracking = t.tracking || {};
+  var status = tracking.deterministicStatus || "on_track";
+  var lastCheckin = (t.checkIns || []).slice(-1)[0];
+  var age = _e2FmtCheckinAge(lastCheckin && lastCheckin.timestamp);
+  var checkinAgeLabel = age.label;
+  var isStale = age.isStale;
+  var statusDiverged = !!(lastCheckin && lastCheckin.status && lastCheckin.status !== status);
+  var hb = (t.entryContext || {}).historyBreakerRisk;
+  var entryReconcile = (t.entryContext || {}).reconcile;
+
+  var html = '<div style="padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);margin-top:10px">';
+  html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">';
+  html += '<div style="min-width:0">';
+  html += '<div style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap">';
+  html += escapeHtml(entry.underlying || "SPX") + " IC · $" + escapeHtml(String(entry.wingWidth || "")) + " wings";
+  html += (mode === "tracked")
+    ? _e2TradeFlagChip("TRACKED", "#0a84ff")
+    : _e2TradeFlagChip("LIVE", "#34c759");
+  if (entryReconcile) html += " " + _reconcileBadge(entryReconcile);
+  if (isStale) html += _e2TradeFlagChip("STALE CHECK-IN", "#ff9f0a");
+  if (hb && hb.level && hb.level !== "low") html += _e2TradeFlagChip("HISTORY " + String(hb.level).toUpperCase(), hb.level === "high" ? "#ff453a" : "#ff9f0a");
+  if (tracking.regimeDriftBucket) html += _e2TradeFlagChip("REGIME DRIFT", "#af52de");
+  html += "</div>";
+  html += '<div style="margin-top:6px;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;font-size:11px">';
+  html += '<div><span style="color:var(--text-secondary)">Short Put</span> <span class="mono">' + escapeHtml(String(entry.shortPutStrike || "—")) + "</span></div>";
+  html += '<div><span style="color:var(--text-secondary)">Short Call</span> <span class="mono">' + escapeHtml(String(entry.shortCallStrike || "—")) + "</span></div>";
+  html += '<div><span style="color:var(--text-secondary)">Spot</span> <span class="mono">' + (tracking.currentSpot ? Number(tracking.currentSpot).toFixed(2) : "—") + "</span></div>";
+  html += '<div><span style="color:var(--text-secondary)">DTE</span> <span class="mono">' + (tracking.dte !== null && tracking.dte !== undefined ? tracking.dte : "—") + "</span></div>";
+  html += '<div><span style="color:var(--text-secondary)">Put dist</span> <span class="mono">' + (tracking.distPutPct !== null ? tracking.distPutPct + "%" : "—") + "</span></div>";
+  html += '<div><span style="color:var(--text-secondary)">Call dist</span> <span class="mono">' + (tracking.distCallPct !== null ? tracking.distCallPct + "%" : "—") + "</span></div>";
+  html += "</div></div>";
+
+  html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">' + _statusBadge(status);
+  html += '<button class="chipToggle" data-checkin-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:4px 10px">Check In</button>';
+  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_event" type="button" style="font-size:10px;padding:4px 8px">Pre-event</button>';
+  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_open" type="button" style="font-size:10px;padding:4px 8px">Pre-open</button>';
+  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="post_open" type="button" style="font-size:10px;padding:4px 8px">Post-open</button>';
+  if (mode === "tracked") {
+    html += '<button class="chipToggle" data-promote-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:4px 10px;background:#34c759;color:#fff;border-color:#34c759;font-weight:700">Promote LIVE</button>';
+    html += '<button class="chipToggle" data-stop-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:4px 10px">Stop Tracking</button>';
+  } else {
+    html += '<button class="chipToggle" data-close-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:4px 10px">Close</button>';
+  }
+  html += "</div></div>";
+
+  if (lastCheckin) {
+    html += '<div style="margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;font-size:11px">';
+    html += '<div style="font-weight:700;margin-bottom:3px">Latest check-in ' + _statusBadge(lastCheckin.status || status);
+    if (checkinAgeLabel) html += ' <span style="font-size:10px;color:' + (isStale ? "#ff9f0a" : "var(--text-secondary)") + ';font-weight:500">' + escapeHtml(checkinAgeLabel) + "</span>";
+    html += "</div>";
+    if (lastCheckin.headline) html += '<div style="color:var(--text-primary)">' + escapeHtml(lastCheckin.headline) + "</div>";
+    if (lastCheckin.recommendation) html += '<div style="color:var(--text-secondary);margin-top:2px">' + escapeHtml(lastCheckin.recommendation) + "</div>";
+    html += "</div>";
+  }
+
+  var checks = Array.isArray(t.checkIns) ? t.checkIns.slice(-3).reverse() : [];
+  if (checks.length) {
+    html += '<div style="margin-top:8px;font-size:11px">';
+    html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary);font-weight:700;margin-bottom:4px">Recent timeline</div>';
+    checks.forEach(function (ci) {
+      var a = _e2FmtCheckinAge(ci.timestamp || "");
+      html += '<div style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;border-top:1px solid rgba(255,255,255,.04)">';
+      html += '<span style="min-width:72px;color:var(--text-secondary)">' + escapeHtml(a.label || "—") + "</span>";
+      html += '<span>' + _statusBadge(ci.status || "on_track") + "</span>";
+      html += '<span style="color:var(--text-secondary);flex:1;min-width:0">' + escapeHtml(String(ci.headline || ci.recommendation || "Check-in")) + "</span>";
+      html += "</div>";
+    });
+    html += "</div>";
+  }
+
+  html += '<div id="e2LiveReviewBox-' + escapeHtml(t.tradeId) + '" style="margin-top:8px"></div>';
+  html += "</div>";
+
+  return {
+    html: html,
+    isStaleActionable: !!(statusDiverged || (isStale && (status === "exit" || status === "adjust"))),
+  };
+}
 
 async function _loadActiveTrades() {
   var el = $("e2ActiveTradesContent");
@@ -3214,125 +3321,46 @@ async function _loadActiveTrades() {
     }
 
     sec.classList.remove("hidden");
-    var liveCount = trades.filter(function (t) { return String(t.mode || "live").toLowerCase() === "live"; }).length;
-    var trackedCount = trades.length - liveCount;
-    var html = '<div class="taPanel">';
-    html += '<div class="taHeader"><span class="taHeaderTitle">Active Trades</span><span class="taHeaderMeta">' + liveCount + ' live · ' + trackedCount + ' tracked</span></div>';
-
+    var liveTrades = trades.filter(function (t) { return String(t.mode || "live").toLowerCase() === "live"; });
+    var trackedTrades = trades.filter(function (t) { return String(t.mode || "live").toLowerCase() !== "live"; });
     var staleCheckinTradeIds = [];
+    var html = '<div class="taPanel">';
+    html += '<div class="taHeader"><span class="taHeaderTitle">Active Trades</span><span class="taHeaderMeta">' + liveTrades.length + " live · " + trackedTrades.length + " tracked</span></div>";
 
-    trades.forEach(function (t) {
-      var entry = t.entry || {};
-      var mode = String(t.mode || "live").toLowerCase();
-      var tracking = t.tracking || {};
-      var status = tracking.deterministicStatus || "on_track";
-      var lastCheckin = (t.checkIns || []).slice(-1)[0];
+    html += '<div style="padding:10px 12px">';
+    html += _e2LaneHeader("Live Trades", liveTrades.length, "live");
+    if (_e2TradeLaneExpanded.live) {
+      if (!liveTrades.length) html += '<div style="padding:10px 4px;font-size:12px;color:var(--text-secondary)">No live trades right now.</div>';
+      liveTrades.forEach(function (t) {
+        var card = _e2RenderTradeCard(t);
+        html += card.html;
+        if (card.isStaleActionable) staleCheckinTradeIds.push(t.tradeId);
+      });
+    }
+    html += "</div>";
 
-      var checkinAge = null;
-      var checkinAgeLabel = "";
-      var isStale = false;
-      if (lastCheckin && lastCheckin.timestamp) {
-        var checkinMs = new Date(lastCheckin.timestamp).getTime();
-        var ageMs = Date.now() - checkinMs;
-        var ageMins = Math.floor(ageMs / 60000);
-        if (ageMins < 60) checkinAgeLabel = ageMins + "m ago";
-        else if (ageMins < 1440) checkinAgeLabel = Math.floor(ageMins / 60) + "h ago";
-        else checkinAgeLabel = Math.floor(ageMins / 1440) + "d ago";
-        isStale = ageMins > 360;
-      }
-
-      var statusDiverged = lastCheckin && lastCheckin.status && lastCheckin.status !== status;
-      if (statusDiverged || (isStale && (status === "exit" || status === "adjust"))) {
-        staleCheckinTradeIds.push(t.tradeId);
-      }
-
-      var entryReconcile = (t.entryContext || {}).reconcile;
-      html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-      html += '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">';
-      html += escapeHtml(entry.underlying || "SPX") + ' IC · $' + escapeHtml(String(entry.wingWidth || "")) + ' wings';
-      html += mode === "tracked"
-        ? ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#0a84ff;color:#fff;font-weight:700">TRACKED</span>'
-        : ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#34c759;color:#fff;font-weight:700">LIVE</span>';
-      if (t.source === "engine14") html += ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#0a84ff;color:#fff;font-weight:600">E14</span>';
-      else if (t.source === "adjusted") html += ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#5856d6;color:#fff;font-weight:600">ADJ</span>';
-      if (entryReconcile) html += ' ' + _reconcileBadge(entryReconcile);
-      html += '</div>';
-      html += '<div style="display:flex;align-items:center;gap:8px">' + _statusBadge(status);
-      html += '<button class="chipToggle" data-checkin-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Check In</button>';
-      html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_event" type="button" style="font-size:10px;padding:3px 8px">Pre-event</button>';
-      html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_open" type="button" style="font-size:10px;padding:3px 8px">Pre-open</button>';
-      html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="post_open" type="button" style="font-size:10px;padding:3px 8px">Post-open</button>';
-      if (mode === "tracked") {
-        html += '<button class="chipToggle" data-promote-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px;background:#34c759;color:#fff;border-color:#34c759">Promote LIVE</button>';
-        html += '<button class="chipToggle" data-stop-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Stop Tracking</button>';
-      } else {
-        html += '<button class="chipToggle" data-close-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Close</button>';
-      }
-      html += '</div></div>';
-
-      html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;font-size:11px">';
-      html += '<div><span style="color:var(--text-secondary)">Short Put</span> <span class="mono">' + escapeHtml(String(entry.shortPutStrike || "—")) + '</span></div>';
-      html += '<div><span style="color:var(--text-secondary)">Short Call</span> <span class="mono">' + escapeHtml(String(entry.shortCallStrike || "—")) + '</span></div>';
-      html += '<div><span style="color:var(--text-secondary)">Spot</span> <span class="mono">' + (tracking.currentSpot ? Number(tracking.currentSpot).toFixed(2) : "—") + '</span></div>';
-      html += '<div><span style="color:var(--text-secondary)">DTE</span> <span class="mono">' + (tracking.dte !== null && tracking.dte !== undefined ? tracking.dte : "—") + '</span></div>';
-      html += '<div><span style="color:var(--text-secondary)">Put dist</span> <span class="mono">' + (tracking.distPutPct !== null ? tracking.distPutPct + "%" : "—") + '</span></div>';
-      html += '<div><span style="color:var(--text-secondary)">Call dist</span> <span class="mono">' + (tracking.distCallPct !== null ? tracking.distCallPct + "%" : "—") + '</span></div>';
-      html += '</div>';
-
-      if (entryReconcile && entryReconcile.overall) {
-        var ovStatus = String(entryReconcile.overall.status || "na").toLowerCase();
-        var findings = entryReconcile.overall.topFindings || [];
-        if ((ovStatus === "drift" || ovStatus === "mismatch") && findings.length) {
-          var border = ovStatus === "mismatch" ? "3px solid #ff453a" : "3px solid #ff9f0a";
-          html += '<div style="margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;font-size:11px;border-left:' + border + '">';
-          html += '<div style="font-weight:600;margin-bottom:2px;color:var(--text-primary)">Entry reconcile ' + escapeHtml(ovStatus) + '</div>';
-          findings.slice(0, 3).forEach(function (f) {
-            html += '<div style="color:var(--text-secondary);margin-top:2px">• ' + escapeHtml(String(f)) + '</div>';
-          });
-          html += '</div>';
-        }
-      }
-
-      if (lastCheckin) {
-        var ciBoxBorder = statusDiverged ? "border-left:3px solid #ff9f0a" : "";
-        html += '<div style="margin-top:8px;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;font-size:11px;' + ciBoxBorder + '">';
-
-        var ciHeader = 'Latest check-in: ' + _statusBadge(lastCheckin.status || status);
-        if (checkinAgeLabel) {
-          var ageColor = isStale ? "#ff9f0a" : "var(--text-secondary)";
-          ciHeader += ' <span style="color:' + ageColor + ';font-weight:400;font-size:10px;margin-left:4px">' + escapeHtml(checkinAgeLabel) + '</span>';
-        }
-        html += '<div style="font-weight:600;margin-bottom:2px">' + ciHeader + '</div>';
-
-        if (statusDiverged) {
-          html += '<div style="color:#ff9f0a;font-weight:600;margin-bottom:4px;font-size:10px">';
-          html += 'Status changed since last check-in (' + escapeHtml(lastCheckin.status) + ' \u2192 ' + escapeHtml(status) + ') \u2014 refreshing\u2026';
-          html += '</div>';
-        }
-
-        if (lastCheckin.headline) html += '<div style="color:var(--text-primary)">' + escapeHtml(lastCheckin.headline) + '</div>';
-        if (lastCheckin.recommendation) html += '<div style="color:var(--text-secondary);margin-top:2px">' + escapeHtml(lastCheckin.recommendation) + '</div>';
-        html += '</div>';
-      }
-
-      var hb = (t.entryContext || {}).historyBreakerRisk;
-      if (hb && hb.level && hb.level !== "low") {
-        var hbColor = hb.level === "high" ? "#ff453a" : "#ff9f0a";
-        html += '<div style="margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;border-left:3px solid ' + hbColor + '">';
-        html += '<div style="font-size:11px;font-weight:700;color:' + hbColor + '">History-breaker ' + escapeHtml(String(hb.level || "").toUpperCase()) + ' · score ' + escapeHtml(String(hb.score || "—")) + '</div>';
-        if (Array.isArray(hb.drivers) && hb.drivers.length) {
-          html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:3px">' + escapeHtml(String(hb.drivers[0])) + '</div>';
-        }
-        html += '</div>';
-      }
-      html += '<div id="e2LiveReviewBox-' + escapeHtml(t.tradeId) + '" style="margin-top:8px"></div>';
-
-      html += '</div>';
-    });
+    html += '<div style="padding:0 12px 10px 12px;border-top:1px solid var(--border)">';
+    html += _e2LaneHeader("Tracked Candidates", trackedTrades.length, "tracked");
+    if (_e2TradeLaneExpanded.tracked) {
+      if (!trackedTrades.length) html += '<div style="padding:10px 4px;font-size:12px;color:var(--text-secondary)">No tracked candidates yet.</div>';
+      trackedTrades.forEach(function (t) {
+        var card = _e2RenderTradeCard(t);
+        html += card.html;
+        if (card.isStaleActionable) staleCheckinTradeIds.push(t.tradeId);
+      });
+    }
+    html += "</div>";
 
     html += '</div>';
     el.innerHTML = html;
+    el.querySelectorAll("[data-lane-toggle]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var lane = String(btn.dataset.laneToggle || "");
+        if (!lane) return;
+        _e2TradeLaneExpanded[lane] = !_e2TradeLaneExpanded[lane];
+        _loadActiveTrades();
+      });
+    });
 
     el.querySelectorAll("[data-checkin-id]").forEach(function (btn) {
       btn.addEventListener("click", function () { _runCheckin(btn.dataset.checkinId); });
@@ -3425,24 +3453,34 @@ function _paintE2LiveReview(tradeId, review) {
       "</div>";
   }
   var rows = Array.isArray(ladder.rows) ? ladder.rows : [];
+  var verdict = String(ladder.preVerdict || "HOLD").toUpperCase();
+  var verdictColor = verdict === "EXIT" ? "#ff453a" : verdict === "ADJUST" || verdict === "CAUTION" ? "#ff9f0a" : "#34c759";
   host.innerHTML =
     '<div style="margin-top:8px;padding:10px;border-radius:10px;background:#171b24;border:1px solid rgba(255,255,255,.1)">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
-        '<div style="font-size:12px;font-weight:700;color:#f5f7ff">Live Review · ' + escapeHtml(String(review.phase || "pre_event")) + '</div>' +
-        '<div style="font-size:11px;color:#d9e1ef">Pre-verdict: <strong style="color:#fff">' + escapeHtml(String(ladder.preVerdict || "HOLD")) + "</strong></div>" +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">' +
+        '<div style="font-size:12px;font-weight:700;color:#f5f7ff">Live Review · ' + escapeHtml(String(review.phase || "pre_event")) + "</div>" +
+        '<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.04);padding:4px 8px;border-radius:999px;font-size:11px;color:#d9e1ef">Pre-verdict ' +
+        '<span style="font-weight:800;color:' + verdictColor + '">' + escapeHtml(verdict) + "</span></div>" +
       "</div>" +
-      '<div style="display:grid;grid-template-columns:repeat(3,minmax(100px,1fr));gap:8px">' +
-        '<div><div style="font-size:10px;color:#aeb8ca">P10</div><div style="font-size:14px;font-weight:700;color:#f0f4ff">' + _fmtPctOrDash(proj.p10) + "</div></div>" +
-        '<div><div style="font-size:10px;color:#aeb8ca">P50</div><div style="font-size:14px;font-weight:700;color:#f0f4ff">' + _fmtPctOrDash(proj.p50) + "</div></div>" +
-        '<div><div style="font-size:10px;color:#aeb8ca">P90</div><div style="font-size:14px;font-weight:700;color:#f0f4ff">' + _fmtPctOrDash(proj.p90) + "</div></div>" +
+      '<div style="display:grid;grid-template-columns:repeat(3,minmax(92px,1fr));gap:8px">' +
+        '<div style="padding:8px;border-radius:8px;background:rgba(255,255,255,.03)"><div style="font-size:10px;color:#aeb8ca">P10</div><div style="font-size:16px;font-weight:800;color:#f0f4ff">' + _fmtPctOrDash(proj.p10) + "</div></div>" +
+        '<div style="padding:8px;border-radius:8px;background:rgba(255,255,255,.03)"><div style="font-size:10px;color:#aeb8ca">P50</div><div style="font-size:16px;font-weight:800;color:#f0f4ff">' + _fmtPctOrDash(proj.p50) + "</div></div>" +
+        '<div style="padding:8px;border-radius:8px;background:rgba(255,255,255,.03)"><div style="font-size:10px;color:#aeb8ca">P90</div><div style="font-size:16px;font-weight:800;color:#f0f4ff">' + _fmtPctOrDash(proj.p90) + "</div></div>" +
       "</div>" +
-      '<div style="margin-top:8px;font-size:11px;color:#dbe3f2">Full collect ' + _fmtPctOrDash(proj.fullCollectRate) +
-      ' · White-knuckle ' + _fmtPctOrDash(proj.whiteKnuckleRate) + ' · Breach ' + _fmtPctOrDash(proj.breachRate) + "</div>" +
+      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:#dbe3f2">' +
+      '<span style="padding:3px 8px;border-radius:999px;background:rgba(52,199,89,.16)">Full collect ' + _fmtPctOrDash(proj.fullCollectRate) + "</span>" +
+      '<span style="padding:3px 8px;border-radius:999px;background:rgba(255,159,10,.16)">White-knuckle ' + _fmtPctOrDash(proj.whiteKnuckleRate) + "</span>" +
+      '<span style="padding:3px 8px;border-radius:999px;background:rgba(255,69,58,.16)">Breach ' + _fmtPctOrDash(proj.breachRate) + "</span>" +
+      "</div>" +
       '<div style="margin-top:8px;font-size:11px;color:#e7ecf8;background:rgba(255,255,255,.03);padding:8px;border-radius:8px">' +
       escapeHtml(String(llm.headline || "No narrative returned.")) + "</div>" +
       (rows.length ? ('<div style="margin-top:8px;font-size:11px;color:#dce4f2">' + rows.slice(0, 3).map(function (r) {
-        return '<div style="margin-top:2px"><strong style="color:#fff">' + escapeHtml(String(r.action || "HOLD")) + "</strong> " +
-          escapeHtml(String(r.probability || "—")) + "% · " + escapeHtml(String(r.note || "")) + "</div>";
+        var prob = Number(r.probability || 0);
+        var clr = r.action === "EXIT" ? "#ff453a" : r.action === "ADJUST" ? "#ff9f0a" : "#34c759";
+        return '<div style="margin-top:6px">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px"><strong style="color:#fff">' + escapeHtml(String(r.action || "HOLD")) + '</strong><span>' + escapeHtml(String(prob)) + "%</span></div>" +
+          '<div style="height:6px;border-radius:999px;background:rgba(255,255,255,.08);margin-top:3px;overflow:hidden"><div style="height:100%;width:' + Math.max(0, Math.min(100, prob)) + '%;background:' + clr + '"></div></div>' +
+          '<div style="margin-top:2px;color:#bcc7da">' + escapeHtml(String(r.note || "")) + "</div></div>";
       }).join("") + "</div>") : "") +
       hbHtml +
     "</div>";
