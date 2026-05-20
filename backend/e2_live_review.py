@@ -44,6 +44,21 @@ def _summarize_replay(scenario: Dict[str, Any]) -> Dict[str, Any]:
     white_knuckle = (dist.get("whiteKnuckle") or {}).get("pct")
     stop_out = (dist.get("stopOut") or {}).get("pct")
     breach = (dist.get("breach") or {}).get("pct")
+    mtm_curve = []
+    for row in tl:
+        if not isinstance(row, dict):
+            continue
+        mtm_curve.append({
+            "dte": row.get("dte"),
+            "p10": row.get("p10"),
+            "p50": row.get("p50"),
+            "p90": row.get("p90"),
+            "pBreach": row.get("pBreach"),
+            "pStopHit": row.get("pStopHit"),
+        })
+    exit_opt = scenario.get("exitRulesOptimization") if isinstance(scenario.get("exitRulesOptimization"), dict) else {}
+    early_avg_days = (dist.get("earlyTarget") or {}).get("avgDays")
+    mae_p50 = (dist.get("whiteKnuckle") or {}).get("maxAdverseExcursionPct")
     return {
         "analoguesUsed": int(scenario.get("analoguesUsed") or 0),
         "p10": end.get("p10"),
@@ -55,6 +70,14 @@ def _summarize_replay(scenario: Dict[str, Any]) -> Dict[str, Any]:
         "whiteKnuckleRate": white_knuckle,
         "stopOutRate": stop_out,
         "breachRate": breach,
+        "mtmCurve": mtm_curve,
+        "exitRulesRec": {
+            "profitTarget": exit_opt.get("recommendedProfitTarget"),
+            "stopLoss": exit_opt.get("recommendedStopLoss"),
+            "timeStopDays": exit_opt.get("recommendedTimeStopDays"),
+        },
+        "daysToEarlyExit": early_avg_days,
+        "medianMaePct": mae_p50,
     }
 
 
@@ -142,8 +165,12 @@ def run_e2_live_review(
         "projection": replay_summary,
         "historyBreaker": history_breaker,
         "llm": {
+            "status": llm.get("status"),
             "headline": llm.get("headline"),
+            "spotAnalysis": llm.get("spotAnalysis"),
+            "regimeDrift": llm.get("regimeDrift"),
             "recommendation": llm.get("recommendation"),
+            "adjustmentIfNeeded": llm.get("adjustmentIfNeeded"),
             "riskUpdate": llm.get("riskUpdate"),
             "deskNote": llm.get("deskNote"),
             "source": llm.get("_source"),

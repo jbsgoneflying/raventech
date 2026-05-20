@@ -3216,10 +3216,10 @@ function _e2TradeFlagChip(text, color) {
   return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:' + color + ';color:#fff">' + escapeHtml(String(text || "")) + "</span>";
 }
 
-function _e2LaneHeader(title, count, laneKey) {
+function _e2LaneHeader(title, count, laneKey, subtitle) {
   var isOpen = !!_e2TradeLaneExpanded[laneKey];
   return '<button type="button" data-lane-toggle="' + laneKey + '" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border:none;background:rgba(255,255,255,.02);cursor:pointer;text-align:left;border-radius:10px">' +
-    '<span style="font-size:13px;font-weight:700">' + escapeHtml(title) + ' <span style="opacity:.6;font-weight:600">(' + count + ')</span></span>' +
+    '<span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700">' + escapeHtml(title) + '</span><span style="font-size:10px;letter-spacing:.4px;padding:2px 7px;border-radius:999px;background:' + (laneKey === "tracked" ? "rgba(124,77,255,.16);color:#7c4dff" : "rgba(52,199,89,.16);color:#34c759") + ';font-weight:700">' + count + (laneKey === "tracked" ? " WATCHING" : " OPEN") + "</span>" + (subtitle ? '<span style="font-size:11px;opacity:.58">' + escapeHtml(subtitle) + "</span>" : "") + "</span>" +
     '<span style="font-size:11px;opacity:.7">' + (isOpen ? "Hide" : "Show") + "</span></button>";
 }
 
@@ -3236,7 +3236,8 @@ function _e2RenderTradeCard(t) {
   var hb = (t.entryContext || {}).historyBreakerRisk;
   var entryReconcile = (t.entryContext || {}).reconcile;
 
-  var html = '<div style="padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);margin-top:10px">';
+  var leftColor = mode === "tracked" ? "#7c4dff" : "#34c759";
+  var html = '<div style="padding:12px 14px;border:1px solid var(--border);border-left:3px solid ' + leftColor + ';border-radius:10px;background:var(--bg-primary);margin-top:10px">';
   html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">';
   html += '<div style="min-width:0">';
   html += '<div style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap">';
@@ -3249,6 +3250,14 @@ function _e2RenderTradeCard(t) {
   if (hb && hb.level && hb.level !== "low") html += _e2TradeFlagChip("HISTORY " + String(hb.level).toUpperCase(), hb.level === "high" ? "#ff453a" : "#ff9f0a");
   if (tracking.regimeDriftBucket) html += _e2TradeFlagChip("REGIME DRIFT", "#af52de");
   html += "</div>";
+  html += '<div style="font-size:11px;opacity:.58;margin-top:3px">' + (entry.emMultiple != null ? escapeHtml(String(entry.emMultiple)) + "x EM" : "—") + (entry.expiryDate ? " · exp " + escapeHtml(String(entry.expiryDate).slice(0, 10)) : "") + (t.loggedAt ? " · tracking since " + escapeHtml(String(t.loggedAt).slice(0, 16).replace("T", " ")) : "") + "</div>";
+  if (entry.shortPutStrike || entry.shortCallStrike) {
+    html += '<div style="font-size:12px;opacity:.72;margin-top:6px">';
+    html += "Strikes: " + escapeHtml(String(entry.shortPutStrike || "?")) + "/" + escapeHtml(String(entry.longPutStrike || "?")) + " put · " +
+      escapeHtml(String(entry.shortCallStrike || "?")) + "/" + escapeHtml(String(entry.longCallStrike || "?")) + " call";
+    if (entry.entryCredit != null) html += " · Credit: $" + escapeHtml(String(entry.entryCredit));
+    html += "</div>";
+  }
   html += '<div style="margin-top:6px;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;font-size:11px">';
   html += '<div><span style="color:var(--text-secondary)">Short Put</span> <span class="mono">' + escapeHtml(String(entry.shortPutStrike || "—")) + "</span></div>";
   html += '<div><span style="color:var(--text-secondary)">Short Call</span> <span class="mono">' + escapeHtml(String(entry.shortCallStrike || "—")) + "</span></div>";
@@ -3305,6 +3314,48 @@ function _e2RenderTradeCard(t) {
   };
 }
 
+function _e2MtmSparkline(curve) {
+  if (!Array.isArray(curve) || curve.length < 2) return "";
+  var W = 360, H = 90, pad = 8;
+  var p50s = curve.map(function (s) { return Number(s.p50); }).filter(isFinite);
+  var p10s = curve.map(function (s) { return Number(s.p10); }).filter(isFinite);
+  var p90s = curve.map(function (s) { return Number(s.p90); }).filter(isFinite);
+  if (!p50s.length) return "";
+  var ymin = Math.min.apply(null, p10s.length ? p10s : p50s);
+  var ymax = Math.max.apply(null, p90s.length ? p90s : p50s);
+  if (ymin === ymax) { ymin -= 1; ymax += 1; }
+  var n = curve.length;
+  function px(i) { return pad + (i * (W - 2 * pad)) / (n - 1); }
+  function py(v) { return H - pad - ((v - ymin) * (H - 2 * pad)) / (ymax - ymin); }
+  var pathFor = function (key) {
+    var d = "";
+    for (var i = 0; i < n; i++) {
+      var v = Number(curve[i][key]);
+      if (!isFinite(v)) continue;
+      d += (d ? " L " : "M ") + px(i).toFixed(1) + " " + py(v).toFixed(1);
+    }
+    return d;
+  };
+  var area = "";
+  for (var a = 0; a < n; a++) {
+    var u = Number(curve[a].p90), l = Number(curve[a].p10);
+    if (!isFinite(u) || !isFinite(l)) continue;
+    area += (area ? " L " : "M ") + px(a).toFixed(1) + " " + py(u).toFixed(1);
+  }
+  for (var b = n - 1; b >= 0; b--) {
+    var lb = Number(curve[b].p10);
+    if (!isFinite(lb)) continue;
+    area += " L " + px(b).toFixed(1) + " " + py(lb).toFixed(1);
+  }
+  if (area) area += " Z";
+  return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" style="display:block">' +
+    (area ? '<path d="' + area + '" fill="rgba(125,182,255,0.10)" stroke="none" />' : "") +
+    '<path d="' + pathFor("p10") + '" fill="none" stroke="rgba(125,182,255,0.4)" stroke-width="1" stroke-dasharray="2 3" />' +
+    '<path d="' + pathFor("p90") + '" fill="none" stroke="rgba(125,182,255,0.4)" stroke-width="1" stroke-dasharray="2 3" />' +
+    '<path d="' + pathFor("p50") + '" fill="none" stroke="#7db6ff" stroke-width="2" />' +
+    "</svg>";
+}
+
 async function _loadActiveTrades() {
   var el = $("e2ActiveTradesContent");
   var sec = $("e2ActiveTrades");
@@ -3328,7 +3379,7 @@ async function _loadActiveTrades() {
     html += '<div class="taHeader"><span class="taHeaderTitle">Active Trades</span><span class="taHeaderMeta">' + liveTrades.length + " live · " + trackedTrades.length + " tracked</span></div>";
 
     html += '<div style="padding:10px 12px">';
-    html += _e2LaneHeader("Live Trades", liveTrades.length, "live");
+    html += _e2LaneHeader("Live Trades", liveTrades.length, "live", "managed positions");
     if (_e2TradeLaneExpanded.live) {
       if (!liveTrades.length) html += '<div style="padding:10px 4px;font-size:12px;color:var(--text-secondary)">No live trades right now.</div>';
       liveTrades.forEach(function (t) {
@@ -3340,7 +3391,7 @@ async function _loadActiveTrades() {
     html += "</div>";
 
     html += '<div style="padding:0 12px 10px 12px;border-top:1px solid var(--border)">';
-    html += _e2LaneHeader("Tracked Candidates", trackedTrades.length, "tracked");
+    html += _e2LaneHeader("Tracked Candidates", trackedTrades.length, "tracked", "paper / what-if — promote to commit");
     if (_e2TradeLaneExpanded.tracked) {
       if (!trackedTrades.length) html += '<div style="padding:10px 4px;font-size:12px;color:var(--text-secondary)">No tracked candidates yet.</div>';
       trackedTrades.forEach(function (t) {
@@ -3453,6 +3504,10 @@ function _paintE2LiveReview(tradeId, review) {
       "</div>";
   }
   var rows = Array.isArray(ladder.rows) ? ladder.rows : [];
+  var tr = review.tracking || {};
+  var spark = _e2MtmSparkline(proj.mtmCurve || []);
+  var rec = proj.exitRulesRec || {};
+  var llmLine = llm.recommendation || llm.riskUpdate || llm.spotAnalysis || "";
   var verdict = String(ladder.preVerdict || "HOLD").toUpperCase();
   var verdictColor = verdict === "EXIT" ? "#ff453a" : verdict === "ADJUST" || verdict === "CAUTION" ? "#ff9f0a" : "#34c759";
   host.innerHTML =
@@ -3474,6 +3529,19 @@ function _paintE2LiveReview(tradeId, review) {
       "</div>" +
       '<div style="margin-top:8px;font-size:11px;color:#e7ecf8;background:rgba(255,255,255,.03);padding:8px;border-radius:8px">' +
       escapeHtml(String(llm.headline || "No narrative returned.")) + "</div>" +
+      (llmLine ? '<div style="margin-top:6px;font-size:11px;color:#c8d3e6">' + escapeHtml(String(llmLine)) + "</div>" : "") +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">' +
+        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Spot now</div><div style="font-weight:700">$' + (tr.currentSpot != null ? escapeHtml(String(Number(tr.currentSpot).toFixed(2))) : "—") + "</div></div>" +
+        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Put dist</div><div style="font-weight:700">' + (tr.distPutPct != null ? escapeHtml(String(tr.distPutPct)) + "%" : "—") + "</div></div>" +
+        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Call dist</div><div style="font-weight:700">' + (tr.distCallPct != null ? escapeHtml(String(tr.distCallPct)) + "%" : "—") + "</div></div>" +
+        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Reco PT</div><div style="font-weight:700">' + (rec.profitTarget != null ? escapeHtml(String(rec.profitTarget)) + "%" : "—") + "</div></div>" +
+        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Reco SL</div><div style="font-weight:700">' + (rec.stopLoss != null ? escapeHtml(String(rec.stopLoss)) + "%" : "—") + "</div></div>" +
+      "</div>" +
+      (spark ? ('<div style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(125,182,255,.06);border:1px solid rgba(125,182,255,.2)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">' +
+          '<strong style="font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:#7db6ff">Replay projection · ' + escapeHtml(String(proj.analoguesUsed || "—")) + ' analogues</strong>' +
+          '<span style="font-size:10px;opacity:.8">now → expiry</span>' +
+        "</div>" + spark + "</div>") : "") +
       (rows.length ? ('<div style="margin-top:8px;font-size:11px;color:#dce4f2">' + rows.slice(0, 3).map(function (r) {
         var prob = Number(r.probability || 0);
         var clr = r.action === "EXIT" ? "#ff453a" : r.action === "ADJUST" ? "#ff9f0a" : "#34c759";
