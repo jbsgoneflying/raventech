@@ -828,7 +828,7 @@ function _e1TBFmt(x, digits = 2) {
   return n.toFixed(digits);
 }
 
-function _e1TrackBuilderIsReady(state) {
+function _e1TrackBuilderHasPricingContext(state) {
   return !!(
     state &&
     state.ticker &&
@@ -870,7 +870,7 @@ function renderTrackBuilder(payload) {
   _e1TrackBuilderState.spot = spot;
   _e1TrackBuilderState.emPct = emPct;
   _e1TrackBuilderState.preview = null;
-  const isReady = _e1TrackBuilderIsReady(_e1TrackBuilderState);
+  const hasPricingCtx = _e1TrackBuilderHasPricingContext(_e1TrackBuilderState);
 
   section.classList.remove("hidden");
 
@@ -880,7 +880,7 @@ function renderTrackBuilder(payload) {
         <span><strong>${escapeHtml(ticker)}</strong></span>
         <span>Earnings <strong>${escapeHtml(eventDate)}</strong> (${escapeHtml(eventTiming)})</span>
         <span>Spot <strong>$${_e1TBFmt(spot, 2)}</strong></span>
-        <span>Implied move <strong>${_e1TBFmt(emPct, 2)}%</strong></span>
+        <span>Implied move <strong>${hasPricingCtx ? (_e1TBFmt(emPct, 2) + "%") : "—%"}</strong></span>
       </div>
 
       <div class="e1TBForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;align-items:end;">
@@ -892,6 +892,16 @@ function renderTrackBuilder(payload) {
         <div>
           <label for="e1TBWing" style="display:block;font-size:11px;opacity:0.7;margin-bottom:3px;">Wing Width (pts)</label>
           <input id="e1TBWing" type="number" min="1" max="50" step="0.5" value="5"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--bg,inherit);" />
+        </div>
+        <div>
+          <label for="e1TBShortPut" style="display:block;font-size:11px;opacity:0.7;margin-bottom:3px;">Short Put (optional manual)</label>
+          <input id="e1TBShortPut" type="number" min="0" step="0.5" placeholder="e.g. 129.5"
+                 style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--bg,inherit);" />
+        </div>
+        <div>
+          <label for="e1TBShortCall" style="display:block;font-size:11px;opacity:0.7;margin-bottom:3px;">Short Call (optional manual)</label>
+          <input id="e1TBShortCall" type="number" min="0" step="0.5" placeholder="e.g. 139.5"
                  style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--bg,inherit);" />
         </div>
         <div>
@@ -907,14 +917,14 @@ function renderTrackBuilder(payload) {
       </div>
 
       <div class="e1TBActions" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
-        <button type="button" id="e1TBPreviewBtn" ${isReady ? "" : "disabled"} style="padding:8px 16px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer;">Preview Strikes</button>
-        <button type="button" id="e1TBTrackBtn" class="primaryButton" ${isReady ? "" : "disabled"} style="padding:8px 18px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;">Start Tracking</button>
+        <button type="button" id="e1TBPreviewBtn" ${hasPricingCtx ? "" : "disabled"} style="padding:8px 16px;font-size:12px;border-radius:6px;border:1px solid var(--border,#ddd);background:none;cursor:pointer;">Preview Strikes</button>
+        <button type="button" id="e1TBTrackBtn" class="primaryButton" style="padding:8px 18px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;">Start Tracking</button>
       </div>
 
       <div id="e1TBPreview" style="margin-top:14px;font-size:12px;opacity:0.85;min-height:22px;">
-        ${isReady
-          ? ""
-          : '<span style="opacity:.75;">Set earnings date/timing and run Calculate so Trade Builder can price strikes.</span>'}
+        ${hasPricingCtx
+          ? '<span style="opacity:.75;">Tip: you can optionally enter short strikes manually, or click Preview for auto-priced strikes.</span>'
+          : '<span style="opacity:.75;">Auto pricing is unavailable right now. You can still enter short strikes manually and click Start Tracking.</span>'}
       </div>
     </div>
   `;
@@ -928,7 +938,7 @@ function renderTrackBuilder(payload) {
 async function _previewTrackCandidate() {
   const previewHost = $("e1TBPreview");
   if (!previewHost) return;
-  if (!_e1TrackBuilderIsReady(_e1TrackBuilderState)) {
+  if (!_e1TrackBuilderHasPricingContext(_e1TrackBuilderState)) {
     previewHost.innerHTML = '<span style="color:#ff9500;">Trade Builder needs ticker + earnings date/timing + spot/implied move. Run Calculate first.</span>';
     return;
   }
@@ -973,12 +983,10 @@ async function _previewTrackCandidate() {
 
 async function _submitTrackCandidate() {
   const state = _e1TrackBuilderState;
-  if (!_e1TrackBuilderIsReady(state)) {
-    alert("Trade Builder is missing pricing context. Run Calculate with earnings date/timing first.");
-    return;
-  }
   const em = parseFloat($("e1TBEm")?.value) || 0;
   const wing = parseFloat($("e1TBWing")?.value) || 0;
+  const manualShortPut = parseFloat($("e1TBShortPut")?.value);
+  const manualShortCall = parseFloat($("e1TBShortCall")?.value);
   const creditOverride = parseFloat($("e1TBCredit")?.value);
   const note = ($("e1TBNote")?.value || "").trim();
 
@@ -987,40 +995,64 @@ async function _submitTrackCandidate() {
     return;
   }
 
-  // Resolve strikes + credit via draft-price if we don't already have a
-  // preview that matches the current inputs.
-  let preview = state.preview;
-  const previewMatches = preview
-    && Math.abs((preview.emMultiple || 0) - em) < 1e-6
-    && Math.abs((preview.wingWidth || 0) - wing) < 1e-6;
-  if (!previewMatches) {
-    try {
-      const resp = await fetch("/api/breach/trade/draft-price", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticker: state.ticker,
-          event_date: state.event_date,
-          event_timing: state.event_timing,
-          emMultiple: em,
-          wingWidth: wing,
-        }),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        throw new Error(`draft-price ${resp.status}: ${txt.slice(0, 160)}`);
-      }
-      preview = await resp.json();
-      _e1TrackBuilderState.preview = preview;
-    } catch (err) {
-      alert("Failed to price candidate: " + (err?.message || err));
+  const hasManualShorts =
+    Number.isFinite(manualShortPut) &&
+    Number.isFinite(manualShortCall) &&
+    manualShortPut > 0 &&
+    manualShortCall > 0;
+  let useManual = false;
+  if (hasManualShorts) {
+    if (!(manualShortPut < manualShortCall)) {
+      alert("Manual strikes invalid: short put must be below short call.");
       return;
+    }
+    useManual = true;
+  }
+
+  // Resolve strikes + credit via draft-price when not using manual strikes.
+  let preview = state.preview;
+  if (!useManual) {
+    if (!_e1TrackBuilderHasPricingContext(state)) {
+      alert("Auto pricing needs spot + implied move. Either run Calculate again or enter short strikes manually.");
+      return;
+    }
+    const previewMatches = preview
+      && Math.abs((preview.emMultiple || 0) - em) < 1e-6
+      && Math.abs((preview.wingWidth || 0) - wing) < 1e-6;
+    if (!previewMatches) {
+      try {
+        const resp = await fetch("/api/breach/trade/draft-price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker: state.ticker,
+            event_date: state.event_date,
+            event_timing: state.event_timing,
+            emMultiple: em,
+            wingWidth: wing,
+          }),
+        });
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error(`draft-price ${resp.status}: ${txt.slice(0, 160)}`);
+        }
+        preview = await resp.json();
+        _e1TrackBuilderState.preview = preview;
+      } catch (err) {
+        alert("Failed to price candidate: " + (err?.message || err));
+        return;
+      }
     }
   }
 
+  const estCredit = useManual ? (Number.isFinite(creditOverride) ? creditOverride : null) : Number(preview.estCredit);
   const credit = Number.isFinite(creditOverride) && creditOverride > 0
     ? creditOverride
-    : Number(preview.estCredit);
+    : estCredit;
+  const shortPutStrike = useManual ? manualShortPut : preview.shortPutStrike;
+  const shortCallStrike = useManual ? manualShortCall : preview.shortCallStrike;
+  const longPutStrike = useManual ? (manualShortPut - wing) : preview.longPutStrike;
+  const longCallStrike = useManual ? (manualShortCall + wing) : preview.longCallStrike;
 
   const body = {
     source: "track_builder",
@@ -1030,20 +1062,20 @@ async function _submitTrackCandidate() {
       emMultiple: em,
       wingWidth: wing,
       entryCredit: credit,
-      shortPutStrike: preview.shortPutStrike,
-      shortCallStrike: preview.shortCallStrike,
-      longPutStrike: preview.longPutStrike,
-      longCallStrike: preview.longCallStrike,
-      spotAtEntry: preview.spot,
-      impliedMovePct: preview.impliedMovePct,
+      shortPutStrike: shortPutStrike,
+      shortCallStrike: shortCallStrike,
+      longPutStrike: longPutStrike,
+      longCallStrike: longCallStrike,
+      spotAtEntry: useManual ? (state.spot || null) : preview.spot,
+      impliedMovePct: useManual ? (state.emPct || null) : preview.impliedMovePct,
       earningsDate: state.event_date,
       earningsTiming: state.event_timing,
     },
     entryContext: {
       earningsTiming: state.event_timing,
-      breachPctSource: preview.creditSource,
+      breachPctSource: useManual ? "manual_strikes" : preview.creditSource,
     },
-    adjustmentNote: note || `Tracked candidate · EM ${em.toFixed(2)}× · $${wing} wings.`,
+    adjustmentNote: note || `Tracked candidate · EM ${em.toFixed(2)}× · $${wing} wings${useManual ? " · manual strikes" : ""}.`,
   };
 
   try {
