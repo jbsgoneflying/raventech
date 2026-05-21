@@ -3269,9 +3269,9 @@ function _e2RenderTradeCard(t) {
 
   html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">' + _statusBadge(status);
   html += '<button class="chipToggle" data-checkin-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:4px 10px">Check In</button>';
-  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_event" type="button" style="font-size:10px;padding:4px 8px">Pre-event</button>';
-  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_open" type="button" style="font-size:10px;padding:4px 8px">Pre-open</button>';
-  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="post_open" type="button" style="font-size:10px;padding:4px 8px">Post-open</button>';
+  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_event" type="button" style="font-size:10px;padding:4px 8px" title="Mid-cycle position check (2+ days to expiry)">Position Check</button>';
+  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="pre_open" type="button" style="font-size:10px;padding:4px 8px" title="Day before expiry: pre-expiry look">Pre-Expiry</button>';
+  html += '<button class="chipToggle" data-live-review-id="' + escapeHtml(t.tradeId) + '" data-live-review-phase="post_open" type="button" style="font-size:10px;padding:4px 8px" title="Expiry day management">Expiry Day</button>';
   if (mode === "tracked") {
     html += '<button class="chipToggle" data-promote-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:4px 10px;background:#34c759;color:#fff;border-color:#34c759;font-weight:700">Promote LIVE</button>';
     html += '<button class="chipToggle" data-stop-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:4px 10px">Stop Tracking</button>';
@@ -3489,75 +3489,292 @@ function _fmtPctOrDash(v) {
   return Number(v).toFixed(1) + "%";
 }
 
+// ---------------------------------------------------------------------------
+// E2 live-review v2 — E1-grade information density for the SPX desk
+// ---------------------------------------------------------------------------
+// The legacy renderer focused on three percentile tiles and a narrow
+// narrative band. The desk asked for the same decision-grade depth
+// they get on E1: a phase chip (SPX-labeled so we don't say
+// "pre-event" for a non-earnings trade), a verdict pill + status
+// chip, evidence tiles (spot/IV/regime/history-breaker/time-decay), a
+// replay projection block with a 3x2 metrics grid, news/macro flags,
+// key points + risks + desk note, and an action ladder with
+// probability bars + p10/p90 PnL bands.
+//
+// Backend evidence shape is documented in backend/e2_live_review.py.
+
+function _e2PhasePalette(phase) {
+  // SPX has no earnings catalyst — re-label the legacy phase enum to
+  // something the weekly IC desk actually says out loud.
+  if (phase === "pre_event") return { color: "#7db6ff", label: "Position Check" };
+  if (phase === "pre_open")  return { color: "#a78bfa", label: "Pre-Expiry" };
+  if (phase === "post_open") return { color: "#3cd4a9", label: "Expiry Day" };
+  return { color: "#7db6ff", label: String(phase || "live") };
+}
+
+function _e2VerdictColor(verdict) {
+  var v = String(verdict || "").toUpperCase();
+  if (v === "HOLD") return "#3cd4a9";
+  if (v === "ADJUST") return "#f3a847";
+  if (v === "CUT" || v === "EXIT") return "#ff7a7a";
+  if (v === "CAUTION") return "#f3a847";
+  return "#7db6ff";
+}
+
+function _e2ChipColor(chip) {
+  if (chip === "breached") return "#ff7a7a";
+  if (chip === "short_strike_challenged") return "#f3a847";
+  if (chip === "caution") return "#f3a847";
+  if (chip === "on_track") return "#3cd4a9";
+  return "#7db6ff";
+}
+
+function _e2FmtPct(v, digits) {
+  if (v === null || v === undefined || v === "") return "—";
+  var n = Number(v);
+  if (!isFinite(n)) return "—";
+  return (n >= 0 ? "+" : "") + n.toFixed(digits == null ? 1 : digits) + "%";
+}
+
+function _e2FmtNum(v, digits) {
+  if (v === null || v === undefined || v === "") return "—";
+  var n = Number(v);
+  if (!isFinite(n)) return "—";
+  return n.toFixed(digits == null ? 2 : digits);
+}
+
+function _e2ReplayMetricsGrid(rp) {
+  if (!rp) return "";
+  var fracPct = function (x) {
+    if (x == null) return "—";
+    var v = Number(x);
+    if (!isFinite(v)) return "—";
+    return Math.round(v * 100) + "%";
+  };
+  var num = function (x, d) {
+    if (x == null) return "—";
+    var v = Number(x);
+    if (!isFinite(v)) return "—";
+    return v.toFixed(d == null ? 1 : d);
+  };
+  var rec = rp.exitRulesRec || {};
+  var earlyDays = rp.daysToEarlyExit;
+
+  var cell = function (label, value, sub) {
+    return '<div style="padding:7px 9px;background:rgba(255,255,255,0.05);border-radius:6px;border:1px solid rgba(255,255,255,0.10)">' +
+      '<div style="font-size:9px;letter-spacing:0.4px;text-transform:uppercase;color:#cfd6e6;margin-bottom:2px">' + escapeHtml(label) + '</div>' +
+      '<div style="font-size:12px;font-weight:700;color:#f5f7ff">' + value + '</div>' +
+      (sub ? '<div style="font-size:10px;color:#aab4c8;margin-top:1px">' + escapeHtml(sub) + '</div>' : '') +
+      '</div>';
+  };
+
+  return (
+    '<div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:6px;margin-top:8px">' +
+      cell("Early Exit", fracPct(rp.earlyExitRateFrac), (earlyDays != null ? "avg " + num(earlyDays, 1) + "d" : "")) +
+      cell("Full Collect", fracPct(rp.fullCollectRateFrac), "early+full") +
+      cell("White-Knuckle", fracPct(rp.whiteKnuckleRateFrac), "won but scary") +
+      cell("MAE p50", (rp.medianMaePct != null ? num(rp.medianMaePct, 1) + "%" : "—"), "median mid-life") +
+      cell("Reco PT", (rec.profitTarget != null ? Math.round(Number(rec.profitTarget)) + "%" : "—"), "profit target") +
+      cell("Reco SL", (rec.stopLoss != null ? Math.round(Number(rec.stopLoss)) + "%" : "—"), (rec.timeStopDays != null ? "time stop " + rec.timeStopDays + "d" : "")) +
+    '</div>'
+  );
+}
+
+function _e2RenderActionLadder(ladder) {
+  if (!Array.isArray(ladder) || !ladder.length) return '';
+  return ladder.map(function (a) {
+    var probLabel;
+    if (a.probWin == null) {
+      probLabel = "prob —";
+    } else if (Number(a.probWin) >= 0.999) {
+      probLabel = "guaranteed";
+    } else {
+      probLabel = "prob " + Math.round(Number(a.probWin) * 100) + "%";
+    }
+    var pnl;
+    if (a.expectedPnlPct == null) {
+      pnl = "—";
+    } else {
+      pnl = _e2FmtPct(a.expectedPnlPct);
+    }
+    var pnlColor = (a.expectedPnlPct != null && Number(a.expectedPnlPct) < 0) ? "#ff7a7a" : "#3cd4a9";
+    var rangeStr = "";
+    if (a.p10PnlPct != null && a.p90PnlPct != null) {
+      rangeStr = ' <span style="font-size:10px;font-weight:600;color:#c9d3e8">(p10 ' + _e2FmtPct(a.p10PnlPct) + ' / p90 ' + _e2FmtPct(a.p90PnlPct) + ')</span>';
+    }
+    var probBarPct = (a.probWin != null) ? Math.round(Number(a.probWin) * 100) : 0;
+    var actionColor = _e2VerdictColor(a.action === "CUT_NOW" ? "CUT" : a.action);
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:baseline;padding:7px 9px;border-radius:6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);margin-bottom:5px">' +
+      '<strong style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:' + actionColor + '">' + escapeHtml(String(a.action || "")) + '</strong>' +
+      '<span style="font-size:12px;color:#e7ecf8">' + escapeHtml(String(a.label || a.rationale || "")) + '</span>' +
+      '<span style="font-size:11px;color:#cfd6e6">' + probLabel + '</span>' +
+      '<span style="font-size:12px;font-weight:700;color:' + pnlColor + '">' + pnl + rangeStr + '</span>' +
+      '<div style="grid-column:1 / -1;height:5px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:2px"><div style="height:100%;width:' + Math.max(0, Math.min(100, probBarPct)) + '%;background:' + actionColor + '"></div></div>' +
+      '</div>';
+  }).join("");
+}
+
 function _paintE2LiveReview(tradeId, review) {
   var host = document.getElementById("e2LiveReviewBox-" + tradeId);
   if (!host) return;
-  var proj = review.projection || {};
-  var ladder = review.actionLadder || {};
-  var llm = review.llm || {};
-  var hb = review.historyBreaker || null;
-  var hbHtml = "";
-  if (hb && hb.level && hb.level !== "low") {
-    var c = hb.level === "high" ? "#ff453a" : "#ff9f0a";
-    hbHtml = '<div style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid ' + c + ';font-size:11px;color:#f4f6fa">' +
-      'History-breaker ' + escapeHtml(String(hb.level || "").toUpperCase()) + ' (' + escapeHtml(String(hb.score || "—")) + ')' +
-      "</div>";
+  var rec = review.recommendation || {};
+  var ev = review.evidence || {};
+  var phase = review.phase || "pre_event";
+  var phasePal = _e2PhasePalette(phase);
+
+  var verdict = String(rec.verdict || review.actionLadder?.preVerdict || "HOLD").toUpperCase();
+  var verdictColor = _e2VerdictColor(verdict);
+  var conf = rec.confidence != null ? Math.round(Number(rec.confidence) * 100) + "%" : "—";
+  var chipColor = _e2ChipColor(review.statusChip);
+
+  // --- Header: phase + verdict + status + key numbers ---
+  var phaseChip =
+    '<span style="padding:3px 9px;border-radius:999px;background:' + phasePal.color + '22;color:' + phasePal.color + ';font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase">' + escapeHtml(phasePal.label) + '</span>';
+  var verdictPill =
+    '<span style="padding:3px 12px;border-radius:6px;background:' + verdictColor + '1f;color:' + verdictColor + ';font-size:13px;font-weight:700;letter-spacing:0.5px">' + escapeHtml(verdict) + '</span>' +
+    '<span style="font-size:10px;color:#cfd6e6;margin-left:-4px">conf ' + conf + '</span>';
+  var statusPill =
+    '<span style="padding:2px 8px;border-radius:4px;background:' + chipColor + '22;color:' + chipColor + ';font-size:10px;text-transform:uppercase;letter-spacing:0.4px">' + escapeHtml(review.statusChip || "—") + '</span>';
+  var mismatchNote = review.phaseMismatch
+    ? '<span style="font-size:10px;color:#f3a847;margin-left:4px" title="The phase you picked doesn\'t match the auto-detected phase based on DTE.">·phase override</span>'
+    : '';
+  var spotE = ev.spot || {};
+  var td = ev.timeDecay || {};
+  var header = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
+    phaseChip + mismatchNote + verdictPill + statusPill +
+    '<span style="font-size:12px;color:#e7ecf8">Spot $' + _e2FmtNum(spotE.now) + '</span>' +
+    '<span style="font-size:12px;color:#e7ecf8">Nearest short ' + _e2FmtPct(spotE.nearestShortPct, 2) + '</span>' +
+    (td.dte != null ? '<span style="font-size:12px;color:#e7ecf8">' + td.dte + ' DTE</span>' : '') +
+    '</div>';
+
+  // --- Narrative block (verdict-color left border) ---
+  var narrative = rec.narrative
+    ? '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(255,255,255,0.05);border-left:3px solid ' + verdictColor + ';border-radius:0 6px 6px 0;color:#f0f4ff;font-size:12px;line-height:1.45">' + escapeHtml(rec.narrative) + '</div>'
+    : '';
+
+  // --- Evidence tiles ---
+  var ivE = ev.iv || {};
+  var regE = ev.regime || {};
+  var hbE = ev.historyBreaker || {};
+  var tile = function (label, value, sub) {
+    return '<div style="padding:8px 10px;background:rgba(255,255,255,0.06);border-radius:6px;border:1px solid rgba(255,255,255,0.10);min-width:100px">' +
+      '<div style="font-size:9px;letter-spacing:0.5px;text-transform:uppercase;color:#cfd6e6;margin-bottom:2px">' + escapeHtml(label) + '</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#f5f7ff">' + value + '</div>' +
+      (sub ? '<div style="font-size:10px;color:#aab4c8;margin-top:1px">' + sub + '</div>' : '') +
+      '</div>';
+  };
+  var tiles = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">';
+  tiles += tile("Spot now",
+    "$" + _e2FmtNum(spotE.now),
+    spotE.atEntry ? "entry $" + _e2FmtNum(spotE.atEntry) + (spotE.moveSinceEntryPct != null ? " · " + _e2FmtPct(spotE.moveSinceEntryPct, 2) : "") : "");
+  tiles += tile("Put dist",
+    _e2FmtPct(spotE.putDistPct, 2),
+    spotE.breachProxPut != null ? "prox " + Math.round(Number(spotE.breachProxPut)) + "%" : "");
+  tiles += tile("Call dist",
+    _e2FmtPct(spotE.callDistPct, 2),
+    spotE.breachProxCall != null ? "prox " + Math.round(Number(spotE.breachProxCall)) + "%" : "");
+  if (ivE && ivE.available !== false && (ivE.now != null || ivE.volPressureNow)) {
+    var ivVal = ivE.now != null ? _e2FmtNum(ivE.now, 2) : (ivE.volPressureNow || "—");
+    var ivSub = ivE.crushSoFarPct != null
+      ? "crush " + _e2FmtPct(ivE.crushSoFarPct, 0)
+      : (ivE.shift || (ivE.atEntry != null ? "entry " + _e2FmtNum(ivE.atEntry, 2) : ""));
+    tiles += tile("Vol / IV", escapeHtml(String(ivVal)), ivSub);
   }
-  var rows = Array.isArray(ladder.rows) ? ladder.rows : [];
-  var tr = review.tracking || {};
-  var spark = _e2MtmSparkline(proj.mtmCurve || []);
-  var rec = proj.exitRulesRec || {};
-  var llmLine = llm.recommendation || llm.riskUpdate || llm.spotAnalysis || "";
-  var verdict = String(ladder.preVerdict || "HOLD").toUpperCase();
-  var verdictColor = verdict === "EXIT" ? "#ff453a" : verdict === "ADJUST" || verdict === "CAUTION" ? "#ff9f0a" : "#34c759";
+  if (regE && regE.available !== false && (regE.now || regE.atEntry)) {
+    tiles += tile("Regime",
+      escapeHtml(String(regE.now || "—")),
+      regE.atEntry ? "entry " + escapeHtml(String(regE.atEntry)) + (regE.bucketShift ? " · shifted" : "") : "");
+  }
+  if (td && td.dte != null) {
+    tiles += tile("Time decay",
+      (td.progressPct != null ? td.progressPct + "%" : "—"),
+      td.dte + " DTE");
+  }
+  if (hbE && hbE.score !== undefined && hbE.score !== null) {
+    var hbSub = (Array.isArray(hbE.drivers) && hbE.drivers[0]) ? hbE.drivers[0] : ("gate " + String(hbE.gate || "OK"));
+    tiles += tile(
+      "History breaker",
+      escapeHtml(String(hbE.level || "low").toUpperCase()) + " · " + escapeHtml(String(hbE.score)),
+      escapeHtml(hbSub)
+    );
+  }
+  tiles += '</div>';
+
+  // --- Replay projection (P10/P50/P90 numbers + sparkline + metrics grid) ---
+  var rp = ev.replay || {};
+  var replayBlock = "";
+  if (rp.available !== false) {
+    var p10 = rp.p10PnlPct, p50 = rp.p50PnlPct, p90 = rp.p90PnlPct;
+    var fcr = rp.fullCollectRateFrac != null ? Math.round(Number(rp.fullCollectRateFrac) * 100) + "%" : "—";
+    var pn = rp.pathsCount || rp.analoguesUsed || "—";
+    var spark = _e2MtmSparkline(rp.mtmCurve || []);
+    var brn = rp.breachRateFrac != null ? Math.round(Number(rp.breachRateFrac) * 100) + "%" : "—";
+    var mean = rp.meanPnlPct != null ? _e2FmtPct(rp.meanPnlPct) : null;
+    replayBlock = '<div style="margin:8px 0;padding:10px 12px;background:rgba(125,182,255,0.07);border-radius:8px;border:1px solid rgba(125,182,255,0.22)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
+        '<strong style="font-size:11px;letter-spacing:0.4px;text-transform:uppercase;color:#9ec5ff">Replay Projection · ' + escapeHtml(String(pn)) + ' analogues</strong>' +
+        '<span style="font-size:10px;color:#cfd6e6">now → expiry</span>' +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin-bottom:6px;color:#e7ecf8">' +
+        '<span>P10 <strong style="color:' + ((p10 != null && p10 < 0) ? "#ff7a7a" : "#f5f7ff") + '">' + _e2FmtPct(p10) + '</strong></span>' +
+        '<span>P50 <strong style="color:' + ((p50 != null && p50 < 0) ? "#ff7a7a" : "#3cd4a9") + '">' + _e2FmtPct(p50) + '</strong></span>' +
+        '<span>P90 <strong style="color:#3cd4a9">' + _e2FmtPct(p90) + '</strong></span>' +
+        '<span>Full-collect <strong style="color:#f5f7ff">' + fcr + '</strong></span>' +
+        '<span>Breach <strong style="color:' + (rp.breachRateFrac && rp.breachRateFrac >= 0.05 ? "#ff7a7a" : "#f5f7ff") + '">' + brn + '</strong></span>' +
+        (mean ? '<span>Mean PnL <strong style="color:#f5f7ff">' + mean + '</strong></span>' : '') +
+      '</div>' +
+      (spark || '<div style="font-size:11px;color:#aab4c8">MTM curve unavailable.</div>') +
+      _e2ReplayMetricsGrid(rp) +
+      (rp.conditioningSummary
+        ? '<div style="margin-top:6px;font-size:11px;color:#cfd6e6;font-style:italic">' + escapeHtml(String(rp.conditioningSummary)) + '</div>'
+        : '') +
+      '</div>';
+  } else if (rp.error) {
+    replayBlock = '<div style="margin:8px 0;padding:8px 10px;background:rgba(243,168,71,0.10);border-radius:6px;font-size:11px;color:#f3c777">Replay unavailable: ' + escapeHtml(String(rp.error)) + '</div>';
+  }
+
+  // --- Key points / Risks / Desk note ---
+  var keyPts = (Array.isArray(rec.keyPoints) && rec.keyPoints.length)
+    ? '<div style="margin-top:8px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:#f5f7ff">Key points</strong>' +
+      '<ul style="margin:4px 0 0 18px;padding:0;font-size:12px;line-height:1.5;color:#e7ecf8">' + rec.keyPoints.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
+    : '';
+  var risks = (Array.isArray(rec.riskFactors) && rec.riskFactors.length)
+    ? '<div style="margin-top:6px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:#f3a847">Risks</strong>' +
+      '<ul style="margin:4px 0 0 18px;padding:0;font-size:12px;line-height:1.5;color:#f0d8ad">' + rec.riskFactors.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
+    : '';
+  var deskNote = rec.deskNote
+    ? '<div style="margin-top:8px;padding:7px 10px;background:rgba(60,212,169,0.14);border-radius:6px;border:1px solid rgba(60,212,169,0.40);font-size:12px;line-height:1.4;color:#e7f7f1"><em>Desk note:</em> ' + escapeHtml(rec.deskNote) + '</div>'
+    : '';
+
+  // --- Action ladder ---
+  var ladderBlock = "";
+  if (Array.isArray(rec.actionLadder) && rec.actionLadder.length) {
+    ladderBlock = '<div style="margin-top:10px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:#f5f7ff;display:block;margin-bottom:6px">Action ladder</strong>' +
+      _e2RenderActionLadder(rec.actionLadder) + '</div>';
+  }
+
+  // --- Adjustment hint (if status=adjust) ---
+  var adjBlock = "";
+  if (rec.adjustmentIfNeeded && rec.adjustmentIfNeeded.action) {
+    adjBlock = '<div style="margin-top:8px;padding:7px 10px;background:rgba(247,168,71,0.12);border-radius:6px;border:1px solid rgba(247,168,71,0.40);font-size:12px;line-height:1.4;color:#fce5b8">' +
+      '<strong style="color:#f3a847;text-transform:uppercase;font-size:10px;letter-spacing:0.4px">Adjustment · ' + escapeHtml(String(rec.adjustmentIfNeeded.action)) + '</strong><br>' +
+      escapeHtml(String(rec.adjustmentIfNeeded.detail || "")) + '</div>';
+  }
+
   host.innerHTML =
-    '<div style="margin-top:8px;padding:10px;border-radius:10px;background:#171b24;border:1px solid rgba(255,255,255,.1)">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">' +
-        '<div style="font-size:12px;font-weight:700;color:#f5f7ff">Live Review · ' + escapeHtml(String(review.phase || "pre_event")) + "</div>" +
-        '<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.04);padding:4px 8px;border-radius:999px;font-size:11px;color:#d9e1ef">Pre-verdict ' +
-        '<span style="font-weight:800;color:' + verdictColor + '">' + escapeHtml(verdict) + "</span></div>" +
-      "</div>" +
-      '<div style="display:grid;grid-template-columns:repeat(3,minmax(92px,1fr));gap:8px">' +
-        '<div style="padding:8px;border-radius:8px;background:rgba(255,255,255,.03)"><div style="font-size:10px;color:#aeb8ca">P10</div><div style="font-size:16px;font-weight:800;color:#f0f4ff">' + _fmtPctOrDash(proj.p10) + "</div></div>" +
-        '<div style="padding:8px;border-radius:8px;background:rgba(255,255,255,.03)"><div style="font-size:10px;color:#aeb8ca">P50</div><div style="font-size:16px;font-weight:800;color:#f0f4ff">' + _fmtPctOrDash(proj.p50) + "</div></div>" +
-        '<div style="padding:8px;border-radius:8px;background:rgba(255,255,255,.03)"><div style="font-size:10px;color:#aeb8ca">P90</div><div style="font-size:16px;font-weight:800;color:#f0f4ff">' + _fmtPctOrDash(proj.p90) + "</div></div>" +
-      "</div>" +
-      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:#dbe3f2">' +
-      '<span style="padding:3px 8px;border-radius:999px;background:rgba(52,199,89,.16)">Full collect ' + _fmtPctOrDash(proj.fullCollectRate) + "</span>" +
-      '<span style="padding:3px 8px;border-radius:999px;background:rgba(255,159,10,.16)">White-knuckle ' + _fmtPctOrDash(proj.whiteKnuckleRate) + "</span>" +
-      '<span style="padding:3px 8px;border-radius:999px;background:rgba(255,69,58,.16)">Breach ' + _fmtPctOrDash(proj.breachRate) + "</span>" +
-      "</div>" +
-      '<div style="margin-top:8px;font-size:11px;color:#e7ecf8;background:rgba(255,255,255,.03);padding:8px;border-radius:8px">' +
-      escapeHtml(String(llm.headline || "No narrative returned.")) + "</div>" +
-      (llmLine ? '<div style="margin-top:6px;font-size:11px;color:#c8d3e6">' + escapeHtml(String(llmLine)) + "</div>" : "") +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">' +
-        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Spot now</div><div style="font-weight:700">$' + (tr.currentSpot != null ? escapeHtml(String(Number(tr.currentSpot).toFixed(2))) : "—") + "</div></div>" +
-        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Put dist</div><div style="font-weight:700">' + (tr.distPutPct != null ? escapeHtml(String(tr.distPutPct)) + "%" : "—") + "</div></div>" +
-        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Call dist</div><div style="font-weight:700">' + (tr.distCallPct != null ? escapeHtml(String(tr.distCallPct)) + "%" : "—") + "</div></div>" +
-        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Reco PT</div><div style="font-weight:700">' + (rec.profitTarget != null ? escapeHtml(String(rec.profitTarget)) + "%" : "—") + "</div></div>" +
-        '<div style="padding:6px 8px;background:rgba(255,255,255,.04);border-radius:6px;font-size:11px"><div style="font-size:9px;opacity:.7;text-transform:uppercase">Reco SL</div><div style="font-weight:700">' + (rec.stopLoss != null ? escapeHtml(String(rec.stopLoss)) + "%" : "—") + "</div></div>" +
-      "</div>" +
-      (spark ? ('<div style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(125,182,255,.06);border:1px solid rgba(125,182,255,.2)">' +
-        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">' +
-          '<strong style="font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:#7db6ff">Replay projection · ' + escapeHtml(String(proj.analoguesUsed || "—")) + ' analogues</strong>' +
-          '<span style="font-size:10px;opacity:.8">now → expiry</span>' +
-        "</div>" + spark + "</div>") : "") +
-      (rows.length ? ('<div style="margin-top:8px;font-size:11px;color:#dce4f2">' + rows.slice(0, 3).map(function (r) {
-        var prob = Number(r.probability || 0);
-        var clr = r.action === "EXIT" ? "#ff453a" : r.action === "ADJUST" ? "#ff9f0a" : "#34c759";
-        return '<div style="margin-top:6px">' +
-          '<div style="display:flex;justify-content:space-between;gap:8px"><strong style="color:#fff">' + escapeHtml(String(r.action || "HOLD")) + '</strong><span>' + escapeHtml(String(prob)) + "%</span></div>" +
-          '<div style="height:6px;border-radius:999px;background:rgba(255,255,255,.08);margin-top:3px;overflow:hidden"><div style="height:100%;width:' + Math.max(0, Math.min(100, prob)) + '%;background:' + clr + '"></div></div>' +
-          '<div style="margin-top:2px;color:#bcc7da">' + escapeHtml(String(r.note || "")) + "</div></div>";
-      }).join("") + "</div>") : "") +
-      hbHtml +
+    '<div style="margin-top:8px;padding:12px;border-radius:10px;background:#171b24;border:1px solid rgba(255,255,255,.12);color:#e7ecf8">' +
+      header + narrative + tiles + replayBlock + adjBlock + keyPts + risks + deskNote + ladderBlock +
     "</div>";
 }
 
 async function _runE2LiveReview(tradeId, phase) {
   var host = document.getElementById("e2LiveReviewBox-" + tradeId);
+  var pal = _e2PhasePalette(phase || "pre_event");
   if (host) {
-    host.innerHTML = '<div style="margin-top:8px;padding:8px;border-radius:8px;background:#1b1f2a;color:#d7dfef;font-size:11px">Running ' + escapeHtml(String(phase || "pre_event")) + ' review…</div>';
+    host.innerHTML = '<div style="margin-top:8px;padding:10px 12px;border-radius:8px;background:#1b1f2a;color:#f0f4ff;font-size:12px;border:1px solid rgba(255,255,255,0.10);line-height:1.5">' +
+      '<strong style="color:' + pal.color + ';text-transform:uppercase;letter-spacing:0.4px;font-size:11px">' + escapeHtml(pal.label) + '</strong> · running review…<br>' +
+      '<span style="color:#cfd6e6;font-size:11px">Pulling spot, vol, regime, news, macro, analogues and Engine 14 replay (cold cache may take 30-60s).</span>' +
+      '</div>';
   }
   try {
     var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/live-review", {
@@ -3570,7 +3787,7 @@ async function _runE2LiveReview(tradeId, phase) {
     _paintE2LiveReview(tradeId, data.review || {});
   } catch (err) {
     if (host) {
-      host.innerHTML = '<div style="margin-top:8px;padding:8px;border-radius:8px;background:#2a1b1b;color:#ffb2b2;font-size:11px">Live review failed: ' + escapeHtml(String(err.message || err)) + "</div>";
+      host.innerHTML = '<div style="margin-top:8px;padding:10px 12px;border-radius:8px;background:#2a1b1b;color:#ffb2b2;font-size:12px;border:1px solid rgba(255,122,122,0.40)">Live review failed: ' + escapeHtml(String(err.message || err)) + "</div>";
     }
   }
 }
