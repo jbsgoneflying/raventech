@@ -3568,12 +3568,29 @@ function _e2ReplayMetricsGrid(rp) {
       '</div>';
   };
 
+  // MAE in the simulator is the worst transient mark-to-market the
+  // *white-knuckle* bucket saw during the path's life — it can be deeply
+  // negative (e.g. -730% of credit) on tight-wing condors that recover
+  // by expiry. The label needs to convey "this is peak intra-path
+  // drawdown", not "median outcome".
+  var maeVal = "—";
+  if (rp.medianMaePct != null) {
+    var m = Number(rp.medianMaePct);
+    if (isFinite(m)) {
+      // Display as a negative percent with comma separators for readability
+      // when the swing is large.
+      var sign = m < 0 ? "-" : "";
+      var abs = Math.abs(m);
+      maeVal = sign + (abs >= 100 ? Math.round(abs).toLocaleString() : abs.toFixed(1)) + "%";
+    }
+  }
+
   return (
     '<div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:6px;margin-top:8px">' +
       cell("Early Exit", fracPct(rp.earlyExitRateFrac), (earlyDays != null ? "avg " + num(earlyDays, 1) + "d" : "")) +
-      cell("Full Collect", fracPct(rp.fullCollectRateFrac), "early+full") +
+      cell("Full Collect", fracPct(rp.fullCollectRateFrac), "kept 100% of credit") +
       cell("White-Knuckle", fracPct(rp.whiteKnuckleRateFrac), "won but scary") +
-      cell("MAE p50", (rp.medianMaePct != null ? num(rp.medianMaePct, 1) + "%" : "—"), "median mid-life") +
+      cell("Peak Drawdown", maeVal, "worst intra-path mark") +
       cell("Reco PT", (rec.profitTarget != null ? Math.round(Number(rec.profitTarget)) + "%" : "—"), "profit target") +
       cell("Reco SL", (rec.stopLoss != null ? Math.round(Number(rec.stopLoss)) + "%" : "—"), (rec.timeStopDays != null ? "time stop " + rec.timeStopDays + "d" : "")) +
     '</div>'
@@ -3599,8 +3616,20 @@ function _e2RenderActionLadder(ladder) {
     }
     var pnlColor = (a.expectedPnlPct != null && Number(a.expectedPnlPct) < 0) ? "#ff7a7a" : "#3cd4a9";
     var rangeStr = "";
+    // At expiry the p10/p90 bands typically collapse onto the same value
+    // as paths converge to "kept ~all credit" — showing (p10 X% / p90 X%)
+    // when both equal expected is pure visual noise. Only render the
+    // range tag when the bands are meaningfully different.
     if (a.p10PnlPct != null && a.p90PnlPct != null) {
-      rangeStr = ' <span style="font-size:10px;font-weight:600;color:#c9d3e8">(p10 ' + _e2FmtPct(a.p10PnlPct) + ' / p90 ' + _e2FmtPct(a.p90PnlPct) + ')</span>';
+      var p10n = Number(a.p10PnlPct);
+      var p90n = Number(a.p90PnlPct);
+      var spread = Math.abs(p90n - p10n);
+      var midN = a.expectedPnlPct != null ? Number(a.expectedPnlPct) : ((p10n + p90n) / 2);
+      var bandTight = (spread < 1.0)
+        || (a.expectedPnlPct != null && Math.abs(p10n - midN) < 0.5 && Math.abs(p90n - midN) < 0.5);
+      if (!bandTight) {
+        rangeStr = ' <span style="font-size:10px;font-weight:600;color:#c9d3e8">(p10 ' + _e2FmtPct(a.p10PnlPct) + ' / p90 ' + _e2FmtPct(a.p90PnlPct) + ')</span>';
+      }
     }
     var probBarPct = (a.probWin != null) ? Math.round(Number(a.probWin) * 100) : 0;
     var actionColor = _e2VerdictColor(a.action === "CUT_NOW" ? "CUT" : a.action);
@@ -3673,12 +3702,27 @@ function _paintE2LiveReview(tradeId, review) {
   tiles += tile("Call dist",
     _e2FmtPct(spotE.callDistPct, 2),
     spotE.breachProxCall != null ? "prox " + Math.round(Number(spotE.breachProxCall)) + "%" : "");
-  if (ivE && ivE.available !== false && (ivE.now != null || ivE.volPressureNow)) {
-    var ivVal = ivE.now != null ? _e2FmtNum(ivE.now, 2) : (ivE.volPressureNow || "—");
-    var ivSub = ivE.crushSoFarPct != null
-      ? "crush " + _e2FmtPct(ivE.crushSoFarPct, 0)
-      : (ivE.shift || (ivE.atEntry != null ? "entry " + _e2FmtNum(ivE.atEntry, 2) : ""));
-    tiles += tile("Vol / IV", escapeHtml(String(ivVal)), ivSub);
+  if (ivE && ivE.available !== false && (ivE.now != null || ivE.volPressureNow || ivE.volStructure)) {
+    // Coerce the structured MI v2 vol_state into a single line. We
+    // render the level when present (e.g. "10.44"), otherwise the
+    // canonical label (e.g. "neutral"). Sub-line carries crush %,
+    // term-structure and skew so the desk gets the full vol context
+    // without the raw dict spilling into the tile.
+    var ivVal;
+    if (ivE.now != null) {
+      ivVal = _e2FmtNum(ivE.now, 2);
+    } else if (typeof ivE.volPressureNow === "string" && ivE.volPressureNow) {
+      ivVal = ivE.volPressureNow.toUpperCase();
+    } else {
+      ivVal = "—";
+    }
+    var ivSubParts = [];
+    if (ivE.crushSoFarPct != null) ivSubParts.push("crush " + _e2FmtPct(ivE.crushSoFarPct, 0));
+    if (ivE.volStructure) ivSubParts.push("term " + ivE.volStructure);
+    if (ivE.volSkew) ivSubParts.push("skew " + ivE.volSkew);
+    if (!ivSubParts.length && ivE.shift) ivSubParts.push(ivE.shift);
+    if (!ivSubParts.length && ivE.atEntry != null) ivSubParts.push("entry " + _e2FmtNum(ivE.atEntry, 2));
+    tiles += tile("Vol / IV", escapeHtml(String(ivVal)), ivSubParts.join(" · "));
   }
   if (regE && regE.available !== false && (regE.now || regE.atEntry)) {
     tiles += tile("Regime",
@@ -3725,8 +3769,8 @@ function _paintE2LiveReview(tradeId, review) {
       '</div>' +
       (spark || '<div style="font-size:11px;color:#aab4c8">MTM curve unavailable.</div>') +
       _e2ReplayMetricsGrid(rp) +
-      (rp.conditioningSummary
-        ? '<div style="margin-top:6px;font-size:11px;color:#cfd6e6;font-style:italic">' + escapeHtml(String(rp.conditioningSummary)) + '</div>'
+      (typeof rp.conditioningSummary === "string" && rp.conditioningSummary
+        ? '<div style="margin-top:6px;font-size:11px;color:#cfd6e6;font-style:italic">' + escapeHtml(rp.conditioningSummary) + '</div>'
         : '') +
       '</div>';
   } else if (rp.error) {

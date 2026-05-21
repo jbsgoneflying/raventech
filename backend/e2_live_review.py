@@ -158,8 +158,25 @@ def _summarize_replay(scenario: Dict[str, Any]) -> Dict[str, Any]:
         },
         "daysToEarlyExit": early_avg_days,
         "medianMaePct": mae_p50,
-        "conditioningSummary": scenario.get("conditioningSummary"),
+        "conditioningSummary": _extract_conditioning_summary(scenario.get("conditioningSummary")),
     }
+
+
+def _extract_conditioning_summary(raw: Any) -> Optional[str]:
+    """Engine 14 returns ``conditioningSummary`` as a structured dict; the
+    desk-facing line lives in ``humanSummary``. Older snapshots and tests
+    pass a plain string straight through. Return ``None`` when neither
+    representation is usable so the renderer can hide the band cleanly."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        return raw.strip() or None
+    if isinstance(raw, dict):
+        for k in ("humanSummary", "summary", "narrative"):
+            val = raw.get(k)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -196,24 +213,71 @@ def _build_spot_evidence(trade: Dict[str, Any], tracking: Dict[str, Any]) -> Dic
     }
 
 
-def _build_iv_evidence(trade: Dict[str, Any], current_vol: Optional[str]) -> Dict[str, Any]:
+def _build_iv_evidence(trade: Dict[str, Any], current_vol: Any) -> Dict[str, Any]:
+    """Render the vol/IV tile from whatever the router hands us.
+
+    The MI v2 ``regime_snapshot`` exposes ``vol_state`` as a structured
+    dict (``{level, term_structure, skew, source}``), while the legacy
+    engine5 path returns a plain string like ``"neutral"``. We accept
+    both shapes here so the frontend gets clean ``volPressureNow`` /
+    ``volStructure`` / ``volSkew`` / ``ivLevelNow`` fields and never
+    sees a ``[object Object]`` spill.
+    """
     ctx = trade.get("entryContext") or {}
-    entry_vol = ctx.get("volPressureState")
+    entry_vol_raw = ctx.get("volPressureState")
     iv_at_entry = _to_float(ctx.get("ivAtEntry"), default=None)
     iv_now = _to_float(ctx.get("ivNow"), default=None)
+
+    # Normalise both sides into a (label, level, structure, skew) tuple.
+    def _norm(vol: Any) -> Dict[str, Any]:
+        if vol is None:
+            return {"label": None, "level": None, "structure": None, "skew": None}
+        if isinstance(vol, dict):
+            lvl = _to_float(vol.get("level"), default=None)
+            structure = vol.get("term_structure") or vol.get("structure")
+            skew = vol.get("skew")
+            # Build a compact label: prefer existing canonical label
+            # fields, otherwise synthesise one from structure.
+            label = vol.get("label") or vol.get("state") or structure
+            return {
+                "label": str(label) if label is not None else None,
+                "level": lvl,
+                "structure": str(structure) if structure is not None else None,
+                "skew": str(skew) if skew is not None else None,
+            }
+        return {"label": str(vol), "level": None, "structure": None, "skew": None}
+
+    now_n = _norm(current_vol)
+    entry_n = _norm(entry_vol_raw)
+
+    # If the dict carries a level and we don't have an explicit IV, use
+    # that as the "IV now" reading so the tile shows a number.
+    if iv_now is None and now_n["level"] is not None:
+        iv_now = now_n["level"]
+    if iv_at_entry is None and entry_n["level"] is not None:
+        iv_at_entry = entry_n["level"]
+
     crush = None
     if iv_at_entry not in (None, 0.0) and iv_now is not None:
         crush = round((iv_now - iv_at_entry) / iv_at_entry * 100.0, 1)
-    has_any = bool(entry_vol or current_vol or iv_at_entry is not None or iv_now is not None)
+
+    shift = None
+    if now_n["label"] and entry_n["label"] and now_n["label"] != entry_n["label"]:
+        shift = f"{entry_n['label']} -> {now_n['label']}"
+
+    has_any = any([
+        now_n["label"], entry_n["label"], iv_now is not None, iv_at_entry is not None,
+    ])
     return {
-        "available": has_any,
+        "available": bool(has_any),
         "now": iv_now,
         "atEntry": iv_at_entry,
         "crushSoFarPct": crush,
-        "volPressureNow": current_vol,
-        "volPressureAtEntry": entry_vol,
-        "shift": (f"{entry_vol} -> {current_vol}"
-                  if (entry_vol and current_vol and entry_vol != current_vol) else None),
+        "volPressureNow": now_n["label"],
+        "volPressureAtEntry": entry_n["label"],
+        "volStructure": now_n["structure"],
+        "volSkew": now_n["skew"],
+        "shift": shift,
     }
 
 
@@ -382,13 +446,32 @@ def _score_action_ladder(
 
 
 def _split_sentences(text: Optional[str], limit: int = 2) -> List[str]:
+    """Naive sentence splitter that tolerates decimal numbers.
+
+    The original implementation broke a sentence like ``"Current spot is
+    7432.97, between the 7250 short put..."`` into two bullets because
+    the ``.`` inside ``7432.97`` looked like a sentence terminator. We
+    now only split on a terminator when (a) the next character is
+    whitespace or EOS, and (b) the previous character is *not* a digit.
+    """
     if not text:
         return []
+    s = str(text)
     parts: List[str] = []
     buf = ""
-    for ch in str(text):
+    for i, ch in enumerate(s):
         buf += ch
         if ch in ".!?" and len(buf.strip()) > 12:
+            prev_ch = s[i - 1] if i > 0 else ""
+            next_ch = s[i + 1] if i + 1 < len(s) else ""
+            # Skip splits inside decimals (``7432.97``) or numeric
+            # abbreviations (``1.5x EM``).
+            if prev_ch.isdigit() and (next_ch.isdigit() or (next_ch and not next_ch.isspace())):
+                continue
+            # Require either whitespace or end-of-string after the dot
+            # so we don't cut mid-token.
+            if next_ch and not next_ch.isspace():
+                continue
             parts.append(buf.strip())
             buf = ""
             if len(parts) >= limit:

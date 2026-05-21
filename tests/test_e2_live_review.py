@@ -281,6 +281,72 @@ def test_review_verdict_lifts_to_adjust_on_breach_status(patched_review, monkeyp
     assert "put" in risks_text or "breach" in risks_text
 
 
+def test_iv_evidence_handles_dict_vol_state(patched_review):
+    """MI v2's regime_snapshot returns vol_state as a structured dict —
+    the live-review payload must never spill that dict into the UI."""
+    from backend.e2_live_review import run_e2_live_review
+
+    review = run_e2_live_review(
+        trade=_trade(),
+        current_spot=7432.97,
+        current_regime={"bucket": "MODERATE", "score": 54.0},
+        current_vol={
+            "level": 10.44,
+            "term_structure": "flat",
+            "skew": "neutral",
+            "source": "market_intel.canonical_vol_state",
+        },
+        phase="pre_open",
+    )
+    iv = review["evidence"]["iv"]
+    # The structured fields must be plain primitives, never a dict.
+    assert iv["volPressureNow"] == "flat" or iv["volPressureNow"] == "neutral" or isinstance(iv["volPressureNow"], str)
+    assert iv["volStructure"] == "flat"
+    assert iv["volSkew"] == "neutral"
+    # The vol_state level becomes the synthesised IV reading when no
+    # explicit ivNow was logged at entry.
+    assert iv["now"] == 10.44
+    # The shift field must NEVER stringify a dict (would produce a
+    # Python dict repr in the UI).
+    if iv.get("shift") is not None:
+        assert "{" not in iv["shift"]
+        assert "}" not in iv["shift"]
+
+
+def test_conditioning_summary_extracts_human_string():
+    from backend.e2_live_review import _summarize_replay
+
+    scenario = _fake_scenario()
+    scenario["conditioningSummary"] = {
+        "material": True,
+        "direction": "tailwind",
+        "humanSummary": "Modifiers cancel out; replay reads as the empirical analogue window.",
+    }
+    summary = _summarize_replay(scenario)
+    assert isinstance(summary["conditioningSummary"], str)
+    assert "Modifiers cancel out" in summary["conditioningSummary"]
+
+
+def test_conditioning_summary_passthrough_string_and_none():
+    from backend.e2_live_review import _summarize_replay
+    scenario = _fake_scenario()
+    scenario["conditioningSummary"] = "Plain-string summary."
+    assert _summarize_replay(scenario)["conditioningSummary"] == "Plain-string summary."
+    scenario["conditioningSummary"] = None
+    assert _summarize_replay(scenario)["conditioningSummary"] is None
+    scenario["conditioningSummary"] = {"material": False}  # no string fields
+    assert _summarize_replay(scenario)["conditioningSummary"] is None
+
+
+def test_sentence_splitter_preserves_decimals():
+    """The key-points bulletizer used to cut '7432.97' into two sentences."""
+    from backend.e2_live_review import _split_sentences
+    out = _split_sentences("Current spot is 7432.97, between the 7250 short put and 7600 short call.", limit=2)
+    assert len(out) == 1
+    assert "7432.97" in out[0]
+    assert "7250" in out[0]
+
+
 def test_review_legacy_actionladder_rows_are_chartable(patched_review):
     from backend.e2_live_review import run_e2_live_review
     review = run_e2_live_review(
