@@ -227,6 +227,12 @@ def test_run_review_returns_e1_shape_evidence_and_recommendation(patched_review)
     assert isinstance(ladder, list) and len(ladder) >= 2
     hold = next(row for row in ladder if row["action"] == "HOLD")
     assert hold["probWin"] is not None
+    # The HOLD probWin must be 1 − breach − stopOut, NOT just the strict
+    # fullCollect bucket; otherwise a clearly winning trade can show 0%.
+    breach_frac = ev["replay"]["breachRateFrac"] or 0.0
+    stop_frac = ev["replay"].get("stopOutRateFrac") or 0.0
+    expected_prob = 1.0 - breach_frac - stop_frac
+    assert abs(hold["probWin"] - expected_prob) < 1e-3
     assert hold["expectedPnlPct"] is not None
     assert hold["p10PnlPct"] is not None
     assert hold["p90PnlPct"] is not None

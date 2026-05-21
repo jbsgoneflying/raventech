@@ -287,11 +287,26 @@ def _score_action_ladder(
     status = str(tracking.get("deterministicStatus") or "on_track").lower()
     full_collect_frac = replay.get("fullCollectRateFrac")
     breach_frac = replay.get("breachRateFrac") or 0.0
+    stop_out_frac = replay.get("stopOutRateFrac") or 0.0
     p10 = replay.get("p10PnlPct")
     p50 = replay.get("p50PnlPct")
     p90 = replay.get("p90PnlPct")
     mean_pnl = replay.get("meanPnlPct")
     median_pnl = replay.get("medianPnlPct")
+
+    # "probWin" on HOLD is the probability the held position avoids a
+    # tail event by expiry (i.e. doesn't breach or get stopped out).
+    # The simulator's strict "fullCollect" bucket only counts paths that
+    # kept 100% of credit, which understates the desk's actual win odds
+    # for a typical SPX 1-DTE IC — the more truthful metric is
+    # 1 − breach − stopOut. We fall back to fullCollect when the
+    # combined rates are missing.
+    if breach_frac is not None or stop_out_frac is not None:
+        hold_prob_win = max(0.0, min(1.0, 1.0 - (breach_frac or 0.0) - (stop_out_frac or 0.0)))
+    elif full_collect_frac is not None:
+        hold_prob_win = float(full_collect_frac)
+    else:
+        hold_prob_win = None
 
     hb_level = str((history_breaker or {}).get("level") or "low").lower()
     hb_score = _to_float((history_breaker or {}).get("score"), default=0.0) or 0.0
@@ -304,8 +319,10 @@ def _score_action_ladder(
         "ADJUST": 0.74,
         "CUT": 0.86,
     }.get(pre, 0.65)
-    if full_collect_frac is not None and pre == "HOLD":
-        conf = max(conf, float(full_collect_frac))
+    if hold_prob_win is not None and pre == "HOLD":
+        # Lift HOLD confidence to the realised win probability so a
+        # 95%+ win-odds setup doesn't display "conf 70%" next to it.
+        conf = max(conf, float(hold_prob_win))
     conf = round(min(max(conf, 0.55), 0.95), 2)
 
     # HOLD action — surface the replay's central tendency.
@@ -337,7 +354,7 @@ def _score_action_ladder(
             "expectedPnlPct": _round(median_pnl if median_pnl is not None else p50, 1),
             "p10PnlPct": _round(p10, 1),
             "p90PnlPct": _round(p90, 1),
-            "probWin": (round(float(full_collect_frac), 4) if full_collect_frac is not None else None),
+            "probWin": (round(float(hold_prob_win), 4) if hold_prob_win is not None else None),
         },
         {
             "action": "CUT_NOW",
