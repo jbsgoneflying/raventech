@@ -82,7 +82,12 @@ def _get_openai_client():
     if not api_key:
         return None
     try:
-        return openai.OpenAI(api_key=api_key, max_retries=0, timeout=60.0)
+        # 90s client-level ceiling — leaves ~20s headroom inside nginx's
+        # 120s proxy_read_timeout for DMS load, payload serialisation,
+        # and the response trip back. Per-call ``timeout=`` overrides
+        # this for shorter functions (e.g. check-in / post-mortem use
+        # smaller payloads and a 60s cap).
+        return openai.OpenAI(api_key=api_key, max_retries=0, timeout=90.0)
     except TypeError:
         # Older SDK versions don't accept max_retries/timeout in the
         # constructor — fall back to the default client.
@@ -568,7 +573,11 @@ def generate_trade_analysis(
             ],
             temperature=1,
             max_completion_tokens=4000,
-            timeout=45,
+            # 90s per-call cap. gpt-5.5 with JSON-mode + a 30k-char
+            # payload + reasoning consistently runs 50-80s on warm
+            # connections; 45s would always time out and force a
+            # fallback. We sit comfortably inside nginx's 120s budget.
+            timeout=90,
             response_format={"type": "json_object"},
         )
 

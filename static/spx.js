@@ -2759,9 +2759,21 @@ function renderAdvisorPanel(advisorResult) {
   var a = advisorResult?.advisor;
   if (!a || a._source === "fallback") {
     var reason = a?._fallback_reason || "Advisor unavailable";
-    el.innerHTML = '<div class="taPanel"><div class="taHeader"><div class="taHeaderRow"><span class="taHeaderTitle">AI Trade Advisor</span></div></div>' +
-      '<div style="padding:16px;color:var(--text-secondary);font-size:13px;">' + escapeHtml(reason) + '</div></div>';
+    var isTimeout = /timeout|timed out/i.test(reason);
+    var friendly = isTimeout
+      ? "The LLM took longer than the 90-second budget and we returned a structured fallback instead of a 504. Click Run Advisor again — first cold call can be slow, subsequent calls warm up fast."
+      : reason;
+    el.innerHTML = '<div class="taPanel"><div class="taHeader"><div class="taHeaderRow">' +
+      '<span class="taHeaderTitle">AI Trade Advisor</span>' +
+      '<span class="taHeaderActions"><button id="e2RunAdvisorRetryBtn" class="primaryButton" type="button" style="font-size:11px;padding:6px 16px">Try again</button></span>' +
+      '</div></div>' +
+      '<div style="padding:14px 16px;color:#f3a847;font-size:12px;font-weight:600;border-bottom:1px solid rgba(243,168,71,0.25);background:rgba(243,168,71,0.06)">⚠ Fallback (no LLM narrative)</div>' +
+      '<div style="padding:14px 16px;color:var(--text-secondary);font-size:13px;line-height:1.5">' + escapeHtml(friendly) +
+      (isTimeout ? '' : '<div style="margin-top:8px;font-size:11px;color:var(--text-secondary);opacity:.7">Detail: <span class="mono">' + escapeHtml(reason) + '</span></div>') +
+      '</div></div>';
     sec.classList.remove("hidden");
+    var retryBtn = document.getElementById("e2RunAdvisorRetryBtn");
+    if (retryBtn) retryBtn.addEventListener("click", function () { _runAdvisor(); });
     return;
   }
 
