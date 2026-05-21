@@ -64,6 +64,16 @@ _rate_limiter = _AdvisorRateLimiter()
 # ---------------------------------------------------------------------------
 
 def _get_openai_client():
+    """Construct an OpenAI client that fails fast and never silently retries.
+
+    The OpenAI Python SDK defaults to ``max_retries=2``, which multiplies
+    each call's wall-clock by up to 3× on transient slowness — turning a
+    ``timeout=45`` per-call budget into ~135s worst case. That blows past
+    nginx's 120s ``proxy_read_timeout`` and shows up at the desk as a
+    bare ``HTTP 504`` instead of the structured fallback this module is
+    built to emit. We disable SDK retries here and rely on the explicit
+    fallback path (``_fallback_reason``) to keep the desk informed.
+    """
     try:
         import openai  # type: ignore
     except Exception:
@@ -72,7 +82,14 @@ def _get_openai_client():
     if not api_key:
         return None
     try:
-        return openai.OpenAI(api_key=api_key)
+        return openai.OpenAI(api_key=api_key, max_retries=0, timeout=60.0)
+    except TypeError:
+        # Older SDK versions don't accept max_retries/timeout in the
+        # constructor — fall back to the default client.
+        try:
+            return openai.OpenAI(api_key=api_key)
+        except Exception:
+            return None
     except Exception:
         return None
 
